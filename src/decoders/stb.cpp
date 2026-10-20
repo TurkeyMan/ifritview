@@ -13,6 +13,7 @@
 #include "../../third_party/stb_image.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -50,6 +51,12 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     out.from_rgba8(data, w * 4);
     stbi_image_free(data);
     out.has_alpha = channels == 4 || channels == 2;
+    // stb always reports PSDs as 4-channel; the header knows better.
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        uint8_t head[14];
+        if (std::fread(head, 1, 14, f) == 14 && std::memcmp(head, "8BPS", 4) == 0) out.has_alpha = ((head[12] << 8) | head[13]) >= 4;
+        std::fclose(f);
+    }
     out.bits_per_sample = stbi_is_16_bit(path.c_str()) ? 16 : 8;
     out.format = format_name(path);
     return true;

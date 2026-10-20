@@ -48,20 +48,13 @@ public:
     void open_path(const std::string& path);
     void run();
     GtkWidget* window() const { return window_; }
+    const ImageView& view() const { return *view_; }
 
-private:
-    void build_ui();
-    GtkWidget* tool_button(const char* icon, const char* tooltip, void (App::*action)());
-
-    void load_current();
+    // Actions, bound to the toolbar and keys.
     void navigate(int delta);
     void go_first();
     void go_last();
-    void go_prev_action();
-    void go_next_action();
     void reload();
-    void on_loaded(Loader::Result& r);
-    void fit_window_to_image();
     void toggle_fullscreen();
     void zoom_in();
     void zoom_out();
@@ -70,6 +63,16 @@ private:
     void open_dialog();
     void open_settings();
     void quit();
+
+private:
+    void build_ui();
+    GtkWidget* tool_button(const char* icon, const char* tooltip, void (App::*action)());
+
+    void load_current();
+    void go_prev_action();
+    void go_next_action();
+    void on_loaded(Loader::Result& r);
+    void fit_window_to_image();
     void update_status();
     void update_title();
     gboolean on_key(GdkEventKey* e);

@@ -5,6 +5,98 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
+
+namespace {
+
+// Development aid: IFRIT_SCRIPT="next;next;fullscreen;shot:a.png;quit"
+// drives the app without a human, one action every 400 ms. "shot:<file>"
+// draws the frontmost window to a PNG, which works on Wayland too where a
+// real screen capture would not.
+struct Script {
+    App* app;
+    std::vector<std::string> steps;
+    size_t next = 0;
+};
+
+GtkWindow* frontmost_window() {
+    GtkWindow* found = nullptr;
+    GList* list = gtk_window_list_toplevels();
+    for (GList* l = list; l; l = l->next) {
+        auto* w = GTK_WINDOW(l->data);
+        if (gtk_widget_get_visible(GTK_WIDGET(w)) && (!found || gtk_window_is_active(w))) found = w;
+    }
+    g_list_free(list);
+    return found;
+}
+
+void screenshot(GtkWindow* win, const std::string& path) {
+    const int scale = gtk_widget_get_scale_factor(GTK_WIDGET(win));
+    const int w = gtk_widget_get_allocated_width(GTK_WIDGET(win)), h = gtk_widget_get_allocated_height(GTK_WIDGET(win));
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
+    cairo_surface_set_device_scale(surface, scale, scale);
+    cairo_t* cr = cairo_create(surface);
+    gtk_widget_draw(GTK_WIDGET(win), cr);
+    cairo_destroy(cr);
+    cairo_surface_write_to_png(surface, path.c_str());
+    cairo_surface_destroy(surface);
+    int ww = 0, wh = 0;
+    gtk_window_get_size(win, &ww, &wh);
+    std::fprintf(stderr, "shot %s: window %dx%d, allocation %dx%d, scale %d\n", path.c_str(), ww, wh, w, h, scale);
+}
+
+gboolean run_script_step(gpointer p) {
+    auto* s = static_cast<Script*>(p);
+    if (s->next >= s->steps.size()) return G_SOURCE_CONTINUE;
+    const std::string step = s->steps[s->next++];
+    App& app = *s->app;
+    std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
+    if (step == "next") app.navigate(+1);
+    else if (step == "prev") app.navigate(-1);
+    else if (step == "first") app.go_first();
+    else if (step == "last") app.go_last();
+    else if (step == "fullscreen") app.toggle_fullscreen();
+    else if (step == "zoomin") app.zoom_in();
+    else if (step == "zoomout") app.zoom_out();
+    else if (step == "fit") app.zoom_fit();
+    else if (step == "orig") app.zoom_original();
+    else if (step == "reload") app.reload();
+    else if (step == "settings") {
+        // The dialog nests a main loop; open it from an idle so this timer
+        // source finishes dispatching and keeps firing inside the dialog.
+        g_idle_add(+[](gpointer a) -> gboolean { static_cast<App*>(a)->open_settings(); return G_SOURCE_REMOVE; }, &app);
+    }
+    else if (step == "close-dialog") {
+        if (GtkWindow* w = frontmost_window(); w && GTK_IS_DIALOG(w)) gtk_dialog_response(GTK_DIALOG(w), GTK_RESPONSE_CANCEL);
+    } else if (step == "accept-dialog") {
+        if (GtkWindow* w = frontmost_window(); w && GTK_IS_DIALOG(w)) gtk_dialog_response(GTK_DIALOG(w), GTK_RESPONSE_OK);
+    } else if (step.rfind("shot:", 0) == 0) screenshot(frontmost_window(), step.substr(5));
+    else if (step == "quit") app.quit();
+    else std::fprintf(stderr, "script: unknown step '%s'\n", step.c_str());
+    return G_SOURCE_CONTINUE;
+}
+
+int probe(int argc, char** argv) {
+    int failures = 0;
+    for (int i = 0; i < argc; ++i) {
+        Image img;
+        std::string error;
+        const gint64 t0 = g_get_monotonic_time();
+        const bool ok = decode_image(argv[i], img, error);
+        const double ms = (g_get_monotonic_time() - t0) / 1000.0;
+        if (ok) {
+            std::printf("ok    %-40s %5dx%-5d %s%s %s (%.0f ms)\n", argv[i], img.width, img.height,
+                        img.format.c_str(), img.has_alpha ? " +alpha" : "", img.info.c_str(), ms);
+        } else {
+            std::printf("FAIL  %-40s %s\n", argv[i], error.c_str());
+            ++failures;
+        }
+    }
+    return failures ? 1 : 0;
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     g_set_prgname("ifritview");
@@ -16,41 +108,18 @@ int main(int argc, char** argv) {
                     "       ifritview --probe file...   decode files and report, no window\n");
         return 0;
     }
-    if (argc > 2 && std::strcmp(argv[1], "--probe") == 0) {
-        int failures = 0;
-        for (int i = 2; i < argc; ++i) {
-            Image img;
-            std::string error;
-            const gint64 t0 = g_get_monotonic_time();
-            const bool ok = decode_image(argv[i], img, error);
-            const double ms = (g_get_monotonic_time() - t0) / 1000.0;
-            if (ok)
-                std::printf("ok    %-40s %5dx%-5d %s%s %s (%.0f ms)\n", argv[i], img.width, img.height,
-                            img.format.c_str(), img.has_alpha ? " +alpha" : "", img.info.c_str(), ms);
-            else
-                std::printf("FAIL  %-40s %s\n", argv[i], error.c_str()), ++failures;
-        }
-        return failures ? 1 : 0;
-    }
+    if (argc > 2 && std::strcmp(argv[1], "--probe") == 0) return probe(argc - 2, argv + 2);
 
     App app;
     if (argc > 1) app.open_path(argv[1]);
 
-    // Development aid: IFRIT_SCREENSHOT=out.png saves the window after a
-    // moment and exits, which lets the UI be checked without a human.
-    if (const char* shot = g_getenv("IFRIT_SCREENSHOT")) {
-        struct Shot { App* app; std::string path; };
-        g_timeout_add(2500, +[](gpointer p) -> gboolean {
-            auto* s = static_cast<Shot*>(p);
-            GdkWindow* gw = gtk_widget_get_window(s->app->window());
-            if (GdkPixbuf* pb = gw ? gdk_pixbuf_get_from_window(gw, 0, 0, gdk_window_get_width(gw), gdk_window_get_height(gw)) : nullptr) {
-                gdk_pixbuf_save(pb, s->path.c_str(), "png", nullptr, nullptr);
-                g_object_unref(pb);
-            }
-            delete s;
-            gtk_main_quit();
-            return G_SOURCE_REMOVE;
-        }, new Shot{&app, shot});
+    if (const char* script = g_getenv("IFRIT_SCRIPT")) {
+        auto* s = new Script{&app, {}, 0};
+        gchar** parts = g_strsplit(script, ";", -1);
+        for (gchar** p = parts; *p; ++p)
+            if (**p) s->steps.push_back(*p);
+        g_strfreev(parts);
+        g_timeout_add(400, run_script_step, s);
     }
     app.run();
     return 0;

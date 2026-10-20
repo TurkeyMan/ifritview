@@ -19,6 +19,7 @@ std::vector<std::string> extensions() {
         for (gchar** e = exts; e && *e; ++e) {
             std::string ext = *e;
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (ext == "gz") continue;  // the SVGZ loader claims it; a browse filter shouldn't
             if (std::find(list.begin(), list.end(), ext) == list.end()) list.push_back(ext);
         }
         g_strfreev(exts);
