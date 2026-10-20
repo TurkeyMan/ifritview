@@ -1,0 +1,92 @@
+#include "decoder.h"
+
+#include <jxl/decode.h>
+#ifdef HAVE_JXL_THREADS
+#include <jxl/resizable_parallel_runner.h>
+#endif
+
+#include <cstdio>
+#include <cstring>
+#include <memory>
+
+namespace {
+
+bool sniff(const uint8_t* h, size_t n) {
+    static const uint8_t container[12] = {0, 0, 0, 0x0C, 'J', 'X', 'L', ' ', 0x0D, 0x0A, 0x87, 0x0A};
+    return (n >= 2 && h[0] == 0xFF && h[1] == 0x0A) || (n >= 12 && std::memcmp(h, container, 12) == 0);
+}
+
+bool read_file(const std::string& path, std::vector<uint8_t>& data) {
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+    std::fseek(f, 0, SEEK_END);
+    long size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    data.resize(size > 0 ? size_t(size) : 0);
+    const bool ok = data.empty() || std::fread(data.data(), 1, data.size(), f) == data.size();
+    std::fclose(f);
+    return ok;
+}
+
+bool decode(const std::string& path, Image& out, std::string& error) {
+    std::vector<uint8_t> file;
+    if (!read_file(path, file)) {
+        error = "cannot read file";
+        return false;
+    }
+    std::unique_ptr<JxlDecoder, decltype(&JxlDecoderDestroy)> dec(JxlDecoderCreate(nullptr), JxlDecoderDestroy);
+#ifdef HAVE_JXL_THREADS
+    std::unique_ptr<void, decltype(&JxlResizableParallelRunnerDestroy)> runner(
+        JxlResizableParallelRunnerCreate(nullptr), JxlResizableParallelRunnerDestroy);
+    JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner.get());
+#endif
+    if (JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS) {
+        error = "JXL decoder setup failed";
+        return false;
+    }
+    JxlDecoderSetInput(dec.get(), file.data(), file.size());
+    JxlDecoderCloseInput(dec.get());
+
+    const JxlPixelFormat format{4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
+    JxlBasicInfo info{};
+    for (;;) {
+        JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
+        if (status == JXL_DEC_BASIC_INFO) {
+            if (JxlDecoderGetBasicInfo(dec.get(), &info) != JXL_DEC_SUCCESS) {
+                error = "JXL: cannot read basic info";
+                return false;
+            }
+#ifdef HAVE_JXL_THREADS
+            JxlResizableParallelRunnerSetThreads(
+                runner.get(), JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
+#endif
+            out.allocate(int(info.xsize), int(info.ysize));
+        } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+            size_t size = 0;
+            JxlDecoderImageOutBufferSize(dec.get(), &format, &size);
+            if (size != out.pixels.size()) {
+                error = "JXL: unexpected buffer size";
+                return false;
+            }
+            JxlDecoderSetImageOutBuffer(dec.get(), &format, out.pixels.data(), size);
+        } else if (status == JXL_DEC_FULL_IMAGE || status == JXL_DEC_SUCCESS) {
+            break;
+        } else {
+            error = status == JXL_DEC_NEED_MORE_INPUT ? "JXL: truncated file" : "JXL decode error";
+            return false;
+        }
+    }
+    out.from_rgba8(out.pixels.data(), out.stride, info.alpha_premultiplied);
+    out.has_alpha = info.alpha_bits > 0;
+    out.bits_per_sample = int(info.bits_per_sample);
+    out.format = "JPEG XL";
+    if (info.have_animation) out.format += ", animated";
+    return true;
+}
+
+}  // namespace
+
+const Decoder& jxl_decoder() {
+    static const Decoder d{"JPEG XL", {"jxl"}, sniff, decode};
+    return d;
+}
