@@ -162,6 +162,7 @@ private:
     guint video_timer_ = 0;
     void play_video();
     void toggle_video();
+    void toggle_mute();
     const ImageView& view_ref() const { return *view_; }
     void poke_video_controls() { view_->poke_controls(); }
     void stop_video();

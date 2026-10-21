@@ -586,6 +586,15 @@ void ImageView::set_video(bool on)
     gtk_widget_queue_draw(area_);
 }
 
+void ImageView::set_video_muted(bool muted)
+{
+    if (muted == video_muted_)
+        return;
+    video_muted_ = muted;
+    if (controls_visible())
+        gtk_widget_queue_draw(area_);
+}
+
 void ImageView::set_video_progress(double fraction, bool playing)
 {
     if (scrubbing_)
@@ -603,7 +612,7 @@ ImageView::ControlsGeometry ImageView::controls_geometry() const
     view_size(vw, vh);
     const double s = scale_factor();
     const double margin = 28 * s;
-    return {margin, margin + 30 * s, vw - margin, vh - 34 * s, 7 * s};
+    return {margin, margin + 30 * s, vw - margin - 34 * s, vw - margin - 16 * s, vh - 34 * s, 7 * s};
 }
 
 bool ImageView::controls_visible() const
@@ -687,6 +696,45 @@ void ImageView::draw_video_controls(cairo_t* cr, int scale)
     cairo_stroke_preserve(cr);
     cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
     cairo_fill(cr);
+
+    // Speaker at the right end: waves when sound is on, a cross when muted.
+    const double sx = g.speaker_x, sy = g.y, u = scale;
+    cairo_new_path(cr);
+    cairo_move_to(cr, sx - 8 * u, sy - 3 * u);
+    cairo_line_to(cr, sx - 4 * u, sy - 3 * u);
+    cairo_line_to(cr, sx + 1 * u, sy - 7 * u);
+    cairo_line_to(cr, sx + 1 * u, sy + 7 * u);
+    cairo_line_to(cr, sx - 4 * u, sy + 3 * u);
+    cairo_line_to(cr, sx - 8 * u, sy + 3 * u);
+    cairo_close_path(cr);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+    cairo_set_line_width(cr, 2.0 * scale);
+    cairo_stroke_preserve(cr);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+    cairo_fill(cr);
+    auto mark = [&](double width, double r, double gr, double b, double a)
+    {
+        cairo_set_line_width(cr, width);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_set_source_rgba(cr, r, gr, b, a);
+        if (video_muted_)
+        {
+            cairo_move_to(cr, sx + 4 * u, sy - 4 * u);
+            cairo_line_to(cr, sx + 11 * u, sy + 4 * u);
+            cairo_move_to(cr, sx + 11 * u, sy - 4 * u);
+            cairo_line_to(cr, sx + 4 * u, sy + 4 * u);
+        }
+        else
+        {
+            cairo_new_sub_path(cr);
+            cairo_arc(cr, sx + 1 * u, sy, 5 * u, -0.8, 0.8);
+            cairo_new_sub_path(cr);
+            cairo_arc(cr, sx + 1 * u, sy, 9 * u, -0.8, 0.8);
+        }
+        cairo_stroke(cr);
+    };
+    mark(4.0 * scale, 0, 0, 0, 0.5);
+    mark(1.8 * scale, 1, 1, 1, 0.95);
 }
 
 void ImageView::draw(cairo_t* cr)
@@ -1049,6 +1097,11 @@ gboolean ImageView::on_button(GdkEventButton* e)
             {
                 if (on_video_toggle)
                     on_video_toggle();
+            }
+            else if (dx > g.line_x1 + 6 * s)
+            {
+                if (on_video_mute)
+                    on_video_mute();
             }
             else
             {

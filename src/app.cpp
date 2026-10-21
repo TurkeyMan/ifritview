@@ -412,6 +412,8 @@ void App::build_ui()
     view_->on_zoom_changed = [this] { update_status(); };
     view_->on_presented = [this] { image_presented(); };
     view_->on_video_toggle = [this] { toggle_video(); };
+    view_->on_video_mute = [this] { toggle_mute(); };
+    view_->set_video_muted(cfg_.video_muted);
     view_->on_video_seek = [this](double f, bool final) { video_.seek(f, final); };
     video_.on_frame = [this]
     {
@@ -783,6 +785,15 @@ void App::toggle_video()
         video_.toggle();
     if (video_.duration() > 0)
         view_->set_video_progress(video_.position() / video_.duration(), video_.playing());
+    update_status();
+}
+
+void App::toggle_mute()
+{
+    cfg_.video_muted = !cfg_.video_muted;
+    cfg_.save();
+    video_.set_muted(cfg_.video_muted);
+    view_->set_video_muted(cfg_.video_muted);
     update_status();
 }
 
@@ -1737,6 +1748,7 @@ void App::open_settings(const char* page)
         request_place(image_);
     video_.set_loop(cfg_.video_loop);
     video_.set_muted(cfg_.video_muted);
+    view_->set_video_muted(cfg_.video_muted);
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
@@ -1915,13 +1927,7 @@ gboolean App::on_key(GdkEventKey* e)
         case GDK_KEY_m:
         case GDK_KEY_M:
             if (image_ && image_->is_video)
-            {
-                cfg_.video_muted = !cfg_.video_muted;
-                cfg_.save();
-                video_.set_muted(cfg_.video_muted);
-                status_message_ = cfg_.video_muted ? "Muted" : "Sound on";
-                update_status();
-            }
+                toggle_mute();
             return TRUE;
         case GDK_KEY_Home:
             go_first();
