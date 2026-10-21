@@ -1,5 +1,7 @@
 # IfritView
 
+IrfanView clone, but portable, and kinda better!
+
 A light, no-frills, HiDPI-aware image viewer for Linux in the spirit of
 IrfanView. GTK3, C++20, and the system's own format libraries.
 
