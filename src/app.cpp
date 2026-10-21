@@ -249,13 +249,7 @@ void App::build_ui() {
 
     // Exposure, in stops around the decoder's automatic brightness; raw only.
     exposure_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    develop_button_ = gtk_button_new();
-    gtk_container_add(GTK_CONTAINER(develop_button_), cached_icon_image("display-brightness-symbolic", 24));
-    gtk_button_set_relief(GTK_BUTTON(develop_button_), GTK_RELIEF_NONE);
-    gtk_widget_set_can_focus(develop_button_, FALSE);
-    gtk_widget_set_tooltip_text(develop_button_, "Develop the raw now (D); the slider is available once it is");
-    g_signal_connect(develop_button_, "clicked", G_CALLBACK(+[](GtkWidget*, gpointer self) { static_cast<App*>(self)->develop_now(); }), this);
-    gtk_box_pack_start(GTK_BOX(exposure_box_), develop_button_, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(exposure_box_), cached_icon_image("display-brightness-symbolic", 24), FALSE, FALSE, 4);
     exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 0.01);
     gtk_range_set_round_digits(GTK_RANGE(exposure_), -1);   // continuous: every screen pixel is a value
     gtk_scale_set_value_pos(GTK_SCALE(exposure_), GTK_POS_RIGHT);
@@ -264,7 +258,7 @@ void App::build_ui() {
                      }), nullptr);
     gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
     gtk_widget_set_size_request(exposure_, 200, -1);
-    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nWheel or arrows: 0.1 per step, hold Shift for 0.01; Home resets.\nGreyed while the embedded preview is showing: press D or the sun to develop");
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nWheel or arrows: 0.1 per step, hold Shift for 0.01; Home resets.\nGreyed while the embedded preview stands in for the raw");
     gtk_widget_set_can_focus(exposure_, TRUE);
     // Wheel: 0.1 per notch, Shift refines to 0.01.
     gtk_widget_add_events(exposure_, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
@@ -318,6 +312,10 @@ void App::build_ui() {
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_style_context_add_class(gtk_widget_get_style_context(footer_), "ifrit-footer");
     gtk_box_pack_start(GTK_BOX(vbox), footer_, FALSE, FALSE, 0);
+    spinner_ = gtk_spinner_new();
+    gtk_widget_set_size_request(spinner_, 14, 14);
+    gtk_widget_set_no_show_all(spinner_, TRUE);
+    gtk_box_pack_start(GTK_BOX(footer_), spinner_, FALSE, FALSE, 0);
     status_left_ = gtk_label_new("");
     status_center_ = gtk_label_new("");
     status_right_ = gtk_label_new("");
@@ -470,7 +468,7 @@ void App::load_current() {
     image_modified_ = false;
     showing_preview_ = false;
     slider_pending_ = false;
-    develop_requested_ = !cfg_.raw_develop_on_demand;
+    develop_requested_ = true;   // the preview is only a stand-in; the real decode always follows
     preview_edits_.clear();
     ++load_generation_;
     ImageCache::Entry hit;
@@ -540,7 +538,7 @@ void App::on_loaded(Loader::Result& r) {
     schedule_prefetch();
     showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
-    status_message_ = r.preview && develop_requested_ ? "Developing…" : "";
+    status_message_ = r.preview ? "Developing…" : "";
     if (r.preview) {
         const XmpDevelop& d = r.image->xmp;
         if (cfg_.apply_xmp_edits && d.present && !from_cache) {
@@ -548,19 +546,11 @@ void App::on_loaded(Loader::Result& r) {
             // preview already has the right shape. Exposure needs the develop.
             apply_xmp_geometry(*r.image);
         }
-        // Edits that need real pixels mean the preview can't stand for long.
-        if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
-        // A preview smaller than the monitor would be shown upscaled; develop
-        // the real thing behind it.
-        if (cfg_.raw_develop_small_preview && r.image) {
-            GdkRectangle geo{0, 0, 1920, 1080};
-            GdkDisplay* display = gtk_widget_get_display(window_);
-            GdkWindow* gw = gtk_widget_get_window(window_);
-            GdkMonitor* monitor = gw ? gdk_display_get_monitor_at_window(display, gw) : nullptr;
-            if (!monitor) monitor = gdk_display_get_primary_monitor(display);
-            if (monitor) gdk_monitor_get_geometry(monitor, &geo);
-            const int scale = view_->scale_factor();
-            if (r.image->width < geo.width * scale && r.image->height < geo.height * scale) ensure_developed();
+        // A cached preview means the develop never finished (or was skipped
+        // when the user moved on); start it again.
+        if (from_cache) {
+            develop_requested_ = false;
+            ensure_developed();
         }
     } else if (!preview_edits_.empty() && r.image) {
         for (const Edit& e : preview_edits_) {   // redo what was done to the preview
@@ -605,7 +595,6 @@ void App::on_loaded(Loader::Result& r) {
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
 
         gtk_widget_set_sensitive(exposure_, !showing_preview_);   // greyed while the camera JPEG stands in
-        gtk_widget_set_sensitive(develop_button_, showing_preview_);
         gtk_widget_show(exposure_box_);
         if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
         else if (slider_moved) gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
@@ -975,6 +964,14 @@ void App::update_status() {
     } else {
         gtk_widget_hide(status_location_);
     }
+    const bool busy = status_message_.rfind("Loading", 0) == 0 || status_message_.rfind("Developing", 0) == 0;
+    if (busy) {
+        gtk_widget_show(spinner_);
+        gtk_spinner_start(GTK_SPINNER(spinner_));
+    } else {
+        gtk_spinner_stop(GTK_SPINNER(spinner_));
+        gtk_widget_hide(spinner_);
+    }
     gtk_label_set_text(GTK_LABEL(status_left_), left.c_str());
     gtk_label_set_text(GTK_LABEL(status_center_), center.c_str());
     gtk_label_set_text(GTK_LABEL(status_right_), right.c_str());
@@ -1040,8 +1037,6 @@ gboolean App::on_key(GdkEventKey* e) {
             break;
         case GDK_KEY_i: case GDK_KEY_I:
             toggle_metadata(); return TRUE;
-        case GDK_KEY_d: case GDK_KEY_D:
-            develop_now(); return TRUE;
         case GDK_KEY_c: case GDK_KEY_C:
             if (ctrl) { copy_to_clipboard(); return TRUE; }
             break;

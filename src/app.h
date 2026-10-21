@@ -82,7 +82,6 @@ public:
     void toggle_metadata();
     void toggle_xmp() { gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_))); }
     void copy_to_clipboard();
-    void develop_now() { ensure_developed(); }
     void transform(int exif_orientation);   // rotate/mirror the displayed image
     void set_exposure(double ev);
 
@@ -124,10 +123,10 @@ private:
     GtkWidget* footer_ = nullptr;
     GtkWidget* exposure_box_ = nullptr;   // EV slider, shown for raw files only
     GtkWidget* exposure_ = nullptr;
-    GtkWidget* develop_button_ = nullptr;   // the sun: develops the raw behind a preview
     GtkWidget* smooth_toggle_ = nullptr;
     GtkWidget* crop_button_ = nullptr;
     GtkWidget* status_left_ = nullptr;
+    GtkWidget* spinner_ = nullptr;           // turns while a decode is in flight
     GtkWidget* status_center_ = nullptr;
     GtkWidget* status_right_ = nullptr;
     GtkWidget* status_location_ = nullptr;   // GPS link, hidden when absent

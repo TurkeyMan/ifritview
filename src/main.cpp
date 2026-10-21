@@ -85,7 +85,6 @@ gboolean run_script_step(gpointer p) {
     else if (step == "metadata") app.toggle_metadata();
     else if (step == "copy") app.copy_to_clipboard();
     else if (step == "xmp") app.toggle_xmp();
-    else if (step == "develop") app.develop_now();
     else if (step == "rotl") app.transform(8);
     else if (step == "rotr") app.transform(6);
     else if (step.rfind("ev:", 0) == 0) app.set_exposure(std::stod(step.substr(3)));
