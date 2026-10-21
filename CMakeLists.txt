@@ -15,20 +15,16 @@ find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0 gdk-pixbuf-2.0)
 
-add_executable(ifritview
-  src/main.cpp
-  src/app.cpp
-  src/viewer.cpp
-  src/settings.cpp
+# Everything that isn't UI: decoders, the image model, loader, cache, config,
+# folders, video, geocoding. Both front ends link it.
+add_library(ifrit_core STATIC
   src/config.cpp
   src/folder.cpp
   src/image.cpp
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
   src/encoders/encoder.cpp
-  src/metadata.cpp
   src/cache.cpp
-  src/icons.cpp
   src/geocode.cpp
   src/video.cpp
   src/loader.cpp
@@ -39,16 +35,29 @@ add_executable(ifritview
   src/decoders/pcx.cpp
   src/decoders/pixbuf.cpp
 )
-target_compile_options(ifritview PRIVATE -Wall -Wextra)
-target_compile_definitions(ifritview PRIVATE IFRIT_VERSION="${IFRIT_VERSION}")
-target_link_libraries(ifritview PRIVATE PkgConfig::GTK ${CMAKE_DL_LIBS})
+target_compile_options(ifrit_core PRIVATE -Wall -Wextra)
+target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
+target_include_directories(ifrit_core PUBLIC src ${CMAKE_BINARY_DIR}/generated)
+target_link_libraries(ifrit_core PUBLIC PkgConfig::GTK ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
 if(WIN32)
-  target_sources(ifritview PRIVATE src/integration_win.cpp)
-  target_link_libraries(ifritview PRIVATE shell32 advapi32)
+  target_sources(ifrit_core PRIVATE src/integration_win.cpp)
+  target_link_libraries(ifrit_core PUBLIC shell32 advapi32)
 else()
-  target_sources(ifritview PRIVATE src/integration.cpp)
+  target_sources(ifrit_core PRIVATE src/integration.cpp)
 endif()
+
+# The GTK 3 front end (the shipping one, until the anyui one has caught up).
+add_executable(ifritview
+  src/main.cpp
+  src/app.cpp
+  src/viewer.cpp
+  src/settings.cpp
+  src/metadata.cpp
+  src/icons.cpp
+)
+target_compile_options(ifritview PRIVATE -Wall -Wextra)
+target_link_libraries(ifritview PRIVATE ifrit_core)
 
 # Optional format backends. Each is on by default and simply left out, with a
 # notice, when its library isn't installed.
@@ -61,9 +70,9 @@ function(ifrit_backend name define source)
   endif()
   pkg_check_modules(${upper} IMPORTED_TARGET ${ARGN})
   if(${upper}_FOUND)
-    target_sources(ifritview PRIVATE ${source})
-    target_compile_definitions(ifritview PRIVATE ${define})
-    target_link_libraries(ifritview PRIVATE PkgConfig::${upper})
+    target_sources(ifrit_core PRIVATE ${source})
+    target_compile_definitions(ifrit_core PUBLIC ${define})
+    target_link_libraries(ifrit_core PUBLIC PkgConfig::${upper})
     set(IFRIT_HAVE_${upper} TRUE PARENT_SCOPE)
     message(STATUS "${name}: enabled")
   else()
@@ -95,9 +104,9 @@ endif()
 # videos just aren't part of the series.
 pkg_check_modules(VIDEO gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0)
 if(VIDEO_FOUND)
-  target_sources(ifritview PRIVATE src/gst_api.cpp src/decoders/video_poster.cpp)
-  target_compile_definitions(ifritview PRIVATE HAVE_VIDEO)
-  target_include_directories(ifritview PRIVATE ${VIDEO_INCLUDE_DIRS})
+  target_sources(ifrit_core PRIVATE src/gst_api.cpp src/decoders/video_poster.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_VIDEO)
+  target_include_directories(ifrit_core PUBLIC ${VIDEO_INCLUDE_DIRS})
   message(STATUS "video: enabled (GStreamer loaded at runtime)")
 else()
   message(STATUS "video: not found (gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 headers), skipping")
@@ -107,9 +116,9 @@ endif()
 # against its headers, dlopened by src/decoders/pdf.cpp, never linked.
 pkg_check_modules(PDF poppler-glib)
 if(PDF_FOUND)
-  target_sources(ifritview PRIVATE src/decoders/pdf.cpp)
-  target_compile_definitions(ifritview PRIVATE HAVE_PDF)
-  target_include_directories(ifritview PRIVATE ${PDF_INCLUDE_DIRS})
+  target_sources(ifrit_core PRIVATE src/decoders/pdf.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_PDF)
+  target_include_directories(ifrit_core PUBLIC ${PDF_INCLUDE_DIRS})
   message(STATUS "pdf: enabled (poppler loaded at runtime)")
 else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
@@ -119,9 +128,9 @@ endif()
 # GIO (src/http.cpp), with json-glib to read the answer.
 pkg_check_modules(GEOCODE IMPORTED_TARGET json-glib-1.0)
 if(GEOCODE_FOUND)
-  target_sources(ifritview PRIVATE src/http.cpp)
-  target_compile_definitions(ifritview PRIVATE HAVE_GEOCODE)
-  target_link_libraries(ifritview PRIVATE PkgConfig::GEOCODE)
+  target_sources(ifrit_core PRIVATE src/http.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_GEOCODE)
+  target_link_libraries(ifrit_core PUBLIC PkgConfig::GEOCODE)
   message(STATUS "geocode: enabled")
 else()
   message(STATUS "geocode: not found (json-glib-1.0), skipping")
@@ -130,8 +139,8 @@ endif()
 if(IFRIT_HAVE_JXL)
   pkg_check_modules(JXL_THREADS IMPORTED_TARGET libjxl_threads)
   if(JXL_THREADS_FOUND)
-    target_compile_definitions(ifritview PRIVATE HAVE_JXL_THREADS)
-    target_link_libraries(ifritview PRIVATE PkgConfig::JXL_THREADS)
+    target_compile_definitions(ifrit_core PUBLIC HAVE_JXL_THREADS)
+    target_link_libraries(ifrit_core PUBLIC PkgConfig::JXL_THREADS)
   endif()
 endif()
 
@@ -150,7 +159,6 @@ file(READ data/ifritview.svg IFRIT_ICON_SVG)
 file(READ data/ifritview.desktop IFRIT_DESKTOP_ENTRY)
 configure_file(src/embedded.h.in ${CMAKE_BINARY_DIR}/generated/embedded.h @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/ifritview.svg data/ifritview.desktop)
-target_include_directories(ifritview PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # Refresh the desktop/MIME/icon caches on `cmake --install` so file managers
 # pick the app up immediately (packages do this in their own postinst).
