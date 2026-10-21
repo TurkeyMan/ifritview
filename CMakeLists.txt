@@ -28,6 +28,8 @@ add_library(ifrit_core STATIC
   src/geocode.cpp
   src/video.cpp
   src/loader.cpp
+  src/scale.cpp
+  src/probe.cpp
   src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
@@ -58,6 +60,36 @@ add_executable(ifritview
 )
 target_compile_options(ifritview PRIVATE -Wall -Wextra)
 target_link_libraries(ifritview PRIVATE ifrit_core)
+
+# The anyui front end: native widgets from whichever toolkit is at hand (GTK 3
+# here, Win32 on Windows), linked in statically from the third_party/rapport submodule
+# (github.com/TurkeyMan/rapport).
+set(IFRIT_ANYUI_DIR "${CMAKE_SOURCE_DIR}/third_party/rapport" CACHE PATH "anyui source tree")
+option(IFRIT_UI_ANYUI "Build the anyui front end (ifritview-anyui)" ON)
+if(IFRIT_UI_ANYUI AND EXISTS "${IFRIT_ANYUI_DIR}/CMakeLists.txt")
+  set(ANYUI_STATIC ON CACHE BOOL "" FORCE)
+  set(ANYUI_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(ANYUI_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)  # one GTK per program
+  add_subdirectory(${IFRIT_ANYUI_DIR} anyui EXCLUDE_FROM_ALL)
+  add_executable(ifritview-anyui
+    src/ui/main.cpp
+    src/ui/app.cpp
+    src/ui/view.cpp
+  )
+  set_target_properties(ifritview-anyui PROPERTIES CXX_STANDARD 23)
+  target_compile_options(ifritview-anyui PRIVATE -Wall -Wextra)
+  target_include_directories(ifritview-anyui PRIVATE src/ui)
+  target_link_libraries(ifritview-anyui PRIVATE ifrit_core anyui::anyui)
+  foreach(backend gtk3 null)
+    if(TARGET anyui::backend_${backend})
+      target_link_libraries(ifritview-anyui PRIVATE anyui::backend_${backend})
+      target_compile_definitions(ifritview-anyui PRIVATE IFRIT_BACKEND_${backend})
+    endif()
+  endforeach()
+  message(STATUS "anyui front end: enabled (${IFRIT_ANYUI_DIR})")
+else()
+  message(STATUS "anyui front end: off (no ${IFRIT_ANYUI_DIR})")
+endif()
 
 # Optional format backends. Each is on by default and simply left out, with a
 # notice, when its library isn't installed.
