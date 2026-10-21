@@ -30,11 +30,11 @@ Loader::~Loader()
     thread_.join();
 }
 
-void Loader::request(uint64_t generation, const std::string& path, bool develop)
+void Loader::request(uint64_t generation, const std::string& path, bool develop, bool skip_preview)
 {
     {
         std::lock_guard lock(mutex_);
-        pending_ = Job{generation, path, develop};
+        pending_ = Job{generation, path, develop, skip_preview};
     }
     wake_.notify_one();
 }
@@ -109,7 +109,7 @@ void Loader::run()
         // folder shows something at once. The real decode follows only when
         // asked for and only if the user is still on this file.
         static uint64_t previewed = 0;
-        if (previewed != job.generation)
+        if (previewed != job.generation && !job.skip_preview)
         {
             auto preview = std::make_shared<Image>();
             if (decode_preview(job.path, *preview))
@@ -1291,7 +1291,7 @@ void App::ensure_developed()
     develop_requested_ = true;
     status_message_ = "Developing…";
     update_status();
-    loader_.request(load_generation_, folder_.current(), true);
+    loader_.request(load_generation_, folder_.current(), true, /*skip_preview=*/true);
 }
 
 void App::retone()

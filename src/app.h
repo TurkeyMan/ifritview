@@ -38,7 +38,7 @@ public:
     explicit Loader(Callback callback);
     ~Loader();
     // `develop` false: stop after the quick preview when one exists.
-    void request(uint64_t generation, const std::string& path, bool develop);
+    void request(uint64_t generation, const std::string& path, bool develop, bool skip_preview = false);
     // Files to decode when idle, nearest first; replaces the previous list.
     void prefetch(std::vector<std::string> paths);
 
@@ -56,6 +56,7 @@ private:
         uint64_t generation;
         std::string path;
         bool develop;
+        bool skip_preview;  // the preview is already on screen (from the cache); go straight to the decode
     };
     std::optional<Job> pending_;
     std::vector<std::string> prefetch_;

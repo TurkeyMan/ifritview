@@ -153,8 +153,12 @@ void ImageView::outgoing_transform(gint64 now_us, double& zoom, double& px, doub
 
 void ImageView::set_image(std::shared_ptr<Image> image)
 {
-    drop_outgoing();
-    if (pending_crossfade_ms_ > 0 && surface_ && image_ && image && image.get() != image_.get())
+    // A same-size replacement (a raw's develop landing) mid-fade keeps the
+    // fade; anything else ends it.
+    const bool replacement = outgoing_.surface && image_ && image && image->width == image_->width && image->height == image_->height;
+    if (!replacement)
+        drop_outgoing();
+    if (pending_crossfade_ms_ > 0 && !replacement && surface_ && image_ && image && image.get() != image_.get())
     {
         // Snapshot the current rendering: a pre-scaled surface at the motion's
         // zoom (or the current zoom) plus the motion itself, so it carries on.
