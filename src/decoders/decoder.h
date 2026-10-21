@@ -53,6 +53,7 @@ const Decoder& raw_decoder();
 const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();
+const Decoder& tim_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.

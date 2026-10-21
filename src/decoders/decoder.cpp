@@ -86,6 +86,7 @@ const std::vector<const Decoder*>& decoders() {
 #ifdef HAVE_PDF
         v.push_back(&pdf_decoder());
 #endif
+        v.push_back(&tim_decoder());
         v.push_back(&stb_decoder());
         v.push_back(&pixbuf_decoder());  // catch-all, must stay last
         return v;
