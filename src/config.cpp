@@ -122,6 +122,7 @@ void Config::load()
     fit_window_to_image = get_bool(kf, kWindow, "fit_to_image", fit_window_to_image);
     min_window_width = std::max(200, get_int(kf, kWindow, "min_width", min_window_width));
     min_window_height = std::max(150, get_int(kf, kWindow, "min_height", min_window_height));
+    metadata_pane_width = std::clamp(get_int(kf, kWindow, "metadata_pane_width", metadata_pane_width), 240, 1600);
 
     smooth_upscale = get_bool(kf, kView, "smooth_upscale", smooth_upscale);
     smooth_downscale = get_bool(kf, kView, "smooth_downscale", smooth_downscale);
@@ -185,6 +186,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kWindow, "fit_to_image", fit_window_to_image);
     g_key_file_set_integer(kf, kWindow, "min_width", min_window_width);
     g_key_file_set_integer(kf, kWindow, "min_height", min_window_height);
+    g_key_file_set_integer(kf, kWindow, "metadata_pane_width", metadata_pane_width);
 
     g_key_file_set_boolean(kf, kView, "smooth_upscale", smooth_upscale);
     g_key_file_set_boolean(kf, kView, "smooth_downscale", smooth_downscale);

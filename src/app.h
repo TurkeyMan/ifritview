@@ -142,6 +142,8 @@ private:
     GtkWidget* window_ = nullptr;
     GtkWidget* toolbar_ = nullptr;
     GtkWidget* footer_ = nullptr;
+    GtkWidget* paned_ = nullptr;  // image | metadata pane
+    bool paned_adjusting_ = false;
     GtkWidget* exposure_box_ = nullptr;  // EV slider, shown for raw files only
     GtkWidget* exposure_ = nullptr;
     GtkWidget* smooth_toggle_ = nullptr;

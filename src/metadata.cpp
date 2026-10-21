@@ -1,5 +1,7 @@
 #include "metadata.h"
 
+#include <algorithm>
+
 namespace
 {
 
@@ -46,7 +48,7 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
 {
     (void)parent;
     pane_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request(pane_, width(), -1);
+    gtk_widget_set_size_request(pane_, 240, -1);  // minimum; the paned divider sets the actual width
     gtk_widget_set_no_show_all(pane_, TRUE);
     title_ = gtk_label_new("Metadata");
     gtk_widget_set_margin_top(title_, 6);
@@ -67,8 +69,11 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
 
     GtkCellRenderer* key = gtk_cell_renderer_text_new();
     g_object_set(key, "xpad", 8, nullptr);
+    g_object_set(key, "ellipsize", PANGO_ELLIPSIZE_END, nullptr);
     GtkTreeViewColumn* key_col = gtk_tree_view_column_new_with_attributes("Tag", key, "text", KEY, "weight", WEIGHT, nullptr);
     gtk_tree_view_column_set_resizable(key_col, TRUE);
+    gtk_tree_view_column_set_sizing(key_col, GTK_TREE_VIEW_COLUMN_FIXED);
+    gtk_tree_view_column_set_fixed_width(key_col, 150);  // the long libexif titles would otherwise squeeze the values out
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_), key_col);
 
     GtkCellRenderer* value = gtk_cell_renderer_text_new();
@@ -88,6 +93,11 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
 bool MetadataWindow::visible() const
 {
     return gtk_widget_get_visible(pane_);
+}
+
+void MetadataWindow::set_width(int w)
+{
+    width_ = std::max(240, w);
 }
 
 void MetadataWindow::toggle()

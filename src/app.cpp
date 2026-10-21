@@ -371,12 +371,30 @@ void App::build_ui()
         int x, y, w, h;
         gtk_widget_set_sensitive(crop_button_, view_->selection(x, y, w, h));
     };
-    // Image panel with the metadata pane docked to its right.
-    GtkWidget* middle = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_pack_start(GTK_BOX(middle), view_->widget(), TRUE, TRUE, 0);
+    // Image panel with the metadata pane docked to its right, divider draggable.
+    paned_ = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_pack1(GTK_PANED(paned_), view_->widget(), TRUE, FALSE);
     metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
-    gtk_box_pack_start(GTK_BOX(middle), metadata_->widget(), FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox), middle, TRUE, TRUE, 0);
+    metadata_->set_width(cfg_.metadata_pane_width);
+    gtk_paned_pack2(GTK_PANED(paned_), metadata_->widget(), FALSE, FALSE);
+    gtk_box_pack_start(GTK_BOX(vbox), paned_, TRUE, TRUE, 0);
+    // Remember the width the user drags it to (position is measured from the left).
+    g_signal_connect(paned_, "notify::position",
+                     G_CALLBACK(+[](GObject* obj, GParamSpec*, gpointer self)
+                                {
+                                    auto* app = static_cast<App*>(self);
+                                    if (!app->metadata_ || !app->metadata_->visible() || app->paned_adjusting_)
+                                        return;
+                                    const int total = gtk_widget_get_allocated_width(GTK_WIDGET(obj));
+                                    const int w = total - gtk_paned_get_position(GTK_PANED(obj));
+                                    if (total > 0 && w >= 240 && w != app->cfg_.metadata_pane_width)
+                                    {
+                                        app->cfg_.metadata_pane_width = w;
+                                        app->metadata_->set_width(w);
+                                        app->cfg_.save();
+                                    }
+                                }),
+                     this);
 
     lap("view");
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -689,6 +707,14 @@ void App::toggle_metadata()
     if (metadata_->visible())
         refresh_metadata();
     fit_window_to_image();  // grow to make room for the pane, or shrink back
+    if (metadata_->visible())
+        g_idle_add(+[](gpointer self) -> gboolean {  // once the window has its new size
+            auto* app = static_cast<App*>(self);
+            app->paned_adjusting_ = true;
+            gtk_paned_set_position(GTK_PANED(app->paned_), gtk_widget_get_allocated_width(app->paned_) - app->cfg_.metadata_pane_width);
+            app->paned_adjusting_ = false;
+            return G_SOURCE_REMOVE;
+        }, this);
 }
 
 std::vector<MetadataGroup> App::collect_metadata() const

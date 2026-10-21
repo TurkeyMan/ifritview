@@ -23,6 +23,7 @@ struct Config
     bool fit_window_to_image = true;
     int min_window_width = 640;  // logical pixels; the window never shrinks below this
     int min_window_height = 480;
+    int metadata_pane_width = 420;  // the docked info pane, logical pixels; the divider is draggable
 
     // Viewing
     bool smooth_upscale = true;
