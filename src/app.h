@@ -147,6 +147,7 @@ private:
     GtkWidget* status_location_ = nullptr;  // GPS link, hidden when absent
 
     bool fullscreen_ = false;
+    bool slideshow_pending_start_ = false;  // first slide starts once the fullscreen allocation has arrived
     bool chrome_pending_ = false;  // toolbar/footer visibility to apply on the next window allocation
     bool slideshow_ = false;
     guint slideshow_timer_ = 0;

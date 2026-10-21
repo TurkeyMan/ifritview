@@ -36,6 +36,7 @@ struct Config
     bool slideshow_motion = true;      // gentle pan/zoom on each slide
     double slideshow_zoom = 0.08;      // how far the motion zooms, as a fraction
     bool slideshow_shuffle = false;
+    int slideshow_crossfade_ms = 700;  // 0 = cut
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
 

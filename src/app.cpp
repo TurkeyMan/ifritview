@@ -420,6 +420,18 @@ void App::build_ui()
                                     app->chrome_pending_ = false;
                                     gtk_widget_set_visible(app->toolbar_, !app->fullscreen_);
                                     gtk_widget_set_visible(app->footer_, !app->fullscreen_);
+                                    if (app->slideshow_pending_start_)
+                                    {
+                                        app->slideshow_pending_start_ = false;
+                                        // After the re-layout the chrome change causes, so the view has its final size.
+                                        g_idle_add(
+                                            +[](gpointer p) -> gboolean
+                                            {
+                                                static_cast<App*>(p)->slideshow_start_slide();
+                                                return G_SOURCE_REMOVE;
+                                            },
+                                            app);
+                                    }
                                 }),
                      this);
 
@@ -493,8 +505,9 @@ void App::toggle_slideshow()
             load_current();
     }
     if (!fullscreen_)
-        toggle_fullscreen();
-    slideshow_start_slide();
+        toggle_fullscreen();  // the first slide starts once fullscreen has landed (window-state handler)
+    else
+        slideshow_start_slide();
 }
 
 void App::stop_slideshow()
@@ -573,6 +586,7 @@ void App::slideshow_advance()
         return;
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "slideshow: last frame cost %.1f ms\n", view_->frame_ms());
+    view_->crossfade_next(cfg_.slideshow_crossfade_ms);
     if (!slideshow_order_.empty())
     {
         slideshow_pos_ = (slideshow_pos_ + 1) % slideshow_order_.size();
@@ -1462,6 +1476,11 @@ void App::on_window_state(GdkEventWindowState* e)
     fullscreen_ = fs;
     if (!fs && slideshow_)
         stop_slideshow();
+    if (fs && slideshow_)
+        g_idle_add(+[](gpointer self) -> gboolean {  // after the fullscreen allocation, so the motion sees the real size
+            static_cast<App*>(self)->slideshow_start_slide();
+            return G_SOURCE_REMOVE;
+        }, this);
     if (!fs)
     {
         update_title();

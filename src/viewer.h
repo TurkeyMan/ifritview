@@ -48,6 +48,9 @@ public:
     // `start_us` lets a replacement image (preview -> developed) continue a motion in phase; 0 = now.
     void begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms, gint64 start_us = 0);
     void end_motion();
+    // On the next set_image, keep the current rendering and fade the new one
+    // in over `ms` (the outgoing slide keeps moving meanwhile).
+    void crossfade_next(int ms);
     bool motion_active() const { return motion_.active; }
     double frame_ms() const { return frame_ms_; }  // last measured draw cost
     void set_busy(bool busy);                      // a small spinning ring in the corner while a decode runs
@@ -104,6 +107,20 @@ private:
         guint tick = 0;
     } motion_;
     double frame_ms_ = 0;
+    // Outgoing slide during a cross-fade: its own pre-scaled surface and motion.
+    struct Outgoing
+    {
+        cairo_surface_t* surface = nullptr;  // pre-scaled at `scale_zoom`
+        double scale_zoom = 1;
+        Motion motion;
+        double zoom = 1, pan_x = 0, pan_y = 0;
+        int width = 0, height = 0;
+        gint64 fade_start_us = 0, fade_us = 0;
+        guint tick = 0;
+    } outgoing_;
+    int pending_crossfade_ms_ = 0;
+    void drop_outgoing();
+    void outgoing_transform(gint64 now_us, double& zoom, double& px, double& py) const;
     bool busy_ = false;
     guint busy_tick_ = 0;
     void motion_frame(gint64 now_us);

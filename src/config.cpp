@@ -134,6 +134,7 @@ void Config::load()
     slideshow_motion = get_bool(kf, kView, "slideshow_motion", slideshow_motion);
     slideshow_zoom = std::clamp(g_key_file_has_key(kf, kView, "slideshow_zoom", nullptr) ? g_key_file_get_double(kf, kView, "slideshow_zoom", nullptr) : slideshow_zoom, 0.0, 0.5);
     slideshow_shuffle = get_bool(kf, kView, "slideshow_shuffle", slideshow_shuffle);
+    slideshow_crossfade_ms = std::clamp(get_int(kf, kView, "slideshow_crossfade_ms", slideshow_crossfade_ms), 0, 5000);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
     overlay_enabled = get_bool(kf, kOverlay, "enabled", overlay_enabled);
@@ -194,6 +195,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "slideshow_motion", slideshow_motion);
     g_key_file_set_double(kf, kView, "slideshow_zoom", slideshow_zoom);
     g_key_file_set_boolean(kf, kView, "slideshow_shuffle", slideshow_shuffle);
+    g_key_file_set_integer(kf, kView, "slideshow_crossfade_ms", slideshow_crossfade_ms);
     g_key_file_set_string(kf, kView, "background", background.c_str());
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
     for (const ControlInfo& c : kControls)

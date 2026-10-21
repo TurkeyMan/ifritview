@@ -53,6 +53,7 @@ void ImageView::cancel_deferred_click()
 
 ImageView::~ImageView()
 {
+    drop_outgoing();
     set_busy(false);
     end_motion();
     cancel_deferred_click();
@@ -108,8 +109,88 @@ void ImageView::view_size(int& w, int& h) const
     h = gtk_widget_get_allocated_height(area_) * scale;
 }
 
+void ImageView::crossfade_next(int ms)
+{
+    pending_crossfade_ms_ = ms;
+}
+
+void ImageView::drop_outgoing()
+{
+    if (outgoing_.tick)
+        gtk_widget_remove_tick_callback(area_, outgoing_.tick);
+    outgoing_.tick = 0;
+    if (outgoing_.surface)
+        cairo_surface_destroy(outgoing_.surface);
+    outgoing_.surface = nullptr;
+    outgoing_.fade_us = 0;
+}
+
+// Where the outgoing slide is at `now`: continuing its motion if it had one.
+void ImageView::outgoing_transform(gint64 now_us, double& zoom, double& px, double& py) const
+{
+    const Motion& m = outgoing_.motion;
+    if (!m.active)
+    {
+        zoom = outgoing_.zoom;
+        px = outgoing_.pan_x;
+        py = outgoing_.pan_y;
+        return;
+    }
+    double t = m.duration_us > 0 ? double(now_us - m.start_us) / m.duration_us : 1.0;
+    t = std::clamp(t, 0.0, 1.0);
+    const double e = t * t * (3 - 2 * t);
+    int vw, vh;
+    view_size(vw, vh);
+    zoom = m.z0 + (m.z1 - m.z0) * e;
+    const double cx = m.cx0 + (m.cx1 - m.cx0) * e, cy = m.cy0 + (m.cy1 - m.cy0) * e;
+    px = vw / 2.0 - cx * zoom;
+    py = vh / 2.0 - cy * zoom;
+    // Keep it covering the view the same way clamp_pan does.
+    const double sw = outgoing_.width * zoom, sh = outgoing_.height * zoom;
+    px = sw <= vw ? (vw - sw) / 2 : std::clamp(px, vw - sw, 0.0);
+    py = sh <= vh ? (vh - sh) / 2 : std::clamp(py, vh - sh, 0.0);
+}
+
 void ImageView::set_image(std::shared_ptr<Image> image)
 {
+    drop_outgoing();
+    if (pending_crossfade_ms_ > 0 && surface_ && image_ && image && image.get() != image_.get())
+    {
+        // Snapshot the current rendering: a pre-scaled surface at the motion's
+        // zoom (or the current zoom) plus the motion itself, so it carries on.
+        const double z = motion_.active ? motion_.z_cache : zoom_;
+        outgoing_.surface = cairo_surface_reference(scaled_surface(z));
+        outgoing_.scale_zoom = z;
+        outgoing_.motion = motion_;
+        outgoing_.motion.tick = 0;
+        outgoing_.zoom = zoom_;
+        outgoing_.pan_x = pan_x_;
+        outgoing_.pan_y = pan_y_;
+        outgoing_.width = image_->width;
+        outgoing_.height = image_->height;
+        outgoing_.fade_start_us = g_get_monotonic_time();
+        outgoing_.fade_us = gint64(pending_crossfade_ms_) * 1000;
+        outgoing_.tick = gtk_widget_add_tick_callback(
+            area_,
+            +[](GtkWidget* w, GdkFrameClock* clock, gpointer self) -> gboolean {
+                auto* view = static_cast<ImageView*>(self);
+                if (!view->outgoing_.surface)
+                    return G_SOURCE_REMOVE;
+                if (gdk_frame_clock_get_frame_time(clock) >= view->outgoing_.fade_start_us + view->outgoing_.fade_us)
+                {
+                    view->outgoing_.tick = 0;
+                    view->drop_outgoing();
+                    gtk_widget_queue_draw(w);
+                    return G_SOURCE_REMOVE;
+                }
+                gtk_widget_queue_draw(w);
+                return G_SOURCE_CONTINUE;
+            },
+            this, nullptr);
+        scaled_ = nullptr;  // the snapshot owns that surface now; don't let drop_caches free it
+        scaled_zoom_ = 0;
+    }
+    pending_crossfade_ms_ = 0;
     end_motion();
     drop_caches();
     if (surface_)
@@ -445,11 +526,27 @@ void ImageView::draw(cairo_t* cr)
     if (!surface_)
         return;
 
+    double fade_alpha = 1.0;
+    if (outgoing_.surface)
+    {
+        const gint64 now = g_get_monotonic_time();
+        fade_alpha = std::clamp(double(now - outgoing_.fade_start_us) / std::max<gint64>(1, outgoing_.fade_us), 0.0, 1.0);
+        double oz, ox, oy;
+        outgoing_transform(now, oz, ox, oy);
+        cairo_save(cr);
+        cairo_translate(cr, ox, oy);
+        cairo_scale(cr, oz / outgoing_.scale_zoom, oz / outgoing_.scale_zoom);
+        cairo_set_source_surface(cr, outgoing_.surface, 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+        cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_NONE);
+        cairo_paint(cr);
+        cairo_restore(cr);
+    }
     const double sw = image_->width * zoom_, sh = image_->height * zoom_;
     cairo_save(cr);
     cairo_rectangle(cr, pan_x_, pan_y_, std::ceil(sw), std::ceil(sh));
     cairo_clip(cr);
-    if (image_->has_alpha && cfg_.checkerboard)
+    if (image_->has_alpha && cfg_.checkerboard && !outgoing_.surface)
     {
         cairo_set_source(cr, checker_pattern(scale));
         cairo_paint(cr);
@@ -479,7 +576,10 @@ void ImageView::draw(cairo_t* cr)
     }
     cairo_pattern_set_filter(cairo_get_source(cr), filter);
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
-    cairo_paint(cr);
+    if (fade_alpha < 1.0)
+        cairo_paint_with_alpha(cr, fade_alpha);
+    else
+        cairo_paint(cr);
     cairo_restore(cr);
     if (motion_.active)
         frame_ms_ = (g_get_monotonic_time() - t_draw) / 1000.0;
