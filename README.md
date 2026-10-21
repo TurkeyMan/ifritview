@@ -84,7 +84,7 @@ that decoder is left out.
 
     sudo apt install cmake ninja-build libgtk-3-dev libjpeg-dev libexif-dev \
         libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev \
-        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libsoup-3.0-dev libjson-glib-dev \
+        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libjson-glib-dev \
         libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-libav
     ./build.sh
     ./build/ifritview some/picture.jpg

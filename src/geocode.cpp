@@ -9,8 +9,9 @@
 #include <vector>
 
 #ifdef HAVE_GEOCODE
+#include "http.h"
+
 #include <json-glib/json-glib.h>
-#include <libsoup/soup.h>
 #endif
 
 namespace
@@ -49,7 +50,7 @@ struct Geocoder::Impl
     bool in_flight = false;
     guint timer = 0;
 #ifdef HAVE_GEOCODE
-    SoupSession* session = nullptr;
+    std::shared_ptr<void> request;  // the lookup in flight; dropping it cancels
 #endif
 
     void load_cache()
@@ -178,17 +179,6 @@ struct Geocoder::Impl
 };
 
 #ifdef HAVE_GEOCODE
-namespace
-{
-struct Request
-{
-    Geocoder::Impl* impl;
-    std::string key;
-    std::string url;
-    SoupMessage* message;
-};
-}  // namespace
-
 void Geocoder::Impl::send(const std::string& key, double lat, double lon)
 {
     char latb[32], lonb[32];
@@ -199,57 +189,38 @@ void Geocoder::Impl::send(const std::string& key, double lat, double lon)
         url.replace(pos, 5, latb);
     for (auto pos = url.find("{lon}"); pos != std::string::npos; pos = url.find("{lon}"))
         url.replace(pos, 5, lonb);
-    SoupMessage* msg = soup_message_new("GET", url.c_str());
-    if (!msg)
-    {
-        resolve(key, "");
-        return;
-    }
+    HttpHeaders headers{{"User-Agent", "IfritView/0.1 (image viewer; reverse geocoding of photo locations)"}, {"Accept", "application/json"}};
     if (!language.empty())
-        soup_message_headers_append(soup_message_get_request_headers(msg), "Accept-Language", language.c_str());
+        headers.emplace_back("Accept-Language", language);
     in_flight = true;
-    auto* req = new Request{this, key, url, msg};
-    soup_session_send_and_read_async(
-        session, msg, G_PRIORITY_LOW, nullptr,
-        +[](GObject* src, GAsyncResult* res, gpointer p)
-        {
-            auto* r = static_cast<Request*>(p);
-            std::string place;
-            GError* err = nullptr;
-            if (GBytes* bytes = soup_session_send_and_read_finish(SOUP_SESSION(src), res, &err))
-            {
-                if (soup_message_get_status(r->message) == SOUP_STATUS_OK)
-                {
-                    gsize len = 0;
-                    const char* data = static_cast<const char*>(g_bytes_get_data(bytes, &len));
-                    JsonParser* parser = json_parser_new();
-                    if (json_parser_load_from_data(parser, data, gssize(len), nullptr))
-                        place = Impl::parse(r->url, json_parser_get_root(parser));
-                    g_object_unref(parser);
-                }
-                g_bytes_unref(bytes);
-            }
-            if (err)
-                g_error_free(err);
-            g_object_unref(r->message);
-            Impl* impl = r->impl;
-            const std::string key = r->key;
-            delete r;
-            impl->in_flight = false;
-            impl->resolve(key, place);
-            // Nominatim asks for at most one request per second.
-            impl->timer = g_timeout_add(
-                1100,
-                +[](gpointer p) -> gboolean
-                {
-                    auto* impl = static_cast<Impl*>(p);
-                    impl->timer = 0;
-                    impl->pump();
-                    return G_SOURCE_REMOVE;
-                },
-                impl);
-        },
-        req);
+    request = http_get(url, headers,
+                       [this, key, url](const HttpResponse& r)
+                       {
+                           std::string place;
+                           if (r.status == 200)
+                           {
+                               JsonParser* parser = json_parser_new();
+                               if (json_parser_load_from_data(parser, r.body.data(), gssize(r.body.size()), nullptr))
+                                   place = Impl::parse(url, json_parser_get_root(parser));
+                               g_object_unref(parser);
+                           }
+                           else if (g_getenv("IFRIT_TRACE"))
+                               std::fprintf(stderr, "geocode: %d %s\n", r.status, r.error.c_str());
+                           request.reset();
+                           in_flight = false;
+                           resolve(key, place);
+                           // Nominatim asks for at most one request per second.
+                           timer = g_timeout_add(
+                               1100,
+                               +[](gpointer p) -> gboolean
+                               {
+                                   auto* impl = static_cast<Impl*>(p);
+                                   impl->timer = 0;
+                                   impl->pump();
+                                   return G_SOURCE_REMOVE;
+                               },
+                               this);
+                       });
 }
 #else
 void Geocoder::Impl::send(const std::string& key, double, double)
@@ -260,10 +231,6 @@ void Geocoder::Impl::send(const std::string& key, double, double)
 
 Geocoder::Geocoder() : impl_(new Impl)
 {
-#ifdef HAVE_GEOCODE
-    impl_->session = soup_session_new();
-    g_object_set(impl_->session, "user-agent", "IfritView/0.1 (image viewer; reverse geocoding of photo locations)", "timeout", 15u, nullptr);
-#endif
     const gchar* const* langs = g_get_language_names();
     if (langs && langs[0] && std::strcmp(langs[0], "C") != 0)
     {
@@ -281,8 +248,7 @@ Geocoder::~Geocoder()
     if (impl_->timer)
         g_source_remove(impl_->timer);
 #ifdef HAVE_GEOCODE
-    if (impl_->session)
-        g_object_unref(impl_->session);
+    impl_->request.reset();  // cancel; its callback won't run
 #endif
     delete impl_;
 }

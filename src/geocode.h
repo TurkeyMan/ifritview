@@ -36,7 +36,7 @@ public:
     };
     static const Provider* providers(size_t& count);
 
-    struct Impl;  // public so the libsoup completion callback can reach it
+    struct Impl;
 
 private:
     Impl* impl_;

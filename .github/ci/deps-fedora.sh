@@ -6,4 +6,4 @@ dnf install -y --setopt=install_weak_deps=False \
   gtk3-devel libexif-devel libjpeg-turbo-devel libpng-devel libwebp-devel \
   libheif-devel libjxl-devel libtiff-devel poppler-glib-devel \
   libiptcdata-devel exempi-devel LibRaw-devel gstreamer1-devel \
-  gstreamer1-plugins-base-devel libsoup3-devel json-glib-devel
+  gstreamer1-plugins-base-devel json-glib-devel
