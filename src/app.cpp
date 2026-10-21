@@ -474,6 +474,17 @@ void App::build_ui()
                                     app->chrome_pending_ = false;
                                     gtk_widget_set_visible(app->toolbar_, !app->fullscreen_);
                                     gtk_widget_set_visible(app->footer_, !app->fullscreen_);
+                                    // The info pane gives way to the fullscreen overlay, and comes back after.
+                                    if (app->fullscreen_)
+                                    {
+                                        app->pane_before_fullscreen_ = app->metadata_->visible();
+                                        gtk_widget_hide(app->metadata_->widget());
+                                    }
+                                    else if (app->pane_before_fullscreen_)
+                                    {
+                                        gtk_widget_show(app->metadata_->widget());
+                                        app->refresh_metadata();
+                                    }
                                     if (app->slideshow_pending_start_)
                                     {
                                         app->slideshow_pending_start_ = false;
