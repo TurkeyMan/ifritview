@@ -1,0 +1,56 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: ${{ matrix.distro }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debian 13: the bare binaries and the .debs.
+          - { distro: debian, arch: x86_64, runner: ubuntu-24.04,     image: 'debian:trixie', package: DEB }
+          - { distro: debian, arch: arm64,  runner: ubuntu-24.04-arm, image: 'debian:trixie', package: DEB }
+          # Fedora: the .rpms.
+          - { distro: fedora, arch: x86_64, runner: ubuntu-24.04,     image: 'fedora:42',     package: RPM }
+          - { distro: fedora, arch: arm64,  runner: ubuntu-24.04-arm, image: 'fedora:42',     package: RPM }
+    steps:
+      # Before checkout, so it has git and the container has everything else.
+      - name: Install build dependencies
+        run: |
+          if [ -x "$(command -v apt-get)" ]; then
+            apt-get update && apt-get install -y --no-install-recommends ca-certificates git
+          else
+            dnf install -y git
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Install library dependencies
+        run: .github/ci/deps-${{ matrix.distro }}.sh
+
+      - name: Build, test and package
+        run: .github/ci/build.sh ${{ matrix.package }}
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ifritview-${{ matrix.distro }}-${{ matrix.arch }}-${{ matrix.package == 'DEB' && 'deb' || 'rpm' }}
+          path: dist/*.${{ matrix.package == 'DEB' && 'deb' || 'rpm' }}
+          if-no-files-found: error
+
+      - name: Upload binary
+        if: matrix.distro == 'debian'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ifritview-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
