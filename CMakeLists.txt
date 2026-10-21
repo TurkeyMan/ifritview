@@ -159,7 +159,8 @@ install(CODE "
 
 # Packages: `cpack -G DEB` or `cpack -G RPM` in the build directory. Library
 # dependencies are worked out from the binary, so they're the image
-# libraries; GStreamer and poppler aren't linked, so they're only recommended.
+# libraries; GStreamer and poppler aren't linked, so they're only recommended,
+# as is glib-networking (TLS for place-name lookups).
 set(CPACK_PACKAGE_NAME "ifritview")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
@@ -173,14 +174,14 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
+    "glib-networking, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
 # `rpm --suggests`, fails there), so the line rides in after the URL instead.
-set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: glib-networking, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
 # Directories the base system owns; the package must not claim them.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /usr/share/applications /usr/share/icons /usr/share/icons/hicolor /usr/share/icons/hicolor/scalable
