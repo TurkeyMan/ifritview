@@ -11,6 +11,9 @@
 #endif
 #include <glib/gstdio.h>
 
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -19,7 +22,14 @@
 
 // ---------------------------------------------------------------- Loader
 
-Loader::Loader(Callback callback) : callback_(std::move(callback)), thread_([this] { run(); }) {}
+Loader::Loader(Callback callback) : callback_(std::move(callback))
+{
+    foreground_ = std::thread([this] { run_foreground(); });
+    const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
+    const unsigned workers = std::clamp(cores - 2, 1u, 4u);
+    for (unsigned i = 0; i < workers; ++i)
+        background_.emplace_back([this] { run_background(); });
+}
 
 Loader::~Loader()
 {
@@ -27,17 +37,25 @@ Loader::~Loader()
         std::lock_guard lock(mutex_);
         stop_ = true;
     }
-    wake_.notify_all();
-    thread_.join();
+    fg_wake_.notify_all();
+    bg_wake_.notify_all();
+    foreground_.join();
+    for (std::thread& t : background_)
+        t.join();
 }
 
 void Loader::request(uint64_t generation, const std::string& path, bool develop, bool skip_preview)
 {
     {
         std::lock_guard lock(mutex_);
-        pending_ = Job{generation, path, develop, skip_preview};
+        develop_.reset();  // a develop for an image we've left, not yet started, is dropped
+        if (skip_preview)
+            develop_ = Job{generation, path, true, true};
+        else
+            pending_ = Job{generation, path, develop, false};
     }
-    wake_.notify_one();
+    fg_wake_.notify_one();
+    bg_wake_.notify_one();
 }
 
 void Loader::prefetch(std::vector<std::string> paths)
@@ -46,24 +64,21 @@ void Loader::prefetch(std::vector<std::string> paths)
         std::lock_guard lock(mutex_);
         prefetch_ = std::move(paths);
     }
-    wake_.notify_one();
+    bg_wake_.notify_all();
 }
 
-bool Loader::superseded(uint64_t generation)
-{
-    std::lock_guard lock(mutex_);
-    return stop_ || (pending_ && pending_->generation != generation);
-}
-
-void Loader::post(Result* r)
+// Results for the image on screen jump the main loop's queue; prefetches
+// wait until the main thread is otherwise idle.
+void Loader::post(Result* r, Lane lane)
 {
     struct Dispatch
     {
         Loader* loader;
         Result* result;
     };
+    const int priority = lane == Lane::Foreground ? G_PRIORITY_HIGH : lane == Lane::Develop ? G_PRIORITY_DEFAULT : G_PRIORITY_LOW;
     g_idle_add_full(
-        G_PRIORITY_DEFAULT,
+        priority,
         +[](gpointer p) -> gboolean
         {
             auto* d = static_cast<Dispatch*>(p);
@@ -75,63 +90,113 @@ void Loader::post(Result* r)
         new Dispatch{this, r}, nullptr);
 }
 
-void Loader::run()
+void Loader::decode_into(Result& r)
+{
+    r.picked_us = g_get_monotonic_time();
+    if (!decode_image(r.path, *r.image, r.error))
+        r.image.reset();
+    else
+        r.image->build_mips();
+    r.decoded_us = g_get_monotonic_time();
+}
+
+void Loader::run_foreground()
 {
     for (;;)
     {
         Job job;
         {
             std::unique_lock lock(mutex_);
-            wake_.wait(lock, [this] { return stop_ || pending_ || !prefetch_.empty(); });
+            fg_wake_.wait(lock, [this] { return stop_ || pending_; });
             if (stop_)
                 return;
-            if (pending_)
+            job = *pending_;
+            pending_.reset();
+        }
+        // A quick stand-in first (a raw's embedded JPEG); its develop goes to
+        // the background, ahead of any prefetching.
+        auto preview = std::make_shared<Image>();
+        if (decode_preview(job.path, *preview))
+        {
+            preview->build_mips();
+            post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);
+            if (job.develop)
             {
-                job = *pending_;
-                pending_.reset();
+                {
+                    std::lock_guard lock(mutex_);
+                    develop_ = Job{job.generation, job.path, true, true};
+                }
+                bg_wake_.notify_one();
+            }
+            continue;
+        }
+        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
+        decode_into(*r);
+        post(r, Lane::Foreground);
+    }
+}
+
+void Loader::run_background()
+{
+    // Below the foreground worker and the UI when cores are contended.
+    setpriority(PRIO_PROCESS, pid_t(syscall(SYS_gettid)), 10);
+    for (;;)
+    {
+        Job job{};
+        bool is_develop = false;
+        {
+            std::unique_lock lock(mutex_);
+            bg_wake_.wait(lock,
+                          [this]
+                          {
+                              if (stop_ || develop_)
+                                  return true;
+                              for (const std::string& p : prefetch_)
+                                  if (std::find(in_flight_.begin(), in_flight_.end(), p) == in_flight_.end())
+                                      return true;
+                              return false;
+                          });
+            if (stop_)
+                return;
+            if (develop_)
+            {
+                job = *develop_;
+                develop_.reset();
+                is_develop = true;
             }
             else
             {
-                // Idle: decode the next neighbour the same way a normal load
-                // would, and hand it to the cache.
-                const std::string path = prefetch_.front();
-                prefetch_.erase(prefetch_.begin());
-                lock.unlock();
-                auto* r = new Result{0, path, std::make_shared<Image>(), {}, false, true};
-                if (decode_preview(path, *r->image))
-                    r->preview = true;
-                else if (!decode_image(path, *r->image, r->error))
-                    r->image.reset();
-                if (r->image)
-                    r->image->build_mips();
-                post(r);
-                continue;
+                for (auto it = prefetch_.begin(); it != prefetch_.end(); ++it)
+                    if (std::find(in_flight_.begin(), in_flight_.end(), *it) == in_flight_.end())
+                    {
+                        job.path = *it;
+                        prefetch_.erase(it);
+                        break;
+                    }
             }
+            in_flight_.push_back(job.path);
         }
-        // Quick stand-in first (a raw's embedded JPEG), so flicking through a
-        // folder shows something at once. The real decode follows only when
-        // asked for and only if the user is still on this file.
-        static uint64_t previewed = 0;
-        if (previewed != job.generation && !job.skip_preview)
-        {
-            auto preview = std::make_shared<Image>();
-            if (decode_preview(job.path, *preview))
-            {
-                preview->build_mips();
-                previewed = job.generation;
-                post(new Result{job.generation, job.path, preview, {}, true});
-                if (!job.develop || superseded(job.generation))
-                    continue;
-            }
-        }
-        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
-        r->picked_us = g_get_monotonic_time();
-        if (!decode_image(r->path, *r->image, r->error))
-            r->image.reset();
+        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
+        if (is_develop)
+            decode_into(*r);
         else
-            r->image->build_mips();
-        r->decoded_us = g_get_monotonic_time();
-        post(r);
+        {
+            // A neighbour is prepared the way a normal load would be: its
+            // preview when it has one (cheap), otherwise the image itself.
+            if (decode_preview(job.path, *r->image))
+            {
+                r->preview = true;
+                r->image->build_mips();
+            }
+            else
+                decode_into(*r);
+        }
+        {
+            std::lock_guard lock(mutex_);
+            in_flight_.erase(std::find(in_flight_.begin(), in_flight_.end(), job.path));
+        }
+        bg_wake_.notify_one();
+        post(r, is_develop ? Lane::Develop : Lane::Prefetch);
     }
 }
 
