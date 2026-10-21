@@ -1,8 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+// Linear scene data kept alongside a developed raw image so exposure can be
+// changed without demosaicing again.
+struct LinearData {
+    std::vector<uint16_t> rgb;   // 16-bit linear RGB, 3 per pixel, white balanced, sRGB primaries
+    double auto_gain = 1.0;      // gain that clips 1% of samples: the "as the camera meant it" zero point
+};
 
 // A decoded image in cairo's ARGB32 layout: one native-endian uint32 per
 // pixel, alpha premultiplied, so the buffer can be wrapped by a cairo image
@@ -16,6 +24,11 @@ struct Image {
     int bits_per_sample = 8;     // depth of the source file, for the status bar
     std::string format;          // "JPEG", "Canon RAW", ...
     std::string info;            // extra detail for the status bar, may be empty
+    std::shared_ptr<LinearData> linear;   // only for raw files
+
+    // Re-render pixels from `linear` with an exposure offset in stops
+    // around the automatic gain. No-op without linear data.
+    void retone(double ev);
 
     void allocate(int w, int h);
     uint32_t* row(int y) { return reinterpret_cast<uint32_t*>(pixels.data() + size_t(y) * stride); }

@@ -1,5 +1,7 @@
 #include "image.h"
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -77,6 +79,23 @@ void Image::from_rgba16(const uint16_t* src, int src_stride) {
         const uint16_t* s = reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride);
         uint32_t* d = row(y);
         for (int x = 0; x < width; ++x, s += 4) d[x] = pack(s[0] >> 8, s[1] >> 8, s[2] >> 8, s[3] >> 8);
+    }
+}
+
+void Image::retone(double ev) {
+    if (!linear) return;
+    // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
+    static std::vector<uint8_t> lut(65536);
+    const double gain = linear->auto_gain * std::pow(2.0, ev);
+    for (int i = 0; i < 65536; ++i) {
+        double v = std::min(1.0, i / 65535.0 * gain);
+        v = v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
+        lut[i] = uint8_t(std::lround(v * 255.0));
+    }
+    const uint16_t* s = linear->rgb.data();
+    for (int y = 0; y < height; ++y) {
+        uint32_t* d = row(y);
+        for (int x = 0; x < width; ++x, s += 3) d[x] = pack_premultiplied(lut[s[0]], lut[s[1]], lut[s[2]], 255);
     }
 }
 

@@ -26,6 +26,7 @@ public:
     const Image* image() const { return image_.get(); }
     void set_fullscreen(bool on);
     void config_changed();
+    void image_changed();                            // pixels were rewritten in place
 
     enum class ZoomMode { Fit, Manual };
     ZoomMode zoom_mode() const { return mode_; }
@@ -48,6 +49,7 @@ private:
     void zoom_to_selection();
     void update_selection(double x, double y);     // x,y logical px
     void to_image(double x, double y, double& ix, double& iy) const;
+    void update_cursor(double x, double y);        // logical px
     void run_click(Action a, double x, double y);
     void begin_drag(Action a, double x, double y);
     void drag_to(Action a, double x, double y);
@@ -68,6 +70,7 @@ private:
     cairo_surface_t* scaled_ = nullptr;      // cached downscaled rendering
     double scaled_zoom_ = 0;
     cairo_pattern_t* checker_ = nullptr;
+    const char* cursor_name_ = nullptr;      // currently set named cursor, null for the default
     int checker_scale_ = 0;
 
     ZoomMode mode_ = ZoomMode::Fit;

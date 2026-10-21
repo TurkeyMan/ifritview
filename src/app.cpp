@@ -134,6 +134,39 @@ void App::build_ui() {
     tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen);
+    gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+
+    smooth_toggle_ = gtk_toggle_button_new();
+    gtk_container_add(GTK_CONTAINER(smooth_toggle_), gtk_image_new_from_icon_name("view-grid-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+    gtk_button_set_relief(GTK_BUTTON(smooth_toggle_), GTK_RELIEF_NONE);
+    gtk_widget_set_tooltip_text(smooth_toggle_, "Smooth when zoomed in (off shows crisp pixels)");
+    gtk_widget_set_can_focus(smooth_toggle_, FALSE);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
+    g_signal_connect(smooth_toggle_, "toggled", G_CALLBACK(+[](GtkToggleButton*, gpointer self) {
+                         static_cast<App*>(self)->on_smooth_toggled();
+                     }), this);
+    gtk_box_pack_start(GTK_BOX(toolbar_), smooth_toggle_, FALSE, FALSE, 0);
+
+    // Exposure, in stops around the decoder's automatic brightness; raw only.
+    exposure_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_box_pack_start(GTK_BOX(exposure_box_), gtk_image_new_from_icon_name("display-brightness-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR), FALSE, FALSE, 4);
+    exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 1.0 / 3.0);
+    gtk_scale_set_digits(GTK_SCALE(exposure_), 1);
+    gtk_scale_set_value_pos(GTK_SCALE(exposure_), GTK_POS_RIGHT);
+    gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
+    gtk_widget_set_size_request(exposure_, 180, -1);
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness");
+    gtk_widget_set_can_focus(exposure_, FALSE);
+    g_signal_connect(exposure_, "value-changed", G_CALLBACK(+[](GtkRange*, gpointer self) {
+                         static_cast<App*>(self)->on_exposure_changed();
+                     }), this);
+    gtk_box_pack_start(GTK_BOX(exposure_box_), exposure_, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar_), exposure_box_, FALSE, FALSE, 0);
+    // Children are shown now; the box itself is toggled per image.
+    gtk_widget_show_all(exposure_box_);
+    gtk_widget_hide(exposure_box_);
+    gtk_widget_set_no_show_all(exposure_box_, TRUE);
+
     GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings_action);
     gtk_box_set_child_packing(GTK_BOX(toolbar_), settings, FALSE, FALSE, 0, GTK_PACK_END);
 
@@ -257,6 +290,30 @@ void App::on_loaded(Loader::Result& r) {
     fit_window_to_image();
     update_title();
     update_status();
+    if (image_->linear) {
+        g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+        gtk_range_set_value(GTK_RANGE(exposure_), 0.0);
+        g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+        gtk_widget_show(exposure_box_);
+    } else {
+        gtk_widget_hide(exposure_box_);
+    }
+}
+
+void App::set_exposure(double ev) {
+    gtk_range_set_value(GTK_RANGE(exposure_), ev);
+}
+
+void App::on_exposure_changed() {
+    if (!image_ || !image_->linear) return;
+    image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)));
+    view_->image_changed();
+}
+
+void App::on_smooth_toggled() {
+    cfg_.smooth_upscale = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(smooth_toggle_));
+    cfg_.save();
+    view_->config_changed();
 }
 
 // --------------------------------------------------------------- window
@@ -346,6 +403,7 @@ void App::open_settings(const char* page) {
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
     folder_.rescan(cfg_);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     view_->config_changed();
     if (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) load_current();
     update_status();

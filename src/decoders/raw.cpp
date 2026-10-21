@@ -66,8 +66,30 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error) {
 #endif
 }
 
+// Same rule as LibRaw's auto-brightness: the gain that pushes 1% of all
+// samples past white.
+double auto_gain(const std::vector<uint16_t>& rgb) {
+    std::vector<uint32_t> histogram(4096, 0);
+    for (uint16_t v : rgb) ++histogram[v >> 4];
+    const size_t allow = rgb.size() / 100;
+    size_t seen = 0;
+    int bin = 4095;
+    for (; bin > 0; --bin) {
+        seen += histogram[bin];
+        if (seen > allow) break;
+    }
+    const double white = (bin + 1) * 16.0;
+    return white > 0 ? 65535.0 / white : 1.0;
+}
+
 bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.half_size = half ? 1 : 0;
+    // Linear 16-bit, no auto-brightening: tone mapping is done by the viewer
+    // so an exposure change needs no second demosaic.
+    raw.imgdata.params.output_bps = 16;
+    raw.imgdata.params.gamm[0] = 1.0;
+    raw.imgdata.params.gamm[1] = 1.0;
+    raw.imgdata.params.no_auto_bright = 1;
     int r = raw.unpack();
     if (r != LIBRAW_SUCCESS) {
         error = libraw_strerror(r);
@@ -84,10 +106,14 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
         return false;
     }
     bool ok = false;
-    if (img->type == LIBRAW_IMAGE_BITMAP && img->colors == 3) {
+    if (img->type == LIBRAW_IMAGE_BITMAP && img->colors == 3 && img->bits == 16) {
+        auto linear = std::make_shared<LinearData>();
+        const auto* px = reinterpret_cast<const uint16_t*>(img->data);
+        linear->rgb.assign(px, px + size_t(img->width) * img->height * 3);
+        linear->auto_gain = auto_gain(linear->rgb);
         out.allocate(img->width, img->height);
-        if (img->bits == 16) out.from_rgb16(reinterpret_cast<const uint16_t*>(img->data), img->width * 6);
-        else out.from_rgb8(img->data, img->width * 3);
+        out.linear = std::move(linear);
+        out.retone(0.0);
         ok = true;
     } else {
         error = "unexpected LibRaw output";
@@ -99,7 +125,6 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
 bool decode_raw(const std::string& path, Image& out, std::string& error) {
     const DecodeOptions options = decode_options();
     LibRaw raw;
-    raw.imgdata.params.output_bps = 8;
     raw.imgdata.params.use_camera_wb = 1;
     raw.imgdata.params.output_color = 1;  // sRGB
     int r = raw.open_file(path.c_str());

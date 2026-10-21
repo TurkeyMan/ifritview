@@ -52,6 +52,30 @@ ImageView::~ImageView() {
     if (checker_) cairo_pattern_destroy(checker_);
 }
 
+namespace {
+Control drag_control(unsigned button);
+}  // namespace
+
+// A magnifier over the selection says "click here to zoom in"; a closed
+// hand while panning.
+void ImageView::update_cursor(double x, double y) {
+    const char* want = nullptr;
+    if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_)) == Action::Pan) {
+        want = "grabbing";
+    } else if (has_selection_ && image_ && !pressed_button_) {
+        double ix, iy;
+        to_image(x, y, ix, iy);
+        if (ix >= sel_x0_ && ix < sel_x1_ && iy >= sel_y0_ && iy < sel_y1_) want = "zoom-in";
+    }
+    if (want == cursor_name_) return;
+    cursor_name_ = want;
+    GdkWindow* gw = gtk_widget_get_window(area_);
+    if (!gw) return;
+    GdkCursor* cursor = want ? gdk_cursor_new_from_name(gtk_widget_get_display(area_), want) : nullptr;
+    gdk_window_set_cursor(gw, cursor);
+    if (cursor) g_object_unref(cursor);
+}
+
 int ImageView::scale_factor() const {
     return std::max(1, gtk_widget_get_scale_factor(area_));
 }
@@ -84,6 +108,12 @@ void ImageView::set_image(std::shared_ptr<Image> image) {
 void ImageView::set_fullscreen(bool on) {
     fullscreen_ = on;
     zoom_fit();
+}
+
+void ImageView::image_changed() {
+    drop_caches();
+    if (surface_) cairo_surface_mark_dirty(surface_);
+    gtk_widget_queue_draw(area_);
 }
 
 void ImageView::config_changed() {
@@ -394,17 +424,22 @@ gboolean ImageView::on_button(GdkEventButton* e) {
         if (drag_active_) drag_to(cfg_.control(drag_control(button)), e->x, e->y);
         else if (!suppress_click_) run_click(cfg_.control(click_control(button, false)), e->x, e->y);
         drag_active_ = false;
+        update_cursor(e->x, e->y);
     }
     return TRUE;
 }
 
 gboolean ImageView::on_motion(GdkEventMotion* e) {
-    if (!pressed_button_) return FALSE;
+    if (!pressed_button_) {
+        update_cursor(e->x, e->y);
+        return FALSE;
+    }
     const Action a = cfg_.control(drag_control(pressed_button_));
     if (!drag_active_) {
         if (std::hypot(e->x - press_x_, e->y - press_y_) < 4.0) return TRUE;
         drag_active_ = true;
         begin_drag(a, press_x_, press_y_);
+        update_cursor(e->x, e->y);
     }
     drag_to(a, e->x, e->y);
     return TRUE;

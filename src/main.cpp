@@ -79,6 +79,8 @@ gboolean run_script_step(gpointer p) {
     } else if (step == "accept-dialog") {
         if (GtkWindow* w = frontmost_window(); w && GTK_IS_DIALOG(w)) gtk_dialog_response(GTK_DIALOG(w), GTK_RESPONSE_OK);
     } else if (step.rfind("shot:", 0) == 0) screenshot(frontmost_window(), step.substr(5));
+    else if (step == "wait") {}
+    else if (step.rfind("ev:", 0) == 0) app.set_exposure(std::stod(step.substr(3)));
     else if (step == "quit") app.quit();
     else std::fprintf(stderr, "script: unknown step '%s'\n", step.c_str());
     return G_SOURCE_CONTINUE;

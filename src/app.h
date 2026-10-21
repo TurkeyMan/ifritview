@@ -64,6 +64,7 @@ public:
     void open_settings(const char* page = nullptr);
     void open_settings_action() { open_settings(); }
     void quit();
+    void set_exposure(double ev);
 
 private:
     void build_ui();
@@ -79,6 +80,8 @@ private:
     gboolean on_key(GdkEventKey* e);
     void on_window_state(GdkEventWindowState* e);
     void on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx);
+    void on_exposure_changed();
+    void on_smooth_toggled();
 
     Config cfg_;
     Folder folder_;
@@ -88,6 +91,9 @@ private:
     GtkWidget* window_ = nullptr;
     GtkWidget* toolbar_ = nullptr;
     GtkWidget* footer_ = nullptr;
+    GtkWidget* exposure_box_ = nullptr;   // EV slider, shown for raw files only
+    GtkWidget* exposure_ = nullptr;
+    GtkWidget* smooth_toggle_ = nullptr;
     GtkWidget* status_left_ = nullptr;
     GtkWidget* status_center_ = nullptr;
     GtkWidget* status_right_ = nullptr;
