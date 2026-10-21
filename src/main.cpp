@@ -4,6 +4,7 @@
 #include <gtk/gtk.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -232,7 +233,8 @@ int main(int argc, char** argv)
             if (**p)
                 s->steps.push_back(*p);
         g_strfreev(parts);
-        g_timeout_add(400, run_script_step, s);
+        const char* ms = g_getenv("IFRIT_SCRIPT_MS");
+        g_timeout_add(ms ? guint(std::atoi(ms)) : 400u, run_script_step, s);
     }
     app.run();
     return 0;

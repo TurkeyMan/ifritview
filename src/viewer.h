@@ -53,7 +53,13 @@ public:
     void crossfade_next(int ms);
     bool motion_active() const { return motion_.active; }
     double frame_ms() const { return frame_ms_; }  // last measured draw cost
-    void set_busy(bool busy);                      // a small spinning ring in the corner while a decode runs
+    void set_busy(bool busy);
+    // Trace aid: report the time from `since_us` to the first paint that shows `image`.
+    void stamp_present(gint64 since_us, const Image* image)
+    {
+        present_since_ = since_us;
+        present_image_ = image;
+    }  // a small spinning ring in the corner while a decode runs
 
     void zoom_step(int direction);  // around the view centre
     int scale_factor() const;
@@ -64,6 +70,7 @@ public:
     void clear_selection();
 
     std::function<void()> on_zoom_changed;
+    std::function<void()> on_presented;  // first paint of a newly set image
     std::function<void()> on_selection_changed;
     std::function<void(Action)> on_action;  // app-level actions the view can't do itself
 
@@ -107,6 +114,9 @@ private:
         guint tick = 0;
     } motion_;
     double frame_ms_ = 0;
+    gint64 present_since_ = 0;
+    const Image* presented_ = nullptr;  // the image whose first paint has been reported
+    const Image* present_image_ = nullptr;
     // Outgoing slide during a cross-fade: its own pre-scaled surface and motion.
     struct Outgoing
     {

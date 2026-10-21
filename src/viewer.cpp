@@ -153,6 +153,7 @@ void ImageView::outgoing_transform(gint64 now_us, double& zoom, double& px, doub
 
 void ImageView::set_image(std::shared_ptr<Image> image)
 {
+    presented_ = nullptr;  // even the same object again counts as a new presentation
     // A same-size replacement (a raw's develop landing) mid-fade keeps the
     // fade; anything else ends it.
     const bool replacement = outgoing_.surface && image_ && image && image->width == image_->width && image->height == image_->height;
@@ -538,13 +539,37 @@ cairo_surface_t* ImageView::scaled_surface(double zoom)
     const int w = std::max(1, int(std::ceil(image_->width * zoom)));
     const int h = std::max(1, int(std::ceil(image_->height * zoom)));
     scaled_ = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    // Start from the smallest mip that is still at least the target size, so
+    // the filter only ever reduces by up to 2x.
+    cairo_surface_t* src = surface_;
+    int src_w = image_->width;
+    for (const Image::Mip& m : image_->mips)
+    {
+        if (m.width < w || m.height < h)
+            break;
+        src = nullptr;
+        src_w = m.width;
+        if (&m == &image_->mips.back() || image_->mips[&m - image_->mips.data() + 1].width < w)
+        {
+            src = cairo_image_surface_create_for_data(const_cast<uint8_t*>(m.pixels.data()), CAIRO_FORMAT_ARGB32, m.width, m.height, m.width * 4);
+            break;
+        }
+    }
+    if (!src)
+    {
+        src = surface_;
+        src_w = image_->width;
+    }
+    const double s = double(w) / src_w;
     cairo_t* c = cairo_create(scaled_);
-    cairo_scale(c, zoom, zoom);
-    cairo_set_source_surface(c, surface_, 0, 0);
+    cairo_scale(c, s, s);
+    cairo_set_source_surface(c, src, 0, 0);
     cairo_pattern_set_filter(cairo_get_source(c), CAIRO_FILTER_GOOD);
     cairo_pattern_set_extend(cairo_get_source(c), CAIRO_EXTEND_PAD);
     cairo_paint(c);
     cairo_destroy(c);
+    if (src != surface_)
+        cairo_surface_destroy(src);
     scaled_zoom_ = zoom;
     return scaled_;
 }
@@ -631,6 +656,26 @@ void ImageView::draw(cairo_t* cr)
     cairo_restore(cr);
     if (motion_.active)
         frame_ms_ = (g_get_monotonic_time() - t_draw) / 1000.0;
+    if (image_ && presented_ != image_.get())
+    {
+        presented_ = image_.get();
+        if (on_presented)
+            g_idle_add(
+                +[](gpointer self) -> gboolean
+                {
+                    auto* view = static_cast<ImageView*>(self);
+                    if (view->on_presented)
+                        view->on_presented();
+                    return G_SOURCE_REMOVE;
+                },
+                this);
+    }
+    if (present_since_ && present_image_ == image_.get())
+    {
+        std::fprintf(stderr, "present: %6.1f ms  %dx%d %s\n", (g_get_monotonic_time() - present_since_) / 1000.0, image_->width, image_->height,
+                     image_->is_preview() ? "(preview)" : "");
+        present_since_ = 0;
+    }
 
     // Busy ring: bottom-right, small and dim, a short arc chasing round.
     if (busy_)

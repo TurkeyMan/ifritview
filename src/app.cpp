@@ -102,6 +102,8 @@ void Loader::run()
                     r->preview = true;
                 else if (!decode_image(path, *r->image, r->error))
                     r->image.reset();
+                if (r->image)
+                    r->image->build_mips();
                 post(r);
                 continue;
             }
@@ -115,6 +117,7 @@ void Loader::run()
             auto preview = std::make_shared<Image>();
             if (decode_preview(job.path, *preview))
             {
+                preview->build_mips();
                 previewed = job.generation;
                 post(new Result{job.generation, job.path, preview, {}, true});
                 if (!job.develop || superseded(job.generation))
@@ -122,8 +125,12 @@ void Loader::run()
             }
         }
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
+        r->picked_us = g_get_monotonic_time();
         if (!decode_image(r->path, *r->image, r->error))
             r->image.reset();
+        else
+            r->image->build_mips();
+        r->decoded_us = g_get_monotonic_time();
         post(r);
     }
 }
@@ -366,6 +373,7 @@ void App::build_ui()
         }
     };
     view_->on_zoom_changed = [this] { update_status(); };
+    view_->on_presented = [this] { image_presented(); };
     view_->on_selection_changed = [this]
     {
         int x, y, w, h;
@@ -706,6 +714,7 @@ void App::show_animation_frame(size_t index)
     if (f.pixels.size() == image_->pixels.size())
     {
         std::memcpy(image_->pixels.data(), f.pixels.data(), f.pixels.size());
+        image_->mips.clear();
         view_->image_changed();
     }
 }
@@ -982,8 +991,30 @@ void App::load_current()
 
 void App::navigate(int delta)
 {
+    if (awaiting_present_)
+    {
+        pending_steps_ = std::clamp(pending_steps_ + delta, -8, 8);
+        return;
+    }
+    if (g_getenv("IFRIT_TRACE"))
+        nav_stamp_us_ = g_get_monotonic_time();
     if (folder_.step(delta, cfg_.wrap_around))
+    {
+        awaiting_present_ = true;
         load_current();
+    }
+}
+
+// The current image is on screen (a raw counts once its preview is): play
+// out one queued step, if any.
+void App::image_presented()
+{
+    awaiting_present_ = false;
+    if (pending_steps_ == 0)
+        return;
+    const int d = pending_steps_ > 0 ? 1 : -1;
+    pending_steps_ -= d;
+    navigate(d);
 }
 
 void App::go_first()
@@ -1061,6 +1092,15 @@ void App::on_loaded(Loader::Result& r)
         }
         return;
     }
+    if (nav_stamp_us_)
+    {
+        const double base = nav_stamp_us_ / 1000.0;
+        if (r.cached)
+            std::fprintf(stderr, "timeline: cache hit at %.1f ms\n", g_get_monotonic_time() / 1000.0 - base);
+        else
+            std::fprintf(stderr, "timeline: picked %.1f  decoded %.1f  main %.1f ms\n", r.picked_us / 1000.0 - base, r.decoded_us / 1000.0 - base,
+                         g_get_monotonic_time() / 1000.0 - base);
+    }
     const bool from_cache = r.cached;
     schedule_prefetch();
     if (g_getenv("IFRIT_TRACE") && r.image)
@@ -1074,6 +1114,7 @@ void App::on_loaded(Loader::Result& r)
         status_message_ = "Cannot load " + folder_.current_name() + ": " + r.error;
         update_status();
         update_title();
+        image_presented();
         return;
     }
     stop_animation();
@@ -1092,6 +1133,9 @@ void App::on_loaded(Loader::Result& r)
         ensure_developed();
     }
     view_->set_image(image_);
+    if (nav_stamp_us_)
+        view_->stamp_present(nav_stamp_us_, image_.get());
+    nav_stamp_us_ = 0;
     fit_window_to_image();
     update_title();
     sync_exposure_slider();
@@ -1355,6 +1399,7 @@ void App::request_retone()
                     if (current)
                     {
                         j->image->pixels = std::move(j->result);
+                        j->image->mips.clear();
                         if (j->image == app->image_)
                             app->view_->image_changed();
                     }

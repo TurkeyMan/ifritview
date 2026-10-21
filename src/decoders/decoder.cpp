@@ -1,5 +1,7 @@
 #include "decoder.h"
 
+#include <glib.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <mutex>
@@ -31,6 +33,8 @@ bool claims_extension(const Decoder& d, const std::string& ext)
 // APP13, XMP packets and sidecars. Added once a decoder has succeeded.
 void enrich_metadata(const std::string& path, Image& out, const uint8_t* head, size_t head_len)
 {
+    const bool timing = g_getenv("IFRIT_DECODE_TIMING") != nullptr;
+    gint64 t0 = g_get_monotonic_time();
 #ifdef HAVE_IPTC
     if (head_len >= 3 && head[0] == 0xFF && head[1] == 0xD8)
         read_iptc_jpeg(path, out);
@@ -38,16 +42,23 @@ void enrich_metadata(const std::string& path, Image& out, const uint8_t* head, s
     (void)head;
     (void)head_len;
 #endif
+    gint64 t1 = g_get_monotonic_time();
 #ifdef HAVE_XMP
     read_xmp(path, out);
 #endif
+    if (timing)
+        std::fprintf(stderr, "  iptc %.1f ms, xmp %.1f ms\n", (t1 - t0) / 1000.0, (g_get_monotonic_time() - t1) / 1000.0);
 }
 
 bool try_decode(const Decoder& d, const std::string& path, Image& out, std::string& error)
 {
     out = Image{};
     std::string err;
-    if (d.decode(path, out, err))
+    const gint64 t0 = g_get_monotonic_time();
+    const bool ok = d.decode(path, out, err);
+    if (g_getenv("IFRIT_DECODE_TIMING"))
+        std::fprintf(stderr, "  %s decode %.1f ms\n", d.name, (g_get_monotonic_time() - t0) / 1000.0);
+    if (ok)
     {
         if (out.format.empty())
             out.format = d.name;

@@ -31,7 +31,8 @@ public:
         std::string error;
         bool preview = false;   // a quick stand-in; the real decode follows
         bool prefetch = false;  // decoded ahead of time; cache it, don't show it
-        bool cached = false;    // served from the cache: pixels already carry any edits
+        bool cached = false;
+        gint64 picked_us = 0, decoded_us = 0;  // trace: loader timeline    // served from the cache: pixels already carry any edits
     };
     using Callback = std::function<void(Result&)>;  // runs on the GTK main thread
 
@@ -75,6 +76,7 @@ public:
 
     // Actions, bound to the toolbar and keys.
     void navigate(int delta);
+    void image_presented();
     void go_first();
     void go_last();
     void reload();
@@ -110,6 +112,11 @@ private:
     // render that finishes behind the slider triggers another.
     void request_retone();
     bool retone_busy_ = false;
+    gint64 nav_stamp_us_ = 0;
+    // Every image is shown: a step that arrives before the current image has
+    // been painted waits for it (capped, so a big flick doesn't run on).
+    bool awaiting_present_ = false;
+    int pending_steps_ = 0;  // trace: when the current navigation was triggered
     void fit_window_to_image();
     void place_window(int w, int h, const GdkRectangle& work);
     void update_status();

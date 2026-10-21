@@ -103,7 +103,7 @@ void Config::load()
             std::string e = list[i];
             e.erase(std::remove_if(e.begin(), e.end(), [](unsigned char c) { return std::isspace(c) || c == '.'; }), e.end());
             std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
-            if (!e.empty() && !accepts_extension(e))
+            if (!e.empty() && e != "gz" && !accepts_extension(e))  // gz came from the SVGZ loader by mistake
                 extensions.push_back(e);
         }
         g_strfreev(list);
@@ -133,7 +133,8 @@ void Config::load()
     if (!g_key_file_has_key(kf, kView, "slideshow_seconds", nullptr))
         slideshow_seconds = 5.0;
     slideshow_motion = get_bool(kf, kView, "slideshow_motion", slideshow_motion);
-    slideshow_zoom = std::clamp(g_key_file_has_key(kf, kView, "slideshow_zoom", nullptr) ? g_key_file_get_double(kf, kView, "slideshow_zoom", nullptr) : slideshow_zoom, 0.0, 0.5);
+    slideshow_zoom = std::clamp(
+        g_key_file_has_key(kf, kView, "slideshow_zoom", nullptr) ? g_key_file_get_double(kf, kView, "slideshow_zoom", nullptr) : slideshow_zoom, 0.0, 0.5);
     slideshow_shuffle = get_bool(kf, kView, "slideshow_shuffle", slideshow_shuffle);
     slideshow_crossfade_ms = std::clamp(get_int(kf, kView, "slideshow_crossfade_ms", slideshow_crossfade_ms), 0, 5000);
     background = get_string(kf, kView, "background", background);

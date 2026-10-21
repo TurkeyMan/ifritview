@@ -64,12 +64,22 @@ struct Image
     int stride = 0;  // bytes per row, always width * 4
     std::vector<uint8_t> pixels;
     bool has_alpha = false;
-    int bits_per_sample = 8;               // depth of the source file, for the status bar
-    std::string format;                    // "JPEG", "Canon RAW", ...
-    PixelFormat pixel_format;              // how the file stores its pixels
-    std::string color_space;               // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
-    std::string info;                      // extra detail for the status bar, may be empty
-    std::shared_ptr<LinearData> linear;    // only for raw files
+    int bits_per_sample = 8;             // depth of the source file, for the status bar
+    std::string format;                  // "JPEG", "Canon RAW", ...
+    PixelFormat pixel_format;            // how the file stores its pixels
+    std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
+    std::string info;                    // extra detail for the status bar, may be empty
+    std::shared_ptr<LinearData> linear;  // only for raw files
+    // Halvings of `pixels` (½, ¼, …) for fast downscaled display, built off the
+    // main thread after a decode. Empty when absent or stale; anything that
+    // rewrites `pixels` clears them.
+    struct Mip
+    {
+        int width, height;
+        std::vector<uint8_t> pixels;  // ARGB32, stride = width * 4
+    };
+    std::vector<Mip> mips;
+    void build_mips();
     std::shared_ptr<Animation> animation;  // frames when the file animates; pixels hold the first
     double exposure_bias = 0;              // the camera's exposure compensation, in EV, already baked in
     // One Image is one file. A raw starts life as its embedded JPEG (a

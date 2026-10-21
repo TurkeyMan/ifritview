@@ -126,6 +126,35 @@ void Image::retone(double ev)
     if (!linear)
         return;
     pixels = retone_buffer(ev);
+    mips.clear();
+}
+
+// Repeated 2x2 averages of premultiplied ARGB, down to about 1024 px on the
+// long side. Cheap (a third of one pass over the image) and done on the
+// loader thread, so displaying a big image never filters the full buffer.
+void Image::build_mips()
+{
+    mips.clear();
+    const uint8_t* src = pixels.data();
+    int w = width, h = height;
+    while (std::max(w, h) > 1024 && w >= 2 && h >= 2)
+    {
+        const int nw = w / 2, nh = h / 2;
+        Mip m{nw, nh, std::vector<uint8_t>(size_t(nw) * nh * 4)};
+        for (int y = 0; y < nh; ++y)
+        {
+            const uint8_t* r0 = src + size_t(2 * y) * w * 4;
+            const uint8_t* r1 = r0 + size_t(w) * 4;
+            uint8_t* d = m.pixels.data() + size_t(y) * nw * 4;
+            for (int x = 0; x < nw; ++x, d += 4, r0 += 8, r1 += 8)
+                for (int c = 0; c < 4; ++c)
+                    d[c] = uint8_t((r0[c] + r0[c + 4] + r1[c] + r1[c + 4] + 2) >> 2);
+        }
+        mips.push_back(std::move(m));
+        src = mips.back().pixels.data();
+        w = nw;
+        h = nh;
+    }
 }
 
 std::vector<uint8_t> Image::retone_buffer(double ev) const
@@ -321,6 +350,7 @@ void Image::adopt(Image&& f)
     if (!f.info.empty())
         info = std::move(f.info);
     linear = std::move(f.linear);
+    mips = std::move(f.mips);  // empty if pending edits rewrote f's pixels
     animation = std::move(f.animation);
     if (f.exposure_bias != 0)
         exposure_bias = f.exposure_bias;
@@ -347,7 +377,7 @@ void Image::adopt(Image&& f)
     }
     final_width = final_height = 0;
     stage = Stage::Final;
-    if (linear)
+    if (linear && exposure_edit != 0)
         retone(exposure_edit);
 }
 
@@ -357,6 +387,7 @@ void Image::apply_orientation(int o)
         return;
     if (is_preview())
         pending_edits.push_back({o, 0, 0, 0, 0});
+    mips.clear();
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "apply_orientation(%d) on %dx%d\n", o, width, height);
     const int W = width, H = height;
