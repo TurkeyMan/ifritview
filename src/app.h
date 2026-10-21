@@ -102,6 +102,7 @@ private:
     void on_exposure_changed();
     void retone();                           // re-render the raw from both sliders
     void apply_xmp_edits();
+    bool apply_xmp_geometry(Image& image);   // crop + orientation; true if anything changed
     void ensure_developed();                 // kick off the real decode behind a preview
     void schedule_prefetch();
     void on_smooth_toggled();

@@ -515,15 +515,34 @@ void App::on_loaded(Loader::Result& r) {
             return;
         }
     }
-    if (r.generation != load_generation_) return;  // superseded
+    if (r.generation != load_generation_) {
+        // Too late to show, but not wasted: a developed raw replaces its
+        // preview in the cache so the next visit is instant.
+        if (r.image && !r.preview && !r.cached && r.path != image_path_) {
+            ImageCache::Entry old;
+            if (!cache_.get(r.path, old) || old.preview) {
+                if (cfg_.apply_xmp_edits && r.image->xmp.present) {
+                    apply_xmp_geometry(*r.image);
+                    if (r.image->linear) r.image->retone(r.image->xmp.exposure);
+                }
+                cache_.put(r.path, {r.image, false, ImageCache::file_mtime(r.path)});
+            }
+        }
+        return;
+    }
     const bool from_cache = r.cached;
     schedule_prefetch();
     showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
     status_message_ = r.preview && develop_requested_ ? "Developing…" : "";
     if (r.preview) {
-        // Edits that need real pixels mean the preview can't stand for long.
         const XmpDevelop& d = r.image->xmp;
+        if (cfg_.apply_xmp_edits && d.present && !from_cache) {
+            // Geometry applies to the JPEG just as well; do it now so the
+            // preview already has the right shape. Exposure needs the develop.
+            apply_xmp_geometry(*r.image);
+        }
+        // Edits that need real pixels mean the preview can't stand for long.
         if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
         // A preview smaller than the monitor would be shown upscaled; develop
         // the real thing behind it.
@@ -582,6 +601,11 @@ void App::on_loaded(Loader::Result& r) {
         gtk_widget_show(exposure_box_);
         if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
         else if (slider_moved) gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
+        else if (showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present && image_->xmp.exposure != 0) {
+            g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+            gtk_range_set_value(GTK_RANGE(exposure_), bias + image_->xmp.exposure);   // what the develop will use
+            g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+        }
     } else if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present) {
         apply_xmp_edits();
     } else {
@@ -742,15 +766,20 @@ void App::retone() {
 
 // Orientation and crop change the pixels; exposure just moves the slider,
 // which re-renders. White balance from XMP is parsed but not applied yet.
+bool App::apply_xmp_geometry(Image& image) {
+    const XmpDevelop d = image.xmp;
+    if (d.has_crop) {
+        const int x = int(d.crop_left * image.width), y = int(d.crop_top * image.height);
+        const int w = int((d.crop_right - d.crop_left) * image.width), h = int((d.crop_bottom - d.crop_top) * image.height);
+        if (w > 1 && h > 1) image = image.crop(x, y, w, h);
+    }
+    if (d.orientation != 1) image.apply_orientation(d.orientation);
+    return d.has_crop || d.orientation != 1;
+}
+
 void App::apply_xmp_edits() {
     const XmpDevelop d = image_->xmp;
-    if (d.has_crop) {
-        const int x = int(d.crop_left * image_->width), y = int(d.crop_top * image_->height);
-        const int w = int((d.crop_right - d.crop_left) * image_->width), h = int((d.crop_bottom - d.crop_top) * image_->height);
-        if (w > 1 && h > 1) *image_ = image_->crop(x, y, w, h);
-    }
-    if (d.orientation != 1) image_->apply_orientation(d.orientation);
-    if (d.has_crop || d.orientation != 1) {
+    if (apply_xmp_geometry(*image_)) {
         view_->set_image(image_);
         fit_window_to_image();
     }
