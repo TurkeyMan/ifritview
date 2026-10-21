@@ -8,6 +8,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+# Release builds pass the tag's version (CI: v1.2 -> 1.2).
+set(IFRIT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version stamped into the binary and packages")
+
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0 gdk-pixbuf-2.0)
@@ -37,6 +40,7 @@ add_executable(ifritview
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifritview PRIVATE -Wall -Wextra)
+target_compile_definitions(ifritview PRIVATE IFRIT_VERSION="${IFRIT_VERSION}")
 target_link_libraries(ifritview PRIVATE PkgConfig::GTK ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
@@ -162,7 +166,7 @@ install(CODE "
 # libraries; GStreamer and poppler aren't linked, so they're only recommended,
 # as is glib-networking (TLS for place-name lookups).
 set(CPACK_PACKAGE_NAME "ifritview")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${IFRIT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
 set(CPACK_PACKAGE_VENDOR "Manu Evans")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast, no-frills image viewer")

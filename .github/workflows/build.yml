@@ -54,3 +54,29 @@ jobs:
           name: ifritview-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
+
+  # A pushed tag (v1.2, v1.3-beta, ...) becomes a GitHub release carrying the
+  # binaries and packages from the builds above.
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          prerelease=
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --title "IfritView ${GITHUB_REF_NAME#v}" \
+            --generate-notes --verify-tag $prerelease

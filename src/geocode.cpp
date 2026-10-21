@@ -189,7 +189,7 @@ void Geocoder::Impl::send(const std::string& key, double lat, double lon)
         url.replace(pos, 5, latb);
     for (auto pos = url.find("{lon}"); pos != std::string::npos; pos = url.find("{lon}"))
         url.replace(pos, 5, lonb);
-    HttpHeaders headers{{"User-Agent", "IfritView/0.1 (image viewer; reverse geocoding of photo locations)"}, {"Accept", "application/json"}};
+    HttpHeaders headers{{"User-Agent", "IfritView/" IFRIT_VERSION " (image viewer; reverse geocoding of photo locations)"}, {"Accept", "application/json"}};
     if (!language.empty())
         headers.emplace_back("Accept-Language", language);
     in_flight = true;
