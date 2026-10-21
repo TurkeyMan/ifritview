@@ -16,6 +16,7 @@ struct Config {
     int cache_megabytes = 0;               // decoded image cache; 0 = a share of free memory
     std::string raw_mode = "full";         // full | half | preview; half bins 2x2 (fast, no demosaic)
     bool raw_develop_on_demand = true;     // show the embedded JPEG until real pixels are needed
+    bool raw_develop_small_preview = true; // ...unless the preview is smaller than the screen: then develop behind it
     bool apply_xmp_edits = true;           // honour exposure/crop/orientation from XMP
 
     // Window

@@ -522,6 +522,18 @@ void App::on_loaded(Loader::Result& r) {
         // Edits that need real pixels mean the preview can't stand for long.
         const XmpDevelop& d = r.image->xmp;
         if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
+        // A preview smaller than the monitor would be shown upscaled; develop
+        // the real thing behind it.
+        if (cfg_.raw_develop_small_preview && r.image) {
+            GdkRectangle geo{0, 0, 1920, 1080};
+            GdkDisplay* display = gtk_widget_get_display(window_);
+            GdkWindow* gw = gtk_widget_get_window(window_);
+            GdkMonitor* monitor = gw ? gdk_display_get_monitor_at_window(display, gw) : nullptr;
+            if (!monitor) monitor = gdk_display_get_primary_monitor(display);
+            if (monitor) gdk_monitor_get_geometry(monitor, &geo);
+            const int scale = view_->scale_factor();
+            if (r.image->width < geo.width * scale && r.image->height < geo.height * scale) ensure_developed();
+        }
     } else if (!preview_edits_.empty() && r.image) {
         for (const Edit& e : preview_edits_) {   // redo what was done to the preview
             if (e.orientation != 1) r.image->apply_orientation(e.orientation);
