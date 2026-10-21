@@ -282,7 +282,7 @@ std::vector<std::string> default_extensions()
     std::vector<std::string> all;
     for (const Decoder* d : decoders())
         for (const std::string& e : d->extensions)
-            if (std::find(all.begin(), all.end(), e) == all.end())
+            if (e.find('.') == std::string::npos && std::find(all.begin(), all.end(), e) == all.end())  // "svg.gz": svgz covers it
                 all.push_back(e);
     return all;
 }

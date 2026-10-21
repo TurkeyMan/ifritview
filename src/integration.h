@@ -13,6 +13,6 @@ bool ensure_desktop_entry(std::string& error);
 // Set IfritView as the default handler for the MIME types behind these
 // extensions. Returns the number of types set; `skipped` lists extensions
 // whose type the system doesn't know.
-// `images_only`: claim only image/* types, leaving videos and documents with
-// whatever handles them now.
-int set_default_for_extensions(const std::vector<std::string>& extensions, bool images_only, std::vector<std::string>& skipped, std::string& error);
+// Image types are always claimed; video/* only with `videos`, and anything
+// else (PDF) only with `documents`. Unclaimed types keep their current app.
+int set_default_for_extensions(const std::vector<std::string>& extensions, bool videos, bool documents, std::vector<std::string>& skipped, std::string& error);

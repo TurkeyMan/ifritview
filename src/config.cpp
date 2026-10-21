@@ -103,15 +103,29 @@ void Config::load()
             std::string e = list[i];
             e.erase(std::remove_if(e.begin(), e.end(), [](unsigned char c) { return std::isspace(c) || c == '.'; }), e.end());
             std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
-            if (!e.empty() && e != "gz" && !accepts_extension(e))  // gz came from the SVGZ loader by mistake
+            if (!e.empty() && e != "gz" && e != "svggz" && !accepts_extension(e))  // gz came from the SVGZ loader by mistake
                 extensions.push_back(e);
         }
         g_strfreev(list);
-        if (get_int(kf, kFiles, "extensions_version", 1) < 2)
-            for (const std::string& e : default_extensions())
-                if (!accepts_extension(e) &&
-                    (e == "mp4" || e == "m4v" || e == "mov" || e == "mts" || e == "m2ts" || e == "mkv" || e == "webm" || e == "avi" || e == "3gp"))
-                    extensions.push_back(e);
+        // Formats added since the list was saved join it; ones the user took
+        // out stay out. `known_extensions` records what was supported at the
+        // last save. Older files predate it: everything missing from them is
+        // new except PDF, which may have been left out on purpose.
+        std::vector<std::string> known;
+        gsize k = 0;
+        if (gchar** kl = g_key_file_get_string_list(kf, kFiles, "known_extensions", &k, nullptr))
+        {
+            known.assign(kl, kl + k);
+            g_strfreev(kl);
+        }
+        else
+        {
+            known = extensions;
+            known.push_back("pdf");
+        }
+        for (const std::string& e : default_extensions())
+            if (!accepts_extension(e) && std::find(known.begin(), known.end(), e) == known.end())
+                extensions.push_back(e);
     }
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);
@@ -185,7 +199,11 @@ bool Config::save() const
     for (const std::string& e : extensions)
         exts.push_back(e.c_str());
     g_key_file_set_string_list(kf, kFiles, "extensions", exts.data(), exts.size());
-    g_key_file_set_integer(kf, kFiles, "extensions_version", 2);
+    const std::vector<std::string> supported = default_extensions();
+    std::vector<const gchar*> known;
+    for (const std::string& e : supported)
+        known.push_back(e.c_str());
+    g_key_file_set_string_list(kf, kFiles, "known_extensions", known.data(), known.size());
     g_key_file_set_boolean(kf, kFiles, "wrap_around", wrap_around);
     g_key_file_set_boolean(kf, kFiles, "show_hidden", show_hidden);
     g_key_file_set_integer(kf, kFiles, "prefetch_ahead", prefetch_ahead);

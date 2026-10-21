@@ -368,23 +368,30 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w)
     gtk_label_set_line_wrap(GTK_LABEL(result), TRUE);
     gtk_label_set_xalign(GTK_LABEL(result), 0.0f);
     gtk_widget_set_halign(result, GTK_ALIGN_START);
-    GtkWidget* images_only = gtk_check_button_new_with_label("Images only");
-    gtk_widget_set_tooltip_text(images_only, "Leave videos and documents with the apps that open them now");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(images_only), TRUE);
+    // What to claim besides images: by default videos and PDFs stay with
+    // whatever plays or opens them now.
+    GtkWidget* videos = gtk_check_button_new_with_label("Also for videos");
+    gtk_widget_set_tooltip_text(videos, "Leave unticked to keep your current video player for mp4, mov, mkv…");
+    GtkWidget* documents = gtk_check_button_new_with_label("Also for PDFs");
+    gtk_widget_set_tooltip_text(documents, "Leave unticked to keep your current PDF reader");
     struct DefaultsCtx
     {
         GtkWidget* view;
         GtkWidget* result;
-        GtkWidget* images_only;
+        GtkWidget* videos;
+        GtkWidget* documents;
     };
     auto on_defaults = +[](GtkWidget*, gpointer p)
     {
         auto* ctx = static_cast<DefaultsCtx*>(p);
         std::vector<std::string> skipped;
         std::string error;
-        const bool images = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->images_only));
-        const int n = set_default_for_extensions(parse_extensions(get_text_view(ctx->view)), images, skipped, error);
+        const bool videos = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->videos));
+        const bool documents = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->documents));
+        const int n = set_default_for_extensions(parse_extensions(get_text_view(ctx->view)), videos, documents, skipped, error);
         std::string msg = n ? "IfritView is now the default for " + std::to_string(n) + " file types." : "No file types were set.";
+        if (!videos)
+            msg += " Videos were left alone.";
         if (!skipped.empty())
         {
             msg += " Unknown to the system: ";
@@ -396,15 +403,18 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w)
             msg += " Error: " + error;
         gtk_label_set_text(GTK_LABEL(ctx->result), msg.c_str());
     };
-    auto* ctx = new DefaultsCtx{w.extensions, result, images_only};
+    auto* ctx = new DefaultsCtx{w.extensions, result, videos, documents};
     g_object_set_data_full(G_OBJECT(defaults), "ctx", ctx, +[](gpointer p) { delete static_cast<DefaultsCtx*>(p); });
     g_signal_connect(defaults, "clicked", G_CALLBACK(on_defaults), ctx);
 
     GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_pack_start(GTK_BOX(buttons), defaults, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(buttons), images_only, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), reset, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), buttons, FALSE, FALSE, 0);
+    GtkWidget* options = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
+    gtk_box_pack_start(GTK_BOX(options), videos, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(options), documents, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), options, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), result, FALSE, FALSE, 0);
     return box;
 }
