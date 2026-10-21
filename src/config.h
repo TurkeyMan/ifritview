@@ -29,6 +29,7 @@ struct Config
     bool smooth_downscale = true;
     bool fullscreen_upscale = false;  // scale small images up to fill the screen in fullscreen
     bool checkerboard = true;         // show transparency over a checkerboard
+    bool animate = true;  // play animated GIF/WebP
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
 

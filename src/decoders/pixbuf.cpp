@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
+#include <memory>
+#include <vector>
 
 namespace
 {
@@ -89,8 +92,151 @@ PixelFormat header_pixel_format(const std::string& path)
     return none;
 }
 
+// Count GIF image descriptors and note interlacing, which the loader hides.
+void gif_header_info(const std::string& path, Image& out, int& frames)
+{
+    frames = 0;
+    std::vector<uint8_t> d;
+    if (FILE* f = std::fopen(path.c_str(), "rb"))
+    {
+        std::fseek(f, 0, SEEK_END);
+        const long n = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        d.resize(n > 0 ? size_t(n) : 0);
+        if (!d.empty() && std::fread(d.data(), 1, d.size(), f) != d.size())
+            d.clear();
+        std::fclose(f);
+    }
+    if (d.size() < 13 || std::memcmp(d.data(), "GIF", 3) != 0)
+        return;
+    const uint8_t packed = d[10];
+    const int table_bits = (packed & 7) + 1;
+    out.pixel_format = PixelFormat::palette(8, packed & 0x80 ? 1 << table_bits : 0);
+    out.pixel_format.notes.push_back("LZW");
+    size_t pos = 13 + (packed & 0x80 ? size_t(3) << table_bits : 0);
+    bool interlaced = false, transparent = false;
+    auto skip_blocks = [&] {
+        while (pos < d.size() && d[pos])
+            pos += d[pos] + 1;
+        ++pos;
+    };
+    while (pos < d.size())
+    {
+        const uint8_t b = d[pos++];
+        if (b == 0x2C)
+        {
+            if (pos + 9 > d.size())
+                break;
+            const uint8_t flags = d[pos + 8];
+            interlaced |= (flags & 0x40) != 0;
+            pos += 9 + (flags & 0x80 ? size_t(3) << ((flags & 7) + 1) : 0) + 1;  // + LZW minimum code size
+            skip_blocks();
+            ++frames;
+        }
+        else if (b == 0x21)
+        {
+            if (pos < d.size() && d[pos] == 0xF9 && pos + 2 < d.size())
+                transparent |= (d[pos + 2] & 1) != 0;
+            ++pos;
+            skip_blocks();
+        }
+        else
+            break;
+    }
+    if (interlaced)
+        out.pixel_format.notes.push_back("interlaced");
+    if (transparent)
+        out.pixel_format.notes.push_back("transparency key");
+    out.add("GIF", "Version", std::string(reinterpret_cast<const char*>(d.data() + 3), 3));
+    out.add("GIF", "Frames", std::to_string(frames));
+}
+
+// Copy a pixbuf into ARGB32; GIF frames are composed canvases from the loader.
+void pixbuf_to_argb(GdkPixbuf* pb, Image& out)
+{
+    out.allocate(gdk_pixbuf_get_width(pb), gdk_pixbuf_get_height(pb));
+    if (gdk_pixbuf_get_has_alpha(pb))
+        out.from_rgba8(gdk_pixbuf_read_pixels(pb), gdk_pixbuf_get_rowstride(pb));
+    else
+        out.from_rgb8(gdk_pixbuf_read_pixels(pb), gdk_pixbuf_get_rowstride(pb));
+}
+
+// gdk-pixbuf 2.44 deprecates its animation API in favour of glycin; it still
+// works and glycin is not a dependency we want yet.
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
+bool decode_gif(const std::string& path, Image& out, std::string& error)
+{
+    int frames = 0;
+    gif_header_info(path, out, frames);
+    GError* err = nullptr;
+    GdkPixbufAnimation* anim = gdk_pixbuf_animation_new_from_file(path.c_str(), &err);
+    if (!anim)
+    {
+        error = err ? err->message : "gdk-pixbuf failed";
+        if (err)
+            g_error_free(err);
+        return false;
+    }
+    PixelFormat pf = out.pixel_format;
+    std::vector<MetadataGroup> meta = out.metadata;
+    if (gdk_pixbuf_animation_is_static_image(anim) || frames <= 1)
+    {
+        pixbuf_to_argb(gdk_pixbuf_animation_get_static_image(anim), out);
+    }
+    else
+    {
+        // Walk the animation at its own pace, one full composed canvas per frame.
+        GTimeVal t{0, 0};
+        GdkPixbufAnimationIter* it = gdk_pixbuf_animation_get_iter(anim, &t);
+        auto animation = std::make_shared<Animation>();
+        const size_t budget = size_t(512) << 20;
+        size_t used = 0;
+        for (int i = 0; i < frames; ++i)
+        {
+            int delay = gdk_pixbuf_animation_iter_get_delay_time(it);
+            if (delay < 0)
+                delay = 100;
+            Image tmp;
+            pixbuf_to_argb(gdk_pixbuf_animation_iter_get_pixbuf(it), tmp);
+            if (i == 0)
+            {
+                out.allocate(tmp.width, tmp.height);
+                out.pixels = tmp.pixels;
+            }
+            used += tmp.pixels.size();
+            animation->frames.push_back({std::move(tmp.pixels), delay});
+            if (used > budget)
+                break;
+            g_time_val_add(&t, gint64(delay) * 1000);
+            gdk_pixbuf_animation_iter_advance(it, &t);
+        }
+        g_object_unref(it);
+        if (animation->frames.size() > 1)
+            out.animation = animation;
+    }
+    g_object_unref(anim);
+    out.pixel_format = pf;
+    out.metadata = meta;
+    out.has_alpha = true;
+    out.format = out.animation ? "GIF, animated (" + std::to_string(frames) + " frames)" : "GIF";
+    return true;
+}
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+
 bool decode(const std::string& path, Image& out, std::string& error)
 {
+    {
+        uint8_t head[6] = {};
+        if (FILE* f = std::fopen(path.c_str(), "rb"))
+        {
+            const size_t n = std::fread(head, 1, 6, f);
+            std::fclose(f);
+            if (n == 6 && std::memcmp(head, "GIF8", 4) == 0)
+                return decode_gif(path, out, error);
+        }
+    }
     GError* err = nullptr;
     GdkPixbuf* pixbuf = gdk_pixbuf_new_from_file(path.c_str(), &err);
     if (!pixbuf)

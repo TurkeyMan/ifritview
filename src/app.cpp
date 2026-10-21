@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 
 // ---------------------------------------------------------------- Loader
@@ -461,6 +462,72 @@ void App::transform(int exif_orientation)
     refresh_metadata();
 }
 
+GSourceFunc App::animation_timer_callback()
+{
+    return +[](gpointer self) -> gboolean {
+        auto* app = static_cast<App*>(self);
+        app->animation_timer_ = 0;
+        if (!app->animation_playing_ || !app->image_ || !app->image_->animation)
+            return G_SOURCE_REMOVE;
+        const size_t n = app->image_->animation->frames.size();
+        app->animation_frame_ = (app->animation_frame_ + 1) % n;
+        app->show_animation_frame(app->animation_frame_);
+        app->animation_timer_ = g_timeout_add(guint(std::max(10, app->image_->animation->frames[app->animation_frame_].delay_ms)), animation_timer_callback(), self);
+        return G_SOURCE_REMOVE;
+    };
+}
+
+// Animation: frames are swapped into the image's pixel buffer in place, so
+// everything else (zoom, selection, save, copy) sees the current frame.
+void App::show_animation_frame(size_t index)
+{
+    if (!image_ || !image_->animation || image_->animation->frames.empty())
+        return;
+    const Animation::Frame& f = image_->animation->frames[index % image_->animation->frames.size()];
+    if (f.pixels.size() == image_->pixels.size())
+    {
+        std::memcpy(image_->pixels.data(), f.pixels.data(), f.pixels.size());
+        view_->image_changed();
+    }
+}
+
+void App::start_animation()
+{
+    stop_animation();
+    if (!image_ || !image_->animation || image_->animation->frames.size() < 2)
+        return;
+    animation_playing_ = true;
+    animation_frame_ = 0;
+    show_animation_frame(0);
+    animation_timer_ = g_timeout_add(guint(std::max(10, image_->animation->frames[0].delay_ms)), animation_timer_callback(), this);
+}
+
+void App::stop_animation()
+{
+    if (animation_timer_)
+        g_source_remove(animation_timer_);
+    animation_timer_ = 0;
+    animation_playing_ = false;
+}
+
+void App::toggle_animation()
+{
+    if (!image_ || !image_->animation)
+        return;
+    if (animation_playing_)
+    {
+        stop_animation();
+        status_message_ = "Animation paused";
+    }
+    else
+    {
+        animation_playing_ = true;
+        animation_timer_ = g_timeout_add(guint(std::max(10, image_->animation->frames[animation_frame_].delay_ms)), animation_timer_callback(), this);
+        status_message_.clear();
+    }
+    update_status();
+}
+
 void App::toggle_metadata()
 {
     metadata_->toggle();
@@ -829,6 +896,7 @@ void App::on_loaded(Loader::Result& r)
     // A develop replacing its own preview keeps the window exactly as it is:
     // the preview was already shown at the developed size.
     const bool replacing_preview = !r.preview && showing_preview_before && image_ && image_path_ == r.path;
+    stop_animation();
     image_ = r.image;
     image_path_ = r.path;
     std::error_code ec;
@@ -841,6 +909,8 @@ void App::on_loaded(Loader::Result& r)
     update_title();
     update_status();
     refresh_metadata();
+    if (cfg_.animate && image_->animation)
+        start_animation();
     const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
     const bool slider_moved = !r.preview && slider_pending_;  // the user set this on the preview of this very file
     slider_pending_ = false;
@@ -1522,6 +1592,10 @@ gboolean App::on_key(GdkEventKey* e)
         case GDK_KEY_i:
         case GDK_KEY_I:
             toggle_metadata();
+            return TRUE;
+        case GDK_KEY_a:
+        case GDK_KEY_A:
+            toggle_animation();
             return TRUE;
         case GDK_KEY_c:
         case GDK_KEY_C:

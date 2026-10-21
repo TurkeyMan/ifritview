@@ -14,6 +14,9 @@ size_t ImageCache::image_bytes(const Image& image)
     size_t n = image.pixels.size();
     if (image.linear)
         n += image.linear->rgb.size() * sizeof(uint16_t);
+    if (image.animation)
+        for (const Animation::Frame& f : image.animation->frames)
+            n += f.pixels.size();
     return n;
 }
 

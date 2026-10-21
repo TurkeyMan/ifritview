@@ -92,6 +92,7 @@ public:
     void toggle_xmp() { gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_))); }
     void copy_to_clipboard();
     void transform(int exif_orientation);  // rotate/mirror the displayed image
+    void toggle_animation();
     void set_exposure(double ev);
 
 private:
@@ -145,6 +146,13 @@ private:
 
     bool fullscreen_ = false;
     bool chrome_pending_ = false;  // toolbar/footer visibility to apply on the next window allocation
+    guint animation_timer_ = 0;  // next-frame timeout while an animation plays
+    size_t animation_frame_ = 0;
+    bool animation_playing_ = false;
+    void start_animation();
+    void stop_animation();
+    void show_animation_frame(size_t index);
+    static GSourceFunc animation_timer_callback();
     uint64_t load_generation_ = 0;
     bool showing_preview_ = false;  // a raw's embedded JPEG stands in for the real pixels
     bool develop_requested_ = false;

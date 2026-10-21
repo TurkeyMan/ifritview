@@ -41,6 +41,7 @@ struct Widgets
     GtkWidget* smooth_downscale;
     GtkWidget* fullscreen_upscale;
     GtkWidget* checkerboard;
+    GtkWidget* animate;
     GtkWidget* background;
     GtkWidget* fullscreen_background;
     GtkWidget* ov_file;
@@ -281,6 +282,7 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
 
     add_heading(grid, row, "Background");
     w.checkerboard = add_check(grid, row, "Show transparency as a checkerboard", cfg.checkerboard);
+    w.animate = add_check(grid, row, "Play animated GIF and WebP (A toggles)", cfg.animate);
     w.background = color_button(cfg.background);
     add_row(grid, row, "Window", w.background);
     w.fullscreen_background = color_button(cfg.fullscreen_background);
@@ -466,6 +468,7 @@ void apply(const Widgets& w, Config& cfg)
     cfg.smooth_downscale = checked(w.smooth_downscale);
     cfg.fullscreen_upscale = checked(w.fullscreen_upscale);
     cfg.checkerboard = checked(w.checkerboard);
+    cfg.animate = checked(w.animate);
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
     cfg.overlay_file = checked(w.ov_file);

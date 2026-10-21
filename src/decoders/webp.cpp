@@ -4,8 +4,10 @@
 #include <webp/decode.h>
 #include <webp/demux.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 namespace
 {
@@ -69,6 +71,29 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     out.allocate(int(info.canvas_width), int(info.canvas_height));
     out.from_bgra8(frame, out.width * 4, /*premultiplied=*/true);
+    if (features.has_animation && info.frame_count > 1)
+    {
+        auto animation = std::make_shared<Animation>();
+        animation->loops = int(info.loop_count);
+        const size_t budget = size_t(512) << 20;
+        size_t used = 0;
+        int prev_ts = timestamp;
+        animation->frames.push_back({out.pixels, 100});  // duration set once the next timestamp is known
+        while (WebPAnimDecoderHasMoreFrames(dec) && WebPAnimDecoderGetNext(dec, &frame, &timestamp))
+        {
+            animation->frames.back().delay_ms = std::max(10, timestamp - prev_ts);
+            prev_ts = timestamp;
+            Image tmp;
+            tmp.allocate(out.width, out.height);
+            tmp.from_bgra8(frame, out.width * 4, true);
+            used += tmp.pixels.size();
+            animation->frames.push_back({std::move(tmp.pixels), 100});
+            if (used > budget)
+                break;
+        }
+        if (animation->frames.size() > 1)
+            out.animation = animation;
+    }
     WebPAnimDecoderDelete(dec);
 
     out.has_alpha = features.has_alpha;

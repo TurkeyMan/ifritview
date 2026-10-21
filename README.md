@@ -29,6 +29,7 @@ IrfanView. GTK3, C++20, and the system's own format libraries.
 | L / R | rotate left / right |
 | H / V | mirror horizontally / vertically |
 | F5 | rescan folder and reload |
+| A | pause / resume an animation |
 | Ctrl+O | open file |
 | Ctrl+P | settings |
 | Ctrl+Q | quit |
@@ -46,7 +47,7 @@ colour and size, and whether it also shows in the window.
 |---|---|
 | JPEG (incl. CMYK, EXIF orientation) | libjpeg-turbo, libexif |
 | PNG | libpng |
-| WebP (incl. animated, first frame) | libwebp |
+| WebP (incl. animation) | libwebp |
 | HEIF / HEIC / AVIF | libheif |
 | JPEG XL | libjxl |
 | TIFF | libtiff |
@@ -56,7 +57,7 @@ colour and size, and whether it also shows in the window.
 | PlayStation TIM (4/8-bit CLUT, 16/24-bit) | hand-written |
 | Amiga IFF ILBM/PBM (palette, EHB, HAM6/8, 24/32-bit, masks) | hand-written |
 | PCX (mono, EGA, 256-colour, 24-bit) | hand-written |
-| BMP, GIF, ICO, XPM, SVG and anything else with a loader | gdk-pixbuf |
+| GIF (incl. animation), BMP, ICO, XPM, SVG and anything else with a loader | gdk-pixbuf |
 
 Metadata shown in the Metadata window (`I`): EXIF/GPS/maker notes (libexif),
 IPTC-IIM (libiptcdata), XMP embedded or from a `.xmp` sidecar (exempi),

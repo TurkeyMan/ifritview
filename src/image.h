@@ -41,6 +41,19 @@ struct MetadataGroup
     std::vector<MetadataItem> items;
 };
 
+// Frames of an animated image, each a full composed canvas in the same
+// ARGB32 layout as Image::pixels, with its display time.
+struct Animation
+{
+    struct Frame
+    {
+        std::vector<uint8_t> pixels;
+        int delay_ms;
+    };
+    std::vector<Frame> frames;
+    int loops = 0;  // 0 = forever
+};
+
 // A decoded image in cairo's ARGB32 layout: one native-endian uint32 per
 // pixel, alpha premultiplied, so the buffer can be wrapped by a cairo image
 // surface without a copy.
@@ -56,7 +69,8 @@ struct Image
     PixelFormat pixel_format;            // how the file stores its pixels
     std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
     std::string info;                    // extra detail for the status bar, may be empty
-    std::shared_ptr<LinearData> linear;  // only for raw files
+    std::shared_ptr<LinearData> linear;    // only for raw files
+    std::shared_ptr<Animation> animation;  // frames when the file animates; pixels hold the first
     double exposure_bias = 0;            // the camera's exposure compensation, in EV, already baked in
     // For a stand-in (a raw's embedded JPEG): the size the real image will
     // have, so the window and zoom can be chosen for that instead. 0 = none.

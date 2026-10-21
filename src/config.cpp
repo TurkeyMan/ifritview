@@ -127,6 +127,7 @@ void Config::load()
     smooth_downscale = get_bool(kf, kView, "smooth_downscale", smooth_downscale);
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
+    animate = get_bool(kf, kView, "animate", animate);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
     overlay_file = get_bool(kf, kOverlay, "file", overlay_file);
@@ -181,6 +182,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "smooth_downscale", smooth_downscale);
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
+    g_key_file_set_boolean(kf, kView, "animate", animate);
     g_key_file_set_string(kf, kView, "background", background.c_str());
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
     for (const ControlInfo& c : kControls)
