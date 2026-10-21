@@ -125,9 +125,26 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     return ok;
 }
 
+// LibRaw keeps no field for ExposureBiasValue (EXIF 0x9204); catch it as
+// the EXIF block is parsed.
+void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64) {
+    if (tag != 0x9204 || type != 10 || len < 1) return;   // SRATIONAL
+    auto* stream = static_cast<LibRaw_abstract_datastream*>(ifp);
+    uint8_t buf[8];
+    if (stream->read(buf, 8, 1) != 1) return;
+    auto get32 = [&](const uint8_t* p) -> int32_t {
+        return order == 0x4949 ? int32_t(p[0] | (p[1] << 8) | (p[2] << 16) | (uint32_t(p[3]) << 24))
+                               : int32_t((uint32_t(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3]);
+    };
+    const int32_t num = get32(buf), den = get32(buf + 4);
+    if (den != 0) *static_cast<double*>(context) = double(num) / den;
+}
+
 bool decode_raw(const std::string& path, Image& out, std::string& error) {
     const DecodeOptions options = decode_options();
     LibRaw raw;
+    double bias = 0;
+    raw.set_exifparser_handler(on_exif_tag, &bias);
     raw.imgdata.params.use_camera_wb = 1;
     raw.imgdata.params.output_color = 1;  // sRGB
     int r = raw.open_file(path.c_str());
@@ -173,6 +190,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error) {
     if (other.shutter > 0) out.add("Camera", "Shutter", other.shutter >= 1 ? fmt(other.shutter, 1) + " s" : "1/" + std::to_string(int(1 / other.shutter + 0.5)) + " s");
     if (other.aperture > 0) out.add("Camera", "Aperture", "f/" + fmt(other.aperture, 1));
     if (other.focal_len > 0) out.add("Camera", "Focal length", fmt(other.focal_len, 0) + " mm");
+    out.exposure_bias = bias;
+    if (bias != 0) out.add("Camera", "Exposure compensation", (bias > 0 ? "+" : "") + fmt(bias, 2) + " EV");
     if (other.timestamp) {
         char buf[64];
         std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", std::localtime(&other.timestamp));

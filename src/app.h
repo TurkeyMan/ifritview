@@ -69,6 +69,7 @@ public:
     void save_as();
     void toggle_metadata();
     void copy_to_clipboard();
+    void transform(int exif_orientation);   // rotate/mirror the displayed image
     void set_exposure(double ev);
 
 private:

@@ -169,7 +169,7 @@ void App::build_ui() {
                      }), nullptr);
     gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
     gtk_widget_set_size_request(exposure_, 200, -1);
-    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness.\nWheel or arrows: 0.1 per step, hold Shift for 0.01");
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nWheel or arrows: 0.1 per step, hold Shift for 0.01; Home resets");
     gtk_widget_set_can_focus(exposure_, TRUE);
     // Wheel: 0.1 per notch, Shift refines to 0.01.
     gtk_widget_add_events(exposure_, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
@@ -272,6 +272,15 @@ void App::copy_to_clipboard() {
     view_->clear_selection();
     status_message_ = "Copied " + std::to_string(region.width) + " × " + std::to_string(region.height) + " to clipboard";
     update_status();
+}
+
+void App::transform(int exif_orientation) {
+    if (!image_) return;
+    image_->apply_orientation(exif_orientation);
+    view_->set_image(image_);   // dimensions may have swapped
+    fit_window_to_image();
+    update_status();
+    refresh_metadata();
 }
 
 void App::toggle_metadata() {
@@ -391,8 +400,16 @@ void App::on_loaded(Loader::Result& r) {
     update_status();
     refresh_metadata();
     if (image_->linear) {
+        // The slider reads in the shooter's units: it rests at the camera's
+        // exposure compensation, which is already in the pixels, and the
+        // render uses the difference from that.
+        const double bias = image_->exposure_bias;
         g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-        gtk_range_set_value(GTK_RANGE(exposure_), 0.0);
+        gtk_range_set_range(GTK_RANGE(exposure_), bias - 3.0, bias + 3.0);
+        gtk_scale_clear_marks(GTK_SCALE(exposure_));
+        gtk_scale_add_mark(GTK_SCALE(exposure_), bias, GTK_POS_BOTTOM, nullptr);
+        if (bias != 0) gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_TOP, nullptr);
+        gtk_range_set_value(GTK_RANGE(exposure_), bias);
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
         gtk_widget_show(exposure_box_);
     } else {
@@ -410,7 +427,7 @@ void App::crop_to_selection() {
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h)) return;
     auto cropped = std::make_shared<Image>(image_->crop(x, y, w, h));
-    if (cropped->linear) cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)));
+    if (cropped->linear) cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - cropped->exposure_bias);
     cropped->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
     image_ = cropped;
     view_->set_image(image_);
@@ -501,7 +518,7 @@ void App::save_as() {
 
 void App::on_exposure_changed() {
     if (!image_ || !image_->linear) return;
-    image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)));
+    image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias);
     view_->image_changed();
 }
 
@@ -673,7 +690,7 @@ gboolean App::on_key(GdkEventKey* e) {
                 set_exposure(gtk_range_get_value(GTK_RANGE(exposure_)) - step); return TRUE;
             case GDK_KEY_Right: case GDK_KEY_Up:
                 set_exposure(gtk_range_get_value(GTK_RANGE(exposure_)) + step); return TRUE;
-            case GDK_KEY_Home: set_exposure(0.0); return TRUE;
+            case GDK_KEY_Home: set_exposure(image_ ? image_->exposure_bias : 0.0); return TRUE;
             case GDK_KEY_Escape: case GDK_KEY_Return: case GDK_KEY_KP_Enter:
                 gtk_widget_grab_focus(view_->widget()); return TRUE;
             default: break;   // everything else keeps its normal meaning
@@ -700,8 +717,12 @@ gboolean App::on_key(GdkEventKey* e) {
             zoom_original(); return TRUE;
         case GDK_KEY_f: case GDK_KEY_F:
             zoom_fit(); return TRUE;
-        case GDK_KEY_r: case GDK_KEY_F5:
+        case GDK_KEY_F5:
             reload(); return TRUE;
+        case GDK_KEY_l: case GDK_KEY_L: transform(8); return TRUE;   // rotate left
+        case GDK_KEY_r: case GDK_KEY_R: transform(6); return TRUE;   // rotate right
+        case GDK_KEY_h: case GDK_KEY_H: transform(2); return TRUE;   // mirror horizontally
+        case GDK_KEY_v: case GDK_KEY_V: transform(4); return TRUE;   // mirror vertically
         case GDK_KEY_o: case GDK_KEY_O:
             if (ctrl) { open_dialog(); return TRUE; }
             break;

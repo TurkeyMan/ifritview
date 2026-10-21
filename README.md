@@ -26,7 +26,9 @@ IrfanView. GTK3, C++20, and the system's own format libraries.
 | + / - / Ctrl+wheel | zoom in / out |
 | 1 | actual pixels |
 | F | fit to window |
-| R / F5 | rescan folder and reload |
+| L / R | rotate left / right |
+| H / V | mirror horizontally / vertically |
+| F5 | rescan folder and reload |
 | Ctrl+O | open file |
 | Ctrl+P | settings |
 | Ctrl+Q | quit |

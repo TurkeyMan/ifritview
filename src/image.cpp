@@ -132,6 +132,7 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.format = format;
     out.info = info;
     out.metadata = metadata;
+    out.exposure_bias = exposure_bias;
     out.has_location = has_location;
     out.latitude = latitude;
     out.longitude = longitude;
@@ -147,15 +148,14 @@ Image Image::crop(int x, int y, int w, int h) const {
     return out;
 }
 
-void Image::apply_orientation(int o) {
-    if (o < 2 || o > 8) return;
-    const int W = width, H = height;
-    const bool transposed = o >= 5;
-    Image dst;
-    dst.allocate(transposed ? H : W, transposed ? W : H);
-    for (int y = 0; y < dst.height; ++y) {
-        uint32_t* d = dst.row(y);
-        for (int x = 0; x < dst.width; ++x) {
+namespace {
+
+// Maps destination (x, y) to the source pixel for an EXIF orientation.
+template <typename T>
+void reorient(const T* src, int W, int H, int channels, int o, T* dst, int dw, int dh) {
+    for (int y = 0; y < dh; ++y) {
+        T* d = dst + size_t(y) * dw * channels;
+        for (int x = 0; x < dw; ++x) {
             int sx, sy;
             switch (o) {
                 case 2: sx = W - 1 - x; sy = y; break;              // mirror horizontal
@@ -166,11 +166,30 @@ void Image::apply_orientation(int o) {
                 case 7: sx = W - 1 - y; sy = H - 1 - x; break;      // transverse
                 default: sx = W - 1 - y; sy = x; break;             // 8: rotate 90 counter-clockwise
             }
-            d[x] = row(sy)[sx];
+            const T* sp = src + (size_t(sy) * W + sx) * channels;
+            for (int c = 0; c < channels; ++c) d[x * channels + c] = sp[c];
         }
     }
-    width = dst.width;
-    height = dst.height;
-    stride = dst.stride;
-    pixels = std::move(dst.pixels);
+}
+
+}  // namespace
+
+void Image::apply_orientation(int o) {
+    if (o < 2 || o > 8) return;
+    const int W = width, H = height;
+    const bool transposed = o >= 5;
+    const int dw = transposed ? H : W, dh = transposed ? W : H;
+    std::vector<uint8_t> out(size_t(dw) * dh * 4);
+    reorient(reinterpret_cast<const uint32_t*>(pixels.data()), W, H, 1, o, reinterpret_cast<uint32_t*>(out.data()), dw, dh);
+    pixels = std::move(out);
+    if (linear) {
+        auto l = std::make_shared<LinearData>();
+        l->auto_gain = linear->auto_gain;
+        l->rgb.resize(linear->rgb.size());
+        reorient(linear->rgb.data(), W, H, 3, o, l->rgb.data(), dw, dh);
+        linear = std::move(l);
+    }
+    width = dw;
+    height = dh;
+    stride = dw * 4;
 }

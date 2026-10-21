@@ -35,6 +35,7 @@ struct Image {
     std::string format;          // "JPEG", "Canon RAW", ...
     std::string info;            // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;   // only for raw files
+    double exposure_bias = 0;             // the camera's exposure compensation, in EV, already baked in
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
     bool has_location = false;            // GPS position from EXIF, decimal degrees
     double latitude = 0, longitude = 0;
