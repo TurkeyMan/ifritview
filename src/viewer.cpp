@@ -116,6 +116,12 @@ void ImageView::set_image(std::shared_ptr<Image> image) {
 
 void ImageView::set_fullscreen(bool on) {
     fullscreen_ = on;
+    // The transition moves the window under the pointer; a press still held
+    // from the double-click would otherwise turn into a drag.
+    pressed_button_ = 0;
+    drag_active_ = false;
+    suppress_click_ = false;
+    cancel_deferred_click();
     if (on) clear_selection();
     zoom_fit();
 }
