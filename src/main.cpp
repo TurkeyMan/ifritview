@@ -101,6 +101,12 @@ int probe(int argc, char** argv) {
         if (ok) {
             std::printf("ok    %-40s %5dx%-5d %s%s %s (%.0f ms)\n", argv[i], img.width, img.height,
                         img.format.c_str(), img.has_alpha ? " +alpha" : "", img.info.c_str(), ms);
+            for (const MetadataGroup& g : img.metadata) {
+                std::printf("        %s (%zu)", g.name.c_str(), g.items.size());
+                if (g_getenv("IFRIT_PROBE_VERBOSE"))
+                    for (const MetadataItem& m : g.items) std::printf("\n          %s = %s", m.key.c_str(), m.value.c_str());
+                std::printf("\n");
+            }
         } else {
             std::printf("FAIL  %-40s %s\n", argv[i], error.c_str());
             ++failures;

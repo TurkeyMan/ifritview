@@ -59,6 +59,8 @@ ifrit_backend(heif HAVE_HEIF src/decoders/heif.cpp libheif)
 ifrit_backend(jxl  HAVE_JXL  src/decoders/jxl.cpp  libjxl)
 ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
 ifrit_backend(pdf  HAVE_PDF  src/decoders/pdf.cpp  poppler-glib)
+ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
+ifrit_backend(xmp  HAVE_XMP  src/decoders/xmp.cpp  exempi-2.0)
 
 # LibRaw ships a reentrant variant; prefer it, fall back to the plain one.
 pkg_check_modules(LIBRAW_R QUIET libraw_r)

@@ -3,6 +3,8 @@
 #include <tiffio.h>
 
 #include <cstring>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -84,6 +86,17 @@ bool decode(const std::string& path, Image& out, std::string& error) {
         out.add("TIFF", "Resolution", std::to_string(int(unit == RESUNIT_CENTIMETER ? xres * 2.54 : xres)) + " dpi");
     }
     if (pages > 1) out.add("TIFF", "Pages", std::to_string(pages));
+#ifdef HAVE_IPTC
+    uint32_t iptc_count = 0;
+    void* iptc = nullptr;
+    if (TIFFGetField(tif, TIFFTAG_RICHTIFFIPTC, &iptc_count, &iptc) && iptc && iptc_count) {
+        // Older writers store this as LONGs; libtiff byte-swaps those, so undo it.
+        std::vector<uint8_t> blob(static_cast<const uint8_t*>(iptc), static_cast<const uint8_t*>(iptc) + size_t(iptc_count) * (TIFFFieldDataType(TIFFFieldWithTag(tif, TIFFTAG_RICHTIFFIPTC)) == TIFF_LONG ? 4 : 1));
+        if (TIFFIsByteSwapped(tif) && TIFFFieldDataType(TIFFFieldWithTag(tif, TIFFTAG_RICHTIFFIPTC)) == TIFF_LONG)
+            for (size_t i = 0; i + 3 < blob.size(); i += 4) std::swap(blob[i], blob[i + 3]), std::swap(blob[i + 1], blob[i + 2]);
+        read_iptc_blob(blob.data(), blob.size(), out);
+    }
+#endif
     toff_t exif_offset = 0;
     if (TIFFGetField(tif, TIFFTAG_EXIFIFD, &exif_offset) && TIFFReadEXIFDirectory(tif, exif_offset)) {
         char* sv = nullptr;

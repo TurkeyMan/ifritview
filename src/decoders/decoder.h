@@ -52,6 +52,15 @@ const Decoder& pdf_decoder();
 bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error);
 #endif
 
+#ifdef HAVE_IPTC
+void read_iptc_jpeg(const std::string& path, Image& out);
+void read_iptc_blob(const uint8_t* data, size_t size, Image& out);
+#endif
+#ifdef HAVE_XMP
+// Embedded XMP packet plus any .xmp sidecar next to the file.
+void read_xmp(const std::string& path, Image& out);
+#endif
+
 #ifdef HAVE_EXIF
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF
 // header) into the image's metadata groups. Returns the orientation, 1 when

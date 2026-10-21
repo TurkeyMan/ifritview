@@ -46,7 +46,12 @@ the list of extensions considered when cycling through a folder.
 | TIFF | libtiff |
 | Camera RAW: Canon CR2/CR3/CRW, Nikon NEF, Fuji RAF, Sony ARW, DNG, Olympus, Panasonic, Pentax, … | LibRaw |
 | PSD (flattened), TGA, PNM, HDR, PIC | vendored stb_image |
+| PDF (first page) | poppler-glib |
 | BMP, GIF, ICO, XPM, SVG and anything else with a loader | gdk-pixbuf |
+
+Metadata shown in the Metadata window (`I`): EXIF/GPS/maker notes (libexif),
+IPTC-IIM (libiptcdata), XMP embedded or from a `.xmp` sidecar (exempi),
+PNG text chunks, TIFF tags, LibRaw camera data and PDF document info.
 
 Each backend is optional: a missing library is reported at configure time and
 that decoder is left out.
@@ -54,7 +59,8 @@ that decoder is left out.
 ## Building
 
     sudo apt install cmake ninja-build libgtk-3-dev libjpeg-dev libexif-dev \
-        libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev
+        libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev \
+        libpoppler-glib-dev libiptcdata0-dev libexempi-dev
     ./build.sh
     ./build/ifritview some/picture.jpg
 

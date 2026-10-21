@@ -23,6 +23,19 @@ bool claims_extension(const Decoder& d, const std::string& ext) {
     return std::find(d.extensions.begin(), d.extensions.end(), ext) != d.extensions.end();
 }
 
+// Metadata that lives in containers rather than codecs: IPTC in JPEG
+// APP13, XMP packets and sidecars. Added once a decoder has succeeded.
+void enrich_metadata(const std::string& path, Image& out, const uint8_t* head, size_t head_len) {
+#ifdef HAVE_IPTC
+    if (head_len >= 3 && head[0] == 0xFF && head[1] == 0xD8) read_iptc_jpeg(path, out);
+#else
+    (void)head; (void)head_len;
+#endif
+#ifdef HAVE_XMP
+    read_xmp(path, out);
+#endif
+}
+
 bool try_decode(const Decoder& d, const std::string& path, Image& out, std::string& error) {
     out = Image{};
     std::string err;
@@ -98,15 +111,15 @@ bool decode_image(const std::string& path, Image& out, std::string& error) {
     for (const Decoder* d : decoders()) {
         if (!claims_extension(*d, ext)) continue;
         tried.insert(d);
-        if (try_decode(*d, path, out, error)) return true;
+        if (try_decode(*d, path, out, error)) { enrich_metadata(path, out, head, head_len); return true; }
     }
     for (const Decoder* d : decoders()) {
         if (tried.count(d) || !d->sniff || !d->sniff(head, head_len)) continue;
         tried.insert(d);
-        if (try_decode(*d, path, out, error)) return true;
+        if (try_decode(*d, path, out, error)) { enrich_metadata(path, out, head, head_len); return true; }
     }
     const Decoder* fallback = decoders().back();
-    if (!tried.count(fallback) && try_decode(*fallback, path, out, error)) return true;
+    if (!tried.count(fallback) && try_decode(*fallback, path, out, error)) { enrich_metadata(path, out, head, head_len); return true; }
 
     if (error.empty()) error = "unsupported image format";
     return false;
