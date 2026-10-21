@@ -47,7 +47,13 @@ ImageView::ImageView(const Config& cfg) : cfg_(cfg) {
                      }), this);
 }
 
+void ImageView::cancel_deferred_click() {
+    if (deferred_click_) g_source_remove(deferred_click_);
+    deferred_click_ = 0;
+}
+
 ImageView::~ImageView() {
+    cancel_deferred_click();
     drop_caches();
     if (surface_) cairo_surface_destroy(surface_);
     if (checker_) cairo_pattern_destroy(checker_);
@@ -431,11 +437,23 @@ gboolean ImageView::on_button(GdkEventButton* e) {
     // own bindings there, and there is no selecting.
     if (fullscreen_ && e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_ && !drag_active_ && !suppress_click_ && e->button != 2) {
         pressed_button_ = 0;
-        run_click(cfg_.control(e->button == 1 ? Control::FullscreenLeftClick : Control::FullscreenRightClick), e->x, e->y);
+        cancel_deferred_click();
+        deferred_action_ = cfg_.control(e->button == 1 ? Control::FullscreenLeftClick : Control::FullscreenRightClick);
+        deferred_x_ = e->x;
+        deferred_y_ = e->y;
+        gint interval = 400;
+        g_object_get(gtk_widget_get_settings(area_), "gtk-double-click-time", &interval, nullptr);
+        deferred_click_ = g_timeout_add(guint(interval), +[](gpointer p) -> gboolean {
+            auto* self = static_cast<ImageView*>(p);
+            self->deferred_click_ = 0;
+            self->run_click(self->deferred_action_, self->deferred_x_, self->deferred_y_);
+            return G_SOURCE_REMOVE;
+        }, this);
         return TRUE;
     }
     if (e->type == GDK_2BUTTON_PRESS) {
         suppress_click_ = true;
+        cancel_deferred_click();   // the first click of the pair never fires
         run_click(cfg_.control(click_control(e->button, true)), e->x, e->y);
     } else if (e->type == GDK_BUTTON_PRESS) {
         gtk_widget_grab_focus(area_);

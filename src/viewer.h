@@ -93,4 +93,10 @@ private:
     bool has_selection_ = false;
     double sel_x0_ = 0, sel_y0_ = 0, sel_x1_ = 0, sel_y1_ = 0;   // image coords, normalised
     double scroll_accum_ = 0;
+    // In fullscreen a single click is held back for the double-click interval
+    // so a double-click doesn't also step through two images.
+    guint deferred_click_ = 0;
+    Action deferred_action_ = Action::None;
+    double deferred_x_ = 0, deferred_y_ = 0;
+    void cancel_deferred_click();
 };
