@@ -1,5 +1,7 @@
 #include "app.h"
 
+#include "embedded.h"
+
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
 #include "icons.h"
@@ -271,28 +273,41 @@ void App::build_ui()
     gtk_window_set_default_size(GTK_WINDOW(window_), cfg_.min_window_width, cfg_.min_window_height);
     // The app icon and any uncached toolbar icons are dealt with after the
     // first frame; neither should delay it.
-    g_signal_connect(window_, "draw",
-                     G_CALLBACK(+[](GtkWidget* w, cairo_t*, gpointer) -> gboolean
-                                {
-                                    static bool done = false;
-                                    if (done)
-                                        return FALSE;
-                                    done = true;
-                                    g_idle_add(
-                                        +[](gpointer p) -> gboolean
-                                        {
-                                            auto* win = static_cast<GtkWidget*>(p);
-                                            flush_icon_cache(win);
-                                            // Installed builds find the icon by name; a build tree uses the SVG directly.
-                                            gtk_window_set_default_icon_name("ifritview");
-                                            if (!gtk_icon_theme_has_icon(gtk_icon_theme_get_default(), "ifritview"))
-                                                gtk_window_set_default_icon_from_file(IFRIT_SOURCE_DIR "/data/ifritview.svg", nullptr);
-                                            return G_SOURCE_REMOVE;
-                                        },
-                                        w);
-                                    return FALSE;
-                                }),
-                     nullptr);
+    g_signal_connect(
+        window_, "draw",
+        G_CALLBACK(+[](GtkWidget* w, cairo_t*, gpointer) -> gboolean
+                   {
+                       static bool done = false;
+                       if (done)
+                           return FALSE;
+                       done = true;
+                       g_idle_add(
+                           +[](gpointer p) -> gboolean
+                           {
+                               auto* win = static_cast<GtkWidget*>(p);
+                               flush_icon_cache(win);
+                               // Installed builds find the icon by name; otherwise use the copy in the binary.
+                               gtk_window_set_default_icon_name("ifritview");
+                               if (!gtk_icon_theme_has_icon(gtk_icon_theme_get_default(), "ifritview"))
+                               {
+                                   GdkPixbufLoader* loader = gdk_pixbuf_loader_new_with_type("svg", nullptr);
+                                   if (loader)
+                                   {
+                                       gdk_pixbuf_loader_set_size(loader, 256, 256);
+                                       if (gdk_pixbuf_loader_write(loader, reinterpret_cast<const guchar*>(kIconSvg), sizeof kIconSvg - 1, nullptr) &&
+                                           gdk_pixbuf_loader_close(loader, nullptr))
+                                           gtk_window_set_default_icon(gdk_pixbuf_loader_get_pixbuf(loader));
+                                       else
+                                           gdk_pixbuf_loader_close(loader, nullptr);
+                                       g_object_unref(loader);
+                                   }
+                               }
+                               return G_SOURCE_REMOVE;
+                           },
+                           w);
+                       return FALSE;
+                   }),
+        nullptr);
 
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window_), vbox);

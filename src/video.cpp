@@ -1,11 +1,10 @@
 #include "video.h"
 
+#include <algorithm>
+
 #ifdef HAVE_VIDEO
 
-#include <gst/app/gstappsink.h>
-#include <gst/audio/streamvolume.h>
-#include <gst/gst.h>
-#include <gst/video/video.h>
+#include "gst_api.h"
 
 #include <algorithm>
 #include <cstring>
@@ -109,7 +108,7 @@ struct VideoPlayer::Impl
 
 bool video_supported()
 {
-    return true;
+    return gst_api_load();
 }
 
 VideoPlayer::VideoPlayer() = default;
@@ -122,8 +121,7 @@ VideoPlayer::~VideoPlayer()
 void VideoPlayer::start(const std::string& path, std::shared_ptr<Image> target, bool muted, bool loop)
 {
     stop();
-    static const bool initialised = gst_init_check(nullptr, nullptr, nullptr);
-    if (!initialised)
+    if (!gst_api_load())
         return;
     impl_ = new Impl;
     impl_->owner = this;
@@ -292,3 +290,15 @@ double VideoPlayer::duration() const
 }
 
 #endif
+
+const std::vector<std::string>& video_extensions()
+{
+    static const std::vector<std::string> list{"mp4", "m4v", "mov", "mts", "m2ts", "mkv", "webm", "avi", "3gp"};
+    return list;
+}
+
+bool is_video_extension(const std::string& ext)
+{
+    const auto& list = video_extensions();
+    return std::find(list.begin(), list.end(), ext) != list.end();
+}

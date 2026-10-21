@@ -187,7 +187,13 @@ int main(int argc, char** argv)
     const gint64 t_start = g_get_monotonic_time();
     g_set_prgname("ifritview");
     g_set_application_name("IfritView");
-    gtk_init(&argc, &argv);
+    // --probe needs no display (CI runs it headless); everything else does.
+    const bool probing = argc > 2 && std::strcmp(argv[1], "--probe") == 0;
+    if (!gtk_init_check(&argc, &argv) && !probing)
+    {
+        std::fprintf(stderr, "ifritview: cannot open display\n");
+        return 1;
+    }
 
     if (argc > 1 && (std::strcmp(argv[1], "-h") == 0 || std::strcmp(argv[1], "--help") == 0))
     {

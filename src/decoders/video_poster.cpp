@@ -1,11 +1,10 @@
 // Videos in the series: the first frame (upright, per the rotation tag) is
 // the image; the player takes over once it's on screen. GStreamer reads the
 // file itself, so this decoder is marked streaming and gets no preload.
+#include "../video.h"
 #include "decoder.h"
 
-#include <gst/app/gstappsink.h>
-#include <gst/gst.h>
-#include <gst/video/video.h>
+#include "../gst_api.h"
 
 #include <cstdio>
 #include <cstring>
@@ -36,8 +35,7 @@ std::string tag_string(GstTagList* tags, const char* tag)
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    static const bool initialised = gst_init_check(nullptr, nullptr, nullptr);
-    if (!initialised)
+    if (!gst_api_load())
     {
         error = "GStreamer unavailable";
         return false;
@@ -126,6 +124,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& video_decoder()
 {
-    static const Decoder d{"Video", {"mp4", "m4v", "mov", "mts", "m2ts", "mkv", "webm", "avi", "3gp"}, nullptr, decode, nullptr, true};
+    static const Decoder d{"Video", video_extensions(), nullptr, decode, nullptr, true};
     return d;
 }

@@ -1,5 +1,7 @@
 #include "integration.h"
 
+#include "embedded.h"
+
 #include <gio/gdesktopappinfo.h>
 #include <gio/gio.h>
 #include <glib.h>
@@ -20,17 +22,6 @@ std::string executable_path()
     return path;
 }
 
-bool copy_file(const std::string& from, const std::string& to)
-{
-    gchar* data = nullptr;
-    gsize len = 0;
-    if (!g_file_get_contents(from.c_str(), &data, &len, nullptr))
-        return false;
-    const bool ok = g_file_set_contents(to.c_str(), data, gssize(len), nullptr);
-    g_free(data);
-    return ok;
-}
-
 }  // namespace
 
 bool ensure_desktop_entry(std::string& error)
@@ -47,11 +38,10 @@ bool ensure_desktop_entry(std::string& error)
     g_mkdir_with_parents(apps_dir, 0755);
     g_mkdir_with_parents(icon_dir, 0755);
     gchar* icon_path = g_build_filename(icon_dir, "ifritview.svg", nullptr);
-    copy_file(IFRIT_SOURCE_DIR "/data/ifritview.svg", icon_path);
+    g_file_set_contents(icon_path, kIconSvg, -1, nullptr);
 
     GKeyFile* kf = g_key_file_new();
-    const std::string source = IFRIT_SOURCE_DIR "/data/ifritview.desktop";
-    g_key_file_load_from_file(kf, source.c_str(), G_KEY_FILE_NONE, nullptr);
+    g_key_file_load_from_data(kf, kDesktopEntry, -1, G_KEY_FILE_NONE, nullptr);
     g_key_file_set_string(kf, "Desktop Entry", "Type", "Application");
     g_key_file_set_string(kf, "Desktop Entry", "Name", "IfritView");
     g_key_file_set_string(kf, "Desktop Entry", "Exec", (executable_path() + " %f").c_str());

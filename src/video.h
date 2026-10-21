@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 // Plays a video into an Image: GStreamer decodes (and rotates, per the file's
 // orientation tag) frames as BGRA, which replace the image's pixels on the
@@ -43,5 +44,9 @@ private:
     bool playing_ = false;
 };
 
-// Whether video support was built in.
+// Whether videos can play: built with video support and GStreamer present
+// at runtime (it's loaded on first use, never linked).
 bool video_supported();
+// The extensions handled as video; without GStreamer the series skips them.
+const std::vector<std::string>& video_extensions();
+bool is_video_extension(const std::string& ext);

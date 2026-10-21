@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../video.h"
 
 #include <glib.h>
 
@@ -187,7 +188,8 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&pdf_decoder());
 #endif
 #ifdef HAVE_VIDEO
-        v.push_back(&video_decoder());
+        if (video_supported())  // GStreamer is loaded at runtime, if installed
+            v.push_back(&video_decoder());
 #endif
         v.push_back(&tim_decoder());
         v.push_back(&ilbm_decoder());

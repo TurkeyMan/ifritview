@@ -20,6 +20,15 @@ ImageView::ImageView(const Config& cfg) : cfg_(cfg)
 {
     area_ = gtk_drawing_area_new();
     gtk_widget_set_size_request(area_, 64, 64);
+    // The window can go first (quitting mid-slideshow); its frame callbacks go
+    // with it, so forget their ids rather than removing them again later.
+    g_signal_connect(area_, "destroy",
+                     G_CALLBACK(+[](GtkWidget*, gpointer self)
+                                {
+                                    auto* view = static_cast<ImageView*>(self);
+                                    view->outgoing_.tick = view->busy_tick_ = view->motion_.tick = 0;
+                                }),
+                     this);
     gtk_widget_set_hexpand(area_, TRUE);
     gtk_widget_set_vexpand(area_, TRUE);
     gtk_widget_set_can_focus(area_, TRUE);

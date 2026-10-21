@@ -9,6 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(PkgConfig REQUIRED)
+include(GNUInstallDirs)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0 gdk-pixbuf-2.0)
 
 add_executable(ifritview
@@ -35,7 +36,7 @@ add_executable(ifritview
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifritview PRIVATE -Wall -Wextra)
-target_link_libraries(ifritview PRIVATE PkgConfig::GTK)
+target_link_libraries(ifritview PRIVATE PkgConfig::GTK ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
 # Optional format backends. Each is on by default and simply left out, with a
@@ -78,15 +79,18 @@ else()
   ifrit_backend(raw HAVE_RAW src/decoders/raw.cpp libraw)
 endif()
 
-# Videos: poster frames and playback through GStreamer (optional).
-pkg_check_modules(VIDEO IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0)
+# Videos: poster frames and playback through GStreamer, which is optional at
+# runtime: the build needs its headers, but the viewer dlopens the libraries
+# (src/gst_api.cpp) rather than linking them. Without GStreamer installed,
+# videos just aren't part of the series.
+pkg_check_modules(VIDEO gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0)
 if(VIDEO_FOUND)
-  target_sources(ifritview PRIVATE src/decoders/video_poster.cpp)
+  target_sources(ifritview PRIVATE src/gst_api.cpp src/decoders/video_poster.cpp)
   target_compile_definitions(ifritview PRIVATE HAVE_VIDEO)
-  target_link_libraries(ifritview PRIVATE PkgConfig::VIDEO)
-  message(STATUS "video: enabled")
+  target_include_directories(ifritview PRIVATE ${VIDEO_INCLUDE_DIRS})
+  message(STATUS "video: enabled (GStreamer loaded at runtime)")
 else()
-  message(STATUS "video: not found (gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0), skipping")
+  message(STATUS "video: not found (gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 headers), skipping")
 endif()
 
 # Reverse geocoding of GPS positions (optional; the viewer works without it).
@@ -114,12 +118,15 @@ if(IFRIT_HAVE_WEBP AND IFRIT_HAVE_JXL AND IFRIT_HAVE_HEIF)
   target_link_libraries(mkimages PRIVATE PkgConfig::GTK PkgConfig::WEBP PkgConfig::JXL PkgConfig::HEIF)
 endif()
 
-include(GNUInstallDirs)
 install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/ifritview.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
-target_compile_definitions(ifritview PRIVATE IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+file(READ data/ifritview.svg IFRIT_ICON_SVG)
+file(READ data/ifritview.desktop IFRIT_DESKTOP_ENTRY)
+configure_file(src/embedded.h.in ${CMAKE_BINARY_DIR}/generated/embedded.h @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/ifritview.svg data/ifritview.desktop)
+target_include_directories(ifritview PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # Refresh the desktop/MIME/icon caches on `cmake --install` so file managers
 # pick the app up immediately (packages do this in their own postinst).
@@ -136,14 +143,34 @@ install(CODE "
   endif()
 ")
 
-# `cpack -G DEB` in the build directory produces an installable package with
-# library dependencies worked out from the binary.
+# Packages: `cpack -G DEB` or `cpack -G RPM` in the build directory. Library
+# dependencies are worked out from the binary, so they're the image
+# libraries; GStreamer isn't linked, so it's only recommended.
 set(CPACK_PACKAGE_NAME "ifritview")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
+set(CPACK_PACKAGE_VENDOR "Manu Evans")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast, no-frills image viewer")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/TurkeyMan/ifritview")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_STRIP_FILES ON)
+
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libheif-plugin-libde265, libheif-plugin-dav1d")
-set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
+    "libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
+
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+# CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
+# `rpm --suggests`, fails there), so the line rides in after the URL instead.
+set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+# Directories the base system owns; the package must not claim them.
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    /usr/share/applications /usr/share/icons /usr/share/icons/hicolor /usr/share/icons/hicolor/scalable
+    /usr/share/icons/hicolor/scalable/apps /usr/share/metainfo)
+
+set(CPACK_GENERATOR "DEB")
 include(CPack)

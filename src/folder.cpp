@@ -1,6 +1,7 @@
 #include "folder.h"
 
 #include "config.h"
+#include "video.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -31,7 +32,8 @@ std::vector<std::string> list_images(const std::string& dir, const Config& cfg)
     {
         if (!cfg.show_hidden && name[0] == '.')
             continue;
-        if (!cfg.accepts_extension(lowercase_extension(name)))
+        const std::string ext = lowercase_extension(name);
+        if (!cfg.accepts_extension(ext) || (is_video_extension(ext) && !video_supported()))  // no plugin, no videos
             continue;
         gchar* full = g_build_filename(dir.c_str(), name, nullptr);
         const bool regular = g_file_test(full, G_FILE_TEST_IS_REGULAR);
