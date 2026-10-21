@@ -64,6 +64,7 @@ public:
     void open_settings(const char* page = nullptr);
     void open_settings_action() { open_settings(); }
     void quit();
+    void crop_to_selection();
     void set_exposure(double ev);
 
 private:
@@ -94,6 +95,7 @@ private:
     GtkWidget* exposure_box_ = nullptr;   // EV slider, shown for raw files only
     GtkWidget* exposure_ = nullptr;
     GtkWidget* smooth_toggle_ = nullptr;
+    GtkWidget* crop_button_ = nullptr;
     GtkWidget* status_left_ = nullptr;
     GtkWidget* status_center_ = nullptr;
     GtkWidget* status_right_ = nullptr;

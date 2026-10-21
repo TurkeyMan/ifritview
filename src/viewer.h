@@ -37,7 +37,12 @@ public:
     int scale_factor() const;
     void view_size(int& w, int& h) const;           // device pixels
 
+    // Current selection in image pixels; false when there is none.
+    bool selection(int& x, int& y, int& w, int& h) const;
+    void clear_selection();
+
     std::function<void()> on_zoom_changed;
+    std::function<void()> on_selection_changed;
     std::function<void(Action)> on_action;          // app-level actions the view can't do itself
 
 private:

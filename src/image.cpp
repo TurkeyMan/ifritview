@@ -99,6 +99,29 @@ void Image::retone(double ev) {
     }
 }
 
+Image Image::crop(int x, int y, int w, int h) const {
+    x = std::clamp(x, 0, width);
+    y = std::clamp(y, 0, height);
+    w = std::clamp(w, 0, width - x);
+    h = std::clamp(h, 0, height - y);
+    Image out;
+    out.allocate(w, h);
+    out.has_alpha = has_alpha;
+    out.bits_per_sample = bits_per_sample;
+    out.format = format;
+    out.info = info;
+    for (int yy = 0; yy < h; ++yy) std::copy_n(row(y + yy) + x, w, out.row(yy));
+    if (linear) {
+        auto l = std::make_shared<LinearData>();
+        l->auto_gain = linear->auto_gain;
+        l->rgb.resize(size_t(w) * h * 3);
+        for (int yy = 0; yy < h; ++yy)
+            std::copy_n(linear->rgb.data() + (size_t(y + yy) * width + x) * 3, size_t(w) * 3, l->rgb.data() + size_t(yy) * w * 3);
+        out.linear = std::move(l);
+    }
+    return out;
+}
+
 void Image::apply_orientation(int o) {
     if (o < 2 || o > 8) return;
     const int W = width, H = height;

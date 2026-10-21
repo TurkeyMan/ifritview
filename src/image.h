@@ -45,6 +45,10 @@ struct Image {
     void from_rgb16(const uint16_t* src, int src_stride);
     void from_rgba16(const uint16_t* src, int src_stride);
 
+    // A copy of the given rectangle (image coordinates, clamped), keeping
+    // linear data so a cropped raw still takes exposure changes.
+    Image crop(int x, int y, int w, int h) const;
+
     // Rotate/flip in place per an EXIF orientation value 1..8.
     void apply_orientation(int exif_orientation);
 };

@@ -104,6 +104,7 @@ void ImageView::set_image(std::shared_ptr<Image> image) {
     mode_ = ZoomMode::Fit;
     layout();
     zoom_changed();
+    if (on_selection_changed) on_selection_changed();
 }
 
 void ImageView::set_fullscreen(bool on) {
@@ -115,6 +116,22 @@ void ImageView::image_changed() {
     drop_caches();
     if (surface_) cairo_surface_mark_dirty(surface_);
     gtk_widget_queue_draw(area_);
+}
+
+bool ImageView::selection(int& x, int& y, int& w, int& h) const {
+    if (!has_selection_) return false;
+    x = int(sel_x0_);
+    y = int(sel_y0_);
+    w = int(sel_x1_ - sel_x0_);
+    h = int(sel_y1_ - sel_y0_);
+    return true;
+}
+
+void ImageView::clear_selection() {
+    if (!has_selection_) return;
+    has_selection_ = false;
+    gtk_widget_queue_draw(area_);
+    if (on_selection_changed) on_selection_changed();
 }
 
 void ImageView::config_changed() {
@@ -427,6 +444,7 @@ gboolean ImageView::on_button(GdkEventButton* e) {
         else if (!suppress_click_) run_click(cfg_.control(click_control(button, false)), e->x, e->y);
         drag_active_ = false;
         update_cursor(e->x, e->y);
+        if (on_selection_changed) on_selection_changed();
     }
     return TRUE;
 }

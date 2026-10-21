@@ -135,6 +135,8 @@ void App::build_ui() {
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    crop_button_ = tool_button("edit-cut-symbolic", "Crop to selection (Ctrl+Y)", &App::crop_to_selection);
+    gtk_widget_set_sensitive(crop_button_, FALSE);
 
     smooth_toggle_ = gtk_toggle_button_new();
     gtk_container_add(GTK_CONTAINER(smooth_toggle_), gtk_image_new_from_icon_name("view-grid-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
@@ -201,6 +203,10 @@ void App::build_ui() {
         }
     };
     view_->on_zoom_changed = [this] { update_status(); };
+    view_->on_selection_changed = [this] {
+        int x, y, w, h;
+        gtk_widget_set_sensitive(crop_button_, view_->selection(x, y, w, h));
+    };
     gtk_box_pack_start(GTK_BOX(vbox), view_->widget(), TRUE, TRUE, 0);
 
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -320,6 +326,20 @@ void App::on_loaded(Loader::Result& r) {
 
 void App::set_exposure(double ev) {
     gtk_range_set_value(GTK_RANGE(exposure_), ev);
+}
+
+// Replaces the displayed image with the selected region. Nothing is written
+// to disk; R reloads the original.
+void App::crop_to_selection() {
+    int x, y, w, h;
+    if (!image_ || !view_->selection(x, y, w, h)) return;
+    auto cropped = std::make_shared<Image>(image_->crop(x, y, w, h));
+    if (cropped->linear) cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)));
+    cropped->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
+    image_ = cropped;
+    view_->set_image(image_);
+    fit_window_to_image();
+    update_status();
 }
 
 void App::on_exposure_changed() {
@@ -522,6 +542,9 @@ gboolean App::on_key(GdkEventKey* e) {
             break;
         case GDK_KEY_q: case GDK_KEY_Q:
             if (ctrl) { quit(); return TRUE; }
+            break;
+        case GDK_KEY_y: case GDK_KEY_Y:
+            if (ctrl) { crop_to_selection(); return TRUE; }
             break;
         default:
             break;
