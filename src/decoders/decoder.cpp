@@ -14,7 +14,7 @@ namespace
 struct FileBuffer
 {
     std::string path;
-    std::vector<uint8_t> data;
+    PixelBuffer data;  // huge-page backed when large: a 25 MB raw faults in a dozen times, not thousands
     bool ok = false;
 };
 thread_local FileBuffer t_file;
