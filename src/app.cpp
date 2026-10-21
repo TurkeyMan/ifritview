@@ -738,7 +738,6 @@ ImageView::OverlaySections App::overlay_sections() const
             if (!v.empty())
                 detail += (detail.empty() ? "" : "  ·  ") + (label.empty() ? v : label + " " + v);
         };
-        append("", find({"JPEG"}, {"Coding"}));
         append("compression", find({"TIFF"}, {"Compression"}));
         if (!detail.empty())
             lines.push_back(detail);
@@ -759,7 +758,7 @@ ImageView::OverlaySections App::overlay_sections() const
                 exp += (exp.empty() ? "" : "  ·  ") + v;
         };
         append(find({"Camera", "EXIF"}, {"Focal length", "Focal Length"}));
-        append(find({"Camera", "EXIF"}, {"Aperture", "F-Number"}));
+        append(find({"Camera", "EXIF"}, {"F-Number", "Aperture"}));
         append(find({"Camera", "EXIF"}, {"Shutter", "Exposure Time"}));
         const std::string iso = find({"Camera", "EXIF"}, {"ISO", "ISO Speed Ratings"});
         if (!iso.empty())
@@ -769,7 +768,9 @@ ImageView::OverlaySections App::overlay_sections() const
             append(bias + (bias.find("EV") == std::string::npos ? " EV" : ""));
         if (!exp.empty())
             lines.push_back(exp);
-        const std::string taken = find({"Camera", "EXIF"}, {"Taken", "Date and Time (Original)", "Date/time original"});
+        std::string taken = find({"Camera", "EXIF"}, {"Taken", "Date and Time (Original)", "Date/time original"});
+        if (taken.size() >= 10 && taken[4] == ':' && taken[7] == ':')  // EXIF writes the date with colons
+            taken[4] = taken[7] = '-';
         if (!taken.empty())
             lines.push_back(taken);
     }
