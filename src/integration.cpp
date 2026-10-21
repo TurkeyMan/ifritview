@@ -7,21 +7,25 @@
 
 #include <set>
 
-namespace {
+namespace
+{
 
 const char* kDesktopId = "ifritview.desktop";
 
-std::string executable_path() {
+std::string executable_path()
+{
     gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
     std::string path = exe ? exe : "ifritview";
     g_free(exe);
     return path;
 }
 
-bool copy_file(const std::string& from, const std::string& to) {
+bool copy_file(const std::string& from, const std::string& to)
+{
     gchar* data = nullptr;
     gsize len = 0;
-    if (!g_file_get_contents(from.c_str(), &data, &len, nullptr)) return false;
+    if (!g_file_get_contents(from.c_str(), &data, &len, nullptr))
+        return false;
     const bool ok = g_file_set_contents(to.c_str(), data, gssize(len), nullptr);
     g_free(data);
     return ok;
@@ -29,8 +33,10 @@ bool copy_file(const std::string& from, const std::string& to) {
 
 }  // namespace
 
-bool ensure_desktop_entry(std::string& error) {
-    if (GDesktopAppInfo* existing = g_desktop_app_info_new(kDesktopId)) {
+bool ensure_desktop_entry(std::string& error)
+{
+    if (GDesktopAppInfo* existing = g_desktop_app_info_new(kDesktopId))
+    {
         g_object_unref(existing);
         return true;
     }
@@ -53,49 +59,63 @@ bool ensure_desktop_entry(std::string& error) {
     gchar* target = g_build_filename(apps_dir, kDesktopId, nullptr);
     GError* err = nullptr;
     const bool ok = g_key_file_save_to_file(kf, target, &err);
-    if (!ok) {
+    if (!ok)
+    {
         error = err ? err->message : "could not write desktop entry";
-        if (err) g_error_free(err);
+        if (err)
+            g_error_free(err);
     }
     g_key_file_free(kf);
     g_free(target);
     g_free(icon_path);
     g_free(icon_dir);
     g_free(apps_dir);
-    if (!ok) return false;
+    if (!ok)
+        return false;
 
     // Let GIO notice the new file; update-desktop-database is optional.
     gchar* argv[] = {const_cast<gchar*>("update-desktop-database"), const_cast<gchar*>("-q"), nullptr};
-    g_spawn_sync(nullptr, argv, nullptr, GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL),
-                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    g_spawn_sync(nullptr, argv, nullptr, GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL), nullptr, nullptr, nullptr,
+                 nullptr, nullptr, nullptr);
     return true;
 }
 
-int set_default_for_extensions(const std::vector<std::string>& extensions, std::vector<std::string>& skipped, std::string& error) {
-    if (!ensure_desktop_entry(error)) return 0;
+int set_default_for_extensions(const std::vector<std::string>& extensions, std::vector<std::string>& skipped, std::string& error)
+{
+    if (!ensure_desktop_entry(error))
+        return 0;
     GDesktopAppInfo* app = g_desktop_app_info_new(kDesktopId);
-    if (!app) {
+    if (!app)
+    {
         error = "desktop entry not found even after creating it";
         return 0;
     }
     std::set<std::string> done;
     int count = 0;
-    for (const std::string& ext : extensions) {
+    for (const std::string& ext : extensions)
+    {
         gboolean uncertain = FALSE;
         gchar* type = g_content_type_guess(("x." + ext).c_str(), nullptr, 0, &uncertain);
         std::string mime = type ? type : "";
         g_free(type);
-        if (mime.empty() || mime == "application/octet-stream" || g_content_type_is_unknown(mime.c_str())) {
+        if (mime.empty() || mime == "application/octet-stream" || g_content_type_is_unknown(mime.c_str()))
+        {
             skipped.push_back(ext);
             continue;
         }
-        if (!done.insert(mime).second) continue;
+        if (!done.insert(mime).second)
+            continue;
         GError* err = nullptr;
-        if (g_app_info_set_as_default_for_type(G_APP_INFO(app), mime.c_str(), &err)) {
+        if (g_app_info_set_as_default_for_type(G_APP_INFO(app), mime.c_str(), &err))
+        {
             ++count;
-        } else {
-            if (error.empty() && err) error = err->message;
-            if (err) g_error_free(err);
+        }
+        else
+        {
+            if (error.empty() && err)
+                error = err->message;
+            if (err)
+                g_error_free(err);
         }
     }
     g_object_unref(app);

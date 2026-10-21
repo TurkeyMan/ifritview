@@ -1,11 +1,11 @@
 #pragma once
 
+#include "cache.h"
 #include "config.h"
 #include "folder.h"
-#include "cache.h"
 #include "geocode.h"
-#include "metadata.h"
 #include "image.h"
+#include "metadata.h"
 #include "viewer.h"
 
 #include <gtk/gtk.h>
@@ -20,18 +20,20 @@
 
 // Decodes on a worker thread. A newer request replaces a pending one, so
 // scrolling quickly through a folder only decodes what ends up on screen.
-class Loader {
+class Loader
+{
 public:
-    struct Result {
+    struct Result
+    {
         uint64_t generation;
         std::string path;
-        std::shared_ptr<Image> image;   // null on failure
+        std::shared_ptr<Image> image;  // null on failure
         std::string error;
-        bool preview = false;           // a quick stand-in; the real decode follows
-        bool prefetch = false;          // decoded ahead of time; cache it, don't show it
-        bool cached = false;            // served from the cache: pixels already carry any edits
+        bool preview = false;   // a quick stand-in; the real decode follows
+        bool prefetch = false;  // decoded ahead of time; cache it, don't show it
+        bool cached = false;    // served from the cache: pixels already carry any edits
     };
-    using Callback = std::function<void(Result&)>;   // runs on the GTK main thread
+    using Callback = std::function<void(Result&)>;  // runs on the GTK main thread
 
     explicit Loader(Callback callback);
     ~Loader();
@@ -43,20 +45,26 @@ public:
 private:
     void run();
     bool superseded(uint64_t generation);
-    bool preview_shown_ = false;   // this generation already posted its preview
+    bool preview_shown_ = false;  // this generation already posted its preview
     void post(Result* r);
 
     Callback callback_;
     std::mutex mutex_;
     std::condition_variable wake_;
-    struct Job { uint64_t generation; std::string path; bool develop; };
+    struct Job
+    {
+        uint64_t generation;
+        std::string path;
+        bool develop;
+    };
     std::optional<Job> pending_;
     std::vector<std::string> prefetch_;
     bool stop_ = false;
     std::thread thread_;
 };
 
-class App {
+class App
+{
 public:
     App();
     void open_path(const std::string& path);
@@ -83,7 +91,7 @@ public:
     void toggle_metadata();
     void toggle_xmp() { gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_))); }
     void copy_to_clipboard();
-    void transform(int exif_orientation);   // rotate/mirror the displayed image
+    void transform(int exif_orientation);  // rotate/mirror the displayed image
     void set_exposure(double ev);
 
 private:
@@ -101,12 +109,12 @@ private:
     void on_window_state(GdkEventWindowState* e);
     void on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx);
     void on_exposure_changed();
-    void retone();                           // re-render the raw from both sliders
+    void retone();  // re-render the raw from both sliders
     void apply_xmp_edits();
-    bool apply_xmp_geometry(Image& image);   // crop + orientation; true if anything changed
-    void ensure_developed();                 // kick off the real decode behind a preview
+    bool apply_xmp_geometry(Image& image);  // crop + orientation; true if anything changed
+    void ensure_developed();                // kick off the real decode behind a preview
     void schedule_prefetch();
-    void request_place(const std::shared_ptr<Image>& image);   // async reverse geocode, result pops into the UI
+    void request_place(const std::shared_ptr<Image>& image);  // async reverse geocode, result pops into the UI
     void on_smooth_toggled();
     void on_xmp_toggled();
     void refresh_metadata();
@@ -120,34 +128,38 @@ private:
     Loader loader_;
     ImageCache cache_;
     Geocoder geocoder_;
-    bool image_modified_ = false;           // edited or re-toned since it was loaded
+    bool image_modified_ = false;  // edited or re-toned since it was loaded
 
     GtkWidget* window_ = nullptr;
     GtkWidget* toolbar_ = nullptr;
     GtkWidget* footer_ = nullptr;
-    GtkWidget* exposure_box_ = nullptr;   // EV slider, shown for raw files only
+    GtkWidget* exposure_box_ = nullptr;  // EV slider, shown for raw files only
     GtkWidget* exposure_ = nullptr;
     GtkWidget* smooth_toggle_ = nullptr;
     GtkWidget* crop_button_ = nullptr;
     GtkWidget* status_left_ = nullptr;
-    GtkWidget* spinner_ = nullptr;           // turns while a decode is in flight
+    GtkWidget* spinner_ = nullptr;  // turns while a decode is in flight
     GtkWidget* status_center_ = nullptr;
     GtkWidget* status_right_ = nullptr;
-    GtkWidget* status_location_ = nullptr;   // GPS link, hidden when absent
+    GtkWidget* status_location_ = nullptr;  // GPS link, hidden when absent
 
     bool fullscreen_ = false;
-    bool chrome_pending_ = false;            // toolbar/footer visibility to apply on the next window allocation
+    bool chrome_pending_ = false;  // toolbar/footer visibility to apply on the next window allocation
     uint64_t load_generation_ = 0;
-    bool showing_preview_ = false;          // a raw's embedded JPEG stands in for the real pixels
+    bool showing_preview_ = false;  // a raw's embedded JPEG stands in for the real pixels
     bool develop_requested_ = false;
-    bool slider_pending_ = false;           // slider moved on the preview; apply when the develop lands
+    bool slider_pending_ = false;  // slider moved on the preview; apply when the develop lands
     // Edits made while the preview is showing, replayed on the developed
     // image. Crops are fractions so they survive the size difference.
-    struct Edit { int orientation; double x, y, w, h; };
+    struct Edit
+    {
+        int orientation;
+        double x, y, w, h;
+    };
     std::vector<Edit> preview_edits_;
     GtkWidget* xmp_toggle_ = nullptr;
     std::shared_ptr<Image> image_;
     std::string image_path_;
     uint64_t file_size_ = 0;
-    std::string status_message_;    // transient: "Loading…", errors
+    std::string status_message_;  // transient: "Loading…", errors
 };

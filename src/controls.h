@@ -6,20 +6,35 @@
 // Mouse gestures and the actions they can be bound to. Keys and labels are
 // used by the config file and the settings dialog respectively.
 
-enum class Kind { Click, Drag, Wheel };
+enum class Kind
+{
+    Click,
+    Drag,
+    Wheel
+};
 
-enum class Control {
-    LeftClick, LeftDouble, LeftDrag,
-    MiddleClick, MiddleDouble, MiddleDrag,
-    RightClick, RightDouble, RightDrag,
-    Wheel, CtrlWheel, ShiftWheel,
+enum class Control
+{
+    LeftClick,
+    LeftDouble,
+    LeftDrag,
+    MiddleClick,
+    MiddleDouble,
+    MiddleDrag,
+    RightClick,
+    RightDouble,
+    RightDrag,
+    Wheel,
+    CtrlWheel,
+    ShiftWheel,
     Count
 };
 
-enum class Action {
+enum class Action
+{
     None,
     // click
-    ZoomSelection,      // zoom to the selection, or back to fit when zoomed
+    ZoomSelection,  // zoom to the selection, or back to fit when zoomed
     ToggleFullscreen,
     ZoomFit,
     ZoomOriginal,
@@ -37,18 +52,20 @@ enum class Action {
     Scroll,
 };
 
-struct ControlInfo {
+struct ControlInfo
+{
     Control id;
     const char* key;
     const char* label;
     Kind kind;
 };
 
-struct ActionInfo {
+struct ActionInfo
+{
     Action id;
     const char* key;
     const char* label;
-    Kind kind;          // which controls may bind it; None fits every kind
+    Kind kind;  // which controls may bind it; None fits every kind
 };
 
 constexpr std::array<ControlInfo, size_t(Control::Count)> kControls = {{
@@ -86,7 +103,8 @@ constexpr std::array<ActionInfo, 15> kActions = {{
 
 using Bindings = std::array<Action, size_t(Control::Count)>;
 
-constexpr Bindings default_bindings() {
+constexpr Bindings default_bindings()
+{
     Bindings b{};
     b.fill(Action::None);
     b[size_t(Control::LeftClick)] = Action::ZoomSelection;
@@ -101,7 +119,8 @@ constexpr Bindings default_bindings() {
 }
 
 // Fullscreen is for flicking through: clicks step, drags don't select.
-constexpr Bindings default_fullscreen_bindings() {
+constexpr Bindings default_fullscreen_bindings()
+{
     Bindings b = default_bindings();
     b[size_t(Control::LeftClick)] = Action::NextImage;
     b[size_t(Control::RightClick)] = Action::PrevImage;
@@ -109,18 +128,23 @@ constexpr Bindings default_fullscreen_bindings() {
     return b;
 }
 
-inline const ActionInfo& action_info(Action a) {
+inline const ActionInfo& action_info(Action a)
+{
     for (const ActionInfo& i : kActions)
-        if (i.id == a) return i;
+        if (i.id == a)
+            return i;
     return kActions[0];
 }
 
-inline bool action_fits(Action a, Kind k) {
+inline bool action_fits(Action a, Kind k)
+{
     return a == Action::None || action_info(a).kind == k;
 }
 
-inline Action action_from_key(const std::string& key, Action fallback) {
+inline Action action_from_key(const std::string& key, Action fallback)
+{
     for (const ActionInfo& i : kActions)
-        if (key == i.key) return i.id;
+        if (key == i.key)
+            return i.id;
     return fallback;
 }

@@ -2,45 +2,53 @@
 // DPI, over white. Page navigation can come later.
 #include "decoder.h"
 
-#include <poppler.h>
 #include <cairo.h>
 #include <glib.h>
+#include <poppler.h>
 
 #include <cmath>
 #include <cstring>
 
-namespace {
+namespace
+{
 
 constexpr double kDpi = 150.0;
 
-bool sniff(const uint8_t* h, size_t n) {
+bool sniff(const uint8_t* h, size_t n)
+{
     return n >= 5 && std::memcmp(h, "%PDF-", 5) == 0;
 }
 
-void add_info(Image& out, const char* key, gchar* value) {
-    if (value && *value) out.add("Document", key, value);
+void add_info(Image& out, const char* key, gchar* value)
+{
+    if (value && *value)
+        out.add("Document", key, value);
     g_free(value);
 }
 
-bool decode(const std::string& path, Image& out, std::string& error) {
+bool decode(const std::string& path, Image& out, std::string& error)
+{
     gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr);
     GError* err = nullptr;
     PopplerDocument* doc = poppler_document_new_from_file(uri, nullptr, &err);
     g_free(uri);
-    if (!doc) {
+    if (!doc)
+    {
         error = err ? err->message : "cannot open PDF";
-        if (err) g_error_free(err);
+        if (err)
+            g_error_free(err);
         return false;
     }
     const int pages = poppler_document_get_n_pages(doc);
     PopplerPage* page = pages > 0 ? poppler_document_get_page(doc, 0) : nullptr;
-    if (!page) {
+    if (!page)
+    {
         error = "PDF has no pages";
         g_object_unref(doc);
         return false;
     }
     double pw = 0, ph = 0;
-    poppler_page_get_size(page, &pw, &ph);   // points
+    poppler_page_get_size(page, &pw, &ph);  // points
     const double scale = kDpi / 72.0;
     out.allocate(int(std::ceil(pw * scale)), int(std::ceil(ph * scale)));
     cairo_surface_t* surface = cairo_image_surface_create_for_data(out.pixels.data(), CAIRO_FORMAT_ARGB32, out.width, out.height, out.stride);
@@ -77,7 +85,8 @@ bool decode(const std::string& path, Image& out, std::string& error) {
 
 }  // namespace
 
-const Decoder& pdf_decoder() {
+const Decoder& pdf_decoder()
+{
     static const Decoder d{"PDF", {"pdf"}, sniff, decode};
     return d;
 }

@@ -6,7 +6,8 @@
 struct Config;
 
 // The sorted list of viewable files in one directory, with a cursor.
-class Folder {
+class Folder
+{
 public:
     // `path` may be a file (which becomes current if it qualifies) or a
     // directory (cursor goes to the first file).
@@ -18,15 +19,15 @@ public:
     int count() const { return int(files_.size()); }
     int index() const { return index_; }
     const std::string& directory() const { return dir_; }
-    std::string current() const;        // full path, or empty
-    std::string current_name() const;   // file name only
+    std::string current() const;       // full path, or empty
+    std::string current_name() const;  // file name only
     const std::string& name_at(int index) const { return files_[index]; }
 
-    bool step(int delta, bool wrap);    // false when there is nowhere to go
+    bool step(int delta, bool wrap);  // false when there is nowhere to go
     bool go(int index);
 
 private:
     std::string dir_;
-    std::vector<std::string> files_;    // names, sorted
+    std::vector<std::string> files_;  // names, sorted
     int index_ = -1;
 };

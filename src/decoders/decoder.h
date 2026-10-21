@@ -8,10 +8,11 @@
 
 // One image format backend. Decoders are plain tables of functions so the
 // registry can try them by extension first, then by sniffing the file header.
-struct Decoder {
+struct Decoder
+{
     const char* name;
-    std::vector<std::string> extensions;                        // lowercase, without the dot
-    bool (*sniff)(const uint8_t* head, size_t len);             // may be null
+    std::vector<std::string> extensions;             // lowercase, without the dot
+    bool (*sniff)(const uint8_t* head, size_t len);  // may be null
     bool (*decode)(const std::string& path, Image& out, std::string& error);
     // Optional quick approximation (a raw's embedded JPEG) shown while the
     // real decode runs. May be null; returns false when there is none.
@@ -20,10 +21,16 @@ struct Decoder {
 
 // Options the decoders consult. Set from the main thread, read from the
 // loader thread; copied under a lock so a settings change can't tear.
-struct DecodeOptions {
-    enum class RawMode { Full, Half, Preview };
+struct DecodeOptions
+{
+    enum class RawMode
+    {
+        Full,
+        Half,
+        Preview
+    };
     RawMode raw_mode = RawMode::Full;
-    bool raw_camera_crop = true;   // frame as the camera did, dropping the sensor margins it never shows
+    bool raw_camera_crop = true;  // frame as the camera did, dropping the sensor margins it never shows
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();
@@ -54,6 +61,8 @@ const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();
 const Decoder& tim_decoder();
+const Decoder& ilbm_decoder();
+const Decoder& pcx_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
@@ -73,10 +82,11 @@ void read_xmp(const std::string& path, Image& out);
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF
 // header) into the image's metadata groups. Returns the orientation, 1 when
 // absent, and the camera model when known.
-struct ExifSummary {
+struct ExifSummary
+{
     int orientation = 1;
     std::string camera;
-    std::string color_space;   // "sRGB" / "Adobe RGB (1998)" when declared
+    std::string color_space;  // "sRGB" / "Adobe RGB (1998)" when declared
 };
 ExifSummary read_exif_file(const std::string& path, Image& out);
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);

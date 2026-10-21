@@ -10,13 +10,15 @@
 
 // Decoded images kept around so stepping back and forth through a folder
 // is instant. Least recently used entries go first when over budget.
-class ImageCache {
+class ImageCache
+{
 public:
-    struct Entry {
+    struct Entry
+    {
         std::shared_ptr<Image> image;
-        bool preview = false;        // a raw's embedded JPEG rather than the developed image
-        int64_t mtime = 0;           // file modification time when decoded
-        bool has_exposure = false;   // slider position the pixels were rendered with
+        bool preview = false;       // a raw's embedded JPEG rather than the developed image
+        int64_t mtime = 0;          // file modification time when decoded
+        bool has_exposure = false;  // slider position the pixels were rendered with
         double exposure = 0;
     };
 
@@ -24,7 +26,7 @@ public:
     explicit ImageCache(size_t budget = 0);
 
     void put(const std::string& path, Entry entry);
-    bool get(const std::string& path, Entry& entry);   // refreshes recency, checks mtime
+    bool get(const std::string& path, Entry& entry);  // refreshes recency, checks mtime
     bool contains(const std::string& path) const;
     void erase(const std::string& path);
     void clear();
@@ -41,8 +43,9 @@ private:
 
     size_t budget_ = 0;
     size_t bytes_ = 0;
-    std::list<std::string> order_;    // most recent first
-    struct Slot {
+    std::list<std::string> order_;  // most recent first
+    struct Slot
+    {
         Entry entry;
         size_t bytes;
         std::list<std::string>::iterator where;

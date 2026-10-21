@@ -7,15 +7,19 @@
 #include <cstdio>
 #include <cstring>
 
-namespace {
+namespace
+{
 
-bool sniff(const uint8_t* h, size_t n) {
+bool sniff(const uint8_t* h, size_t n)
+{
     return n >= 12 && std::memcmp(h, "RIFF", 4) == 0 && std::memcmp(h + 8, "WEBP", 4) == 0;
 }
 
-bool read_file(const std::string& path, std::vector<uint8_t>& data) {
+bool read_file(const std::string& path, std::vector<uint8_t>& data)
+{
     FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return false;
+    if (!f)
+        return false;
     std::fseek(f, 0, SEEK_END);
     long size = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
@@ -25,14 +29,17 @@ bool read_file(const std::string& path, std::vector<uint8_t>& data) {
     return ok;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error) {
+bool decode(const std::string& path, Image& out, std::string& error)
+{
     std::vector<uint8_t> file;
-    if (!read_file(path, file)) {
+    if (!read_file(path, file))
+    {
         error = "cannot read file";
         return false;
     }
     WebPBitstreamFeatures features;
-    if (WebPGetFeatures(file.data(), file.size(), &features) != VP8_STATUS_OK) {
+    if (WebPGetFeatures(file.data(), file.size(), &features) != VP8_STATUS_OK)
+    {
         error = "not a valid WebP stream";
         return false;
     }
@@ -45,7 +52,8 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     options.use_threads = 1;
     WebPData data{file.data(), file.size()};
     WebPAnimDecoder* dec = WebPAnimDecoderNew(&data, &options);
-    if (!dec) {
+    if (!dec)
+    {
         error = "WebP decode failed";
         return false;
     }
@@ -53,7 +61,8 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     WebPAnimDecoderGetInfo(dec, &info);
     uint8_t* frame = nullptr;
     int timestamp = 0;
-    if (!WebPAnimDecoderGetNext(dec, &frame, &timestamp)) {
+    if (!WebPAnimDecoderGetNext(dec, &frame, &timestamp))
+    {
         WebPAnimDecoderDelete(dec);
         error = "WebP frame decode failed";
         return false;
@@ -64,40 +73,52 @@ bool decode(const std::string& path, Image& out, std::string& error) {
 
     out.has_alpha = features.has_alpha;
     out.format = "WebP";
-    if (features.format == 2) {
+    if (features.format == 2)
+    {
         out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, features.has_alpha ? "ARGB" : "RGB", 8);
         out.pixel_format.notes.push_back("lossless");
-    } else {
+    }
+    else
+    {
         out.pixel_format = PixelFormat::ycbcr(8, 2, 2);
-        if (features.has_alpha) out.pixel_format.channels.push_back({'A', 8});
+        if (features.has_alpha)
+            out.pixel_format.channels.push_back({'A', 8});
         out.pixel_format.notes.push_back("lossy");
     }
     out.add("WebP", "Coding", features.format == 2 ? "lossless" : features.format == 1 ? "lossy" : "mixed/undefined");
-    if (features.has_animation) out.add("WebP", "Frames", std::to_string(info.frame_count));
-    if (WebPDemuxer* demux = WebPDemux(&data)) {
+    if (features.has_animation)
+        out.add("WebP", "Frames", std::to_string(info.frame_count));
+    if (WebPDemuxer* demux = WebPDemux(&data))
+    {
         WebPChunkIterator it;
-        if (WebPDemuxGetChunk(demux, "ICCP", 1, &it)) {
+        if (WebPDemuxGetChunk(demux, "ICCP", 1, &it))
+        {
             out.color_space = icc_profile_description(it.chunk.bytes, it.chunk.size);
             WebPDemuxReleaseChunkIterator(&it);
         }
 #ifdef HAVE_EXIF
-        if (WebPDemuxGetChunk(demux, "EXIF", 1, &it)) {
+        if (WebPDemuxGetChunk(demux, "EXIF", 1, &it))
+        {
             const ExifSummary exif = read_exif_blob(it.chunk.bytes, it.chunk.size, out);
             out.info = exif.camera;
-            if (out.color_space.empty()) out.color_space = exif.color_space;
+            if (out.color_space.empty())
+                out.color_space = exif.color_space;
             WebPDemuxReleaseChunkIterator(&it);
         }
 #endif
         WebPDemuxDelete(demux);
     }
-    if (features.format == 2) out.format += ", lossless";
-    if (features.has_animation) out.format += ", animated (" + std::to_string(info.frame_count) + " frames)";
+    if (features.format == 2)
+        out.format += ", lossless";
+    if (features.has_animation)
+        out.format += ", animated (" + std::to_string(info.frame_count) + " frames)";
     return true;
 }
 
 }  // namespace
 
-const Decoder& webp_decoder() {
+const Decoder& webp_decoder()
+{
     static const Decoder d{"WebP", {"webp"}, sniff, decode};
     return d;
 }

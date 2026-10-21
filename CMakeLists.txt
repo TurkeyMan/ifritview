@@ -29,6 +29,8 @@ add_executable(ifritview
   src/geocode.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
+  src/decoders/ilbm.cpp
+  src/decoders/pcx.cpp
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifritview PRIVATE -Wall -Wextra)

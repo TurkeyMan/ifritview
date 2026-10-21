@@ -54,6 +54,8 @@ colour and size, and whether it also shows in the window.
 | PSD (flattened), TGA, PNM, HDR, PIC | vendored stb_image |
 | PDF (first page) | poppler-glib |
 | PlayStation TIM (4/8-bit CLUT, 16/24-bit) | hand-written |
+| Amiga IFF ILBM/PBM (palette, EHB, HAM6/8, 24/32-bit, masks) | hand-written |
+| PCX (mono, EGA, 256-colour, 24-bit) | hand-written |
 | BMP, GIF, ICO, XPM, SVG and anything else with a loader | gdk-pixbuf |
 
 Metadata shown in the Metadata window (`I`): EXIF/GPS/maker notes (libexif),
@@ -116,6 +118,6 @@ machines where the `-dev` packages can't be installed system-wide.
   - edits (exposure, WB, crop, rotation) kept as parameters and saved to an
     XMP sidecar; export applies them to the developed image.
 - Honour `crs:CropAngle`, `crs:Tint`.
-- Hand-written decoders for XCF, IFF/ILBM; animated GIF/WebP playback.
+- Hand-written decoder for XCF.
 - Re-render toolbar icons when the icon theme changes at runtime (currently
   cached per theme/scale/colour and picked up on the next start).

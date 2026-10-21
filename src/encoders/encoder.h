@@ -5,14 +5,16 @@
 #include <string>
 #include <vector>
 
-struct EncodeOptions {
-    int quality = 90;      // 1..100 for lossy formats; ignored otherwise
+struct EncodeOptions
+{
+    int quality = 90;  // 1..100 for lossy formats; ignored otherwise
 };
 
-struct Encoder {
-    const char* name;      // shown in the format chooser
-    const char* extension; // written onto the file name
-    bool lossy;            // whether `quality` applies
+struct Encoder
+{
+    const char* name;       // shown in the format chooser
+    const char* extension;  // written onto the file name
+    bool lossy;             // whether `quality` applies
     bool (*encode)(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error);
 };
 

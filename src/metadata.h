@@ -9,7 +9,8 @@
 
 // A two-column list of everything known about the current image, in a
 // small window that floats above the main one and follows image changes.
-class MetadataWindow {
+class MetadataWindow
+{
 public:
     explicit MetadataWindow(GtkWindow* parent);
     void toggle();

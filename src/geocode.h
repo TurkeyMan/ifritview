@@ -10,7 +10,8 @@
 //
 // The URL template takes {lat} and {lon}. Known providers get a tailored
 // parse of their JSON; anything else is scanned for the usual fields.
-class Geocoder {
+class Geocoder
+{
 public:
     using Callback = std::function<void(const std::string& place)>;
 
@@ -28,13 +29,14 @@ public:
     bool lookup(double latitude, double longitude, const std::string& language, Callback cb);
 
     // Presets offered in settings.
-    struct Provider {
+    struct Provider
+    {
         const char* name;
         const char* url;
     };
     static const Provider* providers(size_t& count);
 
-    struct Impl;   // public so the libsoup completion callback can reach it
+    struct Impl;  // public so the libsoup completion callback can reach it
 
 private:
     Impl* impl_;
