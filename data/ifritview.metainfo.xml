@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.ifritview.IfritView</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>IfritView</name>
+  <summary>Fast, no-frills image viewer</summary>
+  <description>
+    <p>
+      A lightweight image viewer in the spirit of IrfanView: opens instantly,
+      shows pixels 1:1 on any display scaling, steps through folders with the
+      wheel or arrow keys, and understands the formats people actually have,
+      including camera raw files, HEIF/AVIF, JPEG XL, WebP, PSD and PDF.
+    </p>
+    <p>
+      Includes exposure adjustment for raw files, region selection with crop
+      and copy, metadata/EXIF inspection with map links, configurable mouse
+      controls, and saving to common formats.
+    </p>
+  </description>
+  <launchable type="desktop-id">ifritview.desktop</launchable>
+  <provides>
+    <binary>ifritview</binary>
+  </provides>
+  <categories>
+    <category>Graphics</category>
+    <category>Viewer</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1" date="2026-10-21"/>
+  </releases>
+</component>

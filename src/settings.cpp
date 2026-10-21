@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "decoders/decoder.h"
+#include "integration.h"
 
 #include <algorithm>
 #include <array>
@@ -220,11 +221,40 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w) {
     gtk_box_pack_start(GTK_BOX(box), scroller, TRUE, TRUE, 0);
 
     GtkWidget* reset = gtk_button_new_with_label("Reset to all supported formats");
-    gtk_widget_set_halign(reset, GTK_ALIGN_END);
     g_signal_connect(reset, "clicked", G_CALLBACK(+[](GtkWidget*, gpointer view) {
                          set_text_view(static_cast<GtkWidget*>(view), join_extensions(default_extensions()));
                      }), w.extensions);
-    gtk_box_pack_start(GTK_BOX(box), reset, FALSE, FALSE, 0);
+
+    // Registers with the desktop (per user, no privileges) for the types listed above.
+    GtkWidget* defaults = gtk_button_new_with_label("Make IfritView the default viewer for these types");
+    GtkWidget* result = gtk_label_new("");
+    gtk_label_set_line_wrap(GTK_LABEL(result), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(result), 0.0f);
+    gtk_widget_set_halign(result, GTK_ALIGN_START);
+    struct DefaultsCtx { GtkWidget* view; GtkWidget* result; };
+    auto on_defaults = +[](GtkWidget*, gpointer p) {
+        auto* ctx = static_cast<DefaultsCtx*>(p);
+        std::vector<std::string> skipped;
+        std::string error;
+        const int n = set_default_for_extensions(parse_extensions(get_text_view(ctx->view)), skipped, error);
+        std::string msg = n ? "IfritView is now the default for " + std::to_string(n) + " file types." : "No file types were set.";
+        if (!skipped.empty()) {
+            msg += " Unknown to the system: ";
+            for (size_t i = 0; i < skipped.size(); ++i) msg += (i ? ", " : "") + skipped[i];
+            msg += ".";
+        }
+        if (!error.empty()) msg += " Error: " + error;
+        gtk_label_set_text(GTK_LABEL(ctx->result), msg.c_str());
+    };
+    auto* ctx = new DefaultsCtx{w.extensions, result};
+    g_object_set_data_full(G_OBJECT(defaults), "ctx", ctx, +[](gpointer p) { delete static_cast<DefaultsCtx*>(p); });
+    g_signal_connect(defaults, "clicked", G_CALLBACK(on_defaults), ctx);
+
+    GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(buttons), defaults, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(buttons), reset, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), buttons, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), result, FALSE, FALSE, 0);
     return box;
 }
 

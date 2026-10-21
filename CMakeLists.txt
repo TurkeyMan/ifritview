@@ -22,6 +22,7 @@ add_executable(ifritview
   src/decoders/decoder.cpp
   src/encoders/encoder.cpp
   src/metadata.cpp
+  src/integration.cpp
   src/decoders/stb.cpp
   src/decoders/pixbuf.cpp
 )
@@ -86,4 +87,32 @@ include(GNUInstallDirs)
 install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/ifritview.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 target_compile_definitions(ifritview PRIVATE IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# Refresh the desktop/MIME/icon caches on `cmake --install` so file managers
+# pick the app up immediately (packages do this in their own postinst).
+install(CODE "
+  foreach(tool update-desktop-database update-mime-database gtk-update-icon-cache)
+    find_program(IFRIT_TOOL_\${tool} \${tool})
+  endforeach()
+  set(data \$ENV{DESTDIR}${CMAKE_INSTALL_FULL_DATADIR})
+  if(IFRIT_TOOL_update-desktop-database)
+    execute_process(COMMAND \${IFRIT_TOOL_update-desktop-database} -q \${data}/applications)
+  endif()
+  if(IFRIT_TOOL_gtk-update-icon-cache AND EXISTS \${data}/icons/hicolor/index.theme)
+    execute_process(COMMAND \${IFRIT_TOOL_gtk-update-icon-cache} -q -t -f \${data}/icons/hicolor)
+  endif()
+")
+
+# `cpack -G DEB` in the build directory produces an installable package with
+# library dependencies worked out from the binary.
+set(CPACK_PACKAGE_NAME "ifritview")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast, no-frills image viewer")
+set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libheif-plugin-libde265, libheif-plugin-dav1d")
+set(CPACK_GENERATOR "DEB;TGZ")
+include(CPack)

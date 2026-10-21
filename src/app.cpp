@@ -129,6 +129,7 @@ void App::build_ui() {
     gtk_style_context_add_class(gtk_widget_get_style_context(toolbar_), "ifrit-toolbar");
     gtk_box_pack_start(GTK_BOX(vbox), toolbar_, FALSE, FALSE, 0);
     tool_button("document-open-symbolic", "Open… (Ctrl+O)", &App::open_dialog);
+    tool_button("media-floppy-symbolic", "Save as… (Ctrl+S)", &App::save_as);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     tool_button("go-previous-symbolic", "Previous image (Left, wheel up)", &App::go_prev_action);
     tool_button("go-next-symbolic", "Next image (Right, wheel down)", &App::go_next_action);
@@ -142,8 +143,6 @@ void App::build_ui() {
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     crop_button_ = tool_button("edit-cut-symbolic", "Crop to selection (Ctrl+Y)", &App::crop_to_selection);
     gtk_widget_set_sensitive(crop_button_, FALSE);
-    tool_button("document-save-as-symbolic", "Save as… (Ctrl+S)", &App::save_as);
-    tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata);
 
     smooth_toggle_ = gtk_toggle_button_new();
     gtk_container_add(GTK_CONTAINER(smooth_toggle_), gtk_image_new_from_icon_name("view-grid-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
@@ -195,6 +194,8 @@ void App::build_ui() {
     gtk_widget_show_all(exposure_box_);
     gtk_widget_hide(exposure_box_);
     gtk_widget_set_no_show_all(exposure_box_, TRUE);
+    GtkWidget* metadata = tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata);
+    gtk_box_set_child_packing(GTK_BOX(toolbar_), metadata, FALSE, FALSE, 0, GTK_PACK_END);
 
 
     view_ = std::make_unique<ImageView>(cfg_);
