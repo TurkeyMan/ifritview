@@ -249,7 +249,13 @@ void App::build_ui() {
 
     // Exposure, in stops around the decoder's automatic brightness; raw only.
     exposure_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_box_pack_start(GTK_BOX(exposure_box_), cached_icon_image("display-brightness-symbolic", 24), FALSE, FALSE, 4);
+    develop_button_ = gtk_button_new();
+    gtk_container_add(GTK_CONTAINER(develop_button_), cached_icon_image("display-brightness-symbolic", 24));
+    gtk_button_set_relief(GTK_BUTTON(develop_button_), GTK_RELIEF_NONE);
+    gtk_widget_set_can_focus(develop_button_, FALSE);
+    gtk_widget_set_tooltip_text(develop_button_, "Develop the raw now (D); the slider is available once it is");
+    g_signal_connect(develop_button_, "clicked", G_CALLBACK(+[](GtkWidget*, gpointer self) { static_cast<App*>(self)->develop_now(); }), this);
+    gtk_box_pack_start(GTK_BOX(exposure_box_), develop_button_, FALSE, FALSE, 0);
     exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 0.01);
     gtk_range_set_round_digits(GTK_RANGE(exposure_), -1);   // continuous: every screen pixel is a value
     gtk_scale_set_value_pos(GTK_SCALE(exposure_), GTK_POS_RIGHT);
@@ -258,7 +264,7 @@ void App::build_ui() {
                      }), nullptr);
     gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
     gtk_widget_set_size_request(exposure_, 200, -1);
-    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nWheel or arrows: 0.1 per step, hold Shift for 0.01; Home resets");
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nWheel or arrows: 0.1 per step, hold Shift for 0.01; Home resets.\nGreyed while the embedded preview is showing: press D or the sun to develop");
     gtk_widget_set_can_focus(exposure_, TRUE);
     // Wheel: 0.1 per notch, Shift refines to 0.01.
     gtk_widget_add_events(exposure_, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
@@ -598,6 +604,8 @@ void App::on_loaded(Loader::Result& r) {
         gtk_range_set_value(GTK_RANGE(exposure_), bias);
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
 
+        gtk_widget_set_sensitive(exposure_, !showing_preview_);   // greyed while the camera JPEG stands in
+        gtk_widget_set_sensitive(develop_button_, showing_preview_);
         gtk_widget_show(exposure_box_);
         if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
         else if (slider_moved) gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
@@ -1032,6 +1040,8 @@ gboolean App::on_key(GdkEventKey* e) {
             break;
         case GDK_KEY_i: case GDK_KEY_I:
             toggle_metadata(); return TRUE;
+        case GDK_KEY_d: case GDK_KEY_D:
+            develop_now(); return TRUE;
         case GDK_KEY_c: case GDK_KEY_C:
             if (ctrl) { copy_to_clipboard(); return TRUE; }
             break;
