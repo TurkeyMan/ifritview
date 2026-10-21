@@ -1,0 +1,47 @@
+#pragma once
+// The few things that differ between Linux and Windows. Everything else goes
+// through GLib/GTK, which already hide the platform.
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+
+namespace platform
+{
+
+// fopen for a UTF-8 path (Windows' fopen takes the ANSI code page).
+FILE* fopen(const std::string& path, const char* mode);
+
+// A read-only FILE* over bytes in memory, or null where the C library has no
+// such thing (Windows); callers then open the file instead.
+FILE* fmemopen(const uint8_t* data, size_t size);
+
+// Size of a file in bytes, or -1.
+int64_t file_size(const std::string& path);
+
+// Let the calling thread yield to the UI and the foreground loader.
+void lower_thread_priority();
+
+// Memory the system could give us without swapping, or 0 if unknown.
+size_t available_memory();
+
+// Absolute path of the running executable.
+std::string executable_path();
+
+// Runtime libraries (GStreamer, poppler): their file names here, whether one
+// is installed (a few stats, no load), loading, and symbol lookup.
+#ifdef _WIN32
+#define IFRIT_LIBRARY_NAME(linux_name, windows_name) windows_name
+#else
+#define IFRIT_LIBRARY_NAME(linux_name, windows_name) linux_name
+#endif
+bool library_installed(const char* name);
+void* open_library(const char* name, std::string* error = nullptr);
+void* library_symbol(void* library, const char* symbol);
+
+// Large pixel buffers: aligned for huge pages where the system offers them.
+void* allocate_pixels(size_t bytes);
+void free_pixels(void* p);
+
+}  // namespace platform

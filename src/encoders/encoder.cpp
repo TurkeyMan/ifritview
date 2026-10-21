@@ -3,6 +3,8 @@
 // decoder (BMP goes through gdk-pixbuf, which is always present).
 #include "encoder.h"
 
+#include "../platform.h"
+
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include <algorithm>
@@ -80,7 +82,7 @@ namespace
 #ifdef HAVE_PNG
 bool encode_png(const Image& image, const std::string& path, const EncodeOptions&, std::string& error)
 {
-    FILE* f = std::fopen(path.c_str(), "wb");
+    FILE* f = platform::fopen(path, "wb");
     if (!f)
     {
         error = "cannot create file";
@@ -122,7 +124,7 @@ struct JpegError
 
 bool encode_jpeg(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
-    FILE* f = std::fopen(path.c_str(), "wb");
+    FILE* f = platform::fopen(path, "wb");
     if (!f)
     {
         error = "cannot create file";
@@ -209,7 +211,7 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
 
 bool write_file(const std::string& path, const void* data, size_t size, std::string& error)
 {
-    FILE* f = std::fopen(path.c_str(), "wb");
+    FILE* f = platform::fopen(path, "wb");
     if (!f)
     {
         error = "cannot create file";

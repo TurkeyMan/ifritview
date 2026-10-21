@@ -6,10 +6,9 @@
 // aren't part of the series.
 #include "decoder.h"
 
-#include "../dynlib.h"
+#include "../platform.h"
 
 #include <cairo.h>
-#include <dlfcn.h>
 #include <glib.h>
 #include <poppler.h>
 
@@ -34,6 +33,8 @@
 namespace
 {
 
+const char* const kPopplerLibrary = IFRIT_LIBRARY_NAME("libpoppler-glib.so.8", "libpoppler-glib-8.dll");
+
 struct PopplerApi
 {
 #define IFRIT_POPPLER_POINTER(name) decltype(&::name) name = nullptr;
@@ -46,17 +47,18 @@ bool load_poppler()
 {
     if (g_getenv("IFRIT_NO_PDF"))
         return false;
-    void* lib = dlopen("libpoppler-glib.so.8", RTLD_NOW | RTLD_LOCAL);
+    std::string error;
+    void* lib = platform::open_library(kPopplerLibrary, &error);
     if (!lib)
     {
         if (g_getenv("IFRIT_TRACE"))
-            std::fprintf(stderr, "pdf: %s\n", dlerror());
+            std::fprintf(stderr, "pdf: %s\n", error.c_str());
         return false;
     }
     PopplerApi api;
     bool ok = true;
-#define IFRIT_POPPLER_RESOLVE(name)                                            \
-    if (!(api.name = reinterpret_cast<decltype(api.name)>(dlsym(lib, #name)))) \
+#define IFRIT_POPPLER_RESOLVE(name)                                                               \
+    if (!(api.name = reinterpret_cast<decltype(api.name)>(platform::library_symbol(lib, #name)))) \
         ok = false;
     IFRIT_POPPLER_FUNCTIONS(IFRIT_POPPLER_RESOLVE)
 #undef IFRIT_POPPLER_RESOLVE
@@ -167,7 +169,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 bool pdf_available()
 {
-    return !g_getenv("IFRIT_NO_PDF") && library_installed("libpoppler-glib.so.8");
+    return !g_getenv("IFRIT_NO_PDF") && platform::library_installed(kPopplerLibrary);
 }
 
 bool pdf_supported()

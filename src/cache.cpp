@@ -1,5 +1,7 @@
 #include "cache.h"
 
+#include "platform.h"
+
 #include <glib.h>
 #include <glib/gstdio.h>
 
@@ -30,21 +32,7 @@ int64_t ImageCache::file_mtime(const std::string& path)
 // 24 MP raw is ~240 MB) and never more than half of what's free, capped at 8 GB.
 size_t ImageCache::automatic_budget()
 {
-    size_t available = 0;
-    if (FILE* f = std::fopen("/proc/meminfo", "r"))
-    {
-        char line[256];
-        while (std::fgets(line, sizeof line, f))
-        {
-            unsigned long long kb = 0;
-            if (std::sscanf(line, "MemAvailable: %llu kB", &kb) == 1)
-            {
-                available = size_t(kb) * 1024;
-                break;
-            }
-        }
-        std::fclose(f);
-    }
+    const size_t available = platform::available_memory();
     const size_t quarter = available / 4, half = available / 2;
     return std::min<size_t>(std::max<size_t>(quarter, std::min<size_t>(size_t(1) << 30, half)), size_t(8) << 30);
 }

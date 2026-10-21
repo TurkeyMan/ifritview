@@ -27,12 +27,11 @@ add_executable(ifritview
   src/decoders/icc.cpp
   src/encoders/encoder.cpp
   src/metadata.cpp
-  src/integration.cpp
   src/cache.cpp
   src/icons.cpp
   src/geocode.cpp
   src/video.cpp
-  src/dynlib.cpp
+  src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
   src/decoders/ilbm.cpp
@@ -43,6 +42,12 @@ target_compile_options(ifritview PRIVATE -Wall -Wextra)
 target_compile_definitions(ifritview PRIVATE IFRIT_VERSION="${IFRIT_VERSION}")
 target_link_libraries(ifritview PRIVATE PkgConfig::GTK ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
+if(WIN32)
+  target_sources(ifritview PRIVATE src/integration_win.cpp)
+  target_link_libraries(ifritview PRIVATE shell32 advapi32)
+else()
+  target_sources(ifritview PRIVATE src/integration.cpp)
+endif()
 
 # Optional format backends. Each is on by default and simply left out, with a
 # notice, when its library isn't installed.

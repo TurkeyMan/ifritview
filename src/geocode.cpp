@@ -1,6 +1,7 @@
 #include "geocode.h"
 
 #include <glib.h>
+#include <glib/gstdio.h>
 
 #include <cstdio>
 #include <cstring>
@@ -78,7 +79,7 @@ struct Geocoder::Impl
         gchar* dir = g_path_get_dirname(path.c_str());
         g_mkdir_with_parents(dir, 0755);
         g_free(dir);
-        if (FILE* f = std::fopen(path.c_str(), "a"))
+        if (FILE* f = g_fopen(path.c_str(), "a"))
         {
             std::fprintf(f, "%s\t%s\n", key.c_str(), place.c_str());
             std::fclose(f);

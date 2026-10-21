@@ -1,10 +1,9 @@
 #include "decoder.h"
+
+#include "../platform.h"
 #include "../video.h"
 
 #include <glib.h>
-#include <sys/resource.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -117,11 +116,9 @@ bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size)
         t_file.path = path;
         t_file.ok = false;
         t_file.data.clear();
-        if (FILE* f = std::fopen(path.c_str(), "rb"))
+        const int64_t n = platform::file_size(path);
+        if (FILE* f = n >= 0 ? platform::fopen(path, "rb") : nullptr)
         {
-            std::fseek(f, 0, SEEK_END);
-            const long n = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
             if (n >= 0)
             {
                 t_file.data.resize(size_t(n));
@@ -140,8 +137,9 @@ FILE* open_file(const std::string& path)
     const uint8_t* data = nullptr;
     size_t size = 0;
     if (file_bytes(path, data, size) && size > 0)
-        return fmemopen(const_cast<uint8_t*>(data), size, "rb");
-    return std::fopen(path.c_str(), "rb");
+        if (FILE* f = platform::fmemopen(data, size))
+            return f;
+    return platform::fopen(path, "rb");  // Windows: no fmemopen; the OS cache has the bytes anyway
 }
 
 void release_file_bytes()
@@ -312,7 +310,7 @@ void preload_optional_libraries()
     std::thread(
         []
         {
-            setpriority(PRIO_PROCESS, pid_t(syscall(SYS_gettid)), 10);
+            platform::lower_thread_priority();
 #ifdef HAVE_PDF
             if (pdf_available())
                 pdf_supported();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sys/mman.h>
+#include "platform.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -25,22 +25,11 @@ struct PixelAllocator
 
     T* allocate(std::size_t n)
     {
-        const std::size_t bytes = n * sizeof(T);
-        constexpr std::size_t huge = std::size_t(2) << 20;
-        if (bytes >= (std::size_t(4) << 20))
-        {
-            void* p = nullptr;
-            const std::size_t rounded = (bytes + huge - 1) & ~(huge - 1);
-            if (posix_memalign(&p, huge, rounded) != 0)
-                throw std::bad_alloc();
-            madvise(p, rounded, MADV_HUGEPAGE);
-            return static_cast<T*>(p);
-        }
-        if (void* p = std::malloc(bytes ? bytes : 1))
+        if (void* p = platform::allocate_pixels(n * sizeof(T)))
             return static_cast<T*>(p);
         throw std::bad_alloc();
     }
-    void deallocate(T* p, std::size_t) noexcept { std::free(p); }
+    void deallocate(T* p, std::size_t) noexcept { platform::free_pixels(p); }
 
     // Default-initialise: no zero fill for resize()/construction.
     template <typename U>

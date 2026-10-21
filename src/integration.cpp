@@ -1,6 +1,7 @@
 #include "integration.h"
 
 #include "embedded.h"
+#include "platform.h"
 
 #include <gio/gdesktopappinfo.h>
 #include <gio/gio.h>
@@ -13,14 +14,6 @@ namespace
 {
 
 const char* kDesktopId = "ifritview.desktop";
-
-std::string executable_path()
-{
-    gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
-    std::string path = exe ? exe : "ifritview";
-    g_free(exe);
-    return path;
-}
 
 }  // namespace
 
@@ -44,7 +37,7 @@ bool ensure_desktop_entry(std::string& error)
     g_key_file_load_from_data(kf, kDesktopEntry, -1, G_KEY_FILE_NONE, nullptr);
     g_key_file_set_string(kf, "Desktop Entry", "Type", "Application");
     g_key_file_set_string(kf, "Desktop Entry", "Name", "IfritView");
-    g_key_file_set_string(kf, "Desktop Entry", "Exec", (executable_path() + " %f").c_str());
+    g_key_file_set_string(kf, "Desktop Entry", "Exec", (platform::executable_path() + " %f").c_str());
     g_key_file_set_string(kf, "Desktop Entry", "Icon", g_file_test(icon_path, G_FILE_TEST_EXISTS) ? icon_path : "image-x-generic");
     gchar* target = g_build_filename(apps_dir, kDesktopId, nullptr);
     GError* err = nullptr;

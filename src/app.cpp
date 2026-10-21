@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "embedded.h"
+#include "platform.h"
 
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
@@ -11,11 +12,11 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
+#ifdef GDK_WINDOWING_WIN32
+#include <gdk/gdkwin32.h>
+#endif
 #include <glib/gstdio.h>
 
-#include <sys/resource.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -139,7 +140,7 @@ void Loader::run_foreground()
 void Loader::run_background()
 {
     // Below the foreground worker and the UI when cores are contended.
-    setpriority(PRIO_PROCESS, pid_t(syscall(SYS_gettid)), 10);
+    platform::lower_thread_priority();
     for (;;)
     {
         Job job{};
@@ -1720,12 +1721,19 @@ void App::fit_window_to_image()
 // Keep the window on screen when it changes size. Growth keeps the top-left
 // corner (so it extends right and down); an edge that would cross the work
 // area pushes the window back the other way. Only X11 lets a client place
-// its window; on Wayland the compositor does this itself.
+// its window (X11, Windows); on Wayland the compositor does this itself.
 void App::place_window(int w, int h, const GdkRectangle& work)
 {
-#ifdef GDK_WINDOWING_X11
+#if defined(GDK_WINDOWING_X11) || defined(GDK_WINDOWING_WIN32)
     GdkDisplay* display = gtk_widget_get_display(window_);
-    if (!GDK_IS_X11_DISPLAY(display))
+    bool placeable = false;
+#ifdef GDK_WINDOWING_X11
+    placeable = placeable || GDK_IS_X11_DISPLAY(display);
+#endif
+#ifdef GDK_WINDOWING_WIN32
+    placeable = placeable || GDK_IS_WIN32_DISPLAY(display);
+#endif
+    if (!placeable)
         return;
     int x = 0, y = 0;
     gtk_window_get_position(GTK_WINDOW(window_), &x, &y);

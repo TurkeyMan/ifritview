@@ -1,9 +1,7 @@
 #define IFRIT_GST_NO_REDIRECT  // here the names are the real declarations
 #include "gst_api.h"
 
-#include "dynlib.h"
-
-#include <dlfcn.h>
+#include "platform.h"
 
 #include <cstdio>
 #include <type_traits>
@@ -13,25 +11,34 @@ GstApi g_gst;
 namespace
 {
 
+const char* const kLibraries[] = {
+    IFRIT_LIBRARY_NAME("libgstreamer-1.0.so.0", "libgstreamer-1.0-0.dll"),
+    IFRIT_LIBRARY_NAME("libgstapp-1.0.so.0", "libgstapp-1.0-0.dll"),
+    IFRIT_LIBRARY_NAME("libgstvideo-1.0.so.0", "libgstvideo-1.0-0.dll"),
+    IFRIT_LIBRARY_NAME("libgstaudio-1.0.so.0", "libgstaudio-1.0-0.dll"),
+};
+
 bool load()
 {
     if (g_getenv("IFRIT_NO_VIDEO"))
         return false;
-    const char* libraries[] = {"libgstreamer-1.0.so.0", "libgstapp-1.0.so.0", "libgstvideo-1.0.so.0", "libgstaudio-1.0.so.0"};
     void* handles[4] = {};
     for (int i = 0; i < 4; ++i)
-        if (!(handles[i] = dlopen(libraries[i], RTLD_NOW | RTLD_LOCAL)))
+    {
+        std::string error;
+        if (!(handles[i] = platform::open_library(kLibraries[i], &error)))
         {
             if (g_getenv("IFRIT_TRACE"))
-                std::fprintf(stderr, "video: %s\n", dlerror());
+                std::fprintf(stderr, "video: %s\n", error.c_str());
             return false;  // the handles stay open; harmless, and it only happens once
         }
+    }
     GstApi api;
     bool ok = true;
     auto resolve = [&](auto& fn, const char* name)
     {
         for (void* h : handles)
-            if (void* sym = dlsym(h, name))
+            if (void* sym = platform::library_symbol(h, name))
             {
                 fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(sym);
                 return;
@@ -58,8 +65,12 @@ bool load()
 
 bool gst_api_available()
 {
-    return !g_getenv("IFRIT_NO_VIDEO") && library_installed("libgstreamer-1.0.so.0") && library_installed("libgstapp-1.0.so.0") &&
-           library_installed("libgstvideo-1.0.so.0") && library_installed("libgstaudio-1.0.so.0");
+    if (g_getenv("IFRIT_NO_VIDEO"))
+        return false;
+    for (const char* lib : kLibraries)
+        if (!platform::library_installed(lib))
+            return false;
+    return true;
 }
 
 bool gst_api_load()
