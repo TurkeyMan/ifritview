@@ -31,6 +31,16 @@ struct Config {
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
 
+    // Fullscreen info overlay: categories of metadata drawn over the image.
+    bool overlay_file = true;
+    bool overlay_format = false;
+    bool overlay_shot = true;
+    bool overlay_location = false;
+    bool overlay_view = false;
+    bool overlay_windowed = false;         // also show it in the window, not just fullscreen
+    std::string overlay_color = "#a6d96a";
+    int overlay_font_pt = 10;
+
     // Maps: where a GPS location link goes; {lat} and {lon} are substituted.
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;

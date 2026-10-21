@@ -424,6 +424,81 @@ std::vector<MetadataGroup> App::collect_metadata() const {
     return groups;
 }
 
+// The fullscreen HUD, assembled by category from what the decoders found.
+std::vector<std::string> App::overlay_lines() const {
+    std::vector<std::string> lines;
+    if (!image_) return lines;
+    auto find = [&](std::initializer_list<const char*> groups, std::initializer_list<const char*> keys) -> std::string {
+        for (const MetadataGroup& g : image_->metadata)
+            for (const char* gn : groups)
+                if (g.name == gn)
+                    for (const char* k : keys)
+                        for (const MetadataItem& m : g.items)
+                            if (m.key == k) return m.value;
+        return "";
+    };
+    if (cfg_.overlay_file) {
+        lines.push_back(folder_.current_name() + "  (" + std::to_string(folder_.index() + 1) + "/" + std::to_string(folder_.count()) + ")");
+        std::string line = file_size_ ? human_size(file_size_) : "";
+        GStatBuf st;
+        if (g_stat(image_path_.c_str(), &st) == 0)
+            if (GDateTime* t = g_date_time_new_from_unix_local(st.st_mtime)) {
+                gchar* text = g_date_time_format(t, "%Y-%m-%d %H:%M");
+                line += std::string(line.empty() ? "" : "  ·  ") + text;
+                g_free(text);
+                g_date_time_unref(t);
+            }
+        if (!line.empty()) lines.push_back(line);
+    }
+    if (cfg_.overlay_format) {
+        std::string line = std::to_string(image_->width) + " × " + std::to_string(image_->height) + "  ·  " +
+                           std::to_string(image_->bits_per_sample) + "-bit" + (image_->has_alpha ? " + alpha" : "") + "  ·  " + image_->format;
+        lines.push_back(line);
+        std::string detail;
+        auto append = [&](const std::string& label, const std::string& v) { if (!v.empty()) detail += (detail.empty() ? "" : "  ·  ") + (label.empty() ? v : label + " " + v); };
+        append("", find({"JPEG"}, {"Coding"}));
+        append("chroma", find({"JPEG"}, {"Chroma subsampling"}));
+        append("", find({"PNG"}, {"Color type"}));
+        append("ICC", find({"PNG"}, {"ICC profile"}));
+        append("compression", find({"TIFF"}, {"Compression"}));
+        append("", find({"WebP"}, {"Coding"}));
+        append("mosaic", find({"Raw"}, {"Mosaic"}));
+        if (!detail.empty()) lines.push_back(detail);
+    }
+    if (cfg_.overlay_shot) {
+        const std::string make = find({"Camera", "EXIF"}, {"Make", "Manufacturer"});
+        const std::string model = find({"Camera", "EXIF"}, {"Model"});
+        std::string camera = model.rfind(make, 0) == 0 || make.empty() ? model : make + " " + model;
+        const std::string lens = find({"Camera", "EXIF"}, {"Lens", "Lens Model"});
+        if (!camera.empty()) lines.push_back(camera + (lens.empty() ? "" : "  ·  " + lens));
+        std::string exp;
+        auto append = [&](const std::string& v) { if (!v.empty()) exp += (exp.empty() ? "" : "  ·  ") + v; };
+        append(find({"Camera", "EXIF"}, {"Focal length", "Focal Length"}));
+        append(find({"Camera", "EXIF"}, {"Aperture", "F-Number"}));
+        append(find({"Camera", "EXIF"}, {"Shutter", "Exposure Time"}));
+        const std::string iso = find({"Camera", "EXIF"}, {"ISO", "ISO Speed Ratings"});
+        if (!iso.empty()) append("ISO " + iso);
+        const std::string bias = find({"Camera", "EXIF"}, {"Exposure compensation", "Exposure Bias"});
+        if (!bias.empty() && bias != "0.00 EV") append(bias + (bias.find("EV") == std::string::npos ? " EV" : ""));
+        if (!exp.empty()) lines.push_back(exp);
+        const std::string taken = find({"Camera", "EXIF"}, {"Taken", "Date and Time (Original)", "Date/time original"});
+        if (!taken.empty()) lines.push_back(taken);
+    }
+    if (cfg_.overlay_location && image_->has_location) lines.push_back(image_->location_text());
+    if (cfg_.overlay_view) {
+        const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
+        std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
+        if (showing_preview_) line += "  ·  embedded preview";
+        else if (image_->linear) {
+            char ev[32];
+            std::snprintf(ev, sizeof ev, "%+.2f EV", gtk_range_get_value(GTK_RANGE(exposure_)));
+            line += std::string("  ·  developed  ·  ") + ev;
+        }
+        lines.push_back(line);
+    }
+    return lines;
+}
+
 void App::refresh_metadata() {
     if (!metadata_ || !metadata_->visible()) return;
     const std::string url = image_ && image_->has_location ? cfg_.map_link(image_->latitude, image_->longitude) : "";
@@ -982,6 +1057,7 @@ void App::update_status() {
         gtk_spinner_stop(GTK_SPINNER(spinner_));
         gtk_widget_hide(spinner_);
     }
+    view_->set_overlay(overlay_lines());
     gtk_label_set_text(GTK_LABEL(status_left_), left.c_str());
     gtk_label_set_text(GTK_LABEL(status_center_), center.c_str());
     gtk_label_set_text(GTK_LABEL(status_right_), right.c_str());

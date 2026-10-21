@@ -7,6 +7,8 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
 
 struct Config;
 
@@ -27,6 +29,7 @@ public:
     void set_fullscreen(bool on);
     void config_changed();
     void image_changed();                            // pixels were rewritten in place
+    void set_overlay(std::vector<std::string> lines);   // info drawn over the image (fullscreen HUD)
 
     enum class ZoomMode { Fit, Manual };
     ZoomMode zoom_mode() const { return mode_; }
@@ -69,6 +72,7 @@ private:
     gboolean on_scroll(GdkEventScroll* e);
 
     const Config& cfg_;
+    std::vector<std::string> overlay_;
     GtkWidget* area_ = nullptr;
     std::shared_ptr<Image> image_;
     cairo_surface_t* surface_ = nullptr;     // wraps image_->pixels

@@ -36,6 +36,10 @@ IrfanView. GTK3, C++20, and the system's own format libraries.
 Settings live in `~/.config/ifritview/ifritview.conf` (a GKeyFile), including
 the list of extensions considered when cycling through a folder.
 
+In fullscreen a small info overlay can show categories of metadata (file,
+format, shot, location, view); Settings → Viewing picks the categories,
+colour and size, and whether it also shows in the window.
+
 ## Formats
 
 | Format | Library |

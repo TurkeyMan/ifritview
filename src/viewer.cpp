@@ -142,6 +142,11 @@ void ImageView::clear_selection() {
     if (on_selection_changed) on_selection_changed();
 }
 
+void ImageView::set_overlay(std::vector<std::string> lines) {
+    overlay_ = std::move(lines);
+    gtk_widget_queue_draw(area_);
+}
+
 void ImageView::config_changed() {
     drop_caches();
     layout();
@@ -310,6 +315,30 @@ void ImageView::draw(cairo_t* cr) {
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
     cairo_paint(cr);
     cairo_restore(cr);
+
+    // Info overlay: small text in a contrasting colour over a faint backdrop.
+    if (!overlay_.empty() && (fullscreen_ || cfg_.overlay_windowed)) {
+        std::string text;
+        for (const std::string& l : overlay_) text += (text.empty() ? "" : "\n") + l;
+        PangoLayout* layout = pango_cairo_create_layout(cr);
+        PangoFontDescription* font = pango_font_description_from_string("Sans");
+        pango_font_description_set_size(font, cfg_.overlay_font_pt * PANGO_SCALE * scale);   // device pixels
+        pango_layout_set_font_description(layout, font);
+        pango_font_description_free(font);
+        pango_layout_set_text(layout, text.c_str(), -1);
+        int tw = 0, th = 0;
+        pango_layout_get_pixel_size(layout, &tw, &th);
+        const double pad = 10.0 * scale, margin = 16.0 * scale;
+        cairo_set_source_rgba(cr, 0, 0, 0, 0.45);
+        cairo_rectangle(cr, margin, margin, tw + 2 * pad, th + 2 * pad);
+        cairo_fill(cr);
+        GdkRGBA colour;
+        if (!gdk_rgba_parse(&colour, cfg_.overlay_color.c_str())) gdk_rgba_parse(&colour, "#a6d96a");
+        gdk_cairo_set_source_rgba(cr, &colour);
+        cairo_move_to(cr, margin + pad, margin + pad);
+        pango_cairo_show_layout(cr, layout);
+        g_object_unref(layout);
+    }
 
     if (has_selection_) {
         // Marching-ants style rectangle: a white line with black dashes on top.

@@ -15,6 +15,7 @@ const char* kView = "view";
 const char* kControlsGroup = "controls";
 const char* kFullscreenControlsGroup = "controls_fullscreen";
 const char* kMaps = "maps";
+const char* kOverlay = "overlay";
 
 bool get_bool(GKeyFile* kf, const char* group, const char* key, bool fallback) {
     GError* err = nullptr;
@@ -109,6 +110,14 @@ void Config::load() {
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
+    overlay_file = get_bool(kf, kOverlay, "file", overlay_file);
+    overlay_format = get_bool(kf, kOverlay, "format", overlay_format);
+    overlay_shot = get_bool(kf, kOverlay, "shot", overlay_shot);
+    overlay_location = get_bool(kf, kOverlay, "location", overlay_location);
+    overlay_view = get_bool(kf, kOverlay, "view", overlay_view);
+    overlay_windowed = get_bool(kf, kOverlay, "windowed", overlay_windowed);
+    overlay_color = get_string(kf, kOverlay, "color", overlay_color);
+    overlay_font_pt = std::clamp(get_int(kf, kOverlay, "font_pt", overlay_font_pt), 6, 40);
     map_url = get_string(kf, kMaps, "url", map_url);
     if (map_url.find("{lat}") == std::string::npos || map_url.find("{lon}") == std::string::npos)
         map_url = "https://www.google.com/maps?q={lat},{lon}";
@@ -152,6 +161,14 @@ bool Config::save() const {
         g_key_file_set_string(kf, kFullscreenControlsGroup, c.key, action_info(fullscreen_controls[size_t(c.id)]).key);
     }
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
+    g_key_file_set_boolean(kf, kOverlay, "file", overlay_file);
+    g_key_file_set_boolean(kf, kOverlay, "format", overlay_format);
+    g_key_file_set_boolean(kf, kOverlay, "shot", overlay_shot);
+    g_key_file_set_boolean(kf, kOverlay, "location", overlay_location);
+    g_key_file_set_boolean(kf, kOverlay, "view", overlay_view);
+    g_key_file_set_boolean(kf, kOverlay, "windowed", overlay_windowed);
+    g_key_file_set_string(kf, kOverlay, "color", overlay_color.c_str());
+    g_key_file_set_integer(kf, kOverlay, "font_pt", overlay_font_pt);
 
     const std::string p = path();
     gchar* dir = g_path_get_dirname(p.c_str());

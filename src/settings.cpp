@@ -36,6 +36,8 @@ struct Widgets {
     GtkWidget* checkerboard;
     GtkWidget* background;
     GtkWidget* fullscreen_background;
+    GtkWidget* ov_file; GtkWidget* ov_format; GtkWidget* ov_shot; GtkWidget* ov_location; GtkWidget* ov_view; GtkWidget* ov_windowed;
+    GtkWidget* ov_color; GtkWidget* ov_font;
     GtkWidget* extensions;   // GtkTextView
     GtkWidget* map_provider;
     GtkWidget* map_url;
@@ -206,6 +208,18 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w) {
     add_row(grid, row, "Window", w.background);
     w.fullscreen_background = color_button(cfg.fullscreen_background);
     add_row(grid, row, "Fullscreen", w.fullscreen_background);
+
+    add_heading(grid, row, "Fullscreen info overlay");
+    w.ov_file = add_check(grid, row, "File: name, position in folder, size, date", cfg.overlay_file);
+    w.ov_format = add_check(grid, row, "Format: dimensions, depth, codec details, colour profile", cfg.overlay_format);
+    w.ov_shot = add_check(grid, row, "Shot: camera, lens, aperture, shutter, ISO, focal length", cfg.overlay_shot);
+    w.ov_location = add_check(grid, row, "Location", cfg.overlay_location);
+    w.ov_view = add_check(grid, row, "View: zoom, raw state, exposure", cfg.overlay_view);
+    w.ov_windowed = add_check(grid, row, "Also show in the window, not only in fullscreen", cfg.overlay_windowed);
+    w.ov_color = color_button(cfg.overlay_color);
+    add_row(grid, row, "Text colour", w.ov_color);
+    w.ov_font = spin(cfg.overlay_font_pt, 6, 40, 1);
+    add_row(grid, row, "Text size (pt)", w.ov_font);
     return grid;
 }
 
@@ -354,6 +368,14 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.checkerboard = checked(w.checkerboard);
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
+    cfg.overlay_file = checked(w.ov_file);
+    cfg.overlay_format = checked(w.ov_format);
+    cfg.overlay_shot = checked(w.ov_shot);
+    cfg.overlay_location = checked(w.ov_location);
+    cfg.overlay_view = checked(w.ov_view);
+    cfg.overlay_windowed = checked(w.ov_windowed);
+    cfg.overlay_color = color_hex(w.ov_color);
+    cfg.overlay_font_pt = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.ov_font));
     cfg.extensions = parse_extensions(get_text_view(w.extensions));
     const std::string url = gtk_entry_get_text(GTK_ENTRY(w.map_url));
     if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos) cfg.map_url = url;
