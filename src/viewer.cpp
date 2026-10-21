@@ -53,6 +53,7 @@ void ImageView::cancel_deferred_click()
 
 ImageView::~ImageView()
 {
+    end_motion();
     cancel_deferred_click();
     drop_caches();
     if (surface_)
@@ -108,6 +109,7 @@ void ImageView::view_size(int& w, int& h) const
 
 void ImageView::set_image(std::shared_ptr<Image> image)
 {
+    end_motion();
     drop_caches();
     if (surface_)
     {
@@ -251,13 +253,17 @@ void ImageView::clamp_pan()
         pan_y_ = (vh - sh) / 2;
     else
         pan_y_ = std::clamp(pan_y_, vh - sh, 0.0);
-    // Integer origins keep 1:1 rendering crisp.
-    pan_x_ = std::floor(pan_x_);
-    pan_y_ = std::floor(pan_y_);
+    // Integer origins keep 1:1 rendering crisp; motion wants sub-pixel steps.
+    if (!motion_.active)
+    {
+        pan_x_ = std::floor(pan_x_);
+        pan_y_ = std::floor(pan_y_);
+    }
 }
 
 void ImageView::set_zoom(double z, double anchor_x, double anchor_y)
 {
+    end_motion();
     z = std::clamp(z, kMinZoom, kMaxZoom);
     if (std::fabs(z - 1.0) < 0.03)
         z = 1.0;
@@ -280,6 +286,60 @@ void ImageView::zoom_step_at(int direction, double x, double y)
     set_zoom(zoom_ * factor, x, y);
 }
 
+void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms)
+{
+    if (!image_)
+        return;
+    end_motion();
+    motion_.active = true;
+    motion_.z0 = zoom0;
+    motion_.z1 = zoom1;
+    motion_.cx0 = cx0;
+    motion_.cy0 = cy0;
+    motion_.cx1 = cx1;
+    motion_.cy1 = cy1;
+    motion_.z_cache = std::max(zoom0, zoom1);
+    motion_.start_us = g_get_monotonic_time();
+    motion_.duration_us = gint64(duration_ms) * 1000;
+    mode_ = ZoomMode::Manual;
+    scaled_surface(motion_.z_cache);  // build the intermediate now, not on the first frame
+    motion_frame(motion_.start_us);
+    motion_.tick = gtk_widget_add_tick_callback(
+        area_,
+        +[](GtkWidget*, GdkFrameClock* clock, gpointer self) -> gboolean {
+            auto* view = static_cast<ImageView*>(self);
+            if (!view->motion_.active)
+                return G_SOURCE_REMOVE;
+            view->motion_frame(gdk_frame_clock_get_frame_time(clock));
+            return G_SOURCE_CONTINUE;
+        },
+        this, nullptr);
+}
+
+void ImageView::end_motion()
+{
+    if (motion_.tick)
+        gtk_widget_remove_tick_callback(area_, motion_.tick);
+    motion_.tick = 0;
+    motion_.active = false;
+}
+
+void ImageView::motion_frame(gint64 now_us)
+{
+    double t = motion_.duration_us > 0 ? double(now_us - motion_.start_us) / motion_.duration_us : 1.0;
+    t = std::clamp(t, 0.0, 1.0);
+    const double e = t * t * (3 - 2 * t);  // smoothstep
+    int vw, vh;
+    view_size(vw, vh);
+    zoom_ = motion_.z0 + (motion_.z1 - motion_.z0) * e;
+    const double cx = motion_.cx0 + (motion_.cx1 - motion_.cx0) * e;
+    const double cy = motion_.cy0 + (motion_.cy1 - motion_.cy0) * e;
+    pan_x_ = vw / 2.0 - cx * zoom_;
+    pan_y_ = vh / 2.0 - cy * zoom_;
+    clamp_pan();
+    gtk_widget_queue_draw(area_);
+}
+
 void ImageView::zoom_step(int direction)
 {
     int vw, vh;
@@ -296,6 +356,7 @@ void ImageView::zoom_original()
 
 void ImageView::zoom_fit()
 {
+    end_motion();
     mode_ = ZoomMode::Fit;
     layout();
     zoom_changed();
@@ -326,22 +387,22 @@ cairo_pattern_t* ImageView::checker_pattern(int scale)
 
 // Downscaling a many-megapixel image with a quality filter on every redraw
 // is too slow for smooth panning, so render it once per zoom level.
-cairo_surface_t* ImageView::scaled_surface()
+cairo_surface_t* ImageView::scaled_surface(double zoom)
 {
-    if (scaled_ && scaled_zoom_ == zoom_)
+    if (scaled_ && scaled_zoom_ == zoom)
         return scaled_;
     drop_caches();
-    const int w = std::max(1, int(std::ceil(image_->width * zoom_)));
-    const int h = std::max(1, int(std::ceil(image_->height * zoom_)));
+    const int w = std::max(1, int(std::ceil(image_->width * zoom)));
+    const int h = std::max(1, int(std::ceil(image_->height * zoom)));
     scaled_ = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
     cairo_t* c = cairo_create(scaled_);
-    cairo_scale(c, zoom_, zoom_);
+    cairo_scale(c, zoom, zoom);
     cairo_set_source_surface(c, surface_, 0, 0);
     cairo_pattern_set_filter(cairo_get_source(c), CAIRO_FILTER_GOOD);
     cairo_pattern_set_extend(cairo_get_source(c), CAIRO_EXTEND_PAD);
     cairo_paint(c);
     cairo_destroy(c);
-    scaled_zoom_ = zoom_;
+    scaled_zoom_ = zoom;
     return scaled_;
 }
 
@@ -368,9 +429,19 @@ void ImageView::draw(cairo_t* cr)
         cairo_paint(cr);
     }
     cairo_filter_t filter = CAIRO_FILTER_NEAREST;
-    if (zoom_ < 1.0 && cfg_.smooth_downscale)
+    const gint64 t_draw = g_get_monotonic_time();
+    if (motion_.active)
     {
-        cairo_set_source_surface(cr, scaled_surface(), pan_x_, pan_y_);
+        // Pre-scaled to the motion's largest zoom; each frame only shrinks it a little.
+        cairo_surface_t* base = scaled_surface(motion_.z_cache);
+        cairo_translate(cr, pan_x_, pan_y_);
+        cairo_scale(cr, zoom_ / motion_.z_cache, zoom_ / motion_.z_cache);
+        cairo_set_source_surface(cr, base, 0, 0);
+        filter = CAIRO_FILTER_BILINEAR;
+    }
+    else if (zoom_ < 1.0 && cfg_.smooth_downscale)
+    {
+        cairo_set_source_surface(cr, scaled_surface(zoom_), pan_x_, pan_y_);
     }
     else
     {
@@ -384,6 +455,8 @@ void ImageView::draw(cairo_t* cr)
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
     cairo_paint(cr);
     cairo_restore(cr);
+    if (motion_.active)
+        frame_ms_ = (g_get_monotonic_time() - t_draw) / 1000.0;
 
     // Info overlay: small text in a contrasting colour over a faint backdrop,
     // one block per category with a thin rule between them.

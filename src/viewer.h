@@ -42,6 +42,14 @@ public:
     double zoom() const { return zoom_; }
     void zoom_fit();
     void zoom_original();
+    // Slideshow motion: zoom/pan smoothly between two framings over
+    // `duration_ms`, drawing from a surface pre-scaled to the larger zoom so
+    // each frame is a cheap bilinear blit. Centres are image coordinates.
+    void begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms);
+    void end_motion();
+    bool motion_active() const { return motion_.active; }
+    double frame_ms() const { return frame_ms_; }  // last measured draw cost
+
     void zoom_step(int direction);  // around the view centre
     int scale_factor() const;
     void view_size(int& w, int& h) const;  // device pixels
@@ -69,7 +77,7 @@ private:
     void drag_to(Action a, double x, double y);
     void run_wheel(Action a, int direction, double x, double y);
     void draw(cairo_t* cr);
-    cairo_surface_t* scaled_surface();
+    cairo_surface_t* scaled_surface(double zoom);
     cairo_pattern_t* checker_pattern(int scale);
     void drop_caches();
     void zoom_changed();
@@ -85,6 +93,16 @@ private:
     cairo_surface_t* scaled_ = nullptr;   // cached downscaled rendering
     double scaled_zoom_ = 0;
     cairo_pattern_t* checker_ = nullptr;
+    struct Motion
+    {
+        bool active = false;
+        double z0 = 1, z1 = 1, cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+        double z_cache = 1;
+        gint64 start_us = 0, duration_us = 0;
+        guint tick = 0;
+    } motion_;
+    double frame_ms_ = 0;
+    void motion_frame(gint64 now_us);
     const char* cursor_name_ = nullptr;  // currently set named cursor, null for the default
     int checker_scale_ = 0;
 

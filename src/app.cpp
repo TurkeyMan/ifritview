@@ -262,6 +262,7 @@ void App::build_ui()
     tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen);
+    tool_button("media-playback-start-symbolic", "Slideshow (S): fullscreen, timed, with gentle motion", &App::toggle_slideshow);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     crop_button_ = tool_button("edit-cut-symbolic", "Crop to selection (Ctrl+Y)", &App::crop_to_selection);
     gtk_widget_set_sensitive(crop_button_, FALSE);
@@ -460,6 +461,103 @@ void App::transform(int exif_orientation)
     fit_window_to_image();
     update_status();
     refresh_metadata();
+}
+
+// ------------------------------------------------------------ slideshow
+
+void App::toggle_slideshow()
+{
+    if (slideshow_)
+    {
+        stop_slideshow();
+        return;
+    }
+    if (folder_.empty())
+        return;
+    slideshow_ = true;
+    slideshow_order_.clear();
+    if (cfg_.slideshow_shuffle)
+    {
+        for (int i = 0; i < folder_.count(); ++i)
+            slideshow_order_.push_back(i);
+        for (int i = folder_.count() - 1; i > 0; --i)
+            std::swap(slideshow_order_[i], slideshow_order_[g_random_int_range(0, i + 1)]);
+        slideshow_pos_ = 0;
+        if (folder_.go(slideshow_order_[0]))
+            load_current();
+    }
+    if (!fullscreen_)
+        toggle_fullscreen();
+    slideshow_start_slide();
+}
+
+void App::stop_slideshow()
+{
+    slideshow_ = false;
+    if (slideshow_timer_)
+        g_source_remove(slideshow_timer_);
+    slideshow_timer_ = 0;
+    view_->end_motion();
+    view_->zoom_fit();
+}
+
+// One slide: a random gentle framing change over the slide's duration, then
+// on to the next image. The motion stays within the image and above fit.
+void App::slideshow_start_slide()
+{
+    if (!slideshow_)
+        return;
+    if (slideshow_timer_)
+        g_source_remove(slideshow_timer_);
+    const int ms = int(cfg_.slideshow_seconds * 1000);
+    if (image_ && cfg_.slideshow_motion && cfg_.slideshow_zoom > 0)
+    {
+        int vw, vh;
+        view_->view_size(vw, vh);
+        const double w = image_->width, h = image_->height;
+        const double fit = std::min(vw / w, vh / h);
+        const double zmax = fit * (1.0 + cfg_.slideshow_zoom);
+        const bool in = g_random_boolean();
+        const double z0 = in ? fit * (1.0 + cfg_.slideshow_zoom * 0.15) : zmax, z1 = in ? zmax : fit * (1.0 + cfg_.slideshow_zoom * 0.15);
+        auto centre = [&](double z, double& cx, double& cy) {
+            // Keep the viewport inside the image at this zoom; pick a point in the allowed band.
+            const double half_w = vw / (2 * z), half_h = vh / (2 * z);
+            const double lo_x = std::min(half_w, w - half_w), hi_x = std::max(half_w, w - half_w);
+            const double lo_y = std::min(half_h, h - half_h), hi_y = std::max(half_h, h - half_h);
+            cx = lo_x + (hi_x - lo_x) * g_random_double();
+            cy = lo_y + (hi_y - lo_y) * g_random_double();
+        };
+        double cx0, cy0, cx1, cy1;
+        centre(z0, cx0, cy0);
+        centre(z1, cx1, cy1);
+        view_->begin_motion(z0, z1, cx0, cy0, cx1, cy1, ms);
+    }
+    slideshow_timer_ = g_timeout_add(guint(ms), +[](gpointer self) -> gboolean {
+        auto* app = static_cast<App*>(self);
+        app->slideshow_timer_ = 0;
+        app->slideshow_advance();
+        return G_SOURCE_REMOVE;
+    }, this);
+}
+
+void App::slideshow_advance()
+{
+    if (!slideshow_)
+        return;
+    if (g_getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "slideshow: last frame cost %.1f ms\n", view_->frame_ms());
+    if (!slideshow_order_.empty())
+    {
+        slideshow_pos_ = (slideshow_pos_ + 1) % slideshow_order_.size();
+        if (folder_.go(slideshow_order_[slideshow_pos_]))
+            load_current();
+    }
+    else
+    {
+        if (!folder_.step(+1, true))
+            return;
+        load_current();
+    }
 }
 
 GSourceFunc App::animation_timer_callback()
@@ -911,6 +1009,10 @@ void App::on_loaded(Loader::Result& r)
     refresh_metadata();
     if (cfg_.animate && image_->animation)
         start_animation();
+    if (slideshow_ && !r.preview)
+        slideshow_start_slide();
+    else if (slideshow_ && r.preview && !image_->final_width)
+        slideshow_start_slide();
     const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
     const bool slider_moved = !r.preview && slider_pending_;  // the user set this on the preview of this very file
     slider_pending_ = false;
@@ -1285,6 +1387,8 @@ void App::on_window_state(GdkEventWindowState* e)
     if (fs == fullscreen_)
         return;
     fullscreen_ = fs;
+    if (!fs && slideshow_)
+        stop_slideshow();
     chrome_pending_ = true;
     view_->set_fullscreen(fs);
     gtk_widget_queue_resize(window_);
@@ -1508,6 +1612,8 @@ gboolean App::on_key(GdkEventKey* e)
             toggle_fullscreen();
             return TRUE;
         case GDK_KEY_Escape:
+            if (slideshow_)
+                stop_slideshow();
             if (fullscreen_)
                 toggle_fullscreen();
             else
@@ -1584,11 +1690,10 @@ gboolean App::on_key(GdkEventKey* e)
         case GDK_KEY_s:
         case GDK_KEY_S:
             if (ctrl)
-            {
                 save_as();
-                return TRUE;
-            }
-            break;
+            else
+                toggle_slideshow();
+            return TRUE;
         case GDK_KEY_i:
         case GDK_KEY_I:
             toggle_metadata();

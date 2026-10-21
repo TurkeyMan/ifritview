@@ -93,6 +93,7 @@ public:
     void copy_to_clipboard();
     void transform(int exif_orientation);  // rotate/mirror the displayed image
     void toggle_animation();
+    void toggle_slideshow();
     void set_exposure(double ev);
 
 private:
@@ -146,6 +147,13 @@ private:
 
     bool fullscreen_ = false;
     bool chrome_pending_ = false;  // toolbar/footer visibility to apply on the next window allocation
+    bool slideshow_ = false;
+    guint slideshow_timer_ = 0;
+    std::vector<int> slideshow_order_;  // shuffled indices when shuffling
+    size_t slideshow_pos_ = 0;
+    void slideshow_start_slide();
+    void slideshow_advance();
+    void stop_slideshow();
     guint animation_timer_ = 0;  // next-frame timeout while an animation plays
     size_t animation_frame_ = 0;
     bool animation_playing_ = false;

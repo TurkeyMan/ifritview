@@ -30,6 +30,12 @@ struct Config
     bool fullscreen_upscale = false;  // scale small images up to fill the screen in fullscreen
     bool checkerboard = true;         // show transparency over a checkerboard
     bool animate = true;  // play animated GIF/WebP
+
+    // Slideshow
+    double slideshow_seconds = 5.0;
+    bool slideshow_motion = true;      // gentle pan/zoom on each slide
+    double slideshow_zoom = 0.08;      // how far the motion zooms, as a fraction
+    bool slideshow_shuffle = false;
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
 

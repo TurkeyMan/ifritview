@@ -128,6 +128,12 @@ void Config::load()
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     animate = get_bool(kf, kView, "animate", animate);
+    slideshow_seconds = std::clamp(g_key_file_get_double(kf, kView, "slideshow_seconds", nullptr), 0.5, 600.0);
+    if (!g_key_file_has_key(kf, kView, "slideshow_seconds", nullptr))
+        slideshow_seconds = 5.0;
+    slideshow_motion = get_bool(kf, kView, "slideshow_motion", slideshow_motion);
+    slideshow_zoom = std::clamp(g_key_file_has_key(kf, kView, "slideshow_zoom", nullptr) ? g_key_file_get_double(kf, kView, "slideshow_zoom", nullptr) : slideshow_zoom, 0.0, 0.5);
+    slideshow_shuffle = get_bool(kf, kView, "slideshow_shuffle", slideshow_shuffle);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
     overlay_file = get_bool(kf, kOverlay, "file", overlay_file);
@@ -183,6 +189,10 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_boolean(kf, kView, "animate", animate);
+    g_key_file_set_double(kf, kView, "slideshow_seconds", slideshow_seconds);
+    g_key_file_set_boolean(kf, kView, "slideshow_motion", slideshow_motion);
+    g_key_file_set_double(kf, kView, "slideshow_zoom", slideshow_zoom);
+    g_key_file_set_boolean(kf, kView, "slideshow_shuffle", slideshow_shuffle);
     g_key_file_set_string(kf, kView, "background", background.c_str());
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
     for (const ControlInfo& c : kControls)

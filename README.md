@@ -30,6 +30,7 @@ IrfanView. GTK3, C++20, and the system's own format libraries.
 | H / V | mirror horizontally / vertically |
 | F5 | rescan folder and reload |
 | A | pause / resume an animation |
+| S | slideshow: fullscreen, timed, gentle pan/zoom |
 | Ctrl+O | open file |
 | Ctrl+P | settings |
 | Ctrl+Q | quit |

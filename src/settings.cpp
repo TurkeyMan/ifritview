@@ -42,6 +42,10 @@ struct Widgets
     GtkWidget* fullscreen_upscale;
     GtkWidget* checkerboard;
     GtkWidget* animate;
+    GtkWidget* ss_seconds;
+    GtkWidget* ss_motion;
+    GtkWidget* ss_zoom;
+    GtkWidget* ss_shuffle;
     GtkWidget* background;
     GtkWidget* fullscreen_background;
     GtkWidget* ov_file;
@@ -288,6 +292,17 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     w.fullscreen_background = color_button(cfg.fullscreen_background);
     add_row(grid, row, "Fullscreen", w.fullscreen_background);
 
+    add_heading(grid, row, "Slideshow");
+    w.ss_seconds = gtk_spin_button_new_with_range(0.5, 600, 0.5);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(w.ss_seconds), 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w.ss_seconds), cfg.slideshow_seconds);
+    add_row(grid, row, "Seconds per image", w.ss_seconds);
+    w.ss_motion = add_check(grid, row, "Gentle pan and zoom on each image", cfg.slideshow_motion);
+    w.ss_zoom = gtk_spin_button_new_with_range(0, 50, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(w.ss_zoom), cfg.slideshow_zoom * 100);
+    add_row(grid, row, "Motion amount (%)", w.ss_zoom);
+    w.ss_shuffle = add_check(grid, row, "Shuffle", cfg.slideshow_shuffle);
+
     add_heading(grid, row, "Fullscreen info overlay");
     w.ov_file = add_check(grid, row, "File: name, position in folder, size, date", cfg.overlay_file);
     w.ov_format = add_check(grid, row, "Format: dimensions, depth, codec details, colour profile", cfg.overlay_format);
@@ -469,6 +484,10 @@ void apply(const Widgets& w, Config& cfg)
     cfg.fullscreen_upscale = checked(w.fullscreen_upscale);
     cfg.checkerboard = checked(w.checkerboard);
     cfg.animate = checked(w.animate);
+    cfg.slideshow_seconds = gtk_spin_button_get_value(GTK_SPIN_BUTTON(w.ss_seconds));
+    cfg.slideshow_motion = checked(w.ss_motion);
+    cfg.slideshow_zoom = gtk_spin_button_get_value(GTK_SPIN_BUTTON(w.ss_zoom)) / 100.0;
+    cfg.slideshow_shuffle = checked(w.ss_shuffle);
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
     cfg.overlay_file = checked(w.ov_file);

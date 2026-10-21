@@ -120,6 +120,8 @@ gboolean run_script_step(gpointer p)
         app.copy_to_clipboard();
     else if (step == "xmp")
         app.toggle_xmp();
+    else if (step == "slideshow")
+        app.toggle_slideshow();
     else if (step == "rotl")
         app.transform(8);
     else if (step == "rotr")
