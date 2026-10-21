@@ -73,6 +73,25 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error) {
 #endif
 }
 
+// The camera's own framing: the sensor readout carries a border the camera
+// never shows (its JPEG is cut from the "inset" rectangle). Apply that
+// rectangle as LibRaw's crop box so the develop matches the JPEG's framing.
+bool apply_camera_crop(LibRaw& raw) {
+    if (!decode_options().raw_camera_crop) return false;
+    const auto& sz = raw.imgdata.sizes;
+    const auto& c = sz.raw_inset_crops[0];
+    if (c.cwidth == 0 || c.cheight == 0 || c.cleft == 0xFFFF || c.ctop == 0xFFFF) return false;
+    // The inset is in raw-frame coordinates; the crop box is relative to the active area.
+    const int left = int(c.cleft) - int(sz.left_margin), top = int(c.ctop) - int(sz.top_margin);
+    if (left < 0 || top < 0 || left + int(c.cwidth) > int(sz.width) || top + int(c.cheight) > int(sz.height)) return false;
+    if (c.cwidth == sz.width && c.cheight == sz.height) return false;   // nothing to crop
+    raw.imgdata.params.cropbox[0] = unsigned(left);
+    raw.imgdata.params.cropbox[1] = unsigned(top);
+    raw.imgdata.params.cropbox[2] = c.cwidth;
+    raw.imgdata.params.cropbox[3] = c.cheight;
+    return true;
+}
+
 // Derive the camera's tone curve from its own JPEG: match the luminance
 // distribution of our linear render to the preview's. Brightness and
 // contrast then agree with what the camera showed; colour rendering is
@@ -120,6 +139,7 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.gamm[0] = 1.0;
     raw.imgdata.params.gamm[1] = 1.0;
     raw.imgdata.params.no_auto_bright = 1;
+    const bool framed = apply_camera_crop(raw);
     if (const char* q = g_getenv("IFRIT_RAW_QUAL")) raw.imgdata.params.user_qual = std::atoi(q);
     const bool timing = g_getenv("IFRIT_RAW_TIMING") != nullptr;
     gint64 t0 = g_get_monotonic_time();
@@ -186,6 +206,10 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     out.linear = std::move(linear);
     out.retone(0.0);
     lap("retone");
+    if (framed) {
+        const auto& c = raw.imgdata.sizes.raw_inset_crops[0];
+        out.add("Raw", "Camera framing", std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " + std::to_string(c.ctop) + ")");
+    }
     return true;
 }
 
@@ -206,6 +230,7 @@ bool preview(const std::string& path, Image& out) {
     out.exposure_bias = bias;
     // What the develop will produce, so the window can be sized for it now.
     raw.imgdata.params.half_size = decode_options().raw_mode == DecodeOptions::RawMode::Half ? 1 : 0;
+    apply_camera_crop(raw);
     if (raw.adjust_sizes_info_only() == LIBRAW_SUCCESS) {
         out.final_width = raw.imgdata.sizes.iwidth;
         out.final_height = raw.imgdata.sizes.iheight;

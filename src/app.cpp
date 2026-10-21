@@ -115,6 +115,7 @@ DecodeOptions decode_options_for(const Config& cfg) {
     DecodeOptions o;
     using RawMode = DecodeOptions::RawMode;
     o.raw_mode = cfg.raw_mode == "full" ? RawMode::Full : cfg.raw_mode == "preview" ? RawMode::Preview : RawMode::Half;
+    o.raw_camera_crop = cfg.raw_camera_crop;
     return o;
 }
 
@@ -897,6 +898,7 @@ void App::open_dialog() {
 void App::open_settings(const char* page) {
     const std::string old_raw_mode = cfg_.raw_mode;
     const bool old_apply_xmp = cfg_.apply_xmp_edits;
+    const bool old_raw_crop = cfg_.raw_camera_crop;
     if (!run_settings_dialog(GTK_WINDOW(window_), cfg_, page)) return;
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
@@ -906,7 +908,7 @@ void App::open_settings(const char* page) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
     view_->config_changed();
     refresh_metadata();
-    const bool reload = (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) ||
+    const bool reload = ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->format.find("RAW") != std::string::npos) ||
                         (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
     if (reload) {
         cache_.erase(image_path_);

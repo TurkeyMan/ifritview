@@ -15,6 +15,7 @@ struct Config {
     int prefetch_behind = 1;
     int cache_megabytes = 0;               // decoded image cache; 0 = a share of free memory
     std::string raw_mode = "full";         // full | half | preview; half bins 2x2 (fast, no demosaic)
+    bool raw_camera_crop = true;           // crop the sensor margins to the camera's own framing
     bool apply_xmp_edits = true;           // honour exposure/crop/orientation from XMP
 
     // Window

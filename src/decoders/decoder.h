@@ -23,6 +23,7 @@ struct Decoder {
 struct DecodeOptions {
     enum class RawMode { Full, Half, Preview };
     RawMode raw_mode = RawMode::Full;
+    bool raw_camera_crop = true;   // frame as the camera did, dropping the sensor margins it never shows
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();

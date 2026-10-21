@@ -29,6 +29,7 @@ struct Widgets {
     GtkWidget* cache_mb;
     GtkWidget* raw_mode;
     GtkWidget* apply_xmp;
+    GtkWidget* raw_crop;
     GtkWidget* smooth_upscale;
     GtkWidget* smooth_downscale;
     GtkWidget* fullscreen_upscale;
@@ -167,6 +168,7 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "preview", "Embedded JPEG only (never develop)");
     gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.raw_mode), cfg.raw_mode.c_str());
     add_row(grid, row, "Decode", w.raw_mode);
+    w.raw_crop = add_check(grid, row, "Frame as the camera did (crop the sensor margins the camera never shows)", cfg.raw_camera_crop);
     w.apply_xmp = add_check(grid, row, "Apply edits from XMP sidecars (exposure, crop, rotation)", cfg.apply_xmp_edits);
 
     add_heading(grid, row, "Maps");
@@ -345,6 +347,7 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.cache_megabytes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.cache_mb));
     if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.raw_mode))) cfg.raw_mode = id;
     cfg.apply_xmp_edits = checked(w.apply_xmp);
+    cfg.raw_camera_crop = checked(w.raw_crop);
     cfg.smooth_upscale = checked(w.smooth_upscale);
     cfg.smooth_downscale = checked(w.smooth_downscale);
     cfg.fullscreen_upscale = checked(w.fullscreen_upscale);
