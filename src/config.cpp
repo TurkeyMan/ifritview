@@ -13,6 +13,7 @@ const char* kFiles = "files";
 const char* kWindow = "window";
 const char* kView = "view";
 const char* kControlsGroup = "controls";
+const char* kFullscreenControlsGroup = "controls_fullscreen";
 const char* kMaps = "maps";
 
 bool get_bool(GKeyFile* kf, const char* group, const char* key, bool fallback) {
@@ -112,6 +113,9 @@ void Config::load() {
         Action& a = controls[size_t(c.id)];
         a = action_from_key(get_string(kf, kControlsGroup, c.key, action_info(a).key), a);
         if (!action_fits(a, c.kind)) a = Action::None;
+        Action& f = fullscreen_controls[size_t(c.id)];
+        f = action_from_key(get_string(kf, kFullscreenControlsGroup, c.key, action_info(f).key), f);
+        if (!action_fits(f, c.kind)) f = Action::None;
     }
     g_key_file_free(kf);
 }
@@ -137,8 +141,10 @@ bool Config::save() const {
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_string(kf, kView, "background", background.c_str());
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
-    for (const ControlInfo& c : kControls)
+    for (const ControlInfo& c : kControls) {
         g_key_file_set_string(kf, kControlsGroup, c.key, action_info(controls[size_t(c.id)]).key);
+        g_key_file_set_string(kf, kFullscreenControlsGroup, c.key, action_info(fullscreen_controls[size_t(c.id)]).key);
+    }
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
 
     const std::string p = path();

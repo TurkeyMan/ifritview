@@ -32,9 +32,12 @@ struct Config {
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;
 
-    // Mouse
+    // Mouse: one binding set for windowed mode, another for fullscreen.
     Bindings controls = default_bindings();
-    Action control(Control c) const { return controls[size_t(c)]; }
+    Bindings fullscreen_controls = default_fullscreen_bindings();
+    Action control(Control c, bool fullscreen = false) const {
+        return (fullscreen ? fullscreen_controls : controls)[size_t(c)];
+    }
 
     static std::string path();
     void load();                           // missing file or keys leave the defaults

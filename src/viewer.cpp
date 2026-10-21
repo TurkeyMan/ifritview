@@ -67,7 +67,7 @@ Control drag_control(unsigned button);
 // hand while panning.
 void ImageView::update_cursor(double x, double y) {
     const char* want = nullptr;
-    if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_)) == Action::Pan) {
+    if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_), fullscreen_) == Action::Pan) {
         want = "grabbing";
     } else if (has_selection_ && image_ && !pressed_button_) {
         double ix, iy;
@@ -378,7 +378,7 @@ void ImageView::run_click(Action a, double x, double y) {
 }
 
 void ImageView::begin_drag(Action a, double x, double y) {
-    if (a == Action::Select && image_ && !fullscreen_) {
+    if (a == Action::Select && image_) {
         double ix, iy;
         to_image(x, y, ix, iy);
         sel_anchor_x_ = std::clamp(ix, 0.0, double(image_->width));
@@ -389,7 +389,7 @@ void ImageView::begin_drag(Action a, double x, double y) {
 
 void ImageView::drag_to(Action a, double x, double y) {
     if (a == Action::Select) {
-        if (image_ && !fullscreen_) update_selection(x, y);
+        if (image_) update_selection(x, y);
     } else if (a == Action::Pan) {
         const int scale = scale_factor();
         pan_x_ += (x - drag_x_) * scale;
@@ -435,10 +435,14 @@ gboolean ImageView::on_button(GdkEventButton* e) {
     if (e->button < 1 || e->button > 3) return FALSE;
     // Fullscreen is for flicking through: plain left/right clicks have their
     // own bindings there, and there is no selecting.
-    if (fullscreen_ && e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_ && !drag_active_ && !suppress_click_ && e->button != 2) {
+    // In fullscreen a click is held back for the double-click interval when
+    // the same button also has a double-click action, so one gesture can't
+    // fire both.
+    if (fullscreen_ && e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_ && !drag_active_ && !suppress_click_ &&
+        cfg_.control(click_control(e->button, true), true) != Action::None) {
         pressed_button_ = 0;
         cancel_deferred_click();
-        deferred_action_ = cfg_.control(e->button == 1 ? Control::FullscreenLeftClick : Control::FullscreenRightClick);
+        deferred_action_ = cfg_.control(click_control(e->button, false), true);
         deferred_x_ = e->x;
         deferred_y_ = e->y;
         gint interval = 400;
@@ -454,7 +458,7 @@ gboolean ImageView::on_button(GdkEventButton* e) {
     if (e->type == GDK_2BUTTON_PRESS) {
         suppress_click_ = true;
         cancel_deferred_click();   // the first click of the pair never fires
-        run_click(cfg_.control(click_control(e->button, true)), e->x, e->y);
+        run_click(cfg_.control(click_control(e->button, true), fullscreen_), e->x, e->y);
     } else if (e->type == GDK_BUTTON_PRESS) {
         gtk_widget_grab_focus(area_);
         if (pressed_button_) return TRUE;  // a second button during a drag is ignored
@@ -466,8 +470,8 @@ gboolean ImageView::on_button(GdkEventButton* e) {
     } else if (e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_) {
         const unsigned button = pressed_button_;
         pressed_button_ = 0;
-        if (drag_active_) drag_to(cfg_.control(drag_control(button)), e->x, e->y);
-        else if (!suppress_click_) run_click(cfg_.control(click_control(button, false)), e->x, e->y);
+        if (drag_active_) drag_to(cfg_.control(drag_control(button), fullscreen_), e->x, e->y);
+        else if (!suppress_click_) run_click(cfg_.control(click_control(button, false), fullscreen_), e->x, e->y);
         drag_active_ = false;
         update_cursor(e->x, e->y);
         if (on_selection_changed) on_selection_changed();
@@ -480,7 +484,7 @@ gboolean ImageView::on_motion(GdkEventMotion* e) {
         update_cursor(e->x, e->y);
         return FALSE;
     }
-    const Action a = cfg_.control(drag_control(pressed_button_));
+    const Action a = cfg_.control(drag_control(pressed_button_), fullscreen_);
     if (!drag_active_) {
         if (std::hypot(e->x - press_x_, e->y - press_y_) < 4.0) return TRUE;
         drag_active_ = true;
@@ -512,6 +516,6 @@ gboolean ImageView::on_scroll(GdkEventScroll* e) {
     if (direction == 0) return TRUE;
     const Control c = (e->state & GDK_CONTROL_MASK) ? Control::CtrlWheel
                     : (e->state & GDK_SHIFT_MASK) ? Control::ShiftWheel : Control::Wheel;
-    run_wheel(cfg_.control(c), direction, e->x, e->y);
+    run_wheel(cfg_.control(c, fullscreen_), direction, e->x, e->y);
     return TRUE;
 }

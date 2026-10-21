@@ -37,6 +37,7 @@ struct Widgets {
     GtkWidget* map_provider;
     GtkWidget* map_url;
     std::array<GtkWidget*, size_t(Control::Count)> controls;
+    std::array<GtkWidget*, size_t(Control::Count)> fullscreen_controls;
 };
 
 GtkWidget* page_grid() {
@@ -262,37 +263,62 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w) {
     return box;
 }
 
+GtkWidget* action_combo(Kind kind, Action current) {
+    GtkWidget* combo = gtk_combo_box_text_new();
+    for (const ActionInfo& a : kActions)
+        if (action_fits(a.id, kind)) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), a.key, a.label);
+    gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), action_info(current).key);
+    return combo;
+}
+
 GtkWidget* build_controls(const Config& cfg, Widgets& w) {
     GtkWidget* grid = page_grid();
     int row = 0;
+    // Column headings
+    GtkWidget* h1 = gtk_label_new("Windowed");
+    GtkWidget* h2 = gtk_label_new("Fullscreen");
+    for (GtkWidget* h : {h1, h2}) {
+        PangoAttrList* attrs = pango_attr_list_new();
+        pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+        gtk_label_set_attributes(GTK_LABEL(h), attrs);
+        pango_attr_list_unref(attrs);
+    }
+    gtk_grid_attach(GTK_GRID(grid), h1, 1, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), h2, 2, row++, 1, 1);
+
     std::string group;
     for (const ControlInfo& c : kControls) {
-        // Group rows by button: "Left click", "Left drag"... share a heading.
-        std::string g = c.kind == Kind::Wheel ? "Wheel" : std::string(c.label).rfind("Fullscreen", 0) == 0 ? "Fullscreen"
-                                              : std::string(c.label).substr(0, std::string(c.label).find(' ')) + " button";
+        std::string g = c.kind == Kind::Wheel ? "Wheel" : std::string(c.label).substr(0, std::string(c.label).find(' ')) + " button";
         if (g != group) {
-            add_heading(grid, row, g.c_str());
+            add_heading(grid, row, g.c_str());   // spans the label column; the combos start one row down
             group = g;
         }
-        GtkWidget* combo = gtk_combo_box_text_new();
-        for (const ActionInfo& a : kActions)
-            if (action_fits(a.id, c.kind)) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), a.key, a.label);
-        gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), action_info(cfg.control(c.id)).key);
-        add_row(grid, row, c.label, combo);
-        w.controls[size_t(c.id)] = combo;
+        GtkWidget* label = gtk_label_new(c.label);
+        gtk_widget_set_halign(label, GTK_ALIGN_END);
+        gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+        w.controls[size_t(c.id)] = action_combo(c.kind, cfg.control(c.id, false));
+        w.fullscreen_controls[size_t(c.id)] = action_combo(c.kind, cfg.control(c.id, true));
+        gtk_grid_attach(GTK_GRID(grid), w.controls[size_t(c.id)], 1, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), w.fullscreen_controls[size_t(c.id)], 2, row++, 1, 1);
     }
+
     GtkWidget* reset = gtk_button_new_with_label("Reset to defaults");
     gtk_widget_set_halign(reset, GTK_ALIGN_END);
     gtk_widget_set_margin_top(reset, 12);
     using Combos = std::array<GtkWidget*, size_t(Control::Count)>;
+    struct ResetCtx { Combos* windowed; Combos* fullscreen; };
     auto reset_cb = +[](GtkWidget*, gpointer p) {
-        auto* combos = static_cast<Combos*>(p);
-        const Bindings defaults = default_bindings();
-        for (size_t i = 0; i < combos->size(); ++i)
-            gtk_combo_box_set_active_id(GTK_COMBO_BOX((*combos)[i]), action_info(defaults[i]).key);
+        auto* ctx = static_cast<ResetCtx*>(p);
+        const Bindings d = default_bindings(), f = default_fullscreen_bindings();
+        for (size_t i = 0; i < ctx->windowed->size(); ++i) {
+            gtk_combo_box_set_active_id(GTK_COMBO_BOX((*ctx->windowed)[i]), action_info(d[i]).key);
+            gtk_combo_box_set_active_id(GTK_COMBO_BOX((*ctx->fullscreen)[i]), action_info(f[i]).key);
+        }
     };
-    g_signal_connect(reset, "clicked", G_CALLBACK(reset_cb), &w.controls);
-    gtk_grid_attach(GTK_GRID(grid), reset, 0, row++, 2, 1);
+    auto* ctx = new ResetCtx{&w.controls, &w.fullscreen_controls};
+    g_object_set_data_full(G_OBJECT(reset), "ctx", ctx, +[](gpointer p) { delete static_cast<ResetCtx*>(p); });
+    g_signal_connect(reset, "clicked", G_CALLBACK(reset_cb), ctx);
+    gtk_grid_attach(GTK_GRID(grid), reset, 0, row++, 3, 1);
 
     GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -318,9 +344,12 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.extensions = parse_extensions(get_text_view(w.extensions));
     const std::string url = gtk_entry_get_text(GTK_ENTRY(w.map_url));
     if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos) cfg.map_url = url;
-    for (const ControlInfo& c : kControls)
+    for (const ControlInfo& c : kControls) {
         if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.controls[size_t(c.id)])))
             cfg.controls[size_t(c.id)] = action_from_key(id, Action::None);
+        if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.fullscreen_controls[size_t(c.id)])))
+            cfg.fullscreen_controls[size_t(c.id)] = action_from_key(id, Action::None);
+    }
 }
 
 }  // namespace
@@ -330,7 +359,7 @@ bool run_settings_dialog(GtkWindow* parent, Config& cfg, const char* page) {
                                                     GtkDialogFlags(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
                                                     "_Cancel", GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
     gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 660, 560);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 820, 700);
 
     GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget* categories = gtk_list_box_new();
