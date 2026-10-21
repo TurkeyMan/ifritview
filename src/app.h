@@ -160,6 +160,9 @@ private:
     std::unique_ptr<MetadataPane> metadata_;
     VideoPlayer video_;  // after view_: stops (and its frame callbacks) before the view goes
     guint video_timer_ = 0;
+    bool volume_dirty_ = false;
+    bool scrubbing_ = false;
+    bool resume_after_scrub_ = false;
     void play_video();
     void toggle_video();
     void toggle_mute();

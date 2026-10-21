@@ -137,6 +137,8 @@ void Config::load()
     video_autoplay = get_bool(kf, kView, "video_autoplay", video_autoplay);
     video_muted = get_bool(kf, kView, "video_muted", video_muted);
     video_loop = get_bool(kf, kView, "video_loop", video_loop);
+    if (g_key_file_has_key(kf, kView, "video_volume", nullptr))
+        video_volume = std::clamp(g_key_file_get_double(kf, kView, "video_volume", nullptr), 0.0, 1.0);
     slideshow_seconds = std::clamp(g_key_file_get_double(kf, kView, "slideshow_seconds", nullptr), 0.5, 600.0);
     if (!g_key_file_has_key(kf, kView, "slideshow_seconds", nullptr))
         slideshow_seconds = 5.0;
@@ -206,6 +208,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "video_autoplay", video_autoplay);
     g_key_file_set_boolean(kf, kView, "video_muted", video_muted);
     g_key_file_set_boolean(kf, kView, "video_loop", video_loop);
+    g_key_file_set_double(kf, kView, "video_volume", video_volume);
     g_key_file_set_double(kf, kView, "slideshow_seconds", slideshow_seconds);
     g_key_file_set_boolean(kf, kView, "slideshow_motion", slideshow_motion);
     g_key_file_set_double(kf, kView, "slideshow_zoom", slideshow_zoom);

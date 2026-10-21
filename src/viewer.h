@@ -77,9 +77,11 @@ public:
     void set_video(bool on);
     void set_video_progress(double fraction, bool playing);
     void set_video_muted(bool muted);
+    void set_video_volume(double volume);
     void poke_controls();  // the mouse moved: show the controls for a moment
     std::function<void()> on_video_toggle;
     std::function<void()> on_video_mute;
+    std::function<void(double volume)> on_video_volume;
     std::function<void(double fraction, bool final)> on_video_seek;
     std::function<void()> on_selection_changed;
     std::function<void(Action)> on_action;  // app-level actions the view can't do itself
@@ -129,12 +131,15 @@ private:
     double video_fraction_ = 0;
     bool video_playing_ = false;
     bool video_muted_ = true;
+    double video_volume_ = 0.7;
+    bool volume_dragging_ = false;
     gint64 controls_until_ = 0;  // controls visible until this time
     guint controls_timer_ = 0;
     bool scrubbing_ = false;
     struct ControlsGeometry
     {
         double glyph_x, line_x0, line_x1, speaker_x, y, radius;
+        double volume_top, volume_bottom;  // the vertical volume line above the speaker
     };
     ControlsGeometry controls_geometry() const;
     bool controls_visible() const;

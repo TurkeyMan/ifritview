@@ -3,6 +3,7 @@
 #ifdef HAVE_VIDEO
 
 #include <gst/app/gstappsink.h>
+#include <gst/audio/streamvolume.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
@@ -193,6 +194,14 @@ void VideoPlayer::toggle()
     gst_element_set_state(impl_->playbin, playing_ ? GST_STATE_PLAYING : GST_STATE_PAUSED);
 }
 
+void VideoPlayer::set_playing(bool playing)
+{
+    if (!impl_ || playing == playing_)
+        return;
+    playing_ = playing;
+    gst_element_set_state(impl_->playbin, playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+}
+
 void VideoPlayer::set_muted(bool muted)
 {
     if (impl_)
@@ -203,6 +212,12 @@ void VideoPlayer::set_loop(bool loop)
 {
     if (impl_)
         impl_->loop = loop;
+}
+
+void VideoPlayer::set_volume(double volume)
+{
+    if (impl_)
+        gst_stream_volume_set_volume(GST_STREAM_VOLUME(impl_->playbin), GST_STREAM_VOLUME_FORMAT_CUBIC, std::clamp(volume, 0.0, 1.0));
 }
 
 void VideoPlayer::seek(double fraction, bool final)
@@ -251,8 +266,10 @@ bool VideoPlayer::active() const
     return false;
 }
 void VideoPlayer::toggle() {}
+void VideoPlayer::set_playing(bool) {}
 void VideoPlayer::set_muted(bool) {}
 void VideoPlayer::set_loop(bool) {}
+void VideoPlayer::set_volume(double) {}
 void VideoPlayer::seek(double, bool) {}
 double VideoPlayer::position() const
 {

@@ -23,7 +23,9 @@ public:
     bool active() const;
     bool playing() const { return playing_; }
     void toggle();
+    void set_playing(bool playing);
     void set_muted(bool muted);
+    void set_volume(double volume);  // 0..1, perceptual
     void set_loop(bool loop);
     // `final`: the end of a drag; seek exactly rather than to the nearest key frame.
     void seek(double fraction, bool final);

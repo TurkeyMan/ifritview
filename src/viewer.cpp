@@ -595,6 +595,13 @@ void ImageView::set_video_muted(bool muted)
         gtk_widget_queue_draw(area_);
 }
 
+void ImageView::set_video_volume(double volume)
+{
+    video_volume_ = std::clamp(volume, 0.0, 1.0);
+    if (controls_visible())
+        gtk_widget_queue_draw(area_);
+}
+
 void ImageView::set_video_progress(double fraction, bool playing)
 {
     if (scrubbing_)
@@ -612,7 +619,8 @@ ImageView::ControlsGeometry ImageView::controls_geometry() const
     view_size(vw, vh);
     const double s = scale_factor();
     const double margin = 28 * s;
-    return {margin, margin + 30 * s, vw - margin - 34 * s, vw - margin - 16 * s, vh - 34 * s, 7 * s};
+    const double y = vh - 34 * s;
+    return {margin, margin + 30 * s, vw - margin - 34 * s, vw - margin - 16 * s, y, 7 * s, y - 110 * s, y - 22 * s};
 }
 
 bool ImageView::controls_visible() const
@@ -735,6 +743,31 @@ void ImageView::draw_video_controls(cairo_t* cr, int scale)
     };
     mark(4.0 * scale, 0, 0, 0, 0.5);
     mark(1.8 * scale, 1, 1, 1, 0.95);
+
+    // Volume: a vertical line and knob above the speaker, only with sound on.
+    if (!video_muted_)
+    {
+        const double vx = sx - 3.5 * u, top = g.volume_top, bottom = g.volume_bottom;
+        const double knob_y = bottom - (bottom - top) * video_volume_;
+        auto vline = [&](double width, double r, double gr, double b, double a, double from, double to)
+        {
+            cairo_set_line_width(cr, width);
+            cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+            cairo_set_source_rgba(cr, r, gr, b, a);
+            cairo_move_to(cr, vx, from);
+            cairo_line_to(cr, vx, to);
+            cairo_stroke(cr);
+        };
+        vline(5.0 * scale, 0, 0, 0, 0.45, top, bottom);
+        vline(2.0 * scale, 1, 1, 1, 0.45, top, bottom);
+        vline(2.0 * scale, 1, 1, 1, 0.95, knob_y, bottom);
+        cairo_arc(cr, vx, knob_y, g.radius, 0, 2 * G_PI);
+        cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+        cairo_set_line_width(cr, 2.0 * scale);
+        cairo_stroke_preserve(cr);
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+        cairo_fill(cr);
+    }
 }
 
 void ImageView::draw(cairo_t* cr)
@@ -1083,6 +1116,24 @@ gboolean ImageView::on_button(GdkEventButton* e)
         const int s = scale_factor();
         const double dx = e->x * s, dy = e->y * s;
         const ControlsGeometry g = controls_geometry();
+        const double vx = g.speaker_x - 3.5 * s;
+        auto volume_at = [&](double y) { return std::clamp((g.volume_bottom - y) / (g.volume_bottom - g.volume_top), 0.0, 1.0); };
+        if (e->type == GDK_BUTTON_RELEASE && volume_dragging_)
+        {
+            volume_dragging_ = false;
+            poke_controls();
+            return TRUE;
+        }
+        if (e->type == GDK_BUTTON_PRESS && controls_visible() && !video_muted_ && std::fabs(dx - vx) < 14 * s && dy > g.volume_top - 12 * s &&
+            dy < g.volume_bottom + 6 * s)
+        {
+            volume_dragging_ = true;
+            video_volume_ = volume_at(dy);
+            if (on_video_volume)
+                on_video_volume(video_volume_);
+            gtk_widget_queue_draw(area_);
+            return TRUE;
+        }
         if (e->type == GDK_BUTTON_RELEASE && scrubbing_)
         {
             scrubbing_ = false;
@@ -1181,6 +1232,15 @@ gboolean ImageView::on_button(GdkEventButton* e)
 gboolean ImageView::on_motion(GdkEventMotion* e)
 {
     poke_controls();
+    if (volume_dragging_)
+    {
+        const ControlsGeometry g = controls_geometry();
+        video_volume_ = std::clamp((g.volume_bottom - e->y * scale_factor()) / (g.volume_bottom - g.volume_top), 0.0, 1.0);
+        if (on_video_volume)
+            on_video_volume(video_volume_);
+        gtk_widget_queue_draw(area_);
+        return TRUE;
+    }
     if (scrubbing_)
     {
         video_fraction_ = fraction_at(e->x * scale_factor());
@@ -1209,6 +1269,34 @@ gboolean ImageView::on_motion(GdkEventMotion* e)
 
 gboolean ImageView::on_scroll(GdkEventScroll* e)
 {
+    // Over the speaker or the volume line, the wheel is the volume.
+    if (video_ && controls_visible())
+    {
+        const int s = scale_factor();
+        const ControlsGeometry g = controls_geometry();
+        const double dx = e->x * s, dy = e->y * s;
+        if (std::fabs(dx - g.speaker_x) < 20 * s && dy > g.volume_top - 12 * s && dy < g.y + 16 * s)
+        {
+            double step = 0;
+            if (e->direction == GDK_SCROLL_UP)
+                step = 0.05;
+            else if (e->direction == GDK_SCROLL_DOWN)
+                step = -0.05;
+            else if (e->direction == GDK_SCROLL_SMOOTH && !gdk_event_get_pointer_emulated(reinterpret_cast<GdkEvent*>(e)))
+                step = -0.05 * e->delta_y;
+            if (step > 0 && video_muted_ && on_video_mute)
+                on_video_mute();  // wheeling up on a muted video brings the sound back
+            else if (step != 0 && !video_muted_)
+            {
+                video_volume_ = std::clamp(video_volume_ + step, 0.0, 1.0);
+                if (on_video_volume)
+                    on_video_volume(video_volume_);
+            }
+            poke_controls();
+            gtk_widget_queue_draw(area_);
+            return TRUE;
+        }
+    }
     int direction = 0;
     if (e->direction == GDK_SCROLL_SMOOTH)
     {

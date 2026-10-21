@@ -33,7 +33,8 @@ struct Config
     bool animate = true;
     bool video_autoplay = true;
     bool video_muted = true;
-    bool video_loop = false;  // play animated GIF/WebP
+    double video_volume = 0.7;  // 0..1, perceptual (cubic)
+    bool video_loop = false;    // play animated GIF/WebP
 
     // Slideshow
     double slideshow_seconds = 5.0;

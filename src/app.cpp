@@ -413,8 +413,30 @@ void App::build_ui()
     view_->on_presented = [this] { image_presented(); };
     view_->on_video_toggle = [this] { toggle_video(); };
     view_->on_video_mute = [this] { toggle_mute(); };
+    view_->on_video_volume = [this](double v)
+    {
+        cfg_.video_volume = v;
+        video_.set_volume(v);
+        volume_dirty_ = true;  // saved by the progress timer, not on every pixel of a drag
+    };
+    view_->set_video_volume(cfg_.video_volume);
     view_->set_video_muted(cfg_.video_muted);
-    view_->on_video_seek = [this](double f, bool final) { video_.seek(f, final); };
+    view_->on_video_seek = [this](double f, bool final)
+    {
+        // Holding the knob pauses; letting go resumes only if it was playing.
+        if (!scrubbing_)
+        {
+            scrubbing_ = true;
+            resume_after_scrub_ = video_.playing();
+            video_.set_playing(false);
+        }
+        video_.seek(f, final);
+        if (final)
+        {
+            scrubbing_ = false;
+            video_.set_playing(resume_after_scrub_);
+        }
+    };
     video_.on_frame = [this]
     {
         if (!image_)
@@ -758,6 +780,7 @@ void App::play_video()
     if (!image_ || !image_->is_video)
         return;
     video_.start(image_path_, image_, cfg_.video_muted, cfg_.video_loop);
+    video_.set_volume(cfg_.video_volume);
     if (!video_timer_)  // position for the knob and the status bar, a few times a second
         video_timer_ = g_timeout_add(
             250,
@@ -771,6 +794,11 @@ void App::play_video()
                 }
                 if (app->video_.duration() > 0)
                     app->view_->set_video_progress(app->video_.position() / app->video_.duration(), app->video_.playing());
+                if (app->volume_dirty_)
+                {
+                    app->volume_dirty_ = false;
+                    app->cfg_.save();
+                }
                 app->update_status();
                 return G_SOURCE_CONTINUE;
             },

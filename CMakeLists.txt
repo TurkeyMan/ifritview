@@ -79,7 +79,7 @@ else()
 endif()
 
 # Videos: poster frames and playback through GStreamer (optional).
-pkg_check_modules(VIDEO IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+pkg_check_modules(VIDEO IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0)
 if(VIDEO_FOUND)
   target_sources(ifritview PRIVATE src/decoders/video_poster.cpp)
   target_compile_definitions(ifritview PRIVATE HAVE_VIDEO)
