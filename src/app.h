@@ -161,6 +161,13 @@ private:
     VideoPlayer video_;  // after view_: stops (and its frame callbacks) before the view goes
     guint video_timer_ = 0;
     bool volume_dirty_ = false;
+    // Slideshow cross-fade from a video: it keeps playing (and its sound fades
+    // out) under the incoming slide, whose sound fades in.
+    VideoPlayer outgoing_video_;
+    guint audio_fade_timer_ = 0;
+    gint64 audio_fade_start_ = 0;
+    int audio_fade_ms_ = 0;
+    void start_audio_fade(int ms);
     bool scrubbing_ = false;
     bool resume_after_scrub_ = false;
     void play_video();

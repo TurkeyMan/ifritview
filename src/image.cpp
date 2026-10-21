@@ -378,6 +378,7 @@ void Image::adopt(Image&& f)
     }
     is_raw = is_raw || f.is_raw;
     is_video = is_video || f.is_video;
+    has_audio = has_audio || f.has_audio;
     final_width = final_height = 0;
     stage = Stage::Final;
     if (linear && exposure_edit != 0)

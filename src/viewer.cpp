@@ -116,8 +116,14 @@ void ImageView::crossfade_next(int ms)
     pending_crossfade_ms_ = ms;
 }
 
+void ImageView::crossfade_live()
+{
+    pending_live_ = true;
+}
+
 void ImageView::drop_outgoing()
 {
+    outgoing_live_.reset();
     if (outgoing_.tick)
         gtk_widget_remove_tick_callback(area_, outgoing_.tick);
     outgoing_.tick = 0;
@@ -167,6 +173,8 @@ void ImageView::set_image(std::shared_ptr<Image> image)
         // zoom (or the current zoom) plus the motion itself, so it carries on.
         const double z = motion_.active ? motion_.z_cache : zoom_;
         outgoing_.surface = cairo_surface_reference(scaled_surface(z));
+        if (pending_live_)
+            outgoing_live_ = image_;
         outgoing_.scale_zoom = z;
         outgoing_.motion = motion_;
         outgoing_.motion.tick = 0;
@@ -199,6 +207,7 @@ void ImageView::set_image(std::shared_ptr<Image> image)
         scaled_zoom_ = 0;
     }
     pending_crossfade_ms_ = 0;
+    pending_live_ = false;
     end_motion();
     drop_caches();
     if (surface_)
@@ -576,9 +585,10 @@ cairo_surface_t* ImageView::scaled_surface(double zoom)
     return scaled_;
 }
 
-void ImageView::set_video(bool on)
+void ImageView::set_video(bool on, bool audio)
 {
     video_ = on;
+    video_audio_ = audio;
     scrubbing_ = false;
     video_fraction_ = 0;
     if (!on)
@@ -620,7 +630,12 @@ ImageView::ControlsGeometry ImageView::controls_geometry() const
     const double s = scale_factor();
     const double margin = 28 * s;
     const double y = vh - 34 * s;
-    return {margin, margin + 30 * s, vw - margin - 34 * s, vw - margin - 16 * s, y, 7 * s, y - 110 * s, y - 22 * s};
+    // The glyph is 12 wide with 18 to the line; the speaker (8 left of its
+    // centre) gets the same 18 on the other side. Without audio the line
+    // runs to the margin.
+    const double speaker_x = vw - margin - 16 * s;
+    const double line_x1 = video_audio_ ? speaker_x - 26 * s : vw - margin;
+    return {margin, margin + 30 * s, line_x1, speaker_x, y, 7 * s, y - 110 * s, y - 22 * s};
 }
 
 bool ImageView::controls_visible() const
@@ -705,6 +720,8 @@ void ImageView::draw_video_controls(cairo_t* cr, int scale)
     cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
     cairo_fill(cr);
 
+    if (!video_audio_)
+        return;
     // Speaker at the right end: waves when sound is on, a cross when muted.
     const double sx = g.speaker_x, sy = g.y, u = scale;
     cairo_new_path(cr);
@@ -792,11 +809,25 @@ void ImageView::draw(cairo_t* cr)
         outgoing_transform(now, oz, ox, oy);
         cairo_save(cr);
         cairo_translate(cr, ox, oy);
-        cairo_scale(cr, oz / outgoing_.scale_zoom, oz / outgoing_.scale_zoom);
-        cairo_set_source_surface(cr, outgoing_.surface, 0, 0);
+        cairo_surface_t* live = nullptr;
+        if (outgoing_live_ && outgoing_live_->width == outgoing_.width && outgoing_live_->height == outgoing_.height)
+        {
+            // Still playing: draw its current frame.
+            live = cairo_image_surface_create_for_data(outgoing_live_->pixels.data(), CAIRO_FORMAT_ARGB32, outgoing_live_->width, outgoing_live_->height,
+                                                       outgoing_live_->stride);
+            cairo_scale(cr, oz, oz);
+            cairo_set_source_surface(cr, live, 0, 0);
+        }
+        else
+        {
+            cairo_scale(cr, oz / outgoing_.scale_zoom, oz / outgoing_.scale_zoom);
+            cairo_set_source_surface(cr, outgoing_.surface, 0, 0);
+        }
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
         cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_NONE);
         cairo_paint(cr);
+        if (live)
+            cairo_surface_destroy(live);
         cairo_restore(cr);
         // Where the incoming image won't cover it, the outgoing one fades to
         // the background at the same rate, instead of vanishing at the end.
@@ -1124,7 +1155,7 @@ gboolean ImageView::on_button(GdkEventButton* e)
             poke_controls();
             return TRUE;
         }
-        if (e->type == GDK_BUTTON_PRESS && controls_visible() && !video_muted_ && std::fabs(dx - vx) < 14 * s && dy > g.volume_top - 12 * s &&
+        if (e->type == GDK_BUTTON_PRESS && controls_visible() && video_audio_ && !video_muted_ && std::fabs(dx - vx) < 14 * s && dy > g.volume_top - 12 * s &&
             dy < g.volume_bottom + 6 * s)
         {
             volume_dragging_ = true;
@@ -1151,7 +1182,7 @@ gboolean ImageView::on_button(GdkEventButton* e)
             }
             else if (dx > g.line_x1 + 6 * s)
             {
-                if (on_video_mute)
+                if (video_audio_ && on_video_mute)
                     on_video_mute();
             }
             else
@@ -1270,7 +1301,7 @@ gboolean ImageView::on_motion(GdkEventMotion* e)
 gboolean ImageView::on_scroll(GdkEventScroll* e)
 {
     // Over the speaker or the volume line, the wheel is the volume.
-    if (video_ && controls_visible())
+    if (video_ && video_audio_ && controls_visible())
     {
         const int s = scale_factor();
         const ControlsGeometry g = controls_geometry();

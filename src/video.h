@@ -24,6 +24,8 @@ public:
     bool playing() const { return playing_; }
     void toggle();
     void set_playing(bool playing);
+    // Exchange playbacks with `other` (frames keep flowing to the same image).
+    void swap(VideoPlayer& other);
     void set_muted(bool muted);
     void set_volume(double volume);  // 0..1, perceptual
     void set_loop(bool loop);

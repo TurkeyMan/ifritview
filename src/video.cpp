@@ -194,6 +194,16 @@ void VideoPlayer::toggle()
     gst_element_set_state(impl_->playbin, playing_ ? GST_STATE_PLAYING : GST_STATE_PAUSED);
 }
 
+void VideoPlayer::swap(VideoPlayer& other)
+{
+    std::swap(impl_, other.impl_);
+    std::swap(playing_, other.playing_);
+    if (impl_)
+        impl_->owner = this;
+    if (other.impl_)
+        other.impl_->owner = &other;
+}
+
 void VideoPlayer::set_playing(bool playing)
 {
     if (!impl_ || playing == playing_)
@@ -267,6 +277,7 @@ bool VideoPlayer::active() const
 }
 void VideoPlayer::toggle() {}
 void VideoPlayer::set_playing(bool) {}
+void VideoPlayer::swap(VideoPlayer&) {}
 void VideoPlayer::set_muted(bool) {}
 void VideoPlayer::set_loop(bool) {}
 void VideoPlayer::set_volume(double) {}

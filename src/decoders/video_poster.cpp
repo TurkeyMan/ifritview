@@ -90,6 +90,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (ok)
     {
         out.is_video = true;
+        gint n_audio = 0;
+        g_object_get(playbin, "n-audio", &n_audio, nullptr);
+        out.has_audio = n_audio > 0;
         gint64 t = 0;
         if (gst_element_query_duration(playbin, GST_FORMAT_TIME, &t) && t > 0)
             out.duration = double(t) / GST_SECOND;
@@ -106,7 +109,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.add("Video", "Audio", acodec.empty() ? (atags ? "yes" : "none") : acodec);
         const std::string container = tag_string(vtags, GST_TAG_CONTAINER_FORMAT);
         out.add("Video", "Container", container);
-        out.info = out.duration > 0 ? clock_text(out.duration) : "";
         out.pixel_format.notes.push_back(vcodec.empty() ? "video" : vcodec);
         if (vtags)
             gst_tag_list_unref(vtags);

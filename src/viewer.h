@@ -51,6 +51,9 @@ public:
     // On the next set_image, keep the current rendering and fade the new one
     // in over `ms` (the outgoing slide keeps moving meanwhile).
     void crossfade_next(int ms);
+    // ...and the outgoing image keeps changing (a video playing out under the fade).
+    void crossfade_live();
+    void outgoing_changed() { gtk_widget_queue_draw(area_); }
     bool motion_active() const { return motion_.active; }
     double frame_ms() const { return frame_ms_; }  // last measured draw cost
     void set_busy(bool busy);
@@ -74,7 +77,7 @@ public:
 
     // Video controls: a line with a position knob (and play/pause glyph) over
     // the bottom of the picture, shown while the mouse moves.
-    void set_video(bool on);
+    void set_video(bool on, bool audio);
     void set_video_progress(double fraction, bool playing);
     void set_video_muted(bool muted);
     void set_video_volume(double volume);
@@ -131,6 +134,7 @@ private:
     double video_fraction_ = 0;
     bool video_playing_ = false;
     bool video_muted_ = true;
+    bool video_audio_ = false;  // no audio stream: no speaker or volume
     double video_volume_ = 0.7;
     bool volume_dragging_ = false;
     gint64 controls_until_ = 0;  // controls visible until this time
@@ -159,6 +163,8 @@ private:
         guint tick = 0;
     } outgoing_;
     int pending_crossfade_ms_ = 0;
+    bool pending_live_ = false;
+    std::shared_ptr<Image> outgoing_live_;  // drawn from its current pixels each frame
     void drop_outgoing();
     void outgoing_transform(gint64 now_us, double& zoom, double& px, double& py) const;
     bool busy_ = false;

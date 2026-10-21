@@ -662,6 +662,11 @@ void App::toggle_slideshow()
 
 void App::stop_slideshow()
 {
+    outgoing_video_.stop();
+    if (audio_fade_timer_)
+        g_source_remove(audio_fade_timer_);
+    audio_fade_timer_ = 0;
+    video_.set_volume(cfg_.video_volume);
     slideshow_ = false;
     slide_.active = false;
     if (slideshow_timer_)
@@ -681,11 +686,24 @@ void App::slideshow_start_slide()
         return;
     if (slideshow_timer_)
         g_source_remove(slideshow_timer_);
-    const int ms = int(cfg_.slideshow_seconds * 1000);
-    slide_.active = image_ && cfg_.slideshow_motion && cfg_.slideshow_zoom > 0;
+    int ms = int(cfg_.slideshow_seconds * 1000);
+    if (image_ && image_->is_video && image_->duration > 0)
+    {
+        // A video plays to its end; the next slide fades in over its last moments.
+        const double played = video_.active() ? video_.position() : 0.0;
+        ms = std::max(500, int((image_->duration - played) * 1000) - cfg_.slideshow_crossfade_ms);
+    }
+    slide_.active = image_ && !image_->is_video && cfg_.slideshow_motion && cfg_.slideshow_zoom > 0;
+    if (g_getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "slide: %s for %d ms\n", folder_.current_name().c_str(), ms);
     slide_.start_us = g_get_monotonic_time();
     slide_.duration_ms = ms;
-    if (slide_.active)
+    if (!slide_.active)
+    {
+        view_->end_motion();  // videos hold still: no pan or zoom carried over from the last photo
+        view_->zoom_fit();
+    }
+    else
     {
         const bool in = g_random_boolean();
         const double lo = 1.0 + cfg_.slideshow_zoom * 0.15, hi = 1.0 + cfg_.slideshow_zoom;
@@ -742,6 +760,14 @@ void App::slideshow_advance()
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "slideshow: last frame cost %.1f ms\n", view_->frame_ms());
     view_->crossfade_next(cfg_.slideshow_crossfade_ms);
+    if (cfg_.slideshow_crossfade_ms > 0 && image_ && image_->is_video && video_.active())
+    {
+        outgoing_video_.stop();
+        outgoing_video_.swap(video_);  // it plays on under the fade
+        view_->crossfade_live();
+    }
+    if (cfg_.slideshow_crossfade_ms > 0)
+        start_audio_fade(cfg_.slideshow_crossfade_ms);
     if (!slideshow_order_.empty())
     {
         slideshow_pos_ = (slideshow_pos_ + 1) % slideshow_order_.size();
@@ -779,9 +805,9 @@ void App::play_video()
 {
     if (!image_ || !image_->is_video)
         return;
-    video_.start(image_path_, image_, cfg_.video_muted, cfg_.video_loop);
-    video_.set_volume(cfg_.video_volume);
-    if (!video_timer_)  // position for the knob and the status bar, a few times a second
+    video_.start(image_path_, image_, cfg_.video_muted, cfg_.video_loop && !slideshow_);
+    video_.set_volume(audio_fade_timer_ ? 0.0 : cfg_.video_volume);  // during a cross-fade it fades in
+    if (!video_timer_)                                               // position for the knob and the status bar, a few times a second
         video_timer_ = g_timeout_add(
             250,
             +[](gpointer self) -> gboolean
@@ -814,6 +840,32 @@ void App::toggle_video()
     if (video_.duration() > 0)
         view_->set_video_progress(video_.position() / video_.duration(), video_.playing());
     update_status();
+}
+
+// Over `ms`, the outgoing video's sound falls to silence and the incoming
+// one's rises to the set volume; then the outgoing playback ends.
+void App::start_audio_fade(int ms)
+{
+    outgoing_video_.on_frame = [this] { view_->outgoing_changed(); };
+    audio_fade_start_ = g_get_monotonic_time();
+    audio_fade_ms_ = ms;
+    if (audio_fade_timer_)
+        return;
+    audio_fade_timer_ = g_timeout_add(
+        16,
+        +[](gpointer self) -> gboolean
+        {
+            auto* app = static_cast<App*>(self);
+            const double t = std::clamp((g_get_monotonic_time() - app->audio_fade_start_) / (app->audio_fade_ms_ * 1000.0), 0.0, 1.0);
+            app->outgoing_video_.set_volume(app->cfg_.video_volume * (1 - t));
+            app->video_.set_volume(app->cfg_.video_volume * t);
+            if (t < 1.0)
+                return G_SOURCE_CONTINUE;
+            app->outgoing_video_.stop();
+            app->audio_fade_timer_ = 0;
+            return G_SOURCE_REMOVE;
+        },
+        this);
 }
 
 void App::toggle_mute()
@@ -1268,8 +1320,8 @@ void App::on_loaded(Loader::Result& r)
     refresh_metadata();
     if (cfg_.animate && image_->animation)
         start_animation();
-    view_->set_video(image_->is_video);
-    if (image_->is_video && cfg_.video_autoplay)
+    view_->set_video(image_->is_video, image_->has_audio);
+    if (image_->is_video && (cfg_.video_autoplay || slideshow_))
         play_video();
     if (slideshow_)
         slideshow_start_slide();
@@ -1865,7 +1917,7 @@ void App::update_status()
                 std::snprintf(buf, sizeof buf, "%d:%02d", v / 60, v % 60);
                 return std::string(buf);
             };
-            right = clock(video_.position()) + " / " + clock(video_.duration()) + (cfg_.video_muted ? "  ·  muted" : "") + "  ·  " + right;
+            right = clock(video_.position()) + " / " + clock(video_.duration()) + (cfg_.video_muted && image_->has_audio ? "  ·  muted" : "") + "  ·  " + right;
         }
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0)
             right += " (fit)";
@@ -1954,7 +2006,7 @@ gboolean App::on_key(GdkEventKey* e)
             return TRUE;
         case GDK_KEY_m:
         case GDK_KEY_M:
-            if (image_ && image_->is_video)
+            if (image_ && image_->is_video && image_->has_audio)
                 toggle_mute();
             return TRUE;
         case GDK_KEY_Home:

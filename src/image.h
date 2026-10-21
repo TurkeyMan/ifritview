@@ -93,8 +93,9 @@ struct Image
     Stage stage = Stage::Final;
     bool is_preview() const { return stage == Stage::Preview; }
     bool is_raw = false;
-    bool is_video = false;  // the pixels are a frame (the first, until the player takes over)
-    double duration = 0;    // seconds, for videos  // a camera raw (its preview is the embedded JPEG; it has an exposure control)
+    bool is_video = false;
+    bool has_audio = false;  // videos: an audio stream exists  // the pixels are a frame (the first, until the player takes over)
+    double duration = 0;     // seconds, for videos  // a camera raw (its preview is the embedded JPEG; it has an exposure control)
     // While a preview: the size the final pixels will have, so the window and
     // zoom are chosen for that. 0 = unknown.
     int final_width = 0, final_height = 0;
