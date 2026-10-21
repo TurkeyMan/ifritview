@@ -85,20 +85,47 @@ void Image::from_rgba16(const uint16_t* src, int src_stride) {
     }
 }
 
+namespace {
+
+inline double srgb_encode(double v) {
+    v = std::clamp(v, 0.0, 1.0);
+    return v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
+}
+
+}  // namespace
+
 void Image::retone(double ev) {
     if (!linear) return;
-    // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
-    static std::vector<uint8_t> lut(65536);
-    const double gain = linear->auto_gain * std::pow(2.0, ev);
-    for (int i = 0; i < 65536; ++i) {
-        double v = std::min(1.0, i / 65535.0 * gain);
-        v = v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
-        lut[i] = uint8_t(std::lround(v * 255.0));
+    const double exposure = std::pow(2.0, ev);
+    if (linear->tone.empty()) {
+        // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
+        static std::vector<uint8_t> lut(65536);
+        const double gain = linear->auto_gain * exposure;
+        for (int i = 0; i < 65536; ++i) lut[i] = uint8_t(std::lround(srgb_encode(i / 65535.0 * gain) * 255.0));
+        const uint16_t* s = linear->rgb.data();
+        for (int y = 0; y < height; ++y) {
+            uint32_t* d = row(y);
+            for (int x = 0; x < width; ++x, s += 3) d[x] = pack_premultiplied(lut[s[0]], lut[s[1]], lut[s[2]], 255);
+        }
+        return;
     }
+    // Camera-matched curve: it maps scene luminance to display luminance;
+    // the pixel's colour is scaled by the same ratio so hue is kept.
+    static std::vector<uint8_t> encode(4096);
+    for (int i = 0; i < 4096; ++i) encode[i] = uint8_t(std::lround(srgb_encode(i / 4095.0) * 255.0));
+    const std::vector<float>& tone = linear->tone;
     const uint16_t* s = linear->rgb.data();
+    const float scale = float(exposure / 65535.0);
     for (int y = 0; y < height; ++y) {
         uint32_t* d = row(y);
-        for (int x = 0; x < width; ++x, s += 3) d[x] = pack_premultiplied(lut[s[0]], lut[s[1]], lut[s[2]], 255);
+        for (int x = 0; x < width; ++x, s += 3) {
+            const float r = s[0] * scale, g = s[1] * scale, b = s[2] * scale;
+            const float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            const float out = tone[std::min(4095, int(lum * 4095.0f + 0.5f))];
+            const float ratio = lum > 1e-6f ? out / lum : 0.0f;
+            auto enc = [&](float v) { return encode[std::clamp(int(v * ratio * 4095.0f + 0.5f), 0, 4095)]; };
+            d[x] = pack_premultiplied(enc(r), enc(g), enc(b), 255);
+        }
     }
 }
 
@@ -142,6 +169,7 @@ Image Image::crop(int x, int y, int w, int h) const {
     if (linear) {
         auto l = std::make_shared<LinearData>();
         l->auto_gain = linear->auto_gain;
+        l->tone = linear->tone;
         l->rgb.resize(size_t(w) * h * 3);
         for (int yy = 0; yy < h; ++yy)
             std::copy_n(linear->rgb.data() + (size_t(y + yy) * width + x) * 3, size_t(w) * 3, l->rgb.data() + size_t(yy) * w * 3);
@@ -188,6 +216,7 @@ void Image::apply_orientation(int o) {
     if (linear) {
         auto l = std::make_shared<LinearData>();
         l->auto_gain = linear->auto_gain;
+        l->tone = linear->tone;
         l->rgb.resize(linear->rgb.size());
         reorient(linear->rgb.data(), W, H, 3, o, l->rgb.data(), dw, dh);
         linear = std::move(l);

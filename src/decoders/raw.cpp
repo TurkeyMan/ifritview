@@ -73,6 +73,45 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error) {
 #endif
 }
 
+// Derive the camera's tone curve from its own JPEG: match the luminance
+// distribution of our linear render to the preview's. Brightness and
+// contrast then agree with what the camera showed; colour rendering is
+// left for the real tonemapper.
+std::vector<float> match_tone_to_preview(const LinearData& linear, const Image& preview) {
+    std::vector<uint32_t> hist_preview(256, 0), hist_linear(4096, 0);
+    for (int y = 0; y < preview.height; ++y) {
+        const uint32_t* p = preview.row(y);
+        for (int x = 0; x < preview.width; ++x) {
+            const uint32_t v = p[x];
+            const int luma = int(0.2126 * ((v >> 16) & 0xFF) + 0.7152 * ((v >> 8) & 0xFF) + 0.0722 * (v & 0xFF) + 0.5);
+            ++hist_preview[std::clamp(luma, 0, 255)];
+        }
+    }
+    const uint16_t* s = linear.rgb.data();
+    const size_t n = linear.rgb.size() / 3;
+    for (size_t i = 0; i < n; i += 2, s += 6) {
+        const double lum = (0.2126 * s[0] + 0.7152 * s[1] + 0.0722 * s[2]) / 65535.0;
+        ++hist_linear[std::clamp(int(lum * 4095.0 + 0.5), 0, 4095)];
+    }
+    double total_p = 0, total_l = 0;
+    for (uint32_t c : hist_preview) total_p += c;
+    for (uint32_t c : hist_linear) total_l += c;
+    if (total_p == 0 || total_l == 0) return {};
+
+    auto srgb_decode = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    std::vector<float> tone(4096);
+    double cdf_l = 0, cdf_p = hist_preview[0] / total_p;
+    int p = 0;
+    for (int b = 0; b < 4096; ++b) {
+        cdf_l += hist_linear[b] / total_l;
+        while (p < 255 && cdf_p < cdf_l) cdf_p += hist_preview[++p] / total_p;
+        tone[b] = float(srgb_decode(p / 255.0));
+    }
+    // Beyond the brightest input seen, keep heading to white.
+    for (int b = 1; b < 4096; ++b) tone[b] = std::max(tone[b], tone[b - 1]);
+    return tone;
+}
+
 bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.half_size = half ? 1 : 0;
     // Linear 16-bit, no auto-brightening: tone mapping is done by the viewer
@@ -135,6 +174,14 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
         if (seen > allow) break;
     }
     linear->auto_gain = 65535.0 / ((bin + 1) * 16.0);
+#ifdef HAVE_JPEG
+    {
+        Image preview;
+        std::string ignored;
+        if (decode_preview(raw, preview, ignored) && preview.width > 0) linear->tone = match_tone_to_preview(*linear, preview);
+        lap("tone match");
+    }
+#endif
     out.allocate(w, h);
     out.linear = std::move(linear);
     out.retone(0.0);
@@ -144,14 +191,19 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
 
 // The embedded JPEG, used as the on-screen stand-in while the real decode
 // runs; not offered when the configured mode is the preview anyway.
+void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64);
+
 bool preview(const std::string& path, Image& out) {
     if (decode_options().raw_mode == DecodeOptions::RawMode::Preview) return false;
     LibRaw raw;
+    double bias = 0;
+    raw.set_exifparser_handler(on_exif_tag, &bias);   // the slider rests at the camera's compensation even on the preview
     if (raw.open_file(path.c_str()) != LIBRAW_SUCCESS) return false;
     std::string error;
     if (!decode_preview(raw, out, error)) return false;
     out.format = "RAW preview";
     out.info = camera_name(raw);
+    out.exposure_bias = bias;
     return true;
 }
 

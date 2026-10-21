@@ -10,6 +10,9 @@
 struct LinearData {
     std::vector<uint16_t> rgb;   // 16-bit linear RGB, 3 per pixel, white balanced, sRGB primaries
     double auto_gain = 1.0;      // gain that clips 1% of samples: the "as the camera meant it" zero point
+    // Tone curve matched to the camera's own rendering (its embedded JPEG):
+    // display-linear output for scene-linear input i/4095. Empty = none.
+    std::vector<float> tone;
 };
 
 // Edits found in XMP (embedded or sidecar) that the viewer can honour.
