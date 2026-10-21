@@ -268,7 +268,8 @@ GtkWidget* build_controls(const Config& cfg, Widgets& w) {
     std::string group;
     for (const ControlInfo& c : kControls) {
         // Group rows by button: "Left click", "Left drag"... share a heading.
-        std::string g = c.kind == Kind::Wheel ? "Wheel" : std::string(c.label).substr(0, std::string(c.label).find(' ')) + " button";
+        std::string g = c.kind == Kind::Wheel ? "Wheel" : std::string(c.label).rfind("Fullscreen", 0) == 0 ? "Fullscreen"
+                                              : std::string(c.label).substr(0, std::string(c.label).find(' ')) + " button";
         if (g != group) {
             add_heading(grid, row, g.c_str());
             group = g;

@@ -109,6 +109,7 @@ void ImageView::set_image(std::shared_ptr<Image> image) {
 
 void ImageView::set_fullscreen(bool on) {
     fullscreen_ = on;
+    if (on) clear_selection();
     zoom_fit();
 }
 
@@ -371,7 +372,7 @@ void ImageView::run_click(Action a, double x, double y) {
 }
 
 void ImageView::begin_drag(Action a, double x, double y) {
-    if (a == Action::Select && image_) {
+    if (a == Action::Select && image_ && !fullscreen_) {
         double ix, iy;
         to_image(x, y, ix, iy);
         sel_anchor_x_ = std::clamp(ix, 0.0, double(image_->width));
@@ -382,7 +383,7 @@ void ImageView::begin_drag(Action a, double x, double y) {
 
 void ImageView::drag_to(Action a, double x, double y) {
     if (a == Action::Select) {
-        if (image_) update_selection(x, y);
+        if (image_ && !fullscreen_) update_selection(x, y);
     } else if (a == Action::Pan) {
         const int scale = scale_factor();
         pan_x_ += (x - drag_x_) * scale;
@@ -426,6 +427,13 @@ Control drag_control(unsigned button) {
 
 gboolean ImageView::on_button(GdkEventButton* e) {
     if (e->button < 1 || e->button > 3) return FALSE;
+    // Fullscreen is for flicking through: plain left/right clicks have their
+    // own bindings there, and there is no selecting.
+    if (fullscreen_ && e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_ && !drag_active_ && !suppress_click_ && e->button != 2) {
+        pressed_button_ = 0;
+        run_click(cfg_.control(e->button == 1 ? Control::FullscreenLeftClick : Control::FullscreenRightClick), e->x, e->y);
+        return TRUE;
+    }
     if (e->type == GDK_2BUTTON_PRESS) {
         suppress_click_ = true;
         run_click(cfg_.control(click_control(e->button, true)), e->x, e->y);

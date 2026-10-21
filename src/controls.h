@@ -13,6 +13,7 @@ enum class Control {
     MiddleClick, MiddleDouble, MiddleDrag,
     RightClick, RightDouble, RightDrag,
     Wheel, CtrlWheel, ShiftWheel,
+    FullscreenLeftClick, FullscreenRightClick,   // override the plain clicks in fullscreen
     Count
 };
 
@@ -64,6 +65,8 @@ constexpr std::array<ControlInfo, size_t(Control::Count)> kControls = {{
     {Control::Wheel, "wheel", "Wheel", Kind::Wheel},
     {Control::CtrlWheel, "ctrl_wheel", "Ctrl + wheel", Kind::Wheel},
     {Control::ShiftWheel, "shift_wheel", "Shift + wheel", Kind::Wheel},
+    {Control::FullscreenLeftClick, "fullscreen_left_click", "Fullscreen left click", Kind::Click},
+    {Control::FullscreenRightClick, "fullscreen_right_click", "Fullscreen right click", Kind::Click},
 }};
 
 constexpr std::array<ActionInfo, 15> kActions = {{
@@ -97,6 +100,8 @@ constexpr Bindings default_bindings() {
     b[size_t(Control::Wheel)] = Action::Navigate;
     b[size_t(Control::CtrlWheel)] = Action::Zoom;
     b[size_t(Control::ShiftWheel)] = Action::Scroll;
+    b[size_t(Control::FullscreenLeftClick)] = Action::NextImage;
+    b[size_t(Control::FullscreenRightClick)] = Action::PrevImage;
     return b;
 }
 
