@@ -192,6 +192,7 @@ void ImageView::set_image(std::shared_ptr<Image> image)
         outgoing_.pan_y = pan_y_;
         outgoing_.width = image_->width;
         outgoing_.height = image_->height;
+        outgoing_.has_alpha = image_->has_alpha;
         outgoing_.fade_start_us = g_get_monotonic_time();
         outgoing_.fade_us = gint64(pending_crossfade_ms_) * 1000;
         outgoing_.tick = gtk_widget_add_tick_callback(
@@ -819,6 +820,15 @@ void ImageView::draw(cairo_t* cr)
         fade_alpha = std::clamp(double(now - outgoing_.fade_start_us) / std::max<gint64>(1, outgoing_.fade_us), 0.0, 1.0);
         double oz, ox, oy;
         outgoing_transform(now, oz, ox, oy);
+        if (outgoing_.has_alpha && cfg_.checkerboard)
+        {
+            cairo_save(cr);
+            cairo_rectangle(cr, ox, oy, std::ceil(outgoing_.width * oz), std::ceil(outgoing_.height * oz));
+            cairo_clip(cr);
+            cairo_set_source(cr, checker_pattern(scale));
+            cairo_paint(cr);
+            cairo_restore(cr);
+        }
         cairo_save(cr);
         cairo_translate(cr, ox, oy);
         cairo_surface_t* live = nullptr;
@@ -858,10 +868,12 @@ void ImageView::draw(cairo_t* cr)
     cairo_save(cr);
     cairo_rectangle(cr, pan_x_, pan_y_, std::ceil(sw), std::ceil(sh));
     cairo_clip(cr);
-    if (image_->has_alpha && cfg_.checkerboard && !outgoing_.surface)
+    // Mid-fade the checkerboard fades in with its image (not quite a group
+    // fade where the image is part-transparent, but close).
+    if (image_->has_alpha && cfg_.checkerboard)
     {
         cairo_set_source(cr, checker_pattern(scale));
-        cairo_paint(cr);
+        cairo_paint_with_alpha(cr, fade_alpha);
     }
     cairo_filter_t filter = CAIRO_FILTER_NEAREST;
     const gint64 t_draw = g_get_monotonic_time();

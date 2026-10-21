@@ -216,11 +216,15 @@ void View::set_image(std::shared_ptr<Image> image)
         // Snapshot the current rendering: a pre-scaled image at the motion's
         // zoom (or the current zoom) plus the motion itself, so it carries on.
         const double z = motion_.active ? motion_.z_cache : zoom_;
-        if (scaled_image(z))
+        // At 1:1 or larger that's the full-size upload itself, not a scaled copy.
+        const anyui::Image* snap = scaled_image(z);
+        if (snap && snap == scaled_.get())
         {
             outgoing_.image = std::move(scaled_);
             scaled_zoom_ = 0;
         }
+        else if (snap && snap == base_.get())
+            outgoing_.image = std::move(base_);
         if (pending_live_)
             outgoing_live_ = image_;
         outgoing_.scale_zoom = z;
@@ -230,6 +234,7 @@ void View::set_image(std::shared_ptr<Image> image)
         outgoing_.pan_y = pan_y_;
         outgoing_.width = image_->width;
         outgoing_.height = image_->height;
+        outgoing_.has_alpha = image_->has_alpha;
         outgoing_.fade_start_us = now_us();
         outgoing_.fade_us = int64_t(pending_crossfade_ms_) * 1000;
         if (canvas_)
@@ -588,6 +593,17 @@ void View::paint(Painter& p, SizeF)
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
 
+    // The transparency checkerboard under an image's rectangle (device px),
+    // 1:1 from the view-sized checkerboard.
+    const auto checker = [&](double x, double y, double w, double h, float alpha)
+    {
+        const double x0 = std::max(0.0, x), y0 = std::max(0.0, y);
+        const double x1 = std::min(double(vw), x + std::ceil(w)), y1 = std::min(double(vh), y + std::ceil(h));
+        if (x1 > x0 && y1 > y0)
+            p.image(*checker_image(vw, vh), {float(x0), float(y0), float(x1 - x0), float(y1 - y0)}, {L(x0), L(y0), L(x1 - x0), L(y1 - y0)},
+                    Filter::Nearest, alpha);
+    };
+
     double fade_alpha = 1.0;
     if (outgoing_.image)
     {
@@ -595,6 +611,8 @@ void View::paint(Painter& p, SizeF)
         fade_alpha = std::clamp(double(now - outgoing_.fade_start_us) / std::max<int64_t>(1, outgoing_.fade_us), 0.0, 1.0);
         double oz, ox, oy;
         outgoing_transform(now, oz, ox, oy);
+        if (outgoing_.has_alpha && cfg_.checkerboard)
+            checker(ox, oy, outgoing_.width * oz, outgoing_.height * oz, 1.f);
         if (outgoing_live_ && outgoing_live_->width == outgoing_.width && outgoing_live_->height == outgoing_.height)
         {
             // Still playing: draw its current frame.
@@ -623,14 +641,10 @@ void View::paint(Painter& p, SizeF)
 
     const double sw = image_->width * zoom_, sh = image_->height * zoom_;
     const RectF dst{L(pan_x_), L(pan_y_), L(sw), L(sh)};
-    if (image_->has_alpha && cfg_.checkerboard && !outgoing_.image && vw > 0 && vh > 0)
-    {
-        // The part of the view the image covers, 1:1 from the view-sized checkerboard.
-        const double x0 = std::max(0.0, pan_x_), y0 = std::max(0.0, pan_y_);
-        const double x1 = std::min(double(vw), pan_x_ + std::ceil(sw)), y1 = std::min(double(vh), pan_y_ + std::ceil(sh));
-        if (x1 > x0 && y1 > y0)
-            p.image(*checker_image(vw, vh), {float(x0), float(y0), float(x1 - x0), float(y1 - y0)}, {L(x0), L(y0), L(x1 - x0), L(y1 - y0)}, Filter::Nearest);
-    }
+    // Mid-fade the checkerboard fades in with its image (not quite a group
+    // fade where the image is part-transparent, but close).
+    if (image_->has_alpha && cfg_.checkerboard)
+        checker(pan_x_, pan_y_, sw, sh, float(fade_alpha));
     const int64_t t_draw = now_us();
     const float alpha = float(fade_alpha);
     if (motion_.active)

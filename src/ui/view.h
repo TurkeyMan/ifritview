@@ -149,6 +149,7 @@ private:
         Motion motion;
         double zoom = 1, pan_x = 0, pan_y = 0;
         int width = 0, height = 0;
+        bool has_alpha = false;
         int64_t fade_start_us = 0, fade_us = 0;
     } outgoing_;
     anyui::Subscription outgoing_tick_;
