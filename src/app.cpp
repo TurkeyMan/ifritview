@@ -147,28 +147,32 @@ void App::build_ui() {
                      }), this);
     gtk_box_pack_start(GTK_BOX(toolbar_), smooth_toggle_, FALSE, FALSE, 0);
 
+    GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings_action);
+    gtk_box_set_child_packing(GTK_BOX(toolbar_), settings, FALSE, FALSE, 0, GTK_PACK_END);
+
     // Exposure, in stops around the decoder's automatic brightness; raw only.
     exposure_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_box_pack_start(GTK_BOX(exposure_box_), gtk_image_new_from_icon_name("display-brightness-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR), FALSE, FALSE, 4);
-    exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 1.0 / 3.0);
-    gtk_scale_set_digits(GTK_SCALE(exposure_), 1);
+    exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 0.01);
+    gtk_range_set_round_digits(GTK_RANGE(exposure_), -1);   // continuous: every screen pixel is a value
     gtk_scale_set_value_pos(GTK_SCALE(exposure_), GTK_POS_RIGHT);
+    g_signal_connect(exposure_, "format-value", G_CALLBACK(+[](GtkScale*, gdouble v, gpointer) -> gchar* {
+                         return g_strdup_printf("%+.2f", v);
+                     }), nullptr);
     gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
-    gtk_widget_set_size_request(exposure_, 180, -1);
-    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness");
-    gtk_widget_set_can_focus(exposure_, FALSE);
+    gtk_widget_set_size_request(exposure_, 200, -1);
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness.\nClick, then Left/Right nudge by 0.01, Shift for 0.1");
+    gtk_widget_set_can_focus(exposure_, TRUE);
     g_signal_connect(exposure_, "value-changed", G_CALLBACK(+[](GtkRange*, gpointer self) {
                          static_cast<App*>(self)->on_exposure_changed();
                      }), this);
     gtk_box_pack_start(GTK_BOX(exposure_box_), exposure_, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar_), exposure_box_, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(toolbar_), exposure_box_, FALSE, FALSE, 8);   // sits left of the settings button
     // Children are shown now; the box itself is toggled per image.
     gtk_widget_show_all(exposure_box_);
     gtk_widget_hide(exposure_box_);
     gtk_widget_set_no_show_all(exposure_box_, TRUE);
 
-    GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings_action);
-    gtk_box_set_child_packing(GTK_BOX(toolbar_), settings, FALSE, FALSE, 0, GTK_PACK_END);
 
     view_ = std::make_unique<ImageView>(cfg_);
     view_->on_action = [this](Action a) {
@@ -459,6 +463,20 @@ void App::update_status() {
 
 gboolean App::on_key(GdkEventKey* e) {
     const bool ctrl = e->state & GDK_CONTROL_MASK;
+    const bool shift = e->state & GDK_SHIFT_MASK;
+    if (gtk_widget_has_focus(exposure_) && gtk_widget_get_visible(exposure_box_)) {
+        const double step = shift ? 0.1 : 0.01;
+        switch (e->keyval) {
+            case GDK_KEY_Left: case GDK_KEY_Down:
+                set_exposure(gtk_range_get_value(GTK_RANGE(exposure_)) - step); return TRUE;
+            case GDK_KEY_Right: case GDK_KEY_Up:
+                set_exposure(gtk_range_get_value(GTK_RANGE(exposure_)) + step); return TRUE;
+            case GDK_KEY_Home: set_exposure(0.0); return TRUE;
+            case GDK_KEY_Escape: case GDK_KEY_Return: case GDK_KEY_KP_Enter:
+                gtk_widget_grab_focus(view_->widget()); return TRUE;
+            default: break;   // everything else keeps its normal meaning
+        }
+    }
     switch (e->keyval) {
         case GDK_KEY_Left: case GDK_KEY_Page_Up: case GDK_KEY_BackSpace:
             navigate(-1); return TRUE;

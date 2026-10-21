@@ -19,6 +19,7 @@ ImageView::ImageView(const Config& cfg) : cfg_(cfg) {
     gtk_widget_set_size_request(area_, 64, 64);
     gtk_widget_set_hexpand(area_, TRUE);
     gtk_widget_set_vexpand(area_, TRUE);
+    gtk_widget_set_can_focus(area_, TRUE);
     gtk_widget_add_events(area_, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK |
                                      GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
 
@@ -412,6 +413,7 @@ gboolean ImageView::on_button(GdkEventButton* e) {
         suppress_click_ = true;
         run_click(cfg_.control(click_control(e->button, true)), e->x, e->y);
     } else if (e->type == GDK_BUTTON_PRESS) {
+        gtk_widget_grab_focus(area_);
         if (pressed_button_) return TRUE;  // a second button during a drag is ignored
         pressed_button_ = e->button;
         drag_active_ = false;
