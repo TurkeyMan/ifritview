@@ -3,10 +3,14 @@
 
 #include <jpeglib.h>
 
+#include <glib.h>
+
+#include <algorithm>
 #include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 
 namespace
 {
@@ -56,7 +60,11 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         }
     }
     const bool cmyk = cinfo.jpeg_color_space == JCS_CMYK || cinfo.jpeg_color_space == JCS_YCCK;
-    cinfo.out_color_space = cmyk ? JCS_CMYK : JCS_EXT_BGRX;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    cinfo.out_color_space = cmyk ? JCS_CMYK : JCS_EXT_BGRA;  // cairo's ARGB32 byte order, alpha 0xFF: no second pass
+#else
+    cinfo.out_color_space = cmyk ? JCS_CMYK : JCS_EXT_ARGB;
+#endif
     jpeg_start_decompress(&cinfo);
 
     out.allocate(int(cinfo.output_width), int(cinfo.output_height));
@@ -83,8 +91,6 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
             jpeg_read_scanlines(&cinfo, rows, 1);
         }
     }
-    if (!cmyk)
-        out.from_bgrx8(out.pixels.data(), out.stride);
     const char* subsampling = "4:4:4";
     if (!cmyk && cinfo.num_components == 3)
     {
@@ -130,8 +136,9 @@ void setup(jpeg_decompress_struct& cinfo, ErrorManager& err)
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    FILE* f = open_file(path);
-    if (!f)
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
     {
         error = "cannot open file";
         return false;
@@ -139,14 +146,19 @@ bool decode(const std::string& path, Image& out, std::string& error)
     jpeg_decompress_struct cinfo;
     ErrorManager err{};
     setup(cinfo, err);
-    jpeg_stdio_src(&cinfo, f);
+    jpeg_mem_src(&cinfo, bytes, static_cast<unsigned long>(size));
+    const gint64 t0 = g_get_monotonic_time();
     const bool ok = decode_from(cinfo, err, out, error);
-    std::fclose(f);
     if (!ok)
         return false;
+    const gint64 t1 = g_get_monotonic_time();
 #ifdef HAVE_EXIF
     const ExifSummary exif = read_exif_file(path, out);
+    const gint64 t2 = g_get_monotonic_time();
     out.apply_orientation(exif.orientation);
+    if (g_getenv("IFRIT_DECODE_TIMING"))
+        std::fprintf(stderr, "  jpeg: libjpeg %.1f  exif %.1f  orient(%d) %.1f ms\n", (t1 - t0) / 1000.0, (t2 - t1) / 1000.0, exif.orientation,
+                     (g_get_monotonic_time() - t2) / 1000.0);
     out.info = exif.camera;
     if (out.color_space.empty())
         out.color_space = exif.color_space;  // an embedded profile is more specific than the EXIF flag

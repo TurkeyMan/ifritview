@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pixel_buffer.h"
 #include "pixel_format.h"
 
 #include <cstdint>
@@ -11,8 +12,8 @@
 // changed without demosaicing again.
 struct LinearData
 {
-    std::vector<uint16_t> rgb;  // 16-bit linear RGB, 3 per pixel, white balanced, sRGB primaries
-    double auto_gain = 1.0;     // gain that clips 1% of samples: the "as the camera meant it" zero point
+    LinearBuffer rgb;        // 16-bit linear RGB, 3 per pixel, white balanced, sRGB primaries
+    double auto_gain = 1.0;  // gain that clips 1% of samples: the "as the camera meant it" zero point
     // Tone curve matched to the camera's own rendering (its embedded JPEG):
     // display-linear output for scene-linear input i/4095. Empty = none.
     std::vector<float> tone;
@@ -47,7 +48,7 @@ struct Animation
 {
     struct Frame
     {
-        std::vector<uint8_t> pixels;
+        PixelBuffer pixels;
         int delay_ms;
     };
     std::vector<Frame> frames;
@@ -62,7 +63,7 @@ struct Image
     int width = 0;
     int height = 0;
     int stride = 0;  // bytes per row, always width * 4
-    std::vector<uint8_t> pixels;
+    PixelBuffer pixels;
     bool has_alpha = false;
     int bits_per_sample = 8;             // depth of the source file, for the status bar
     std::string format;                  // "JPEG", "Canon RAW", ...
@@ -76,7 +77,7 @@ struct Image
     struct Mip
     {
         int width, height;
-        std::vector<uint8_t> pixels;  // ARGB32, stride = width * 4
+        PixelBuffer pixels;  // ARGB32, stride = width * 4
     };
     std::vector<Mip> mips;
     void build_mips();
@@ -92,6 +93,7 @@ struct Image
     };
     Stage stage = Stage::Final;
     bool is_preview() const { return stage == Stage::Preview; }
+    bool is_raw = false;  // a camera raw (its preview is the embedded JPEG; it has an exposure control)
     // While a preview: the size the final pixels will have, so the window and
     // zoom are chosen for that. 0 = unknown.
     int final_width = 0, final_height = 0;
@@ -122,7 +124,7 @@ struct Image
     void retone(double ev);
     // Same rendering into a fresh buffer, safe to run off the main thread while
     // `pixels` is being displayed; the caller swaps it in.
-    std::vector<uint8_t> retone_buffer(double ev) const;
+    PixelBuffer retone_buffer(double ev) const;
 
     void allocate(int w, int h);
     uint32_t* row(int y) { return reinterpret_cast<uint32_t*>(pixels.data() + size_t(y) * stride); }

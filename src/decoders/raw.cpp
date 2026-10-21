@@ -286,6 +286,7 @@ bool preview(const std::string& path, Image& out)
     if (!decode_preview(raw, out, error))
         return false;
     out.format = "RAW preview";
+    out.is_raw = true;
     out.info = camera_name(raw);
     out.exposure_bias = bias;
     // What the develop will produce, so the window can be sized for it now.
@@ -365,6 +366,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     out.format = make.empty() ? "RAW" : make + " RAW";
     out.format += ", " + mode;
     out.info = camera_name(raw);
+    out.is_raw = true;
 
     const auto& id = raw.imgdata.idata;
     const auto& other = raw.imgdata.other;

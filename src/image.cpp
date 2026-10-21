@@ -33,7 +33,8 @@ void Image::allocate(int w, int h)
     width = w;
     height = h;
     stride = w * 4;
-    pixels.assign(size_t(stride) * h, 0);
+    pixels.resize(0);
+    pixels.resize(size_t(stride) * h);  // not zeroed: every decoder writes every pixel
 }
 
 void Image::from_rgb8(const uint8_t* src, int src_stride)
@@ -140,7 +141,7 @@ void Image::build_mips()
     while (std::max(w, h) > 1024 && w >= 2 && h >= 2)
     {
         const int nw = w / 2, nh = h / 2;
-        Mip m{nw, nh, std::vector<uint8_t>(size_t(nw) * nh * 4)};
+        Mip m{nw, nh, PixelBuffer(size_t(nw) * nh * 4)};
         for (int y = 0; y < nh; ++y)
         {
             const uint8_t* r0 = src + size_t(2 * y) * w * 4;
@@ -157,9 +158,9 @@ void Image::build_mips()
     }
 }
 
-std::vector<uint8_t> Image::retone_buffer(double ev) const
+PixelBuffer Image::retone_buffer(double ev) const
 {
-    std::vector<uint8_t> out(pixels.size());
+    PixelBuffer out(pixels.size());
     if (!linear || out.empty())
         return out;
     auto row_of = [&](int y) { return reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride); };
@@ -375,6 +376,7 @@ void Image::adopt(Image&& f)
         if (!replaced)
             metadata.push_back(std::move(g));
     }
+    is_raw = is_raw || f.is_raw;
     final_width = final_height = 0;
     stage = Stage::Final;
     if (linear && exposure_edit != 0)
@@ -393,7 +395,7 @@ void Image::apply_orientation(int o)
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;
-    std::vector<uint8_t> out(size_t(dw) * dh * 4);
+    PixelBuffer out(size_t(dw) * dh * 4);
     reorient(reinterpret_cast<const uint32_t*>(pixels.data()), W, H, 1, o, reinterpret_cast<uint32_t*>(out.data()), dw, dh);
     pixels = std::move(out);
     if (linear)

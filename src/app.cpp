@@ -983,7 +983,7 @@ ImageView::OverlaySections App::overlay_sections() const
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
         if (image_->is_preview())
-            line += "  ·  embedded preview";
+            line += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
         else if (image_->linear)
         {
             char ev[32];
@@ -1189,7 +1189,7 @@ void App::on_loaded(Loader::Result& r)
     file_size_ = std::filesystem::file_size(r.path, ec);
     if (ec)
         file_size_ = 0;
-    status_message_ = image_->is_preview() ? "Developing…" : "";
+    status_message_ = image_->is_preview() && image_->is_raw ? "Developing…" : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
     if (image_->is_preview() && from_cache)
@@ -1217,7 +1217,7 @@ void App::on_loaded(Loader::Result& r)
 // Greyed while the embedded JPEG stands in for the raw.
 void App::sync_exposure_slider()
 {
-    const bool raw = image_ && (image_->linear || image_->is_preview());
+    const bool raw = image_ && image_->is_raw;
     if (!fullscreen_)
         gtk_widget_set_visible(exposure_box_, raw);
     if (!raw)
@@ -1419,8 +1419,11 @@ void App::ensure_developed()
     if (!image_ || !image_->is_preview() || develop_requested_)
         return;
     develop_requested_ = true;
-    status_message_ = "Developing…";
-    update_status();
+    if (image_->is_raw)
+    {
+        status_message_ = "Developing…";
+        update_status();
+    }
     loader_.request(load_generation_, folder_.current(), true, /*skip_preview=*/true);
 }
 
@@ -1447,7 +1450,7 @@ void App::request_retone()
         std::shared_ptr<Image> image;
         std::shared_ptr<LinearData> linear;
         double ev;
-        std::vector<uint8_t> result;
+        PixelBuffer result;
     };
     auto* job = new Job{this, image_, image_->linear, image_->exposure_edit, {}};
     std::thread(
@@ -1649,7 +1652,7 @@ void App::on_window_state(GdkEventWindowState* e)
     if (!fs)
     {
         update_title();
-        gtk_widget_set_visible(exposure_box_, image_ && (image_->linear || image_->is_preview()));
+        gtk_widget_set_visible(exposure_box_, image_ && image_->is_raw);
     }
     chrome_pending_ = true;
     view_->set_fullscreen(fs);
@@ -1785,7 +1788,7 @@ void App::update_status()
         if (!image_->info.empty())
             center += "  ·  " + image_->info;
         if (image_->is_preview() && status_message_.empty())
-            center += "  ·  embedded preview";
+            center += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
         // For a stand-in, report the zoom of the image it stands for.
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
         const int percent = int(std::lround(shown * 100.0));

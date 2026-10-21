@@ -200,8 +200,7 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
 {
     error.clear();
     const std::string ext = lowercase_extension(path);
-    release_file_bytes();  // always read afresh: the file may have changed
-    const uint8_t* data = nullptr;
+    const uint8_t* data = nullptr;  // read once; every decode releases the bytes when done, so this is fresh
     size_t size = 0;
     if (!file_bytes(path, data, size))
     {
@@ -250,7 +249,6 @@ bool decode_preview(const std::string& path, Image& out)
     for (const Decoder* d : decoders())
         if (d->preview && claims_extension(*d, ext))
         {
-            release_file_bytes();
             const uint8_t* data = nullptr;
             size_t size = 0;
             if (!file_bytes(path, data, size))
@@ -265,7 +263,8 @@ bool decode_preview(const std::string& path, Image& out)
             }
             else if (meta.thread.joinable())
                 meta.thread.join();
-            release_file_bytes();
+            if (ok)
+                release_file_bytes();  // on failure the full decode that follows reuses them
             return ok;
         }
     return false;
