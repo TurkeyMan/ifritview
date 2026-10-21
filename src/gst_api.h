@@ -11,31 +11,31 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
-#define IFRIT_GST_FUNCTIONS(X)        \
-    X(gst_init_check)                 \
-    X(gst_element_factory_make)       \
-    X(gst_element_get_bus)            \
-    X(gst_element_set_state)          \
-    X(gst_element_seek_simple)        \
-    X(gst_element_query_position)     \
-    X(gst_element_query_duration)     \
-    X(gst_util_set_object_arg)        \
-    X(gst_filename_to_uri)            \
-    X(gst_bus_add_watch)              \
-    X(gst_object_unref)               \
-    X(gst_mini_object_unref)          \
-    X(gst_message_parse_error)        \
-    X(gst_caps_from_string)           \
-    X(gst_sample_get_buffer)          \
-    X(gst_sample_get_caps)            \
-    X(gst_buffer_map)                 \
-    X(gst_buffer_unmap)               \
-    X(gst_tag_list_get_string)        \
-    X(gst_app_sink_pull_preroll)      \
-    X(gst_app_sink_pull_sample)       \
-    X(gst_app_sink_try_pull_preroll)  \
-    X(gst_app_sink_set_callbacks)     \
-    X(gst_video_info_from_caps)       \
+#define IFRIT_GST_FUNCTIONS(X)       \
+    X(gst_init_check)                \
+    X(gst_element_factory_make)      \
+    X(gst_element_get_bus)           \
+    X(gst_element_set_state)         \
+    X(gst_element_seek_simple)       \
+    X(gst_element_query_position)    \
+    X(gst_element_query_duration)    \
+    X(gst_util_set_object_arg)       \
+    X(gst_filename_to_uri)           \
+    X(gst_bus_add_watch)             \
+    X(gst_object_unref)              \
+    X(gst_mini_object_unref)         \
+    X(gst_message_parse_error)       \
+    X(gst_caps_from_string)          \
+    X(gst_sample_get_buffer)         \
+    X(gst_sample_get_caps)           \
+    X(gst_buffer_map)                \
+    X(gst_buffer_unmap)              \
+    X(gst_tag_list_get_string)       \
+    X(gst_app_sink_pull_preroll)     \
+    X(gst_app_sink_pull_sample)      \
+    X(gst_app_sink_try_pull_preroll) \
+    X(gst_app_sink_set_callbacks)    \
+    X(gst_video_info_from_caps)      \
     X(gst_stream_volume_set_volume)
 
 struct GstApi
@@ -51,6 +51,8 @@ extern GstApi g_gst;
 // Loads GStreamer once (thread-safe) and returns whether every function
 // resolved and gst_init succeeded. IFRIT_NO_VIDEO=1 pretends it's missing.
 bool gst_api_load();
+// Whether the libraries are installed, without loading them.
+bool gst_api_available();
 
 #ifndef IFRIT_GST_NO_REDIRECT
 // Route the names through the table. The header's inline helpers call the

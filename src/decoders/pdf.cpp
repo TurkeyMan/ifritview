@@ -6,6 +6,8 @@
 // aren't part of the series.
 #include "decoder.h"
 
+#include "../dynlib.h"
+
 #include <cairo.h>
 #include <dlfcn.h>
 #include <glib.h>
@@ -94,6 +96,11 @@ void add_info(Image& out, const char* key, gchar* value)
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
+    if (!pdf_supported())  // first PDF: load poppler now
+    {
+        error = "poppler could not be loaded";
+        return false;
+    }
     const uint8_t* bytes = nullptr;
     size_t size = 0;
     if (!file_bytes(path, bytes, size))
@@ -157,6 +164,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
 }
 
 }  // namespace
+
+bool pdf_available()
+{
+    return !g_getenv("IFRIT_NO_PDF") && library_installed("libpoppler-glib.so.8");
+}
 
 bool pdf_supported()
 {

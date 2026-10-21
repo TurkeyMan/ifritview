@@ -1,6 +1,8 @@
 #define IFRIT_GST_NO_REDIRECT  // here the names are the real declarations
 #include "gst_api.h"
 
+#include "dynlib.h"
+
 #include <dlfcn.h>
 
 #include <cstdio>
@@ -53,6 +55,12 @@ bool load()
 }
 
 }  // namespace
+
+bool gst_api_available()
+{
+    return !g_getenv("IFRIT_NO_VIDEO") && library_installed("libgstreamer-1.0.so.0") && library_installed("libgstapp-1.0.so.0") &&
+           library_installed("libgstvideo-1.0.so.0") && library_installed("libgstaudio-1.0.so.0");
+}
 
 bool gst_api_load()
 {

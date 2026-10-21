@@ -2,6 +2,9 @@
 #include "../video.h"
 
 #include <glib.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -185,11 +188,11 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&tiff_decoder());
 #endif
 #ifdef HAVE_PDF
-        if (pdf_supported())  // poppler is loaded at runtime, if installed
+        if (pdf_available())  // poppler is loaded when the first PDF is opened
             v.push_back(&pdf_decoder());
 #endif
 #ifdef HAVE_VIDEO
-        if (video_supported())  // GStreamer is loaded at runtime, if installed
+        if (video_available())  // GStreamer is loaded when the first video is opened
             v.push_back(&video_decoder());
 #endif
         v.push_back(&tim_decoder());
@@ -298,4 +301,26 @@ bool extension_supported(const std::string& ext)
         return std::set<std::string>(all.begin(), all.end());
     }();
     return supported.count(ext) != 0;
+}
+
+void preload_optional_libraries()
+{
+    static bool started = false;
+    if (started)
+        return;
+    started = true;
+    std::thread(
+        []
+        {
+            setpriority(PRIO_PROCESS, pid_t(syscall(SYS_gettid)), 10);
+#ifdef HAVE_PDF
+            if (pdf_available())
+                pdf_supported();
+#endif
+#ifdef HAVE_VIDEO
+            if (video_available())
+                video_supported();
+#endif
+        })
+        .detach();
 }

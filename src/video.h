@@ -44,8 +44,10 @@ private:
     bool playing_ = false;
 };
 
-// Whether videos can play: built with video support and GStreamer present
-// at runtime (it's loaded on first use, never linked).
+// Whether GStreamer is installed (cheap: no load). Gates what folders list.
+bool video_available();
+// Loads GStreamer if needed (first call: tens of ms) and says whether
+// videos can play. Never linked; see gst_api.h.
 bool video_supported();
 // The extensions handled as video.
 const std::vector<std::string>& video_extensions();

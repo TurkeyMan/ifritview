@@ -29,6 +29,7 @@ add_executable(ifritview
   src/icons.cpp
   src/geocode.cpp
   src/video.cpp
+  src/dynlib.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
   src/decoders/ilbm.cpp
@@ -104,14 +105,16 @@ else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
 endif()
 
-# Reverse geocoding of GPS positions (optional; the viewer works without it).
-pkg_check_modules(GEOCODE IMPORTED_TARGET libsoup-3.0 json-glib-1.0)
+# Reverse geocoding of GPS positions (optional): a plain HTTPS request over
+# GIO (src/http.cpp), with json-glib to read the answer.
+pkg_check_modules(GEOCODE IMPORTED_TARGET json-glib-1.0)
 if(GEOCODE_FOUND)
+  target_sources(ifritview PRIVATE src/http.cpp)
   target_compile_definitions(ifritview PRIVATE HAVE_GEOCODE)
   target_link_libraries(ifritview PRIVATE PkgConfig::GEOCODE)
   message(STATUS "geocode: enabled")
 else()
-  message(STATUS "geocode: not found (libsoup-3.0 json-glib-1.0), skipping")
+  message(STATUS "geocode: not found (json-glib-1.0), skipping")
 endif()
 
 if(IFRIT_HAVE_JXL)

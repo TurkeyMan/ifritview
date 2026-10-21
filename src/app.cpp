@@ -1205,6 +1205,7 @@ void App::navigate(int delta)
 void App::image_presented()
 {
     awaiting_present_ = false;
+    preload_optional_libraries();  // the first image is up; warm video and PDF support
     if (pending_steps_ == 0)
         return;
     const int d = pending_steps_ > 0 ? 1 : -1;

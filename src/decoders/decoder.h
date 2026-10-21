@@ -65,6 +65,11 @@ std::vector<std::string> default_extensions();
 // (GStreamer, poppler) that aren't installed take their extensions with them.
 bool extension_supported(const std::string& ext);
 
+// Load the optional libraries (GStreamer, poppler) on a low-priority thread,
+// so the first video or PDF opens without the wait. Called once the first
+// image is on screen; later calls do nothing.
+void preload_optional_libraries();
+
 // Backend constructors, each defined in its own file; only those compiled in
 // are referenced from decoder.cpp.
 const Decoder& jpeg_decoder();
@@ -77,7 +82,8 @@ const Decoder& raw_decoder();
 const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();
-bool pdf_supported();  // poppler found at runtime
+bool pdf_available();  // poppler installed (cheap: no load)
+bool pdf_supported();  // loads poppler if needed; whether PDFs can render
 const Decoder& tim_decoder();
 const Decoder& video_decoder();
 const Decoder& ilbm_decoder();

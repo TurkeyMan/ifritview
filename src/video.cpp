@@ -104,6 +104,11 @@ struct VideoPlayer::Impl
     }
 };
 
+bool video_available()
+{
+    return gst_api_available();
+}
+
 bool video_supported()
 {
     return gst_api_load();
@@ -259,6 +264,10 @@ struct VideoPlayer::Impl
 {
 };
 
+bool video_available()
+{
+    return false;
+}
 bool video_supported()
 {
     return false;
