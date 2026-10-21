@@ -469,7 +469,7 @@ void App::load_current() {
     ++load_generation_;
     ImageCache::Entry hit;
     if (cache_.get(path, hit)) {
-        Loader::Result r{load_generation_, path, hit.image, {}, hit.preview, false};
+        Loader::Result r{load_generation_, path, hit.image, {}, hit.preview, false, true};
         on_loaded(r);
         if (hit.has_exposure && gtk_widget_get_visible(exposure_box_)) {   // pixels already match this value
             g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
@@ -516,7 +516,7 @@ void App::on_loaded(Loader::Result& r) {
         }
     }
     if (r.generation != load_generation_) return;  // superseded
-    const bool from_cache = cache_.contains(r.path);
+    const bool from_cache = r.cached;
     schedule_prefetch();
     showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);

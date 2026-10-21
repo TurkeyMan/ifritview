@@ -28,6 +28,7 @@ public:
         std::string error;
         bool preview = false;           // a quick stand-in; the real decode follows
         bool prefetch = false;          // decoded ahead of time; cache it, don't show it
+        bool cached = false;            // served from the cache: pixels already carry any edits
     };
     using Callback = std::function<void(Result&)>;   // runs on the GTK main thread
 
