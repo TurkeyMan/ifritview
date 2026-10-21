@@ -504,7 +504,9 @@ void App::reload() {
 
 void App::on_loaded(Loader::Result& r) {
     if (r.prefetch) {
-        if (r.image && r.path != image_path_) cache_.put(r.path, {r.image, r.preview, ImageCache::file_mtime(r.path)});
+        // Never replace what is already cached: it may carry the user's edits.
+        if (r.image && r.path != image_path_ && !cache_.contains(r.path))
+            cache_.put(r.path, {r.image, r.preview, ImageCache::file_mtime(r.path)});
         if (r.image && r.path == folder_.current() && !image_) {   // user moved onto it while it was decoding
             r.generation = load_generation_;
             r.prefetch = false;
