@@ -28,10 +28,17 @@ void add_info(Image& out, const char* key, gchar* value)
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr);
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
+    {
+        error = "cannot read file";
+        return false;
+    }
+    GBytes* gbytes = g_bytes_new_static(bytes, size);
     GError* err = nullptr;
-    PopplerDocument* doc = poppler_document_new_from_file(uri, nullptr, &err);
-    g_free(uri);
+    PopplerDocument* doc = poppler_document_new_from_bytes(gbytes, nullptr, &err);
+    g_bytes_unref(gbytes);
     if (!doc)
     {
         error = err ? err->message : "cannot open PDF";

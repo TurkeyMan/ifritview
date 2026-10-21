@@ -23,7 +23,15 @@ bool sniff(const uint8_t* h, size_t n)
 bool decode(const std::string& path, Image& out, std::string& error)
 {
     heif_context* ctx = heif_context_alloc();
-    heif_error err = heif_context_read_from_file(ctx, path.c_str(), nullptr);
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
+    {
+        error = "cannot read file";
+        heif_context_free(ctx);
+        return false;
+    }
+    heif_error err = heif_context_read_from_memory_without_copy(ctx, bytes, size, nullptr);
     if (err.code != heif_error_Ok)
     {
         error = err.message;
@@ -58,13 +66,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.has_alpha = alpha;
     out.bits_per_sample = heif_image_handle_get_luma_bits_per_pixel(handle);
 
-    uint8_t head[12] = {};
-    if (FILE* f = std::fopen(path.c_str(), "rb"))
-    {
-        if (std::fread(head, 1, 12, f) == 12 && std::memcmp(head + 8, "avi", 3) == 0)
-            out.format = "AVIF";
-        std::fclose(f);
-    }
+    if (size >= 12 && std::memcmp(bytes + 8, "avi", 3) == 0)
+        out.format = "AVIF";
     if (out.format.empty())
         out.format = "HEIF";
     if (heif_image_handle_get_number_of_depth_images(handle) > 0)

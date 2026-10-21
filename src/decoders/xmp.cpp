@@ -8,6 +8,7 @@
 #include <glib.h>
 
 #include <mutex>
+#include <string_view>
 
 namespace
 {
@@ -140,19 +141,29 @@ bool read_sidecar(const std::string& sidecar, Image& out)
 
 }  // namespace
 
-void read_xmp(const std::string& path, Image& out)
+// The embedded XMP packet sits verbatim in the file (JPEG APP1, PNG iTXt,
+// TIFF/DNG tag, WebP chunk...); find it in the bytes and parse just that,
+// instead of exempi's file handlers reading the whole file again.
+void read_xmp(const std::string& path, const uint8_t* data, size_t size, Image& out)
 {
     ensure_init();
-    if (XmpFilePtr file = xmp_files_open_new(path.c_str(), XmpOpenFileOptions(XMP_OPEN_READ | XMP_OPEN_ONLYXMP)))
+    if (data && size)
     {
-        if (XmpPtr xmp = xmp_files_get_new_xmp(file))
+        const char* begin = reinterpret_cast<const char*>(data);
+        const std::string_view all(begin, size);
+        const size_t start = all.find("<x:xmpmeta");
+        const size_t end = start == std::string_view::npos ? start : all.find("</x:xmpmeta>", start);
+        if (end != std::string_view::npos)
         {
-            collect(xmp, "XMP", out);
-            collect_develop(xmp, out);
+            const size_t len = end + 12 - start;
+            XmpPtr xmp = xmp_new_empty();
+            if (xmp_parse(xmp, begin + start, len))
+            {
+                collect(xmp, "XMP", out);
+                collect_develop(xmp, out);
+            }
             xmp_free(xmp);
         }
-        xmp_files_close(file, XMP_CLOSE_NOOPTION);
-        xmp_files_free(file);
     }
     // Sidecars: IMG_0001.CR2.xmp (darktable) first, then IMG_0001.xmp (Lightroom).
     if (!read_sidecar(path + ".xmp", out))

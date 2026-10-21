@@ -55,7 +55,7 @@ PixelFormat header_pixel_format(const std::string& path)
 {
     using M = PixelFormat::Model;
     PixelFormat none;
-    FILE* f = std::fopen(path.c_str(), "rb");
+    FILE* f = open_file(path);
     if (!f)
         return none;
     uint8_t h[70] = {};
@@ -97,7 +97,7 @@ void gif_header_info(const std::string& path, Image& out, int& frames)
 {
     frames = 0;
     std::vector<uint8_t> d;
-    if (FILE* f = std::fopen(path.c_str(), "rb"))
+    if (FILE* f = open_file(path))
     {
         std::fseek(f, 0, SEEK_END);
         const long n = std::ftell(f);
@@ -115,7 +115,8 @@ void gif_header_info(const std::string& path, Image& out, int& frames)
     out.pixel_format.notes.push_back("LZW");
     size_t pos = 13 + (packed & 0x80 ? size_t(3) << table_bits : 0);
     bool interlaced = false, transparent = false;
-    auto skip_blocks = [&] {
+    auto skip_blocks = [&]
+    {
         while (pos < d.size() && d[pos])
             pos += d[pos] + 1;
         ++pos;
@@ -229,7 +230,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 {
     {
         uint8_t head[6] = {};
-        if (FILE* f = std::fopen(path.c_str(), "rb"))
+        if (FILE* f = open_file(path))
         {
             const size_t n = std::fread(head, 1, 6, f);
             std::fclose(f);

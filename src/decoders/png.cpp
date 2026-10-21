@@ -27,7 +27,7 @@ void on_warning(png_structp, png_const_charp) {}
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    FILE* f = std::fopen(path.c_str(), "rb");
+    FILE* f = open_file(path);
     if (!f)
     {
         error = "cannot open file";

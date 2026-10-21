@@ -6,9 +6,18 @@
 #include <cstdio>
 #include <mutex>
 #include <set>
+#include <thread>
 
 namespace
 {
+
+struct FileBuffer
+{
+    std::string path;
+    std::vector<uint8_t> data;
+    bool ok = false;
+};
+thread_local FileBuffer t_file;
 
 std::mutex g_options_mutex;
 DecodeOptions g_options;
@@ -31,24 +40,50 @@ bool claims_extension(const Decoder& d, const std::string& ext)
 
 // Metadata that lives in containers rather than codecs: IPTC in JPEG
 // APP13, XMP packets and sidecars. Added once a decoder has succeeded.
-void enrich_metadata(const std::string& path, Image& out, const uint8_t* head, size_t head_len)
+// Metadata that lives in containers rather than codecs: IPTC in JPEG APP13,
+// XMP packets and sidecars. Runs on its own thread, from the same bytes, while
+// the pixels decode; the results land in `extra` and are merged afterwards.
+void enrich_metadata(const std::string& path, const uint8_t* data, size_t size, Image& extra)
 {
-    const bool timing = g_getenv("IFRIT_DECODE_TIMING") != nullptr;
-    gint64 t0 = g_get_monotonic_time();
 #ifdef HAVE_IPTC
-    if (head_len >= 3 && head[0] == 0xFF && head[1] == 0xD8)
-        read_iptc_jpeg(path, out);
-#else
-    (void)head;
-    (void)head_len;
+    read_iptc_jpeg(data, size, extra);
 #endif
-    gint64 t1 = g_get_monotonic_time();
 #ifdef HAVE_XMP
-    read_xmp(path, out);
+    read_xmp(path, data, size, extra);
+#else
+    (void)path;
+    (void)data;
+    (void)size;
+    (void)extra;
 #endif
-    if (timing)
-        std::fprintf(stderr, "  iptc %.1f ms, xmp %.1f ms\n", (t1 - t0) / 1000.0, (g_get_monotonic_time() - t1) / 1000.0);
 }
+
+void merge_metadata(Image& out, Image&& extra)
+{
+    for (MetadataGroup& g : extra.metadata)
+        out.metadata.push_back(std::move(g));
+    if (extra.xmp.present)
+        out.xmp = extra.xmp;
+}
+
+// Starts the metadata pass alongside a decode; join() waits for it. The
+// display-affecting fields (XMP orientation, crop, exposure) are in by then.
+struct MetadataPass
+{
+    Image extra;
+    std::thread thread;
+    MetadataPass(const std::string& path, const uint8_t* data, size_t size) : thread([this, path, data, size] { enrich_metadata(path, data, size, extra); }) {}
+    void finish(Image& out)
+    {
+        thread.join();
+        merge_metadata(out, std::move(extra));
+    }
+    ~MetadataPass()
+    {
+        if (thread.joinable())
+            thread.join();
+    }
+};
 
 bool try_decode(const Decoder& d, const std::string& path, Image& out, std::string& error)
 {
@@ -70,6 +105,45 @@ bool try_decode(const Decoder& d, const std::string& path, Image& out, std::stri
 }
 
 }  // namespace
+
+bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size)
+{
+    if (t_file.path != path)
+    {
+        t_file.path = path;
+        t_file.ok = false;
+        t_file.data.clear();
+        if (FILE* f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            const long n = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (n >= 0)
+            {
+                t_file.data.resize(size_t(n));
+                t_file.ok = n == 0 || std::fread(t_file.data.data(), 1, t_file.data.size(), f) == t_file.data.size();
+            }
+            std::fclose(f);
+        }
+    }
+    data = t_file.data.data();
+    size = t_file.data.size();
+    return t_file.ok;
+}
+
+FILE* open_file(const std::string& path)
+{
+    const uint8_t* data = nullptr;
+    size_t size = 0;
+    if (file_bytes(path, data, size) && size > 0)
+        return fmemopen(const_cast<uint8_t*>(data), size, "rb");
+    return std::fopen(path.c_str(), "rb");
+}
+
+void release_file_bytes()
+{
+    t_file = FileBuffer{};
+}
 
 void set_decode_options(const DecodeOptions& options)
 {
@@ -126,53 +200,48 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
 {
     error.clear();
     const std::string ext = lowercase_extension(path);
-
-    uint8_t head[64];
-    size_t head_len = 0;
-    if (FILE* f = std::fopen(path.c_str(), "rb"))
-    {
-        head_len = std::fread(head, 1, sizeof head, f);
-        std::fclose(f);
-    }
-    else
+    release_file_bytes();  // always read afresh: the file may have changed
+    const uint8_t* data = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, data, size))
     {
         error = "cannot open file";
         return false;
     }
+    const uint8_t* head = data;
+    const size_t head_len = std::min<size_t>(size, 64);
+    MetadataPass meta(path, data, size);
 
+    bool ok = false;
     std::set<const Decoder*> tried;
     for (const Decoder* d : decoders())
     {
-        if (!claims_extension(*d, ext))
+        if (ok || !claims_extension(*d, ext))
             continue;
         tried.insert(d);
-        if (try_decode(*d, path, out, error))
-        {
-            enrich_metadata(path, out, head, head_len);
-            return true;
-        }
+        ok = try_decode(*d, path, out, error);
     }
     for (const Decoder* d : decoders())
     {
-        if (tried.count(d) || !d->sniff || !d->sniff(head, head_len))
+        if (ok || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
             continue;
         tried.insert(d);
-        if (try_decode(*d, path, out, error))
-        {
-            enrich_metadata(path, out, head, head_len);
-            return true;
-        }
+        ok = try_decode(*d, path, out, error);
     }
     const Decoder* fallback = decoders().back();
-    if (!tried.count(fallback) && try_decode(*fallback, path, out, error))
+    if (!ok && !tried.count(fallback))
+        ok = try_decode(*fallback, path, out, error);
+    if (ok)
     {
-        enrich_metadata(path, out, head, head_len);
-        return true;
+        meta.finish(out);
+        error.clear();
     }
-
-    if (error.empty())
+    else if (error.empty())
         error = "unsupported image format";
-    return false;
+    if (meta.thread.joinable())
+        meta.thread.join();
+    release_file_bytes();
+    return ok;
 }
 
 bool decode_preview(const std::string& path, Image& out)
@@ -181,19 +250,23 @@ bool decode_preview(const std::string& path, Image& out)
     for (const Decoder* d : decoders())
         if (d->preview && claims_extension(*d, ext))
         {
-            out = Image{};
-            if (!d->preview(path, out))
+            release_file_bytes();
+            const uint8_t* data = nullptr;
+            size_t size = 0;
+            if (!file_bytes(path, data, size))
                 return false;
-            out.stage = Image::Stage::Preview;
-            uint8_t head[64];
-            size_t head_len = 0;
-            if (FILE* f = std::fopen(path.c_str(), "rb"))
+            MetadataPass meta(path, data, size);
+            out = Image{};
+            const bool ok = d->preview(path, out);
+            if (ok)
             {
-                head_len = std::fread(head, 1, sizeof head, f);
-                std::fclose(f);
+                out.stage = Image::Stage::Preview;
+                meta.finish(out);
             }
-            enrich_metadata(path, out, head, head_len);
-            return true;
+            else if (meta.thread.joinable())
+                meta.thread.join();
+            release_file_bytes();
+            return ok;
         }
     return false;
 }

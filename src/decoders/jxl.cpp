@@ -21,16 +21,12 @@ bool sniff(const uint8_t* h, size_t n)
 
 bool read_file(const std::string& path, std::vector<uint8_t>& data)
 {
-    FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f)
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
         return false;
-    std::fseek(f, 0, SEEK_END);
-    long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    data.resize(size > 0 ? size_t(size) : 0);
-    const bool ok = data.empty() || std::fread(data.data(), 1, data.size(), f) == data.size();
-    std::fclose(f);
-    return ok;
+    data.assign(bytes, bytes + size);
+    return true;
 }
 
 bool decode(const std::string& path, Image& out, std::string& error)

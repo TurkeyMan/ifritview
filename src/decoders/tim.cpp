@@ -40,7 +40,7 @@ uint32_t colour15(uint16_t c, bool& stp)
 bool decode(const std::string& path, Image& out, std::string& error)
 {
     std::vector<uint8_t> d;
-    if (FILE* f = std::fopen(path.c_str(), "rb"))
+    if (FILE* f = open_file(path))
     {
         std::fseek(f, 0, SEEK_END);
         const long n = std::ftell(f);

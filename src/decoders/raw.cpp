@@ -278,7 +278,9 @@ bool preview(const std::string& path, Image& out)
     LibRaw raw;
     double bias = 0;
     raw.set_exifparser_handler(on_exif_tag, &bias);  // the slider rests at the camera's compensation even on the preview
-    if (raw.open_file(path.c_str()) != LIBRAW_SUCCESS)
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size) || raw.open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
     std::string error;
     if (!decode_preview(raw, out, error))
@@ -325,7 +327,14 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     raw.set_exifparser_handler(on_exif_tag, &bias);
     raw.imgdata.params.use_camera_wb = 1;
     raw.imgdata.params.output_color = 1;  // sRGB
-    int r = raw.open_file(path.c_str());
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
+    {
+        error = "cannot read file";
+        return false;
+    }
+    int r = raw.open_buffer(bytes, size);
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);

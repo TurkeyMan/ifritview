@@ -57,7 +57,14 @@ std::string format_name(const std::string& path)
 bool decode(const std::string& path, Image& out, std::string& error)
 {
     int w = 0, h = 0, channels = 0;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
+    {
+        error = "cannot read file";
+        return false;
+    }
+    unsigned char* data = stbi_load_from_memory(bytes, int(size), &w, &h, &channels, 4);
     if (!data)
     {
         error = "stb_image could not decode the file";
@@ -68,19 +75,19 @@ bool decode(const std::string& path, Image& out, std::string& error)
     stbi_image_free(data);
     out.has_alpha = channels == 4 || channels == 2;
     // stb always reports PSDs as 4-channel; the header knows better.
-    if (FILE* f = std::fopen(path.c_str(), "rb"))
+    if (FILE* f = open_file(path))
     {
         uint8_t head[14];
         if (std::fread(head, 1, 14, f) == 14 && std::memcmp(head, "8BPS", 4) == 0)
             out.has_alpha = ((head[12] << 8) | head[13]) >= 4;
         std::fclose(f);
     }
-    out.bits_per_sample = stbi_is_16_bit(path.c_str()) ? 16 : 8;
+    out.bits_per_sample = stbi_is_16_bit_from_memory(bytes, int(size)) ? 16 : 8;
     {
         using M = PixelFormat::Model;
         const char* names = channels == 1 ? "Y" : channels == 2 ? "YA" : channels == 4 ? "RGBA" : "RGB";
         out.pixel_format = PixelFormat::packed(channels <= 2 ? M::Gray : M::RGB, names, out.bits_per_sample);
-        if (FILE* f = std::fopen(path.c_str(), "rb"))
+        if (FILE* f = open_file(path))
         {  // TGA: the header knows the packed depth stb expands
             uint8_t h[18];
             if (format_name(path) == "Targa" && std::fread(h, 1, 18, f) == 18)

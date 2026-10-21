@@ -3,6 +3,7 @@
 #include "../image.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,16 @@ struct DecodeOptions
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();
+
+// The file being decoded, read once per decode on this thread. Every reader
+// (the decoder, EXIF, XMP, the format sniffers) takes its bytes from here
+// rather than opening the path again, which matters on slow filesystems.
+// Returns false if the file can't be read.
+bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size);
+// A FILE* over those bytes, for libraries that want one (libjpeg, libpng).
+FILE* open_file(const std::string& path);
+// Forget the cached bytes (the next file_bytes reads afresh).
+void release_file_bytes();
 
 // Compiled-in decoders in priority order.
 const std::vector<const Decoder*>& decoders();
@@ -70,12 +81,12 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
 #endif
 
 #ifdef HAVE_IPTC
-void read_iptc_jpeg(const std::string& path, Image& out);
+void read_iptc_jpeg(const uint8_t* data, size_t size, Image& out);
 void read_iptc_blob(const uint8_t* data, size_t size, Image& out);
 #endif
 #ifdef HAVE_XMP
 // Embedded XMP packet plus any .xmp sidecar next to the file.
-void read_xmp(const std::string& path, Image& out);
+void read_xmp(const std::string& path, const uint8_t* data, size_t size, Image& out);
 #endif
 
 #ifdef HAVE_EXIF
