@@ -4,6 +4,7 @@
 #include "decoders/decoder.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <sstream>
 
@@ -23,6 +24,7 @@ struct Widgets {
     GtkWidget* background;
     GtkWidget* fullscreen_background;
     GtkWidget* extensions;   // GtkTextView
+    std::array<GtkWidget*, size_t(Control::Count)> controls;
 };
 
 GtkWidget* page_grid() {
@@ -198,6 +200,43 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w) {
     return box;
 }
 
+GtkWidget* build_controls(const Config& cfg, Widgets& w) {
+    GtkWidget* grid = page_grid();
+    int row = 0;
+    std::string group;
+    for (const ControlInfo& c : kControls) {
+        // Group rows by button: "Left click", "Left drag"... share a heading.
+        std::string g = c.kind == Kind::Wheel ? "Wheel" : std::string(c.label).substr(0, std::string(c.label).find(' ')) + " button";
+        if (g != group) {
+            add_heading(grid, row, g.c_str());
+            group = g;
+        }
+        GtkWidget* combo = gtk_combo_box_text_new();
+        for (const ActionInfo& a : kActions)
+            if (action_fits(a.id, c.kind)) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), a.key, a.label);
+        gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), action_info(cfg.control(c.id)).key);
+        add_row(grid, row, c.label, combo);
+        w.controls[size_t(c.id)] = combo;
+    }
+    GtkWidget* reset = gtk_button_new_with_label("Reset to defaults");
+    gtk_widget_set_halign(reset, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(reset, 12);
+    using Combos = std::array<GtkWidget*, size_t(Control::Count)>;
+    auto reset_cb = +[](GtkWidget*, gpointer p) {
+        auto* combos = static_cast<Combos*>(p);
+        const Bindings defaults = default_bindings();
+        for (size_t i = 0; i < combos->size(); ++i)
+            gtk_combo_box_set_active_id(GTK_COMBO_BOX((*combos)[i]), action_info(defaults[i]).key);
+    };
+    g_signal_connect(reset, "clicked", G_CALLBACK(reset_cb), &w.controls);
+    gtk_grid_attach(GTK_GRID(grid), reset, 0, row++, 2, 1);
+
+    GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(scroller), grid);
+    return scroller;
+}
+
 void apply(const Widgets& w, Config& cfg) {
     cfg.fit_window_to_image = checked(w.fit_window);
     cfg.min_window_width = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.min_width));
@@ -212,16 +251,19 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
     cfg.extensions = parse_extensions(get_text_view(w.extensions));
+    for (const ControlInfo& c : kControls)
+        if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.controls[size_t(c.id)])))
+            cfg.controls[size_t(c.id)] = action_from_key(id, Action::None);
 }
 
 }  // namespace
 
-bool run_settings_dialog(GtkWindow* parent, Config& cfg) {
+bool run_settings_dialog(GtkWindow* parent, Config& cfg, const char* page) {
     GtkWidget* dialog = gtk_dialog_new_with_buttons("Settings", parent,
                                                     GtkDialogFlags(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
                                                     "_Cancel", GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
     gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 640, 440);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 660, 560);
 
     GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget* categories = gtk_list_box_new();
@@ -240,6 +282,7 @@ bool run_settings_dialog(GtkWindow* parent, Config& cfg) {
     const Page pages[] = {
         {"general", "General", build_general(cfg, w)},
         {"viewing", "Viewing", build_viewing(cfg, w)},
+        {"controls", "Controls", build_controls(cfg, w)},
         {"files", "File Types", build_file_types(cfg, w)},
     };
     for (const Page& p : pages) {
@@ -258,7 +301,10 @@ bool run_settings_dialog(GtkWindow* parent, Config& cfg) {
     g_signal_connect(categories, "row-selected", G_CALLBACK(+[](GtkListBox*, GtkListBoxRow* row, gpointer stack) {
                          if (row) gtk_stack_set_visible_child_name(GTK_STACK(stack), static_cast<const char*>(g_object_get_data(G_OBJECT(row), "page")));
                      }), stack);
-    gtk_list_box_select_row(GTK_LIST_BOX(categories), gtk_list_box_get_row_at_index(GTK_LIST_BOX(categories), 0));
+    int initial = 0;
+    for (size_t i = 0; page && i < std::size(pages); ++i)
+        if (std::string(pages[i].id) == page) initial = int(i);
+    gtk_list_box_select_row(GTK_LIST_BOX(categories), gtk_list_box_get_row_at_index(GTK_LIST_BOX(categories), initial));
 
     gtk_box_pack_start(GTK_BOX(hbox), categories, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(hbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);

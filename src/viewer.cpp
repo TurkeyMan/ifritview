@@ -1,6 +1,7 @@
 #include "viewer.h"
 
 #include "config.h"
+#include "controls.h"
 
 #include <algorithm>
 #include <cmath>
@@ -72,6 +73,9 @@ void ImageView::set_image(std::shared_ptr<Image> image) {
         surface_ = cairo_image_surface_create_for_data(image_->pixels.data(), CAIRO_FORMAT_ARGB32,
                                                        image_->width, image_->height, image_->stride);
     }
+    has_selection_ = false;
+    drag_active_ = false;
+    pressed_button_ = 0;
     mode_ = ZoomMode::Fit;
     layout();
     zoom_changed();
@@ -245,32 +249,164 @@ void ImageView::draw(cairo_t* cr) {
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
     cairo_paint(cr);
     cairo_restore(cr);
+
+    if (has_selection_) {
+        // Marching-ants style rectangle: a white line with black dashes on top.
+        const double x = std::floor(pan_x_ + sel_x0_ * zoom_) + 0.5, y = std::floor(pan_y_ + sel_y0_ * zoom_) + 0.5;
+        const double w = std::round((sel_x1_ - sel_x0_) * zoom_) - 1, h = std::round((sel_y1_ - sel_y0_) * zoom_) - 1;
+        cairo_set_line_width(cr, 1.0);
+        cairo_rectangle(cr, x, y, w, h);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_stroke_preserve(cr);
+        const double dashes[] = {4.0 * scale, 4.0 * scale};
+        cairo_set_dash(cr, dashes, 2, 0);
+        cairo_set_source_rgb(cr, 0, 0, 0);
+        cairo_stroke(cr);
+    }
 }
 
+void ImageView::to_image(double x, double y, double& ix, double& iy) const {
+    const int scale = scale_factor();
+    ix = (x * scale - pan_x_) / zoom_;
+    iy = (y * scale - pan_y_) / zoom_;
+}
+
+void ImageView::update_selection(double x, double y) {
+    double ix, iy;
+    to_image(x, y, ix, iy);
+    ix = std::clamp(ix, 0.0, double(image_->width));
+    iy = std::clamp(iy, 0.0, double(image_->height));
+    sel_x0_ = std::floor(std::min(sel_anchor_x_, ix));
+    sel_y0_ = std::floor(std::min(sel_anchor_y_, iy));
+    sel_x1_ = std::ceil(std::max(sel_anchor_x_, ix));
+    sel_y1_ = std::ceil(std::max(sel_anchor_y_, iy));
+    has_selection_ = sel_x1_ - sel_x0_ >= 2 && sel_y1_ - sel_y0_ >= 2;
+    gtk_widget_queue_draw(area_);
+}
+
+void ImageView::zoom_to_selection() {
+    int vw, vh;
+    view_size(vw, vh);
+    const double w = sel_x1_ - sel_x0_, h = sel_y1_ - sel_y0_;
+    const double z = std::clamp(std::min(vw / w, vh / h), kMinZoom, kMaxZoom);
+    zoom_ = z;
+    mode_ = ZoomMode::Manual;
+    pan_x_ = vw / 2.0 - (sel_x0_ + w / 2) * z;
+    pan_y_ = vh / 2.0 - (sel_y0_ + h / 2) * z;
+    has_selection_ = false;
+    clamp_pan();
+    gtk_widget_queue_draw(area_);
+    zoom_changed();
+}
+
+// ------------------------------------------------------------- bindings
+
+void ImageView::run_click(Action a, double x, double y) {
+    switch (a) {
+        case Action::ZoomSelection: {
+            if (!image_) return;
+            double ix, iy;
+            to_image(x, y, ix, iy);
+            if (has_selection_ && ix >= sel_x0_ && ix < sel_x1_ && iy >= sel_y0_ && iy < sel_y1_) zoom_to_selection();
+            else if (mode_ == ZoomMode::Manual) zoom_fit();
+            has_selection_ = false;
+            gtk_widget_queue_draw(area_);
+            return;
+        }
+        case Action::ZoomFit: zoom_fit(); return;
+        case Action::ZoomOriginal: zoom_original(); return;
+        case Action::None: return;
+        default:
+            if (on_action) on_action(a);
+            return;
+    }
+}
+
+void ImageView::begin_drag(Action a, double x, double y) {
+    if (a == Action::Select && image_) {
+        double ix, iy;
+        to_image(x, y, ix, iy);
+        sel_anchor_x_ = std::clamp(ix, 0.0, double(image_->width));
+        sel_anchor_y_ = std::clamp(iy, 0.0, double(image_->height));
+        has_selection_ = false;
+    }
+}
+
+void ImageView::drag_to(Action a, double x, double y) {
+    if (a == Action::Select) {
+        if (image_) update_selection(x, y);
+    } else if (a == Action::Pan) {
+        const int scale = scale_factor();
+        pan_x_ += (x - drag_x_) * scale;
+        pan_y_ += (y - drag_y_) * scale;
+        clamp_pan();
+        gtk_widget_queue_draw(area_);
+    }
+    drag_x_ = x;
+    drag_y_ = y;
+}
+
+void ImageView::run_wheel(Action a, int direction, double x, double y) {
+    const int scale = scale_factor();
+    switch (a) {
+        case Action::Zoom: zoom_step_at(-direction, x * scale, y * scale); return;   // wheel up zooms in
+        case Action::Navigate: if (on_action) on_action(direction > 0 ? Action::NextImage : Action::PrevImage); return;
+        case Action::Scroll:
+            pan_y_ -= direction * 64.0 * scale;
+            clamp_pan();
+            gtk_widget_queue_draw(area_);
+            return;
+        default: return;
+    }
+}
+
+namespace {
+
+Control click_control(unsigned button, bool twice) {
+    switch (button) {
+        case 1: return twice ? Control::LeftDouble : Control::LeftClick;
+        case 2: return twice ? Control::MiddleDouble : Control::MiddleClick;
+        default: return twice ? Control::RightDouble : Control::RightClick;
+    }
+}
+
+Control drag_control(unsigned button) {
+    return button == 1 ? Control::LeftDrag : button == 2 ? Control::MiddleDrag : Control::RightDrag;
+}
+
+}  // namespace
+
 gboolean ImageView::on_button(GdkEventButton* e) {
-    if (e->button != 1) return FALSE;
+    if (e->button < 1 || e->button > 3) return FALSE;
     if (e->type == GDK_2BUTTON_PRESS) {
-        dragging_ = false;
-        if (on_toggle_fullscreen) on_toggle_fullscreen();
+        suppress_click_ = true;
+        run_click(cfg_.control(click_control(e->button, true)), e->x, e->y);
     } else if (e->type == GDK_BUTTON_PRESS) {
-        dragging_ = true;
-        drag_x_ = e->x;
-        drag_y_ = e->y;
-    } else if (e->type == GDK_BUTTON_RELEASE) {
-        dragging_ = false;
+        if (pressed_button_) return TRUE;  // a second button during a drag is ignored
+        pressed_button_ = e->button;
+        drag_active_ = false;
+        suppress_click_ = false;
+        press_x_ = drag_x_ = e->x;
+        press_y_ = drag_y_ = e->y;
+    } else if (e->type == GDK_BUTTON_RELEASE && e->button == pressed_button_) {
+        const unsigned button = pressed_button_;
+        pressed_button_ = 0;
+        if (drag_active_) drag_to(cfg_.control(drag_control(button)), e->x, e->y);
+        else if (!suppress_click_) run_click(cfg_.control(click_control(button, false)), e->x, e->y);
+        drag_active_ = false;
     }
     return TRUE;
 }
 
 gboolean ImageView::on_motion(GdkEventMotion* e) {
-    if (!dragging_ || !(e->state & GDK_BUTTON1_MASK)) return FALSE;
-    const int scale = scale_factor();
-    pan_x_ += (e->x - drag_x_) * scale;
-    pan_y_ += (e->y - drag_y_) * scale;
-    drag_x_ = e->x;
-    drag_y_ = e->y;
-    clamp_pan();
-    gtk_widget_queue_draw(area_);
+    if (!pressed_button_) return FALSE;
+    const Action a = cfg_.control(drag_control(pressed_button_));
+    if (!drag_active_) {
+        if (std::hypot(e->x - press_x_, e->y - press_y_) < 4.0) return TRUE;
+        drag_active_ = true;
+        begin_drag(a, press_x_, press_y_);
+    }
+    drag_to(a, e->x, e->y);
     return TRUE;
 }
 
@@ -293,12 +429,8 @@ gboolean ImageView::on_scroll(GdkEventScroll* e) {
         return FALSE;
     }
     if (direction == 0) return TRUE;
-
-    if (e->state & GDK_CONTROL_MASK) {
-        const int scale = scale_factor();
-        zoom_step_at(-direction, e->x * scale, e->y * scale);  // wheel up zooms in
-    } else if (on_navigate) {
-        on_navigate(direction);
-    }
+    const Control c = (e->state & GDK_CONTROL_MASK) ? Control::CtrlWheel
+                    : (e->state & GDK_SHIFT_MASK) ? Control::ShiftWheel : Control::Wheel;
+    run_wheel(cfg_.control(c), direction, e->x, e->y);
     return TRUE;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "controls.h"
+
 #include <string>
 #include <vector>
 
@@ -23,6 +25,10 @@ struct Config {
     bool checkerboard = true;              // show transparency over a checkerboard
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
+
+    // Mouse
+    Bindings controls = default_bindings();
+    Action control(Control c) const { return controls[size_t(c)]; }
 
     static std::string path();
     void load();                           // missing file or keys leave the defaults

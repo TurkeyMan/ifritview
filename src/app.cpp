@@ -134,12 +134,21 @@ void App::build_ui() {
     tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit);
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen);
-    GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings);
+    GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings_action);
     gtk_box_set_child_packing(GTK_BOX(toolbar_), settings, FALSE, FALSE, 0, GTK_PACK_END);
 
     view_ = std::make_unique<ImageView>(cfg_);
-    view_->on_navigate = [this](int d) { navigate(d); };
-    view_->on_toggle_fullscreen = [this] { toggle_fullscreen(); };
+    view_->on_action = [this](Action a) {
+        switch (a) {
+            case Action::NextImage: navigate(+1); break;
+            case Action::PrevImage: navigate(-1); break;
+            case Action::ToggleFullscreen: toggle_fullscreen(); break;
+            case Action::OpenFile: open_dialog(); break;
+            case Action::Settings: open_settings(); break;
+            case Action::Quit: quit(); break;
+            default: break;
+        }
+    };
     view_->on_zoom_changed = [this] { update_status(); };
     gtk_box_pack_start(GTK_BOX(vbox), view_->widget(), TRUE, TRUE, 0);
 
@@ -331,9 +340,9 @@ void App::open_dialog() {
     g_object_unref(dialog);
 }
 
-void App::open_settings() {
+void App::open_settings(const char* page) {
     const std::string old_raw_mode = cfg_.raw_mode;
-    if (!run_settings_dialog(GTK_WINDOW(window_), cfg_)) return;
+    if (!run_settings_dialog(GTK_WINDOW(window_), cfg_, page)) return;
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
     folder_.rescan(cfg_);

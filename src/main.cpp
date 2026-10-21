@@ -18,6 +18,7 @@ struct Script {
     App* app;
     std::vector<std::string> steps;
     size_t next = 0;
+    std::string page;
 };
 
 GtkWindow* frontmost_window() {
@@ -62,10 +63,16 @@ gboolean run_script_step(gpointer p) {
     else if (step == "fit") app.zoom_fit();
     else if (step == "orig") app.zoom_original();
     else if (step == "reload") app.reload();
-    else if (step == "settings") {
+    else if (step.rfind("settings", 0) == 0) {
         // The dialog nests a main loop; open it from an idle so this timer
         // source finishes dispatching and keeps firing inside the dialog.
-        g_idle_add(+[](gpointer a) -> gboolean { static_cast<App*>(a)->open_settings(); return G_SOURCE_REMOVE; }, &app);
+        // "settings:controls" opens on that page.
+        s->page = step.size() > 9 ? step.substr(9) : "";
+        g_idle_add(+[](gpointer p) -> gboolean {
+            auto* s = static_cast<Script*>(p);
+            s->app->open_settings(s->page.empty() ? nullptr : s->page.c_str());
+            return G_SOURCE_REMOVE;
+        }, s);
     }
     else if (step == "close-dialog") {
         if (GtkWindow* w = frontmost_window(); w && GTK_IS_DIALOG(w)) gtk_dialog_response(GTK_DIALOG(w), GTK_RESPONSE_CANCEL);
@@ -114,7 +121,7 @@ int main(int argc, char** argv) {
     if (argc > 1) app.open_path(argv[1]);
 
     if (const char* script = g_getenv("IFRIT_SCRIPT")) {
-        auto* s = new Script{&app, {}, 0};
+        auto* s = new Script{&app, {}, 0, {}};
         gchar** parts = g_strsplit(script, ";", -1);
         for (gchar** p = parts; *p; ++p)
             if (**p) s->steps.push_back(*p);

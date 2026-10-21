@@ -11,6 +11,7 @@ namespace {
 const char* kFiles = "files";
 const char* kWindow = "window";
 const char* kView = "view";
+const char* kControlsGroup = "controls";
 
 bool get_bool(GKeyFile* kf, const char* group, const char* key, bool fallback) {
     GError* err = nullptr;
@@ -90,6 +91,11 @@ void Config::load() {
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
+    for (const ControlInfo& c : kControls) {
+        Action& a = controls[size_t(c.id)];
+        a = action_from_key(get_string(kf, kControlsGroup, c.key, action_info(a).key), a);
+        if (!action_fits(a, c.kind)) a = Action::None;
+    }
     g_key_file_free(kf);
 }
 
@@ -112,6 +118,8 @@ bool Config::save() const {
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_string(kf, kView, "background", background.c_str());
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
+    for (const ControlInfo& c : kControls)
+        g_key_file_set_string(kf, kControlsGroup, c.key, action_info(controls[size_t(c.id)]).key);
 
     const std::string p = path();
     gchar* dir = g_path_get_dirname(p.c_str());

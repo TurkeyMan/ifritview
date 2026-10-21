@@ -1,5 +1,6 @@
 #pragma once
 
+#include "controls.h"
 #include "image.h"
 
 #include <gtk/gtk.h>
@@ -36,8 +37,7 @@ public:
     void view_size(int& w, int& h) const;           // device pixels
 
     std::function<void()> on_zoom_changed;
-    std::function<void()> on_toggle_fullscreen;
-    std::function<void(int)> on_navigate;           // +1 next, -1 previous
+    std::function<void(Action)> on_action;          // app-level actions the view can't do itself
 
 private:
     void layout();
@@ -45,6 +45,13 @@ private:
     void clamp_pan();
     void set_zoom(double z, double anchor_x, double anchor_y);   // anchor in device pixels
     void zoom_step_at(int direction, double x, double y);
+    void zoom_to_selection();
+    void update_selection(double x, double y);     // x,y logical px
+    void to_image(double x, double y, double& ix, double& iy) const;
+    void run_click(Action a, double x, double y);
+    void begin_drag(Action a, double x, double y);
+    void drag_to(Action a, double x, double y);
+    void run_wheel(Action a, int direction, double x, double y);
     void draw(cairo_t* cr);
     cairo_surface_t* scaled_surface();
     cairo_pattern_t* checker_pattern(int scale);
@@ -67,7 +74,15 @@ private:
     double zoom_ = 1.0;
     double pan_x_ = 0, pan_y_ = 0;           // image origin in device pixels
     bool fullscreen_ = false;
-    bool dragging_ = false;
-    double drag_x_ = 0, drag_y_ = 0;
+    // Mouse state: which button is down, where it went down, and whether
+    // the pointer has moved far enough for it to count as a drag.
+    unsigned pressed_button_ = 0;
+    bool drag_active_ = false;
+    bool suppress_click_ = false;            // a double-click consumed this press
+    double press_x_ = 0, press_y_ = 0;       // logical px
+    double drag_x_ = 0, drag_y_ = 0;         // last pointer position, logical px
+    double sel_anchor_x_ = 0, sel_anchor_y_ = 0;   // image coords where the drag began
+    bool has_selection_ = false;
+    double sel_x0_ = 0, sel_y0_ = 0, sel_x1_ = 0, sel_y1_ = 0;   // image coords, normalised
     double scroll_accum_ = 0;
 };

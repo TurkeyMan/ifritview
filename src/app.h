@@ -61,7 +61,8 @@ public:
     void zoom_original();
     void zoom_fit();
     void open_dialog();
-    void open_settings();
+    void open_settings(const char* page = nullptr);
+    void open_settings_action() { open_settings(); }
     void quit();
 
 private:
