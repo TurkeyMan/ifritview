@@ -169,6 +169,7 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.has_location = has_location;
     out.latitude = latitude;
     out.longitude = longitude;
+    out.place = place;
     for (int yy = 0; yy < h; ++yy) std::copy_n(row(y + yy) + x, w, out.row(yy));
     if (linear) {
         auto l = std::make_shared<LinearData>();

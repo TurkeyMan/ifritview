@@ -3,6 +3,7 @@
 #include "config.h"
 #include "folder.h"
 #include "cache.h"
+#include "geocode.h"
 #include "metadata.h"
 #include "image.h"
 #include "viewer.h"
@@ -105,6 +106,7 @@ private:
     bool apply_xmp_geometry(Image& image);   // crop + orientation; true if anything changed
     void ensure_developed();                 // kick off the real decode behind a preview
     void schedule_prefetch();
+    void request_place(const std::shared_ptr<Image>& image);   // async reverse geocode, result pops into the UI
     void on_smooth_toggled();
     void on_xmp_toggled();
     void refresh_metadata();
@@ -117,6 +119,7 @@ private:
     std::unique_ptr<MetadataWindow> metadata_;
     Loader loader_;
     ImageCache cache_;
+    Geocoder geocoder_;
     bool image_modified_ = false;           // edited or re-toned since it was loaded
 
     GtkWidget* window_ = nullptr;

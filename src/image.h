@@ -57,6 +57,7 @@ struct Image {
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
     bool has_location = false;            // GPS position from EXIF, decimal degrees
     double latitude = 0, longitude = 0;
+    std::string place;                    // reverse-geocoded name, filled in asynchronously
 
     std::string location_text() const;    // "48.8584° N, 2.2945° E"
 

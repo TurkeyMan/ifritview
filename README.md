@@ -59,6 +59,13 @@ Metadata shown in the Metadata window (`I`): EXIF/GPS/maker notes (libexif),
 IPTC-IIM (libiptcdata), XMP embedded or from a `.xmp` sidecar (exempi),
 PNG text chunks, TIFF tags, LibRaw camera data and PDF document info.
 
+GPS positions become a map link (provider configurable) and, if enabled, a
+place name looked up by reverse geocoding (OpenStreetMap's Nominatim by
+default; Photon, BigDataCloud or a custom URL template; or off). Lookups run
+ahead of time for prefetched images, at most one per second, and are cached in
+`~/.cache/ifritview/places.tsv`. Note that this sends photo coordinates to the
+chosen service; turn it off in Settings → General if that matters to you.
+
 Each backend is optional: a missing library is reported at configure time and
 that decoder is left out.
 
@@ -66,7 +73,7 @@ that decoder is left out.
 
     sudo apt install cmake ninja-build libgtk-3-dev libjpeg-dev libexif-dev \
         libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev \
-        libpoppler-glib-dev libiptcdata0-dev libexempi-dev
+        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libsoup-3.0-dev libjson-glib-dev
     ./build.sh
     ./build/ifritview some/picture.jpg
 

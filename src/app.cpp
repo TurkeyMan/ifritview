@@ -140,6 +140,7 @@ App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }), cache_(0) {
     cfg_.load();
     lap("config");
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
+    geocoder_.set_provider(cfg_.geocoder_url);
     set_decode_options(decode_options_for(cfg_));
     build_ui();
     lap("build_ui");
@@ -417,9 +418,13 @@ std::vector<MetadataGroup> App::collect_metadata() const {
     groups.push_back(std::move(img));
     for (const MetadataGroup& g : image_->metadata) groups.push_back(g);
     if (image_->has_location) {
-        bool has_gps = false;
-        for (const MetadataGroup& g : groups) has_gps |= g.name == "GPS";
-        if (!has_gps) groups.push_back({"GPS", {}});
+        MetadataGroup* gps = nullptr;
+        for (MetadataGroup& g : groups) if (g.name == "GPS") gps = &g;
+        if (!gps) {
+            groups.push_back({"GPS", {}});
+            gps = &groups.back();
+        }
+        if (!image_->place.empty() && image_->place != " ") gps->items.insert(gps->items.begin(), {"Place", image_->place});
     }
     return groups;
 }
@@ -489,7 +494,10 @@ ImageView::OverlaySections App::overlay_sections() const {
         if (!taken.empty()) lines.push_back(taken);
     }
     flush();
-    if (cfg_.overlay_location && image_->has_location) lines.push_back(image_->location_text());
+    if (cfg_.overlay_location && image_->has_location) {
+        lines.push_back(image_->location_text());
+        if (!image_->place.empty() && image_->place != " ") lines.push_back(image_->place);
+    }
     flush();
     if (cfg_.overlay_view) {
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
@@ -591,6 +599,7 @@ void App::reload() {
 }
 
 void App::on_loaded(Loader::Result& r) {
+    if (r.image) request_place(r.image);   // prefetched neighbours get their place name looked up ahead of time
     if (r.prefetch) {
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_path_ && !cache_.contains(r.path))
@@ -828,6 +837,20 @@ void App::schedule_prefetch() {
     loader_.prefetch(std::move(paths));
 }
 
+void App::request_place(const std::shared_ptr<Image>& image) {
+    if (!image || !image->has_location || !image->place.empty()) return;
+    std::weak_ptr<Image> weak = image;
+    geocoder_.lookup(image->latitude, image->longitude, "", [this, weak](const std::string& place) {
+        auto img = weak.lock();
+        if (!img) return;
+        img->place = place.empty() ? " " : place;   // a space marks "looked up, nothing found"
+        if (img == image_) {
+            update_status();
+            refresh_metadata();
+        }
+    });
+}
+
 void App::ensure_developed() {
     if (!showing_preview_ || develop_requested_) return;
     develop_requested_ = true;
@@ -985,6 +1008,8 @@ void App::open_settings(const char* page) {
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
+    geocoder_.set_provider(cfg_.geocoder_url);
+    if (image_) request_place(image_);
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
@@ -1047,8 +1072,10 @@ void App::update_status() {
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0) right += " (fit)";
     }
     if (image_ && image_->has_location) {
-        gchar* markup = g_markup_printf_escaped("<a href=\"%s\">%s</a>", cfg_.map_link(image_->latitude, image_->longitude).c_str(),
-                                                image_->location_text().c_str());
+        const std::string place = image_->place == " " ? "" : image_->place;
+        gchar* markup = place.empty()
+            ? g_markup_printf_escaped("<a href=\"%s\">%s</a>", cfg_.map_link(image_->latitude, image_->longitude).c_str(), image_->location_text().c_str())
+            : g_markup_printf_escaped("<a href=\"%s\">%s</a>  ·  %s", cfg_.map_link(image_->latitude, image_->longitude).c_str(), image_->location_text().c_str(), place.c_str());
         gtk_label_set_markup(GTK_LABEL(status_location_), markup);
         g_free(markup);
         gtk_widget_set_tooltip_text(status_location_, "Open in maps");

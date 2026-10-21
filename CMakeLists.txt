@@ -25,6 +25,7 @@ add_executable(ifritview
   src/integration.cpp
   src/cache.cpp
   src/icons.cpp
+  src/geocode.cpp
   src/decoders/stb.cpp
   src/decoders/pixbuf.cpp
 )
@@ -70,6 +71,16 @@ if(LIBRAW_R_FOUND)
   ifrit_backend(raw HAVE_RAW src/decoders/raw.cpp libraw_r)
 else()
   ifrit_backend(raw HAVE_RAW src/decoders/raw.cpp libraw)
+endif()
+
+# Reverse geocoding of GPS positions (optional; the viewer works without it).
+pkg_check_modules(GEOCODE IMPORTED_TARGET libsoup-3.0 json-glib-1.0)
+if(GEOCODE_FOUND)
+  target_compile_definitions(ifritview PRIVATE HAVE_GEOCODE)
+  target_link_libraries(ifritview PRIVATE PkgConfig::GEOCODE)
+  message(STATUS "geocode: enabled")
+else()
+  message(STATUS "geocode: not found (libsoup-3.0 json-glib-1.0), skipping")
 endif()
 
 if(IFRIT_HAVE_JXL)

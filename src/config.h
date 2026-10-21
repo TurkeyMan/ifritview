@@ -44,6 +44,8 @@ struct Config {
     // Maps: where a GPS location link goes; {lat} and {lon} are substituted.
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;
+    // Reverse geocoding provider, {lat}/{lon} template; empty = off.
+    std::string geocoder_url = "https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=jsonv2&zoom=14";
 
     // Mouse: one binding set for windowed mode, another for fullscreen.
     Bindings controls = default_bindings();

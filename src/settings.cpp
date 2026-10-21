@@ -3,6 +3,7 @@
 #include "config.h"
 #include "decoders/decoder.h"
 #include "integration.h"
+#include "geocode.h"
 
 #include <algorithm>
 #include <array>
@@ -41,6 +42,8 @@ struct Widgets {
     GtkWidget* extensions;   // GtkTextView
     GtkWidget* map_provider;
     GtkWidget* map_url;
+    GtkWidget* geo_provider;
+    GtkWidget* geo_url;
     std::array<GtkWidget*, size_t(Control::Count)> controls;
     std::array<GtkWidget*, size_t(Control::Count)> fullscreen_controls;
 };
@@ -191,6 +194,32 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
                          gtk_widget_set_sensitive(GTK_WIDGET(entry), !id || !*id);
                      }), w.map_url);
     gtk_widget_set_sensitive(w.map_url, gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.map_provider))[0] == '\0');
+
+    // Place names: sends photo coordinates to the chosen service, so it is a visible choice.
+    w.geo_provider = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.geo_provider), "off", "Off");
+    size_t n = 0;
+    const Geocoder::Provider* providers = Geocoder::providers(n);
+    for (size_t i = 0; i < n; ++i) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.geo_provider), providers[i].url, providers[i].name);
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.geo_provider), "", "Custom");
+    add_row(grid, row, "Look up place names with", w.geo_provider);
+    w.geo_url = gtk_entry_new();
+    gtk_entry_set_width_chars(GTK_ENTRY(w.geo_url), 44);
+    gtk_entry_set_text(GTK_ENTRY(w.geo_url), cfg.geocoder_url.c_str());
+    gtk_widget_set_tooltip_text(w.geo_url, "Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced");
+    add_row(grid, row, "Lookup URL template", w.geo_url);
+    if (cfg.geocoder_url.empty()) gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.geo_provider), "off");
+    else if (!gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.geo_provider), cfg.geocoder_url.c_str())) gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.geo_provider), "");
+    auto geo_changed = +[](GtkComboBox* combo, gpointer entry) {
+        const gchar* id = gtk_combo_box_get_active_id(combo);
+        const bool custom = id && !*id;
+        if (id && *id && std::string(id) != "off") gtk_entry_set_text(GTK_ENTRY(entry), id);
+        if (id && std::string(id) == "off") gtk_entry_set_text(GTK_ENTRY(entry), "");
+        gtk_widget_set_sensitive(GTK_WIDGET(entry), custom);
+    };
+    g_signal_connect(w.geo_provider, "changed", G_CALLBACK(geo_changed), w.geo_url);
+    geo_changed(GTK_COMBO_BOX(w.geo_provider), w.geo_url);
+    gtk_entry_set_text(GTK_ENTRY(w.geo_url), cfg.geocoder_url.c_str());
     return grid;
 }
 
@@ -379,6 +408,10 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.extensions = parse_extensions(get_text_view(w.extensions));
     const std::string url = gtk_entry_get_text(GTK_ENTRY(w.map_url));
     if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos) cfg.map_url = url;
+    const gchar* geo_id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.geo_provider));
+    const std::string geo_url = gtk_entry_get_text(GTK_ENTRY(w.geo_url));
+    if (geo_id && std::string(geo_id) == "off") cfg.geocoder_url.clear();
+    else if (geo_url.find("{lat}") != std::string::npos && geo_url.find("{lon}") != std::string::npos) cfg.geocoder_url = geo_url;
     for (const ControlInfo& c : kControls) {
         if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.controls[size_t(c.id)])))
             cfg.controls[size_t(c.id)] = action_from_key(id, Action::None);

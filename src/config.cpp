@@ -119,6 +119,8 @@ void Config::load() {
     overlay_color = get_string(kf, kOverlay, "color", overlay_color);
     overlay_font_pt = std::clamp(get_int(kf, kOverlay, "font_pt", overlay_font_pt), 6, 40);
     map_url = get_string(kf, kMaps, "url", map_url);
+    geocoder_url = get_string(kf, kMaps, "geocoder_url", geocoder_url);
+    if (!geocoder_url.empty() && (geocoder_url.find("{lat}") == std::string::npos || geocoder_url.find("{lon}") == std::string::npos)) geocoder_url.clear();
     if (map_url.find("{lat}") == std::string::npos || map_url.find("{lon}") == std::string::npos)
         map_url = "https://www.google.com/maps?q={lat},{lon}";
     for (const ControlInfo& c : kControls) {
@@ -161,6 +163,7 @@ bool Config::save() const {
         g_key_file_set_string(kf, kFullscreenControlsGroup, c.key, action_info(fullscreen_controls[size_t(c.id)]).key);
     }
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
+    g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
     g_key_file_set_boolean(kf, kOverlay, "file", overlay_file);
     g_key_file_set_boolean(kf, kOverlay, "format", overlay_format);
     g_key_file_set_boolean(kf, kOverlay, "shot", overlay_shot);
