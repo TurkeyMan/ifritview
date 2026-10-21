@@ -79,6 +79,7 @@ public:
     void crop_to_selection();
     void save_as();
     void toggle_metadata();
+    void toggle_xmp() { gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_))); }
     void copy_to_clipboard();
     void transform(int exif_orientation);   // rotate/mirror the displayed image
     void set_exposure(double ev);
@@ -131,6 +132,7 @@ private:
     uint64_t load_generation_ = 0;
     bool showing_preview_ = false;          // a raw's embedded JPEG stands in for the real pixels
     bool develop_requested_ = false;
+    bool slider_pending_ = false;           // slider moved on the preview; apply when the develop lands
     // Edits made while the preview is showing, replayed on the developed
     // image. Crops are fractions so they survive the size difference.
     struct Edit { int orientation; double x, y, w, h; };

@@ -463,6 +463,7 @@ void App::load_current() {
     }
     image_modified_ = false;
     showing_preview_ = false;
+    slider_pending_ = false;
     develop_requested_ = !cfg_.raw_develop_on_demand;
     preview_edits_.clear();
     ++load_generation_;
@@ -564,7 +565,8 @@ void App::on_loaded(Loader::Result& r) {
     update_status();
     refresh_metadata();
     const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
-    const bool slider_moved = !r.preview && gtk_widget_get_visible(exposure_box_) && std::fabs(slider_before - image_->exposure_bias) > 1e-6;
+    const bool slider_moved = !r.preview && slider_pending_;   // the user set this on the preview of this very file
+    slider_pending_ = false;
     if (image_->linear || showing_preview_) {
         // The slider reads in the shooter's units: it rests at the camera's
         // exposure compensation, which is already in the pixels, and the
@@ -728,6 +730,7 @@ void App::ensure_developed() {
 
 void App::retone() {
     if (showing_preview_) {
+        slider_pending_ = true;
         ensure_developed();   // the slider value is picked up once the real pixels arrive
         return;
     }
@@ -762,7 +765,14 @@ void App::apply_xmp_edits() {
 void App::on_xmp_toggled() {
     cfg_.apply_xmp_edits = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_));
     cfg_.save();
-    if (image_ && image_->xmp.present) load_current();   // re-read with or without the edits
+    // Re-read the file with or without its edits; the cached copy embodies
+    // the old choice, so it has to go (as must the departure snapshot that
+    // load_current would otherwise take of the current pixels).
+    if (image_ && image_->xmp.present) {
+        cache_.erase(image_path_);
+        image_.reset();
+        load_current();
+    }
 }
 
 void App::on_smooth_toggled() {
@@ -854,6 +864,7 @@ void App::open_dialog() {
 
 void App::open_settings(const char* page) {
     const std::string old_raw_mode = cfg_.raw_mode;
+    const bool old_apply_xmp = cfg_.apply_xmp_edits;
     if (!run_settings_dialog(GTK_WINDOW(window_), cfg_, page)) return;
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
@@ -863,7 +874,13 @@ void App::open_settings(const char* page) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
     view_->config_changed();
     refresh_metadata();
-    if (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) load_current();
+    const bool reload = (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) ||
+                        (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
+    if (reload) {
+        cache_.erase(image_path_);
+        image_.reset();
+        load_current();
+    }
     update_status();
 }
 

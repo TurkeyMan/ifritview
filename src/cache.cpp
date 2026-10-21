@@ -20,7 +20,8 @@ int64_t ImageCache::file_mtime(const std::string& path) {
     return g_stat(path.c_str(), &st) == 0 ? int64_t(st.st_mtime) : 0;
 }
 
-// A quarter of what the system has free, between 256 MB and 4 GB.
+// A quarter of what the system has free, but at least 1 GB (a developed
+// 24 MP raw is ~240 MB) and never more than half of what's free, capped at 8 GB.
 size_t ImageCache::automatic_budget() {
     size_t available = 0;
     if (FILE* f = std::fopen("/proc/meminfo", "r")) {
@@ -34,8 +35,8 @@ size_t ImageCache::automatic_budget() {
         }
         std::fclose(f);
     }
-    const size_t quarter = available / 4;
-    return std::clamp<size_t>(quarter, size_t(256) << 20, size_t(4) << 30);
+    const size_t quarter = available / 4, half = available / 2;
+    return std::min<size_t>(std::max<size_t>(quarter, std::min<size_t>(size_t(1) << 30, half)), size_t(8) << 30);
 }
 
 void ImageCache::set_budget(size_t budget) {
