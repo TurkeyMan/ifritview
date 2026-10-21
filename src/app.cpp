@@ -342,6 +342,13 @@ void App::build_ui() {
                          return FALSE;
                      }), this);
     g_signal_connect(window_, "destroy", G_CALLBACK(+[](GtkWidget*, gpointer) { gtk_main_quit(); }), nullptr);
+    g_signal_connect(window_, "size-allocate", G_CALLBACK(+[](GtkWidget*, GdkRectangle*, gpointer self) {
+                         auto* app = static_cast<App*>(self);
+                         if (!app->chrome_pending_) return;
+                         app->chrome_pending_ = false;
+                         gtk_widget_set_visible(app->toolbar_, !app->fullscreen_);
+                         gtk_widget_set_visible(app->footer_, !app->fullscreen_);
+                     }), this);
 
     gtk_drag_dest_set(window_, GTK_DEST_DEFAULT_ALL, nullptr, 0, GDK_ACTION_COPY);
     gtk_drag_dest_add_uri_targets(window_);
@@ -960,14 +967,16 @@ void App::toggle_fullscreen() {
     else gtk_window_fullscreen(GTK_WINDOW(window_));
 }
 
+// The state flag arrives before the surface actually changes size. Hiding
+// or showing the chrome right away would lay the old-size window out once
+// more and show that frame, so the change waits for the new allocation.
 void App::on_window_state(GdkEventWindowState* e) {
     const bool fs = e->new_window_state & GDK_WINDOW_STATE_FULLSCREEN;
     if (fs == fullscreen_) return;
     fullscreen_ = fs;
-    gtk_widget_set_visible(toolbar_, !fs);
-    gtk_widget_set_visible(footer_, !fs);
+    chrome_pending_ = true;
     view_->set_fullscreen(fs);
-    if (!fs) fit_window_to_image();
+    gtk_widget_queue_resize(window_);
 }
 
 void App::zoom_in() { view_->zoom_step(+1); }

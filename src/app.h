@@ -136,6 +136,7 @@ private:
     GtkWidget* status_location_ = nullptr;   // GPS link, hidden when absent
 
     bool fullscreen_ = false;
+    bool chrome_pending_ = false;            // toolbar/footer visibility to apply on the next window allocation
     uint64_t load_generation_ = 0;
     bool showing_preview_ = false;          // a raw's embedded JPEG stands in for the real pixels
     bool develop_requested_ = false;
