@@ -20,6 +20,7 @@ public:
     const std::string& directory() const { return dir_; }
     std::string current() const;        // full path, or empty
     std::string current_name() const;   // file name only
+    const std::string& name_at(int index) const { return files_[index]; }
 
     bool step(int delta, bool wrap);    // false when there is nowhere to go
     bool go(int index);

@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "folder.h"
+#include "cache.h"
 #include "metadata.h"
 #include "image.h"
 #include "viewer.h"
@@ -26,6 +27,7 @@ public:
         std::shared_ptr<Image> image;   // null on failure
         std::string error;
         bool preview = false;           // a quick stand-in; the real decode follows
+        bool prefetch = false;          // decoded ahead of time; cache it, don't show it
     };
     using Callback = std::function<void(Result&)>;   // runs on the GTK main thread
 
@@ -33,6 +35,8 @@ public:
     ~Loader();
     // `develop` false: stop after the quick preview when one exists.
     void request(uint64_t generation, const std::string& path, bool develop);
+    // Files to decode when idle, nearest first; replaces the previous list.
+    void prefetch(std::vector<std::string> paths);
 
 private:
     void run();
@@ -45,6 +49,7 @@ private:
     std::condition_variable wake_;
     struct Job { uint64_t generation; std::string path; bool develop; };
     std::optional<Job> pending_;
+    std::vector<std::string> prefetch_;
     bool stop_ = false;
     std::thread thread_;
 };
@@ -96,6 +101,7 @@ private:
     void retone();                           // re-render the raw from both sliders
     void apply_xmp_edits();
     void ensure_developed();                 // kick off the real decode behind a preview
+    void schedule_prefetch();
     void on_smooth_toggled();
     void on_xmp_toggled();
     void refresh_metadata();
@@ -106,6 +112,8 @@ private:
     std::unique_ptr<ImageView> view_;
     std::unique_ptr<MetadataWindow> metadata_;
     Loader loader_;
+    ImageCache cache_;
+    bool image_modified_ = false;           // edited or re-toned since it was loaded
 
     GtkWidget* window_ = nullptr;
     GtkWidget* toolbar_ = nullptr;

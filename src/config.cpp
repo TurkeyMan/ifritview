@@ -91,6 +91,9 @@ void Config::load() {
     }
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);
+    prefetch_ahead = std::clamp(get_int(kf, kFiles, "prefetch_ahead", prefetch_ahead), 0, 16);
+    prefetch_behind = std::clamp(get_int(kf, kFiles, "prefetch_behind", prefetch_behind), 0, 16);
+    cache_megabytes = std::max(0, get_int(kf, kFiles, "cache_megabytes", cache_megabytes));
     raw_mode = get_string(kf, kFiles, "raw_mode", raw_mode);
     if (raw_mode != "full" && raw_mode != "half" && raw_mode != "preview") raw_mode = "full";
     apply_xmp_edits = get_bool(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
@@ -127,6 +130,9 @@ bool Config::save() const {
     g_key_file_set_string_list(kf, kFiles, "extensions", exts.data(), exts.size());
     g_key_file_set_boolean(kf, kFiles, "wrap_around", wrap_around);
     g_key_file_set_boolean(kf, kFiles, "show_hidden", show_hidden);
+    g_key_file_set_integer(kf, kFiles, "prefetch_ahead", prefetch_ahead);
+    g_key_file_set_integer(kf, kFiles, "prefetch_behind", prefetch_behind);
+    g_key_file_set_integer(kf, kFiles, "cache_megabytes", cache_megabytes);
     g_key_file_set_string(kf, kFiles, "raw_mode", raw_mode.c_str());
     g_key_file_set_boolean(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
     g_key_file_set_boolean(kf, kFiles, "raw_develop_on_demand", raw_develop_on_demand);

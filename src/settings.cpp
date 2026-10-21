@@ -24,6 +24,9 @@ struct Widgets {
     GtkWidget* min_height;
     GtkWidget* wrap_around;
     GtkWidget* show_hidden;
+    GtkWidget* prefetch_ahead;
+    GtkWidget* prefetch_behind;
+    GtkWidget* cache_mb;
     GtkWidget* raw_mode;
     GtkWidget* apply_xmp;
     GtkWidget* raw_on_demand;
@@ -150,6 +153,13 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
     add_heading(grid, row, "Browsing");
     w.wrap_around = add_check(grid, row, "Wrap around at the end of the folder", cfg.wrap_around);
     w.show_hidden = add_check(grid, row, "Include hidden files", cfg.show_hidden);
+    w.prefetch_ahead = spin(cfg.prefetch_ahead, 0, 16, 1);
+    add_row(grid, row, "Preload images ahead", w.prefetch_ahead);
+    w.prefetch_behind = spin(cfg.prefetch_behind, 0, 16, 1);
+    add_row(grid, row, "Preload images behind", w.prefetch_behind);
+    w.cache_mb = spin(cfg.cache_megabytes, 0, 65536, 256);
+    gtk_widget_set_tooltip_text(w.cache_mb, "0 = automatic: a quarter of the memory free at startup");
+    add_row(grid, row, "Image cache (MB, 0 = auto)", w.cache_mb);
 
     add_heading(grid, row, "Camera RAW");
     w.raw_mode = gtk_combo_box_text_new();
@@ -332,6 +342,9 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.min_window_height = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.min_height));
     cfg.wrap_around = checked(w.wrap_around);
     cfg.show_hidden = checked(w.show_hidden);
+    cfg.prefetch_ahead = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.prefetch_ahead));
+    cfg.prefetch_behind = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.prefetch_behind));
+    cfg.cache_megabytes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w.cache_mb));
     if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.raw_mode))) cfg.raw_mode = id;
     cfg.apply_xmp_edits = checked(w.apply_xmp);
     cfg.raw_develop_on_demand = checked(w.raw_on_demand);

@@ -11,6 +11,9 @@ struct Config {
     std::vector<std::string> extensions;   // lowercase, no dot; which files count when cycling a folder
     bool wrap_around = true;               // next after the last image goes to the first
     bool show_hidden = false;
+    int prefetch_ahead = 3;                // images decoded in advance in the browsing direction
+    int prefetch_behind = 1;
+    int cache_megabytes = 0;               // decoded image cache; 0 = a share of free memory
     std::string raw_mode = "full";         // full | half | preview; half bins 2x2 (fast, no demosaic)
     bool raw_develop_on_demand = true;     // show the embedded JPEG until real pixels are needed
     bool apply_xmp_edits = true;           // honour exposure/crop/orientation from XMP

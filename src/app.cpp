@@ -32,6 +32,14 @@ void Loader::request(uint64_t generation, const std::string& path, bool develop)
     wake_.notify_one();
 }
 
+void Loader::prefetch(std::vector<std::string> paths) {
+    {
+        std::lock_guard lock(mutex_);
+        prefetch_ = std::move(paths);
+    }
+    wake_.notify_one();
+}
+
 bool Loader::superseded(uint64_t generation) {
     std::lock_guard lock(mutex_);
     return stop_ || (pending_ && pending_->generation != generation);
@@ -56,10 +64,23 @@ void Loader::run() {
         Job job;
         {
             std::unique_lock lock(mutex_);
-            wake_.wait(lock, [this] { return stop_ || pending_; });
+            wake_.wait(lock, [this] { return stop_ || pending_ || !prefetch_.empty(); });
             if (stop_) return;
-            job = *pending_;
-            pending_.reset();
+            if (pending_) {
+                job = *pending_;
+                pending_.reset();
+            } else {
+                // Idle: decode the next neighbour the same way a normal load
+                // would, and hand it to the cache.
+                const std::string path = prefetch_.front();
+                prefetch_.erase(prefetch_.begin());
+                lock.unlock();
+                auto* r = new Result{0, path, std::make_shared<Image>(), {}, false, true};
+                if (decode_preview(path, *r->image)) r->preview = true;
+                else if (!decode_image(path, *r->image, r->error)) r->image.reset();
+                post(r);
+                continue;
+            }
         }
         // Quick stand-in first (a raw's embedded JPEG), so flicking through a
         // folder shows something at once. The real decode follows only when
@@ -105,8 +126,9 @@ std::string human_size(uint64_t bytes) {
 
 }  // namespace
 
-App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }) {
+App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }), cache_(0) {
     cfg_.load();
+    cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     set_decode_options(decode_options_for(cfg_));
     build_ui();
 }
@@ -309,6 +331,7 @@ void App::copy_to_clipboard() {
 
 void App::transform(int exif_orientation) {
     if (!image_) return;
+    image_modified_ = true;
     if (showing_preview_) preview_edits_.push_back({exif_orientation, 0, 0, 1, 1});
     image_->apply_orientation(exif_orientation);
     view_->set_image(image_);   // dimensions may have swapped
@@ -386,12 +409,36 @@ void App::load_current() {
         update_title();
         return;
     }
-    status_message_ = "Loading " + folder_.current_name() + "…";
-    update_status();
+    // Leaving an image: keep it (edits included) and remember the slider so
+    // coming back shows exactly what was left, which is what flipping between
+    // the shots of a burst wants.
+    if (image_ && !image_path_.empty()) {
+        ImageCache::Entry e{image_, showing_preview_, ImageCache::file_mtime(image_path_)};
+        if (gtk_widget_get_visible(exposure_box_)) {
+            e.has_exposure = true;
+            e.exposure = gtk_range_get_value(GTK_RANGE(exposure_));
+        }
+        cache_.put(image_path_, e);
+    }
+    image_modified_ = false;
     showing_preview_ = false;
     develop_requested_ = !cfg_.raw_develop_on_demand;
     preview_edits_.clear();
-    loader_.request(++load_generation_, path, develop_requested_);
+    ++load_generation_;
+    ImageCache::Entry hit;
+    if (cache_.get(path, hit)) {
+        Loader::Result r{load_generation_, path, hit.image, {}, hit.preview, false};
+        on_loaded(r);
+        if (hit.has_exposure && gtk_widget_get_visible(exposure_box_)) {   // pixels already match this value
+            g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+            gtk_range_set_value(GTK_RANGE(exposure_), hit.exposure);
+            g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+        }
+        return;
+    }
+    status_message_ = "Loading " + folder_.current_name() + "…";
+    update_status();
+    loader_.request(load_generation_, path, develop_requested_);
 }
 
 void App::navigate(int delta) {
@@ -415,11 +462,22 @@ void App::reload() {
 }
 
 void App::on_loaded(Loader::Result& r) {
+    if (r.prefetch) {
+        if (r.image && r.path != image_path_) cache_.put(r.path, {r.image, r.preview, ImageCache::file_mtime(r.path)});
+        if (r.image && r.path == folder_.current() && !image_) {   // user moved onto it while it was decoding
+            r.generation = load_generation_;
+            r.prefetch = false;
+        } else {
+            return;
+        }
+    }
     if (r.generation != load_generation_) return;  // superseded
+    const bool from_cache = cache_.contains(r.path);
+    schedule_prefetch();
     showing_preview_ = r.preview;
-    if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview));
+    if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
     status_message_ = r.preview && develop_requested_ ? "Developing…" : "";
-    if (r.preview) {
+    if (r.preview && !from_cache) {
         // Edits that need real pixels mean the preview can't stand for long.
         const XmpDevelop& d = r.image->xmp;
         if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
@@ -465,9 +523,9 @@ void App::on_loaded(Loader::Result& r) {
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
 
         gtk_widget_show(exposure_box_);
-        if (!showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
+        if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
         else if (slider_moved) gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
-    } else if (cfg_.apply_xmp_edits && image_->xmp.present) {
+    } else if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present) {
         apply_xmp_edits();
     } else {
         gtk_widget_hide(exposure_box_);
@@ -483,6 +541,7 @@ void App::set_exposure(double ev) {
 void App::crop_to_selection() {
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h)) return;
+    image_modified_ = true;
     if (showing_preview_) preview_edits_.push_back({1, double(x) / image_->width, double(y) / image_->height, double(w) / image_->width, double(h) / image_->height});
     auto cropped = std::make_shared<Image>(image_->crop(x, y, w, h));
     if (cropped->linear) cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - cropped->exposure_bias);
@@ -578,6 +637,32 @@ void App::on_exposure_changed() {
     retone();
 }
 
+// Neighbours in the browsing direction first, then behind; skips what the
+// cache already has.
+void App::schedule_prefetch() {
+    std::vector<std::string> paths;
+    const int n = folder_.count();
+    if (n <= 1) {
+        loader_.prefetch({});
+        return;
+    }
+    auto add = [&](int offset) {
+        int i = folder_.index() + offset;
+        if (cfg_.wrap_around) i = ((i % n) + n) % n;
+        else if (i < 0 || i >= n) return;
+        if (i == folder_.index()) return;
+        gchar* full = g_build_filename(folder_.directory().c_str(), "", nullptr);
+        g_free(full);
+        const std::string path = folder_.directory() + "/" + folder_.name_at(i);
+        if (!cache_.contains(path) && std::find(paths.begin(), paths.end(), path) == paths.end()) paths.push_back(path);
+    };
+    for (int k = 1; k <= cfg_.prefetch_ahead || k <= cfg_.prefetch_behind; ++k) {
+        if (k <= cfg_.prefetch_ahead) add(k);
+        if (k <= cfg_.prefetch_behind) add(-k);
+    }
+    loader_.prefetch(std::move(paths));
+}
+
 void App::ensure_developed() {
     if (!showing_preview_ || develop_requested_) return;
     develop_requested_ = true;
@@ -592,6 +677,7 @@ void App::retone() {
         return;
     }
     if (!image_ || !image_->linear) return;
+    image_modified_ = true;
     image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias);
     view_->image_changed();
 }
@@ -716,6 +802,7 @@ void App::open_settings(const char* page) {
     if (!run_settings_dialog(GTK_WINDOW(window_), cfg_, page)) return;
     cfg_.save();
     set_decode_options(decode_options_for(cfg_));
+    cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
