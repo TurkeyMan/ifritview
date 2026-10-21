@@ -75,6 +75,7 @@ void read_xmp(const std::string& path, Image& out);
 struct ExifSummary {
     int orientation = 1;
     std::string camera;
+    std::string color_space;   // "sRGB" / "Adobe RGB (1998)" when declared
 };
 ExifSummary read_exif_file(const std::string& path, Image& out);
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);

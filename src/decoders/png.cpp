@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "icc.h"
 
 #include <png.h>
 
@@ -60,6 +61,20 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     png_read_image(png, rows.data());
     png_read_end(png, info);
 
+    {
+        using M = PixelFormat::Model;
+        if (color == PNG_COLOR_TYPE_PALETTE) {
+            int entries = 0;
+            png_colorp pal = nullptr;
+            if (png_get_PLTE(png, info, &pal, &entries)) {}
+            out.pixel_format = PixelFormat::palette(depth, entries);
+        } else {
+            const char* names = color == PNG_COLOR_TYPE_GRAY ? "Y" : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "YA" : color == PNG_COLOR_TYPE_RGB_ALPHA ? "RGBA" : "RGB";
+            out.pixel_format = PixelFormat::packed(color & PNG_COLOR_MASK_COLOR ? M::RGB : M::Gray, names, depth);
+        }
+        if (trns && !(color & PNG_COLOR_MASK_ALPHA)) out.pixel_format.notes.push_back("transparency key");
+        if (interlace != PNG_INTERLACE_NONE) out.pixel_format.notes.push_back("interlaced");
+    }
     out.add("PNG", "Bit depth", std::to_string(depth));
     out.add("PNG", "Color type", color == PNG_COLOR_TYPE_PALETTE ? "palette" : color == PNG_COLOR_TYPE_GRAY ? "grayscale"
                                  : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "grayscale + alpha" : color == PNG_COLOR_TYPE_RGB_ALPHA ? "RGB + alpha" : "RGB");
@@ -75,7 +90,13 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     png_bytep icc = nullptr;
     png_uint_32 icc_len = 0;
     int comp = 0;
-    if (png_get_iCCP(png, info, &icc_name, &comp, &icc, &icc_len) && icc_name) out.add("PNG", "ICC profile", icc_name);
+    if (png_get_iCCP(png, info, &icc_name, &comp, &icc, &icc_len) && icc_name) {
+        out.add("PNG", "ICC profile", icc_name);
+        out.color_space = icc_profile_description(icc, icc_len);
+        if (out.color_space.empty()) out.color_space = icc_name;
+    } else if (png_get_valid(png, info, PNG_INFO_sRGB)) {
+        out.color_space = "sRGB";
+    }
     png_textp text = nullptr;
     int n_text = 0;
     if (png_get_text(png, info, &text, &n_text) > 0)

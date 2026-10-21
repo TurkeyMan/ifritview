@@ -20,6 +20,7 @@ add_executable(ifritview
   src/folder.cpp
   src/image.cpp
   src/decoders/decoder.cpp
+  src/decoders/icc.cpp
   src/encoders/encoder.cpp
   src/metadata.cpp
   src/integration.cpp

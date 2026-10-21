@@ -54,6 +54,8 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     cairo_surface_destroy(surface);
 
     out.format = "PDF";
+    out.pixel_format.model = PixelFormat::Model::Vector;
+    out.pixel_format.notes.push_back("rendered at " + std::to_string(int(kDpi)) + " dpi");
     out.info = std::to_string(pages) + (pages == 1 ? " page" : " pages");
     add_info(out, "Title", poppler_document_get_title(doc));
     add_info(out, "Author", poppler_document_get_author(doc));

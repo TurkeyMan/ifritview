@@ -1,7 +1,9 @@
 #include "decoder.h"
+#include "icc.h"
 
 #include <tiffio.h>
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -75,6 +77,38 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     for (const auto& t : strings) {
         char* v = nullptr;
         if (TIFFGetField(tif, t.tag, &v) && v && *v) out.add("TIFF", t.name, v);
+    }
+    {
+        using M = PixelFormat::Model;
+        uint16_t photometric = PHOTOMETRIC_RGB, sample_format = SAMPLEFORMAT_UINT, planar = PLANARCONFIG_CONTIG;
+        TIFFGetFieldDefaulted(tif, TIFFTAG_PHOTOMETRIC, &photometric);
+        TIFFGetFieldDefaulted(tif, TIFFTAG_SAMPLEFORMAT, &sample_format);
+        TIFFGetFieldDefaulted(tif, TIFFTAG_PLANARCONFIG, &planar);
+        std::string names;
+        M model = M::RGB;
+        switch (photometric) {
+            case PHOTOMETRIC_PALETTE: model = M::Palette; break;
+            case PHOTOMETRIC_SEPARATED: model = M::CMYK; names = "CMYK"; break;
+            case PHOTOMETRIC_YCBCR: model = M::YCbCr; names = "YUV"; break;
+            case PHOTOMETRIC_CIELAB: case PHOTOMETRIC_ICCLAB: model = M::Lab; names = "Lab"; break;
+            case PHOTOMETRIC_RGB: names = "RGB"; break;
+            default: model = M::Gray; names = "Y"; break;
+        }
+        if (model == M::Palette) {
+            out.pixel_format = PixelFormat::palette(bps, 1 << std::min<int>(bps, 16));
+        } else {
+            for (int i = int(names.size()); i < spp; ++i) names += alpha && i == int(names.size()) ? 'A' : 'X';
+            out.pixel_format = PixelFormat::packed(model, names.c_str(), bps);
+            if (sample_format == SAMPLEFORMAT_IEEEFP) out.pixel_format.sample = PixelFormat::Sample::Float;
+            else if (sample_format == SAMPLEFORMAT_INT) out.pixel_format.sample = PixelFormat::Sample::Signed;
+            if (planar == PLANARCONFIG_SEPARATE) out.pixel_format.planar = true;
+            if (alpha && extra && extra[0] == EXTRASAMPLE_ASSOCALPHA) out.pixel_format.premultiplied = true;
+        }
+    }
+    {
+        uint32_t icc_len = 0;
+        void* icc = nullptr;
+        if (TIFFGetField(tif, TIFFTAG_ICCPROFILE, &icc_len, &icc) && icc && icc_len) out.color_space = icc_profile_description(static_cast<const uint8_t*>(icc), icc_len);
     }
     out.add("TIFF", "Bits per sample", std::to_string(bps));
     out.add("TIFF", "Samples per pixel", std::to_string(spp));

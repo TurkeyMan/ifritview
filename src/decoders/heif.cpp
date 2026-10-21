@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "icc.h"
 
 #include <libheif/heif.h>
 
@@ -55,6 +56,44 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     }
     if (out.format.empty()) out.format = "HEIF";
     if (heif_image_handle_get_number_of_depth_images(handle) > 0) out.info = "has depth map";
+    {
+        heif_colorspace cs = heif_colorspace_undefined;
+        heif_chroma ch = heif_chroma_undefined;
+        heif_image_handle_get_preferred_decoding_colorspace(handle, &cs, &ch);
+        const int bits = out.bits_per_sample;
+        if (cs == heif_colorspace_RGB) out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, alpha ? "RGBA" : "RGB", bits);
+        else if (cs == heif_colorspace_monochrome || ch == heif_chroma_monochrome) out.pixel_format = PixelFormat::packed(PixelFormat::Model::Gray, alpha ? "YA" : "Y", bits);
+        else {
+            out.pixel_format = PixelFormat::ycbcr(bits, ch == heif_chroma_444 ? 1 : 2, ch == heif_chroma_420 ? 2 : 1);
+            if (alpha) out.pixel_format.channels.push_back({'A', bits});
+        }
+    }
+    {
+        const heif_color_profile_type type = heif_image_handle_get_color_profile_type(handle);
+        if (type == heif_color_profile_type_nclx) {
+            heif_color_profile_nclx* nclx = nullptr;
+            if (heif_image_handle_get_nclx_color_profile(handle, &nclx).code == heif_error_Ok && nclx) {
+                const char* primaries = nclx->color_primaries == heif_color_primaries_ITU_R_BT_709_5 ? "BT.709"
+                                      : nclx->color_primaries == heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ? "BT.2020"
+                                      : nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 ? "Display P3"
+                                      : nclx->color_primaries == heif_color_primaries_SMPTE_RP_431_2 ? "DCI-P3" : nullptr;
+                const char* transfer = nclx->transfer_characteristics == heif_transfer_characteristic_IEC_61966_2_1 ? "sRGB"
+                                     : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_PQ ? "PQ"
+                                     : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_HLG ? "HLG"
+                                     : nclx->transfer_characteristics == heif_transfer_characteristic_linear ? "linear"
+                                     : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_709_5 ? "BT.709" : nullptr;
+                if (primaries && transfer) {
+                    if (std::string(primaries) == "BT.709" && std::string(transfer) == "sRGB") out.color_space = "sRGB";
+                    else out.color_space = std::string(primaries) + " " + transfer;
+                } else if (primaries) out.color_space = primaries;
+                heif_nclx_color_profile_free(nclx);
+            }
+        } else if (type == heif_color_profile_type_rICC || type == heif_color_profile_type_prof) {
+            const size_t n = heif_image_handle_get_raw_color_profile_size(handle);
+            std::vector<uint8_t> icc(n);
+            if (n && heif_image_handle_get_raw_color_profile(handle, icc.data()).code == heif_error_Ok) out.color_space = icc_profile_description(icc.data(), n);
+        }
+    }
     out.add("HEIF", "Bits per pixel", std::to_string(out.bits_per_sample));
     out.add("HEIF", "Alpha channel", alpha ? "yes" : "no");
 #ifdef HAVE_EXIF

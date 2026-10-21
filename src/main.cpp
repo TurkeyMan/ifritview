@@ -104,6 +104,7 @@ int probe(int argc, char** argv) {
         if (ok) {
             std::printf("ok    %-40s %5dx%-5d %s%s %s (%.0f ms)\n", argv[i], img.width, img.height,
                         img.format.c_str(), img.has_alpha ? " +alpha" : "", img.info.c_str(), ms);
+            if (!img.pixel_format.empty()) std::printf("        pixel format: %s%s%s\n", img.pixel_format.describe(img.width, img.height).c_str(), img.color_space.empty() ? "" : " · ", img.color_space.c_str());
             if (img.xmp.present)
                 std::printf("        xmp develop: exposure %+.2f temp %.0f orientation %d crop %d\n", img.xmp.exposure, img.xmp.temperature, img.xmp.orientation, int(img.xmp.has_crop));
             for (const MetadataGroup& g : img.metadata) {

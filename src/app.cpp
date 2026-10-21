@@ -412,6 +412,8 @@ std::vector<MetadataGroup> App::collect_metadata() const {
     MetadataGroup img{"Image", {}};
     img.items.push_back({"Dimensions", std::to_string(image_->width) + " × " + std::to_string(image_->height)});
     img.items.push_back({"Format", image_->format});
+    if (!image_->pixel_format.empty()) img.items.push_back({"Pixel format", image_->pixel_format.describe(image_->width, image_->height)});
+    if (!image_->color_space.empty()) img.items.push_back({"Colour space", image_->color_space});
     img.items.push_back({"Source depth", std::to_string(image_->bits_per_sample) + " bits per sample"});
     img.items.push_back({"Alpha", image_->has_alpha ? "yes" : "no"});
     if (!image_->info.empty()) img.items.push_back({"Notes", image_->info});
@@ -459,18 +461,12 @@ ImageView::OverlaySections App::overlay_sections() const {
     }
     flush();
     if (cfg_.overlay_format) {
-        std::string line = std::to_string(image_->width) + " × " + std::to_string(image_->height) + "  ·  " +
-                           std::to_string(image_->bits_per_sample) + "-bit" + (image_->has_alpha ? " + alpha" : "") + "  ·  " + image_->format;
-        lines.push_back(line);
+        lines.push_back(std::to_string(image_->width) + " × " + std::to_string(image_->height) + "  ·  " + image_->format);
+        if (!image_->pixel_format.empty()) lines.push_back(image_->pixel_format.describe(image_->width, image_->height) + (image_->color_space.empty() ? "" : "  ·  " + image_->color_space));
         std::string detail;
         auto append = [&](const std::string& label, const std::string& v) { if (!v.empty()) detail += (detail.empty() ? "" : "  ·  ") + (label.empty() ? v : label + " " + v); };
         append("", find({"JPEG"}, {"Coding"}));
-        append("chroma", find({"JPEG"}, {"Chroma subsampling"}));
-        append("", find({"PNG"}, {"Color type"}));
-        append("ICC", find({"PNG"}, {"ICC profile"}));
         append("compression", find({"TIFF"}, {"Compression"}));
-        append("", find({"WebP"}, {"Coding"}));
-        append("mosaic", find({"Raw"}, {"Mosaic"}));
         if (!detail.empty()) lines.push_back(detail);
     }
     flush();

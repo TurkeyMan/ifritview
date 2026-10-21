@@ -158,6 +158,8 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.has_alpha = has_alpha;
     out.bits_per_sample = bits_per_sample;
     out.format = format;
+    out.pixel_format = pixel_format;
+    out.color_space = color_space;
     out.info = info;
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;

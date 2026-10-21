@@ -1,9 +1,11 @@
 #include "decoder.h"
+#include "icc.h"
 
 #include <jpeglib.h>
 
 #include <csetjmp>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -35,8 +37,17 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         jpeg_destroy_decompress(&cinfo);
         return false;
     }
+    jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);   // keep the ICC profile
     jpeg_read_header(&cinfo, TRUE);
     progressive = cinfo.progressive_mode;
+    {
+        JOCTET* icc = nullptr;
+        unsigned int icc_len = 0;
+        if (jpeg_read_icc_profile(&cinfo, &icc, &icc_len)) {
+            out.color_space = icc_profile_description(icc, icc_len);
+            free(icc);
+        }
+    }
     const bool cmyk = cinfo.jpeg_color_space == JCS_CMYK || cinfo.jpeg_color_space == JCS_YCCK;
     cinfo.out_color_space = cmyk ? JCS_CMYK : JCS_EXT_BGRX;
     jpeg_start_decompress(&cinfo);
@@ -64,6 +75,14 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     if (!cmyk && cinfo.num_components == 3) {
         const int h = cinfo.comp_info[0].h_samp_factor, v = cinfo.comp_info[0].v_samp_factor;
         subsampling = (h == 2 && v == 2) ? "4:2:0" : (h == 2 && v == 1) ? "4:2:2" : (h == 1 && v == 2) ? "4:4:0" : "4:4:4";
+    }
+    {
+        using M = PixelFormat::Model;
+        if (cmyk) out.pixel_format = PixelFormat::packed(M::CMYK, "CMYK", cinfo.data_precision);
+        else if (cinfo.num_components == 1) out.pixel_format = PixelFormat::packed(M::Gray, "Y", cinfo.data_precision);
+        else if (cinfo.jpeg_color_space == JCS_RGB) out.pixel_format = PixelFormat::packed(M::RGB, "RGB", cinfo.data_precision);
+        else out.pixel_format = PixelFormat::ycbcr(cinfo.data_precision, cinfo.comp_info[0].h_samp_factor, cinfo.comp_info[0].v_samp_factor);
+        out.pixel_format.notes.push_back(progressive ? "progressive" : "baseline");
     }
     out.add("JPEG", "Coding", progressive ? "progressive" : "baseline");
     out.add("JPEG", "Components", std::to_string(cinfo.num_components));
@@ -102,6 +121,7 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     const ExifSummary exif = read_exif_file(path, out);
     out.apply_orientation(exif.orientation);
     out.info = exif.camera;
+    if (out.color_space.empty()) out.color_space = exif.color_space;   // an embedded profile is more specific than the EXIF flag
 #endif
     return true;
 }

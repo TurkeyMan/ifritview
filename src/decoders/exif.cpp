@@ -33,6 +33,14 @@ ExifSummary read(ExifData* ed, Image& out) {
         const int o = exif_get_short(e->data, exif_data_get_byte_order(ed));
         if (o >= 1 && o <= 8) summary.orientation = o;
     }
+    if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_EXIF], EXIF_TAG_COLOR_SPACE)) {
+        const int cs = exif_get_short(e->data, exif_data_get_byte_order(ed));
+        if (cs == 1) summary.color_space = "sRGB";
+        else if (cs == 2) summary.color_space = "Adobe RGB (1998)";
+    }
+    if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_INTEROPERABILITY], EXIF_TAG_INTEROPERABILITY_INDEX)) {
+        if (e->size >= 3 && std::memcmp(e->data, "R03", 3) == 0) summary.color_space = "Adobe RGB (1998)";
+    }
     if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_MODEL)) {
         char buf[128];
         if (exif_entry_get_value(e, buf, sizeof buf)) summary.camera = buf;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pixel_format.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -47,6 +49,8 @@ struct Image {
     bool has_alpha = false;
     int bits_per_sample = 8;     // depth of the source file, for the status bar
     std::string format;          // "JPEG", "Canon RAW", ...
+    PixelFormat pixel_format;    // how the file stores its pixels
+    std::string color_space;     // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
     std::string info;            // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;   // only for raw files
     double exposure_bias = 0;             // the camera's exposure compensation, in EV, already baked in

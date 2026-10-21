@@ -281,6 +281,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error) {
     if (!ok) return false;
 
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
+    if (out.linear) out.color_space = "sRGB (developed)";   // the sensor has no colour space; this is what we rendered to
     std::string make = raw.imgdata.idata.normalized_make[0] ? raw.imgdata.idata.normalized_make : raw.imgdata.idata.make;
     out.format = make.empty() ? "RAW" : make + " RAW";
     out.format += ", " + mode;
@@ -318,6 +319,22 @@ bool decode_raw(const std::string& path, Image& out, std::string& error) {
     if (raw.imgdata.color.raw_bps) out.add("Raw", "Bits per sample", std::to_string(raw.imgdata.color.raw_bps));
     out.add("Raw", "Colour channels", std::to_string(id.colors) + " (" + id.cdesc + ")");
     if (id.dng_version) out.add("Raw", "DNG version", std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
+    {
+        const int bits = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
+        if (id.filters == 9) out.pixel_format = PixelFormat::mosaic_("X-Trans", bits);
+        else if (id.filters) {
+            std::string pat;
+            for (int row = 0; row < 2; ++row)
+                for (int col = 0; col < 2; ++col) {
+                    const int shift = (((row << 1) & 14) + (col & 1)) << 1;   // dcraw's FC(row, col)
+                    pat += id.cdesc[(id.filters >> shift) & 3];
+                }
+            out.pixel_format = PixelFormat::mosaic_("Bayer " + pat, bits);
+        } else {
+            out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, "RGB", bits);
+            out.pixel_format.notes.push_back("linear");
+        }
+    }
     if (id.filters == 9) out.add("Raw", "Mosaic", "X-Trans");
     else if (id.filters) out.add("Raw", "Mosaic", "Bayer");
     else out.add("Raw", "Mosaic", "none (linear)");

@@ -58,6 +58,25 @@ bool decode(const std::string& path, Image& out, std::string& error) {
         std::fclose(f);
     }
     out.bits_per_sample = stbi_is_16_bit(path.c_str()) ? 16 : 8;
+    {
+        using M = PixelFormat::Model;
+        const char* names = channels == 1 ? "Y" : channels == 2 ? "YA" : channels == 4 ? "RGBA" : "RGB";
+        out.pixel_format = PixelFormat::packed(channels <= 2 ? M::Gray : M::RGB, names, out.bits_per_sample);
+        if (FILE* f = std::fopen(path.c_str(), "rb")) {   // TGA: the header knows the packed depth stb expands
+            uint8_t h[18];
+            if (format_name(path) == "Targa" && std::fread(h, 1, 18, f) == 18) {
+                const int type = h[2], depth = h[16], attr = h[17] & 0x0F;
+                if (type == 1 || type == 9) out.pixel_format = PixelFormat::palette(depth);
+                else if (depth == 16) out.pixel_format = attr ? PixelFormat::widths(M::RGB, "ARGB", {1, 5, 5, 5}, 16) : PixelFormat::widths(M::RGB, "XRGB", {1, 5, 5, 5}, 16);
+                else if (depth == 15) out.pixel_format = PixelFormat::widths(M::RGB, "RGB", {5, 5, 5}, 15);
+                else if (depth == 32) out.pixel_format = PixelFormat::packed(M::RGB, "BGRA", 8);
+                else if (depth == 24) out.pixel_format = PixelFormat::packed(M::RGB, "BGR", 8);
+                if (type >= 9) out.pixel_format.notes.push_back("RLE");
+            }
+            std::fclose(f);
+        }
+        if (format_name(path) == "Radiance HDR") out.pixel_format = PixelFormat::widths(M::RGB, "RGBE", {8, 8, 8, 8}, 32), out.pixel_format.notes.push_back("shared exponent");
+    }
     out.format = format_name(path);
     return true;
 }
