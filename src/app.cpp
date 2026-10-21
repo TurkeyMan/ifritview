@@ -23,184 +23,6 @@
 #include <filesystem>
 #include <thread>
 
-// ---------------------------------------------------------------- Loader
-
-Loader::Loader(Callback callback) : callback_(std::move(callback))
-{
-    foreground_ = std::thread([this] { run_foreground(); });
-    const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
-    const unsigned workers = std::clamp(cores - 2, 1u, 4u);
-    for (unsigned i = 0; i < workers; ++i)
-        background_.emplace_back([this] { run_background(); });
-}
-
-Loader::~Loader()
-{
-    {
-        std::lock_guard lock(mutex_);
-        stop_ = true;
-    }
-    fg_wake_.notify_all();
-    bg_wake_.notify_all();
-    foreground_.join();
-    for (std::thread& t : background_)
-        t.join();
-}
-
-void Loader::request(uint64_t generation, const std::string& path)
-{
-    {
-        std::lock_guard lock(mutex_);
-        develop_.reset();  // a develop for an image we've left, not yet started, is dropped
-        pending_ = Job{generation, path};
-    }
-    fg_wake_.notify_one();
-}
-
-void Loader::request_develop(uint64_t generation, const std::string& path)
-{
-    {
-        std::lock_guard lock(mutex_);
-        develop_ = Job{generation, path};
-    }
-    bg_wake_.notify_one();
-}
-
-void Loader::prefetch(std::vector<std::string> paths)
-{
-    {
-        std::lock_guard lock(mutex_);
-        prefetch_ = std::move(paths);
-    }
-    bg_wake_.notify_all();
-}
-
-// Results for the image on screen jump the main loop's queue; prefetches
-// wait until the main thread is otherwise idle.
-void Loader::post(Result* r, Lane lane)
-{
-    struct Dispatch
-    {
-        Loader* loader;
-        Result* result;
-    };
-    const int priority = lane == Lane::Foreground ? G_PRIORITY_HIGH : lane == Lane::Develop ? G_PRIORITY_DEFAULT : G_PRIORITY_LOW;
-    g_idle_add_full(
-        priority,
-        +[](gpointer p) -> gboolean
-        {
-            auto* d = static_cast<Dispatch*>(p);
-            d->loader->callback_(*d->result);
-            delete d->result;
-            delete d;
-            return G_SOURCE_REMOVE;
-        },
-        new Dispatch{this, r}, nullptr);
-}
-
-void Loader::decode_into(Result& r)
-{
-    r.picked_us = g_get_monotonic_time();
-    if (!decode_image(r.path, *r.image, r.error))
-        r.image.reset();
-    else
-        r.image->build_mips();
-    r.decoded_us = g_get_monotonic_time();
-}
-
-void Loader::run_foreground()
-{
-    for (;;)
-    {
-        Job job;
-        {
-            std::unique_lock lock(mutex_);
-            fg_wake_.wait(lock, [this] { return stop_ || pending_; });
-            if (stop_)
-                return;
-            job = *pending_;
-            pending_.reset();
-        }
-        // A quick stand-in first (a raw's embedded JPEG); its develop goes to
-        // the background, ahead of any prefetching.
-        auto preview = std::make_shared<Image>();
-        if (decode_preview(job.path, *preview))
-        {
-            preview->build_mips();
-            post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);
-            request_develop(job.generation, job.path);
-            continue;
-        }
-        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
-        decode_into(*r);
-        post(r, Lane::Foreground);
-    }
-}
-
-void Loader::run_background()
-{
-    // Below the foreground worker and the UI when cores are contended.
-    platform::lower_thread_priority();
-    for (;;)
-    {
-        Job job{};
-        bool is_develop = false;
-        {
-            std::unique_lock lock(mutex_);
-            bg_wake_.wait(lock,
-                          [this]
-                          {
-                              if (stop_ || develop_)
-                                  return true;
-                              for (const std::string& p : prefetch_)
-                                  if (std::find(in_flight_.begin(), in_flight_.end(), p) == in_flight_.end())
-                                      return true;
-                              return false;
-                          });
-            if (stop_)
-                return;
-            if (develop_)
-            {
-                job = *develop_;
-                develop_.reset();
-                is_develop = true;
-            }
-            else
-            {
-                for (auto it = prefetch_.begin(); it != prefetch_.end(); ++it)
-                    if (std::find(in_flight_.begin(), in_flight_.end(), *it) == in_flight_.end())
-                    {
-                        job.path = *it;
-                        prefetch_.erase(it);
-                        break;
-                    }
-            }
-            in_flight_.push_back(job.path);
-        }
-        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
-        if (is_develop)
-            decode_into(*r);
-        else
-        {
-            // A neighbour is prepared the way a normal load would be: its
-            // preview when it has one (cheap), otherwise the image itself.
-            if (decode_preview(job.path, *r->image))
-            {
-                r->preview = true;
-                r->image->build_mips();
-            }
-            else
-                decode_into(*r);
-        }
-        {
-            std::lock_guard lock(mutex_);
-            in_flight_.erase(std::find(in_flight_.begin(), in_flight_.end(), job.path));
-        }
-        bg_wake_.notify_one();
-        post(r, is_develop ? Lane::Develop : Lane::Prefetch);
-    }
-}
-
 // ------------------------------------------------------------------- App
 
 namespace
@@ -231,7 +53,24 @@ std::string human_size(uint64_t bytes)
 
 }  // namespace
 
-App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }), cache_(0)
+namespace
+{
+// GTK main loop: the image on screen jumps the queue, prefetches wait for idle.
+void dispatch_gtk(std::function<void()> fn, int priority)
+{
+    const int p = priority == 0 ? G_PRIORITY_HIGH : priority == 1 ? G_PRIORITY_DEFAULT : G_PRIORITY_LOW;
+    g_idle_add_full(
+        p,
+        +[](gpointer data) -> gboolean
+        {
+            (*static_cast<std::function<void()>*>(data))();
+            return G_SOURCE_REMOVE;
+        },
+        new std::function<void()>(std::move(fn)), +[](gpointer data) { delete static_cast<std::function<void()>*>(data); });
+}
+}  // namespace
+
+App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }, dispatch_gtk), cache_(0)
 {
     cfg_.load();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);

@@ -31,6 +31,7 @@ add_executable(ifritview
   src/icons.cpp
   src/geocode.cpp
   src/video.cpp
+  src/loader.cpp
   src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
