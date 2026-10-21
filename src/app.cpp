@@ -494,6 +494,7 @@ void App::toggle_slideshow()
 void App::stop_slideshow()
 {
     slideshow_ = false;
+    slide_.active = false;
     if (slideshow_timer_)
         g_source_remove(slideshow_timer_);
     slideshow_timer_ = 0;
@@ -502,7 +503,9 @@ void App::stop_slideshow()
 }
 
 // One slide: a random gentle framing change over the slide's duration, then
-// on to the next image. The motion stays within the image and above fit.
+// on to the next image. The motion is chosen once per slide in image-relative
+// terms; if the developed raw replaces its preview mid-way, the same motion
+// carries on from the same phase on the new pixels.
 void App::slideshow_start_slide()
 {
     if (!slideshow_)
@@ -510,27 +513,20 @@ void App::slideshow_start_slide()
     if (slideshow_timer_)
         g_source_remove(slideshow_timer_);
     const int ms = int(cfg_.slideshow_seconds * 1000);
-    if (image_ && cfg_.slideshow_motion && cfg_.slideshow_zoom > 0)
+    slide_.active = image_ && cfg_.slideshow_motion && cfg_.slideshow_zoom > 0;
+    slide_.start_us = g_get_monotonic_time();
+    slide_.duration_ms = ms;
+    if (slide_.active)
     {
-        int vw, vh;
-        view_->view_size(vw, vh);
-        const double w = image_->width, h = image_->height;
-        const double fit = std::min(vw / w, vh / h);
-        const double zmax = fit * (1.0 + cfg_.slideshow_zoom);
         const bool in = g_random_boolean();
-        const double z0 = in ? fit * (1.0 + cfg_.slideshow_zoom * 0.15) : zmax, z1 = in ? zmax : fit * (1.0 + cfg_.slideshow_zoom * 0.15);
-        auto centre = [&](double z, double& cx, double& cy) {
-            // Keep the viewport inside the image at this zoom; pick a point in the allowed band.
-            const double half_w = vw / (2 * z), half_h = vh / (2 * z);
-            const double lo_x = std::min(half_w, w - half_w), hi_x = std::max(half_w, w - half_w);
-            const double lo_y = std::min(half_h, h - half_h), hi_y = std::max(half_h, h - half_h);
-            cx = lo_x + (hi_x - lo_x) * g_random_double();
-            cy = lo_y + (hi_y - lo_y) * g_random_double();
-        };
-        double cx0, cy0, cx1, cy1;
-        centre(z0, cx0, cy0);
-        centre(z1, cx1, cy1);
-        view_->begin_motion(z0, z1, cx0, cy0, cx1, cy1, ms);
+        const double lo = 1.0 + cfg_.slideshow_zoom * 0.15, hi = 1.0 + cfg_.slideshow_zoom;
+        slide_.z0 = in ? lo : hi;
+        slide_.z1 = in ? hi : lo;
+        slide_.fx0 = g_random_double();
+        slide_.fy0 = g_random_double();
+        slide_.fx1 = g_random_double();
+        slide_.fy1 = g_random_double();
+        apply_slide_motion();
     }
     slideshow_timer_ = g_timeout_add(guint(ms), +[](gpointer self) -> gboolean {
         auto* app = static_cast<App*>(self);
@@ -538,6 +534,31 @@ void App::slideshow_start_slide()
         app->slideshow_advance();
         return G_SOURCE_REMOVE;
     }, this);
+}
+
+// Translate the slide's relative motion into this image's coordinates. The
+// viewport is kept inside the image: the random fractions pick a point
+// within the band of centres that allows that at each zoom.
+void App::apply_slide_motion()
+{
+    if (!slide_.active || !image_)
+        return;
+    int vw, vh;
+    view_->view_size(vw, vh);
+    const double w = image_->width, h = image_->height;
+    const double fit = std::min(vw / w, vh / h);
+    auto centre = [&](double z, double fx, double fy, double& cx, double& cy) {
+        const double half_w = vw / (2 * z), half_h = vh / (2 * z);
+        const double lo_x = std::min(half_w, w - half_w), hi_x = std::max(half_w, w - half_w);
+        const double lo_y = std::min(half_h, h - half_h), hi_y = std::max(half_h, h - half_h);
+        cx = lo_x + (hi_x - lo_x) * fx;
+        cy = lo_y + (hi_y - lo_y) * fy;
+    };
+    const double z0 = fit * slide_.z0, z1 = fit * slide_.z1;
+    double cx0, cy0, cx1, cy1;
+    centre(z0, slide_.fx0, slide_.fy0, cx0, cy0);
+    centre(z1, slide_.fx1, slide_.fy1, cx1, cy1);
+    view_->begin_motion(z0, z1, cx0, cy0, cx1, cy1, slide_.duration_ms, slide_.start_us);
 }
 
 void App::slideshow_advance()
@@ -1010,10 +1031,13 @@ void App::on_loaded(Loader::Result& r)
     refresh_metadata();
     if (cfg_.animate && image_->animation)
         start_animation();
-    if (slideshow_ && !r.preview)
-        slideshow_start_slide();
-    else if (slideshow_ && r.preview && !image_->final_width)
-        slideshow_start_slide();
+    if (slideshow_)
+    {
+        if (replacing_preview)
+            apply_slide_motion();  // same slide, same phase, sharper pixels
+        else
+            slideshow_start_slide();
+    }
     const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
     const bool slider_moved = !r.preview && slider_pending_;  // the user set this on the preview of this very file
     slider_pending_ = false;
@@ -1031,7 +1055,8 @@ void App::on_loaded(Loader::Result& r)
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
 
         gtk_widget_set_sensitive(exposure_, !showing_preview_);  // greyed while the camera JPEG stands in
-        gtk_widget_show(exposure_box_);
+        if (!fullscreen_)
+            gtk_widget_show(exposure_box_);
         if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present)
             apply_xmp_edits();
         else if (slider_moved)
@@ -1047,7 +1072,7 @@ void App::on_loaded(Loader::Result& r)
     {
         apply_xmp_edits();
     }
-    else
+    else if (!fullscreen_)
     {
         gtk_widget_hide(exposure_box_);
     }
@@ -1390,6 +1415,11 @@ void App::on_window_state(GdkEventWindowState* e)
     fullscreen_ = fs;
     if (!fs && slideshow_)
         stop_slideshow();
+    if (!fs)
+    {
+        update_title();
+        gtk_widget_set_visible(exposure_box_, image_ && (image_->linear || showing_preview_));
+    }
     chrome_pending_ = true;
     view_->set_fullscreen(fs);
     gtk_widget_queue_resize(window_);
@@ -1488,6 +1518,11 @@ void App::on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx)
 
 void App::update_title()
 {
+    // In fullscreen the title is invisible, and under some compositors a
+    // title change re-activates the window, stealing focus from wherever
+    // the user is typing; the title catches up when fullscreen ends.
+    if (fullscreen_)
+        return;
     std::string title = "IfritView";
     if (!folder_.empty())
     {
@@ -1554,6 +1589,7 @@ void App::update_status()
         gtk_spinner_stop(GTK_SPINNER(spinner_));
         gtk_widget_hide(spinner_);
     }
+    view_->set_busy(busy);  // the footer is hidden in fullscreen; the panel shows a ring instead
     view_->set_overlay(overlay_sections());
     gtk_label_set_text(GTK_LABEL(status_left_), left.c_str());
     gtk_label_set_text(GTK_LABEL(status_center_), center.c_str());

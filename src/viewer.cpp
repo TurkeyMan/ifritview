@@ -53,6 +53,7 @@ void ImageView::cancel_deferred_click()
 
 ImageView::~ImageView()
 {
+    set_busy(false);
     end_motion();
     cancel_deferred_click();
     drop_caches();
@@ -286,7 +287,7 @@ void ImageView::zoom_step_at(int direction, double x, double y)
     set_zoom(zoom_ * factor, x, y);
 }
 
-void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms)
+void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms, gint64 start_us)
 {
     if (!image_)
         return;
@@ -299,11 +300,11 @@ void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0,
     motion_.cx1 = cx1;
     motion_.cy1 = cy1;
     motion_.z_cache = std::max(zoom0, zoom1);
-    motion_.start_us = g_get_monotonic_time();
+    motion_.start_us = start_us ? start_us : g_get_monotonic_time();
     motion_.duration_us = gint64(duration_ms) * 1000;
     mode_ = ZoomMode::Manual;
     scaled_surface(motion_.z_cache);  // build the intermediate now, not on the first frame
-    motion_frame(motion_.start_us);
+    motion_frame(g_get_monotonic_time());
     motion_.tick = gtk_widget_add_tick_callback(
         area_,
         +[](GtkWidget*, GdkFrameClock* clock, gpointer self) -> gboolean {
@@ -314,6 +315,31 @@ void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0,
             return G_SOURCE_CONTINUE;
         },
         this, nullptr);
+}
+
+void ImageView::set_busy(bool busy)
+{
+    if (busy == busy_)
+        return;
+    busy_ = busy;
+    if (busy_tick_)
+        gtk_widget_remove_tick_callback(area_, busy_tick_);
+    busy_tick_ = 0;
+    if (busy)
+        busy_tick_ = gtk_widget_add_tick_callback(
+            area_,
+            +[](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean {
+                auto* view = static_cast<ImageView*>(self);
+                if (!view->busy_)
+                    return G_SOURCE_REMOVE;
+                // Redraw only the ring's corner.
+                const int scale = view->scale_factor();
+                const int s = 40 * scale;
+                gtk_widget_queue_draw_area(w, gtk_widget_get_allocated_width(w) - s / scale, gtk_widget_get_allocated_height(w) - s / scale, s / scale, s / scale);
+                return G_SOURCE_CONTINUE;
+            },
+            this, nullptr);
+    gtk_widget_queue_draw(area_);
 }
 
 void ImageView::end_motion()
@@ -457,6 +483,23 @@ void ImageView::draw(cairo_t* cr)
     cairo_restore(cr);
     if (motion_.active)
         frame_ms_ = (g_get_monotonic_time() - t_draw) / 1000.0;
+
+    // Busy ring: bottom-right, small and dim, a short arc chasing round.
+    if (busy_)
+    {
+        int vw, vh;
+        view_size(vw, vh);
+        const double r = 9.0 * scale, cx = vw - 20.0 * scale, cy = vh - 20.0 * scale;
+        const double phase = (g_get_monotonic_time() % 1000000) / 1000000.0 * 2 * G_PI;
+        cairo_set_line_width(cr, 2.5 * scale);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.18);
+        cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
+        cairo_stroke(cr);
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.75);
+        cairo_arc(cr, cx, cy, r, phase, phase + G_PI * 0.6);
+        cairo_stroke(cr);
+    }
 
     // Info overlay: small text in a contrasting colour over a faint backdrop,
     // one block per category with a thin rule between them.

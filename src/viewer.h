@@ -45,10 +45,12 @@ public:
     // Slideshow motion: zoom/pan smoothly between two framings over
     // `duration_ms`, drawing from a surface pre-scaled to the larger zoom so
     // each frame is a cheap bilinear blit. Centres are image coordinates.
-    void begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms);
+    // `start_us` lets a replacement image (preview -> developed) continue a motion in phase; 0 = now.
+    void begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms, gint64 start_us = 0);
     void end_motion();
     bool motion_active() const { return motion_.active; }
     double frame_ms() const { return frame_ms_; }  // last measured draw cost
+    void set_busy(bool busy);                      // a small spinning ring in the corner while a decode runs
 
     void zoom_step(int direction);  // around the view centre
     int scale_factor() const;
@@ -102,6 +104,8 @@ private:
         guint tick = 0;
     } motion_;
     double frame_ms_ = 0;
+    bool busy_ = false;
+    guint busy_tick_ = 0;
     void motion_frame(gint64 now_us);
     const char* cursor_name_ = nullptr;  // currently set named cursor, null for the default
     int checker_scale_ = 0;

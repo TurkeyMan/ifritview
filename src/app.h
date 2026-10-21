@@ -151,6 +151,15 @@ private:
     guint slideshow_timer_ = 0;
     std::vector<int> slideshow_order_;  // shuffled indices when shuffling
     size_t slideshow_pos_ = 0;
+    struct Slide  // the current slide's motion in image-relative terms, so a developed image can take over mid-way
+    {
+        bool active = false;
+        double z0 = 1, z1 = 1;              // zoom relative to fit
+        double fx0 = 0.5, fy0 = 0.5, fx1 = 0.5, fy1 = 0.5;  // centre as fractions of the image
+        gint64 start_us = 0;
+        int duration_ms = 0;
+    } slide_;
+    void apply_slide_motion();
     void slideshow_start_slide();
     void slideshow_advance();
     void stop_slideshow();
