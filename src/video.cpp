@@ -1,7 +1,5 @@
 #include "video.h"
 
-#include <algorithm>
-
 #ifdef HAVE_VIDEO
 
 #include "gst_api.h"
@@ -295,10 +293,4 @@ const std::vector<std::string>& video_extensions()
 {
     static const std::vector<std::string> list{"mp4", "m4v", "mov", "mts", "m2ts", "mkv", "webm", "avi", "3gp"};
     return list;
-}
-
-bool is_video_extension(const std::string& ext)
-{
-    const auto& list = video_extensions();
-    return std::find(list.begin(), list.end(), ext) != list.end();
 }

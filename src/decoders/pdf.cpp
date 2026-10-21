@@ -1,16 +1,82 @@
 // PDF through poppler-glib: the first page rendered to pixels at a fixed
 // DPI, over white. Page navigation can come later.
+//
+// Poppler is optional at runtime: built against its headers, but dlopened
+// rather than linked (it drags in a few dozen packages). Without it, PDFs
+// aren't part of the series.
 #include "decoder.h"
 
 #include <cairo.h>
+#include <dlfcn.h>
 #include <glib.h>
 #include <poppler.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+
+#define IFRIT_POPPLER_FUNCTIONS(X)             \
+    X(poppler_document_new_from_bytes)         \
+    X(poppler_document_get_n_pages)            \
+    X(poppler_document_get_page)               \
+    X(poppler_document_get_title)              \
+    X(poppler_document_get_author)             \
+    X(poppler_document_get_subject)            \
+    X(poppler_document_get_keywords)           \
+    X(poppler_document_get_creator)            \
+    X(poppler_document_get_producer)           \
+    X(poppler_document_get_pdf_version_string) \
+    X(poppler_page_get_size)                   \
+    X(poppler_page_render)
 
 namespace
 {
+
+struct PopplerApi
+{
+#define IFRIT_POPPLER_POINTER(name) decltype(&::name) name = nullptr;
+    IFRIT_POPPLER_FUNCTIONS(IFRIT_POPPLER_POINTER)
+#undef IFRIT_POPPLER_POINTER
+};
+PopplerApi g_poppler;
+
+bool load_poppler()
+{
+    if (g_getenv("IFRIT_NO_PDF"))
+        return false;
+    void* lib = dlopen("libpoppler-glib.so.8", RTLD_NOW | RTLD_LOCAL);
+    if (!lib)
+    {
+        if (g_getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "pdf: %s\n", dlerror());
+        return false;
+    }
+    PopplerApi api;
+    bool ok = true;
+#define IFRIT_POPPLER_RESOLVE(name)                                            \
+    if (!(api.name = reinterpret_cast<decltype(api.name)>(dlsym(lib, #name)))) \
+        ok = false;
+    IFRIT_POPPLER_FUNCTIONS(IFRIT_POPPLER_RESOLVE)
+#undef IFRIT_POPPLER_RESOLVE
+    if (!ok)
+        return false;  // an incompatible poppler; leave it loaded, it's harmless
+    g_poppler = api;
+    return true;
+}
+
+// From here on the poppler_* names call through the table.
+#define poppler_document_new_from_bytes g_poppler.poppler_document_new_from_bytes
+#define poppler_document_get_n_pages g_poppler.poppler_document_get_n_pages
+#define poppler_document_get_page g_poppler.poppler_document_get_page
+#define poppler_document_get_title g_poppler.poppler_document_get_title
+#define poppler_document_get_author g_poppler.poppler_document_get_author
+#define poppler_document_get_subject g_poppler.poppler_document_get_subject
+#define poppler_document_get_keywords g_poppler.poppler_document_get_keywords
+#define poppler_document_get_creator g_poppler.poppler_document_get_creator
+#define poppler_document_get_producer g_poppler.poppler_document_get_producer
+#define poppler_document_get_pdf_version_string g_poppler.poppler_document_get_pdf_version_string
+#define poppler_page_get_size g_poppler.poppler_page_get_size
+#define poppler_page_render g_poppler.poppler_page_render
 
 constexpr double kDpi = 150.0;
 
@@ -91,6 +157,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
 }
 
 }  // namespace
+
+bool pdf_supported()
+{
+    static const bool loaded = load_poppler();
+    return loaded;
+}
 
 const Decoder& pdf_decoder()
 {

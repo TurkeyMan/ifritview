@@ -47,6 +47,5 @@ private:
 // Whether videos can play: built with video support and GStreamer present
 // at runtime (it's loaded on first use, never linked).
 bool video_supported();
-// The extensions handled as video; without GStreamer the series skips them.
+// The extensions handled as video.
 const std::vector<std::string>& video_extensions();
-bool is_video_extension(const std::string& ext);

@@ -1,7 +1,7 @@
 #include "folder.h"
 
 #include "config.h"
-#include "video.h"
+#include "decoders/decoder.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -33,7 +33,7 @@ std::vector<std::string> list_images(const std::string& dir, const Config& cfg)
         if (!cfg.show_hidden && name[0] == '.')
             continue;
         const std::string ext = lowercase_extension(name);
-        if (!cfg.accepts_extension(ext) || (is_video_extension(ext) && !video_supported()))  // no plugin, no videos
+        if (!cfg.accepts_extension(ext) || !extension_supported(ext))  // e.g. videos without GStreamer
             continue;
         gchar* full = g_build_filename(dir.c_str(), name, nullptr);
         const bool regular = g_file_test(full, G_FILE_TEST_IS_REGULAR);

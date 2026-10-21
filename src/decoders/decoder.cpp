@@ -185,7 +185,8 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&tiff_decoder());
 #endif
 #ifdef HAVE_PDF
-        v.push_back(&pdf_decoder());
+        if (pdf_supported())  // poppler is loaded at runtime, if installed
+            v.push_back(&pdf_decoder());
 #endif
 #ifdef HAVE_VIDEO
         if (video_supported())  // GStreamer is loaded at runtime, if installed
@@ -287,4 +288,14 @@ std::vector<std::string> default_extensions()
             if (e.find('.') == std::string::npos && std::find(all.begin(), all.end(), e) == all.end())  // "svg.gz": svgz covers it
                 all.push_back(e);
     return all;
+}
+
+bool extension_supported(const std::string& ext)
+{
+    static const std::set<std::string> supported = []
+    {
+        const std::vector<std::string> all = default_extensions();
+        return std::set<std::string>(all.begin(), all.end());
+    }();
+    return supported.count(ext) != 0;
 }

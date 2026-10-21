@@ -61,6 +61,10 @@ bool decode_preview(const std::string& path, Image& out);
 // Every extension handled by the compiled-in decoders, in priority order.
 std::vector<std::string> default_extensions();
 
+// Whether some available decoder handles this extension. Optional libraries
+// (GStreamer, poppler) that aren't installed take their extensions with them.
+bool extension_supported(const std::string& ext);
+
 // Backend constructors, each defined in its own file; only those compiled in
 // are referenced from decoder.cpp.
 const Decoder& jpeg_decoder();
@@ -73,6 +77,7 @@ const Decoder& raw_decoder();
 const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();
+bool pdf_supported();  // poppler found at runtime
 const Decoder& tim_decoder();
 const Decoder& video_decoder();
 const Decoder& ilbm_decoder();

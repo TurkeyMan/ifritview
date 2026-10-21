@@ -67,7 +67,6 @@ ifrit_backend(webp HAVE_WEBP src/decoders/webp.cpp libwebp libwebpdemux)
 ifrit_backend(heif HAVE_HEIF src/decoders/heif.cpp libheif)
 ifrit_backend(jxl  HAVE_JXL  src/decoders/jxl.cpp  libjxl)
 ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
-ifrit_backend(pdf  HAVE_PDF  src/decoders/pdf.cpp  poppler-glib)
 ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
 ifrit_backend(xmp  HAVE_XMP  src/decoders/xmp.cpp  exempi-2.0)
 
@@ -91,6 +90,18 @@ if(VIDEO_FOUND)
   message(STATUS "video: enabled (GStreamer loaded at runtime)")
 else()
   message(STATUS "video: not found (gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0 headers), skipping")
+endif()
+
+# PDF through poppler, which, like GStreamer, is optional at runtime: built
+# against its headers, dlopened by src/decoders/pdf.cpp, never linked.
+pkg_check_modules(PDF poppler-glib)
+if(PDF_FOUND)
+  target_sources(ifritview PRIVATE src/decoders/pdf.cpp)
+  target_compile_definitions(ifritview PRIVATE HAVE_PDF)
+  target_include_directories(ifritview PRIVATE ${PDF_INCLUDE_DIRS})
+  message(STATUS "pdf: enabled (poppler loaded at runtime)")
+else()
+  message(STATUS "pdf: not found (poppler-glib headers), skipping")
 endif()
 
 # Reverse geocoding of GPS positions (optional; the viewer works without it).
@@ -145,7 +156,7 @@ install(CODE "
 
 # Packages: `cpack -G DEB` or `cpack -G RPM` in the build directory. Library
 # dependencies are worked out from the binary, so they're the image
-# libraries; GStreamer isn't linked, so it's only recommended.
+# libraries; GStreamer and poppler aren't linked, so they're only recommended.
 set(CPACK_PACKAGE_NAME "ifritview")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
@@ -159,14 +170,14 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
+    "libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
 # `rpm --suggests`, fails there), so the line rides in after the URL instead.
-set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
 # Directories the base system owns; the package must not claim them.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /usr/share/applications /usr/share/icons /usr/share/icons/hicolor /usr/share/icons/hicolor/scalable
