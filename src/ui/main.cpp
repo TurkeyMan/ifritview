@@ -18,6 +18,9 @@
 #ifdef IFRIT_BACKEND_gtk3
 ANYUI_BUILTIN_BACKEND(gtk3);
 #endif
+#ifdef IFRIT_BACKEND_win32
+ANYUI_BUILTIN_BACKEND(win32);
+#endif
 #ifdef IFRIT_BACKEND_null
 ANYUI_BUILTIN_BACKEND(null);
 #endif

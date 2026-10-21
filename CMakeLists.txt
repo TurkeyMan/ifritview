@@ -13,7 +13,15 @@ set(IFRIT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version stamped into the bi
 
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
-pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0 gdk-pixbuf-2.0)
+# The core needs GLib/GIO and gdk-pixbuf; GTK only for the GTK front end.
+if(WIN32)
+  pkg_check_modules(CORE REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0 gdk-pixbuf-2.0)
+else()
+  pkg_check_modules(CORE REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0 gio-unix-2.0 gdk-pixbuf-2.0)
+endif()
+if(NOT WIN32)
+  pkg_check_modules(GTK IMPORTED_TARGET gtk+-3.0)
+endif()
 
 # Everything that isn't UI: decoders, the image model, loader, cache, config,
 # folders, video, geocoding. Both front ends link it.
@@ -40,7 +48,7 @@ add_library(ifrit_core STATIC
 target_compile_options(ifrit_core PRIVATE -Wall -Wextra)
 target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
 target_include_directories(ifrit_core PUBLIC src ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(ifrit_core PUBLIC PkgConfig::GTK ${CMAKE_DL_LIBS})
+target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
@@ -49,17 +57,19 @@ else()
   target_sources(ifrit_core PRIVATE src/integration.cpp)
 endif()
 
-# The GTK 3 front end (the shipping one, until the anyui one has caught up).
-add_executable(ifritview
-  src/main.cpp
-  src/app.cpp
-  src/viewer.cpp
-  src/settings.cpp
-  src/metadata.cpp
-  src/icons.cpp
-)
-target_compile_options(ifritview PRIVATE -Wall -Wextra)
-target_link_libraries(ifritview PRIVATE ifrit_core)
+# The GTK 3 front end (the shipping one on Linux, until the anyui one has caught up).
+if(GTK_FOUND)
+  add_executable(ifritview
+    src/main.cpp
+    src/app.cpp
+    src/viewer.cpp
+    src/settings.cpp
+    src/metadata.cpp
+    src/icons.cpp
+  )
+  target_compile_options(ifritview PRIVATE -Wall -Wextra)
+  target_link_libraries(ifritview PRIVATE ifrit_core PkgConfig::GTK)
+endif()
 
 # The anyui front end: native widgets from whichever toolkit is at hand (GTK 3
 # here, Win32 on Windows), linked in statically from the third_party/rapport submodule
@@ -70,6 +80,9 @@ if(IFRIT_UI_ANYUI AND EXISTS "${IFRIT_ANYUI_DIR}/CMakeLists.txt")
   set(ANYUI_STATIC ON CACHE BOOL "" FORCE)
   set(ANYUI_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(ANYUI_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)  # one GTK per program
+  if(WIN32)
+    set(ANYUI_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
+  endif()
   add_subdirectory(${IFRIT_ANYUI_DIR} anyui EXCLUDE_FROM_ALL)
   add_executable(ifritview-anyui
     src/ui/main.cpp
@@ -81,7 +94,13 @@ if(IFRIT_UI_ANYUI AND EXISTS "${IFRIT_ANYUI_DIR}/CMakeLists.txt")
   target_compile_options(ifritview-anyui PRIVATE -Wall -Wextra)
   target_include_directories(ifritview-anyui PRIVATE src/ui)
   target_link_libraries(ifritview-anyui PRIVATE ifrit_core anyui::anyui)
-  foreach(backend gtk3 null)
+  if(WIN32)
+    # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
+    enable_language(RC)
+    target_sources(ifritview-anyui PRIVATE data/windows/ifritview.rc)
+    set_target_properties(ifritview-anyui PROPERTIES OUTPUT_NAME ifritview)
+  endif()
+  foreach(backend gtk3 null win32)
     if(TARGET anyui::backend_${backend})
       target_link_libraries(ifritview-anyui PRIVATE anyui::backend_${backend})
       target_compile_definitions(ifritview-anyui PRIVATE IFRIT_BACKEND_${backend})
@@ -181,10 +200,12 @@ endif()
 # so it is only built when every library it uses is present.
 if(IFRIT_HAVE_WEBP AND IFRIT_HAVE_JXL AND IFRIT_HAVE_HEIF)
   add_executable(mkimages EXCLUDE_FROM_ALL tools/mkimages.cpp)
-  target_link_libraries(mkimages PRIVATE PkgConfig::GTK PkgConfig::WEBP PkgConfig::JXL PkgConfig::HEIF)
+  target_link_libraries(mkimages PRIVATE PkgConfig::CORE PkgConfig::WEBP PkgConfig::JXL PkgConfig::HEIF)
 endif()
 
-install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET ifritview)
+  install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/ifritview.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)

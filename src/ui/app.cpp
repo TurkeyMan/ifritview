@@ -215,6 +215,7 @@ void App::build_ui()
                 L::Button{""}.flat().onClick([this] { open_url(location_url_); }).bind(status_location_),
                 L::Label{""}.bind(status_right_),
             }
+                .margins()
                 .handle(footer_),
         }}}.size(Extent{float(cfg_.min_window_width), Extent::Unit::Px}, Extent{float(cfg_.min_window_height), Extent::Unit::Px})
                              .margins(false));

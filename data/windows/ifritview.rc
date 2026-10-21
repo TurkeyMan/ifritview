@@ -1,0 +1,5 @@
+// Windows resources: the program icon (also the window icon the app names,
+// "ifritview") and the application manifest.
+#include <winuser.h>
+IFRITVIEW ICON "ifritview.ico"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "ifritview.manifest"
