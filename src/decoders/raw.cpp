@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -80,6 +81,7 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.gamm[0] = 1.0;
     raw.imgdata.params.gamm[1] = 1.0;
     raw.imgdata.params.no_auto_bright = 1;
+    if (const char* q = g_getenv("IFRIT_RAW_QUAL")) raw.imgdata.params.user_qual = std::atoi(q);
     const bool timing = g_getenv("IFRIT_RAW_TIMING") != nullptr;
     gint64 t0 = g_get_monotonic_time();
     auto lap = [&](const char* what) {
