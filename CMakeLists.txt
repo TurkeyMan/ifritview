@@ -24,6 +24,7 @@ add_executable(ifritview
   src/metadata.cpp
   src/integration.cpp
   src/cache.cpp
+  src/icons.cpp
   src/decoders/stb.cpp
   src/decoders/pixbuf.cpp
 )

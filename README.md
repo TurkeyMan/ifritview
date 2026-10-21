@@ -80,3 +80,18 @@ machines where the `-dev` packages can't be installed system-wide.
 - `cmake --build build --target mkimages && ./build/mkimages out/` plus
   `tools/mkimages.py out/` generate a folder of test images in every format
   that can be encoded with the linked libraries.
+
+## Roadmap
+
+- Decoder backends as plugin `.so`s loaded with `g_module_open`, so a package
+  can *Recommend* the format libraries instead of requiring them. (Startup is
+  not the motivation: the dynamic loader is ~4 ms of the ~140 ms warm start;
+  the rest is GTK's own window setup.)
+- Threaded demosaic from LibRaw's mosaic, then a GPU pipeline (demosaic,
+  white balance, matrix, tone curve in shaders) shared with the tonemapper and
+  an HDR-capable Wayland subsurface presenter.
+- White balance slider (D50/D65 ticks) once the pipeline works in camera space.
+- Honour `crs:CropAngle`, `crs:Tint`.
+- Hand-written decoders for XCF, TIM, IFF/ILBM; animated GIF/WebP playback.
+- Re-render toolbar icons when the icon theme changes at runtime (currently
+  cached per theme/scale/colour and picked up on the next start).

@@ -2,6 +2,7 @@
 
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
+#include "icons.h"
 #include "settings.h"
 
 #include <gdk/gdkkeysyms.h>
@@ -127,14 +128,25 @@ std::string human_size(uint64_t bytes) {
 }  // namespace
 
 App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }), cache_(0) {
+    const bool trace = g_getenv("IFRIT_TRACE") != nullptr;
+    gint64 t = g_get_monotonic_time();
+    auto lap = [&](const char* what) {
+        if (!trace) return;
+        const gint64 now = g_get_monotonic_time();
+        std::fprintf(stderr, "startup:   %-16s %4.0f ms\n", what, (now - t) / 1000.0);
+        t = now;
+    };
     cfg_.load();
+    lap("config");
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     set_decode_options(decode_options_for(cfg_));
     build_ui();
+    lap("build_ui");
 }
 
 GtkWidget* App::tool_button(const char* icon, const char* tooltip, void (App::*action)()) {
-    GtkWidget* b = gtk_button_new_from_icon_name(icon, GTK_ICON_SIZE_LARGE_TOOLBAR);
+    GtkWidget* b = gtk_button_new();
+    gtk_container_add(GTK_CONTAINER(b), cached_icon_image(icon, 24));
     gtk_button_set_relief(GTK_BUTTON(b), GTK_RELIEF_NONE);
     gtk_widget_set_tooltip_text(b, tooltip);
     gtk_widget_set_can_focus(b, FALSE);
@@ -151,19 +163,42 @@ GtkWidget* App::tool_button(const char* icon, const char* tooltip, void (App::*a
 }
 
 void App::build_ui() {
+    const bool trace = g_getenv("IFRIT_TRACE") != nullptr;
+    gint64 t = g_get_monotonic_time();
+    auto lap = [&](const char* what) {
+        if (!trace) return;
+        const gint64 now = g_get_monotonic_time();
+        std::fprintf(stderr, "startup:     %-14s %4.0f ms\n", what, (now - t) / 1000.0);
+        t = now;
+    };
     GtkCssProvider* css = gtk_css_provider_new();
     gtk_css_provider_load_from_data(css, kCss, -1, nullptr);
     gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css),
                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(css);
 
+    lap("css");
     window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    set_icon_reference(window_);   // icon cache keyed by this window's theme, scale and colour
     gtk_window_set_title(GTK_WINDOW(window_), "IfritView");
     gtk_window_set_default_size(GTK_WINDOW(window_), cfg_.min_window_width, cfg_.min_window_height);
-    // Installed builds find the icon by name; a build tree uses the SVG directly.
-    gtk_window_set_default_icon_name("ifritview");
-    if (!gtk_icon_theme_has_icon(gtk_icon_theme_get_default(), "ifritview"))
-        gtk_window_set_default_icon_from_file(IFRIT_SOURCE_DIR "/data/ifritview.svg", nullptr);
+    // The app icon and any uncached toolbar icons are dealt with after the
+    // first frame; neither should delay it.
+    g_signal_connect(window_, "draw", G_CALLBACK(+[](GtkWidget* w, cairo_t*, gpointer) -> gboolean {
+        static bool done = false;
+        if (done) return FALSE;
+        done = true;
+        g_idle_add(+[](gpointer p) -> gboolean {
+            auto* win = static_cast<GtkWidget*>(p);
+            flush_icon_cache(win);
+            // Installed builds find the icon by name; a build tree uses the SVG directly.
+            gtk_window_set_default_icon_name("ifritview");
+            if (!gtk_icon_theme_has_icon(gtk_icon_theme_get_default(), "ifritview"))
+                gtk_window_set_default_icon_from_file(IFRIT_SOURCE_DIR "/data/ifritview.svg", nullptr);
+            return G_SOURCE_REMOVE;
+        }, w);
+        return FALSE;
+    }), nullptr);
 
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window_), vbox);
@@ -188,7 +223,7 @@ void App::build_ui() {
     gtk_widget_set_sensitive(crop_button_, FALSE);
 
     smooth_toggle_ = gtk_toggle_button_new();
-    gtk_container_add(GTK_CONTAINER(smooth_toggle_), gtk_image_new_from_icon_name("view-grid-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+    gtk_container_add(GTK_CONTAINER(smooth_toggle_), cached_icon_image("view-grid-symbolic", 24));
     gtk_button_set_relief(GTK_BUTTON(smooth_toggle_), GTK_RELIEF_NONE);
     gtk_widget_set_tooltip_text(smooth_toggle_, "Smooth when zoomed in (off shows crisp pixels)");
     gtk_widget_set_can_focus(smooth_toggle_, FALSE);
@@ -199,7 +234,7 @@ void App::build_ui() {
     gtk_box_pack_start(GTK_BOX(toolbar_), smooth_toggle_, FALSE, FALSE, 0);
 
     xmp_toggle_ = gtk_toggle_button_new();
-    gtk_container_add(GTK_CONTAINER(xmp_toggle_), gtk_image_new_from_icon_name("document-edit-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+    gtk_container_add(GTK_CONTAINER(xmp_toggle_), cached_icon_image("document-edit-symbolic", 24));
     gtk_button_set_relief(GTK_BUTTON(xmp_toggle_), GTK_RELIEF_NONE);
     gtk_widget_set_tooltip_text(xmp_toggle_, "Apply edits from XMP sidecars (exposure, crop, rotation)");
     gtk_widget_set_can_focus(xmp_toggle_, FALSE);
@@ -214,7 +249,7 @@ void App::build_ui() {
 
     // Exposure, in stops around the decoder's automatic brightness; raw only.
     exposure_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_box_pack_start(GTK_BOX(exposure_box_), gtk_image_new_from_icon_name("display-brightness-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(exposure_box_), cached_icon_image("display-brightness-symbolic", 24), FALSE, FALSE, 4);
     exposure_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, -3.0, 3.0, 0.01);
     gtk_range_set_round_digits(GTK_RANGE(exposure_), -1);   // continuous: every screen pixel is a value
     gtk_scale_set_value_pos(GTK_SCALE(exposure_), GTK_POS_RIGHT);
@@ -253,6 +288,7 @@ void App::build_ui() {
     gtk_box_set_child_packing(GTK_BOX(toolbar_), metadata, FALSE, FALSE, 0, GTK_PACK_END);
 
 
+    lap("toolbar");
     view_ = std::make_unique<ImageView>(cfg_);
     view_->on_action = [this](Action a) {
         switch (a) {
@@ -272,6 +308,7 @@ void App::build_ui() {
     };
     gtk_box_pack_start(GTK_BOX(vbox), view_->widget(), TRUE, TRUE, 0);
 
+    lap("view");
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_style_context_add_class(gtk_widget_get_style_context(footer_), "ifrit-footer");
     gtk_box_pack_start(GTK_BOX(vbox), footer_, FALSE, FALSE, 0);
@@ -290,6 +327,7 @@ void App::build_ui() {
     gtk_box_pack_start(GTK_BOX(footer_), status_location_, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(footer_), status_right_, FALSE, FALSE, 0);
 
+    lap("footer");
     g_signal_connect(window_, "key-press-event", G_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer self) {
                          return static_cast<App*>(self)->on_key(e);
                      }), this);
@@ -306,9 +344,12 @@ void App::build_ui() {
                          static_cast<App*>(self)->on_drop(data, time, ctx);
                      }), this);
 
+    lap("signals+dnd");
     metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
+    lap("metadata window");
     update_status();
     gtk_widget_show_all(window_);
+    lap("show_all");
 }
 
 // Ctrl+C: the selection if there is one, otherwise the whole image. The
