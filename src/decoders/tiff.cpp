@@ -64,6 +64,39 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     }
     const int pages = int(TIFFNumberOfDirectories(tif));
     if (pages > 1) out.info = std::to_string(pages) + " pages";
+
+    const struct { ttag_t tag; const char* name; } strings[] = {
+        {TIFFTAG_IMAGEDESCRIPTION, "Description"}, {TIFFTAG_MAKE, "Make"}, {TIFFTAG_MODEL, "Model"},
+        {TIFFTAG_SOFTWARE, "Software"}, {TIFFTAG_DATETIME, "Date/time"}, {TIFFTAG_ARTIST, "Artist"},
+        {TIFFTAG_COPYRIGHT, "Copyright"}, {TIFFTAG_HOSTCOMPUTER, "Host computer"},
+    };
+    for (const auto& t : strings) {
+        char* v = nullptr;
+        if (TIFFGetField(tif, t.tag, &v) && v && *v) out.add("TIFF", t.name, v);
+    }
+    out.add("TIFF", "Bits per sample", std::to_string(bps));
+    out.add("TIFF", "Samples per pixel", std::to_string(spp));
+    out.add("TIFF", "Compression", out.format.size() > 4 ? out.format.substr(6) : "none");
+    float xres = 0;
+    uint16_t unit = RESUNIT_INCH;
+    if (TIFFGetField(tif, TIFFTAG_XRESOLUTION, &xres) && xres > 0) {
+        TIFFGetFieldDefaulted(tif, TIFFTAG_RESOLUTIONUNIT, &unit);
+        out.add("TIFF", "Resolution", std::to_string(int(unit == RESUNIT_CENTIMETER ? xres * 2.54 : xres)) + " dpi");
+    }
+    if (pages > 1) out.add("TIFF", "Pages", std::to_string(pages));
+    toff_t exif_offset = 0;
+    if (TIFFGetField(tif, TIFFTAG_EXIFIFD, &exif_offset) && TIFFReadEXIFDirectory(tif, exif_offset)) {
+        char* sv = nullptr;
+        float fv = 0;
+        if (TIFFGetField(tif, EXIFTAG_DATETIMEORIGINAL, &sv) && sv) out.add("EXIF", "Date/time original", sv);
+        if (TIFFGetField(tif, EXIFTAG_EXPOSURETIME, &fv)) out.add("EXIF", "Exposure time", fv >= 1 ? std::to_string(fv).substr(0, 4) + " s" : "1/" + std::to_string(int(1 / fv + 0.5)) + " s");
+        if (TIFFGetField(tif, EXIFTAG_FNUMBER, &fv)) out.add("EXIF", "F-number", "f/" + std::to_string(fv).substr(0, 4));
+        if (TIFFGetField(tif, EXIFTAG_FOCALLENGTH, &fv)) out.add("EXIF", "Focal length", std::to_string(fv).substr(0, 5) + " mm");
+        uint16_t count = 0;
+        uint16_t* iso = nullptr;
+        if (TIFFGetField(tif, EXIFTAG_ISOSPEEDRATINGS, &count, &iso) && count > 0) out.add("EXIF", "ISO", std::to_string(iso[0]));
+        if (TIFFGetField(tif, EXIFTAG_LENSMODEL, &sv) && sv) out.add("EXIF", "Lens", sv);
+    }
     TIFFClose(tif);
     return true;
 }

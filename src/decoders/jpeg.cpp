@@ -1,7 +1,6 @@
 #include "decoder.h"
 
 #include <jpeglib.h>
-#include <libexif/exif-data.h>
 
 #include <csetjmp>
 #include <cstdio>
@@ -22,26 +21,6 @@ void on_error(j_common_ptr cinfo) {
 }
 
 void on_message(j_common_ptr) {}  // keep libjpeg's warnings off stderr
-
-struct ExifInfo {
-    int orientation = 1;
-    std::string camera;
-};
-
-ExifInfo read_exif(ExifData* ed) {
-    ExifInfo info;
-    if (!ed) return info;
-    if (ExifEntry* e = exif_data_get_entry(ed, EXIF_TAG_ORIENTATION)) {
-        int o = exif_get_short(e->data, exif_data_get_byte_order(ed));
-        if (o >= 1 && o <= 8) info.orientation = o;
-    }
-    if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_MODEL)) {
-        char buf[128];
-        if (exif_entry_get_value(e, buf, sizeof buf)) info.camera = buf;
-    }
-    exif_data_unref(ed);
-    return info;
-}
 
 bool sniff(const uint8_t* h, size_t n) {
     return n >= 3 && h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF;
@@ -81,6 +60,16 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         }
     }
     if (!cmyk) out.from_bgrx8(out.pixels.data(), out.stride);
+    const char* subsampling = "4:4:4";
+    if (!cmyk && cinfo.num_components == 3) {
+        const int h = cinfo.comp_info[0].h_samp_factor, v = cinfo.comp_info[0].v_samp_factor;
+        subsampling = (h == 2 && v == 2) ? "4:2:0" : (h == 2 && v == 1) ? "4:2:2" : (h == 1 && v == 2) ? "4:4:0" : "4:4:4";
+    }
+    out.add("JPEG", "Coding", progressive ? "progressive" : "baseline");
+    out.add("JPEG", "Components", std::to_string(cinfo.num_components));
+    if (cinfo.num_components == 3) out.add("JPEG", "Chroma subsampling", subsampling);
+    if (cinfo.saw_JFIF_marker) out.add("JPEG", "JFIF", std::to_string(cinfo.JFIF_major_version) + "." + std::to_string(cinfo.JFIF_minor_version));
+    if (cinfo.saw_Adobe_marker) out.add("JPEG", "Adobe transform", std::to_string(cinfo.Adobe_transform));
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     out.format = progressive ? "JPEG (progressive)" : "JPEG";
@@ -109,10 +98,11 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     const bool ok = decode_from(cinfo, err, out, error);
     std::fclose(f);
     if (!ok) return false;
-
-    ExifInfo exif = read_exif(exif_data_new_from_file(path.c_str()));
+#ifdef HAVE_EXIF
+    const ExifSummary exif = read_exif_file(path, out);
     out.apply_orientation(exif.orientation);
     out.info = exif.camera;
+#endif
     return true;
 }
 
@@ -124,8 +114,9 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
     setup(cinfo, err);
     jpeg_mem_src(&cinfo, data, static_cast<unsigned long>(size));
     if (!decode_from(cinfo, err, out, error)) return false;
-    ExifInfo exif = read_exif(exif_data_new_from_data(data, static_cast<unsigned>(size)));
-    out.apply_orientation(exif.orientation);
+#ifdef HAVE_EXIF
+    out.apply_orientation(read_exif_blob(data, size, out).orientation);
+#endif
     return true;
 }
 

@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "folder.h"
+#include "metadata.h"
 #include "image.h"
 #include "viewer.h"
 
@@ -65,6 +66,9 @@ public:
     void open_settings_action() { open_settings(); }
     void quit();
     void crop_to_selection();
+    void save_as();
+    void toggle_metadata();
+    void copy_to_clipboard();
     void set_exposure(double ev);
 
 private:
@@ -83,10 +87,13 @@ private:
     void on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx);
     void on_exposure_changed();
     void on_smooth_toggled();
+    void refresh_metadata();
+    std::vector<MetadataGroup> collect_metadata() const;
 
     Config cfg_;
     Folder folder_;
     std::unique_ptr<ImageView> view_;
+    std::unique_ptr<MetadataWindow> metadata_;
     Loader loader_;
 
     GtkWidget* window_ = nullptr;
@@ -99,6 +106,7 @@ private:
     GtkWidget* status_left_ = nullptr;
     GtkWidget* status_center_ = nullptr;
     GtkWidget* status_right_ = nullptr;
+    GtkWidget* status_location_ = nullptr;   // GPS link, hidden when absent
 
     bool fullscreen_ = false;
     uint64_t load_generation_ = 0;

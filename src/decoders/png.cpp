@@ -58,7 +58,29 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     rows.resize(h);
     for (png_uint_32 y = 0; y < h; ++y) rows[y] = reinterpret_cast<png_bytep>(out.row(int(y)));
     png_read_image(png, rows.data());
-    png_read_end(png, nullptr);
+    png_read_end(png, info);
+
+    out.add("PNG", "Bit depth", std::to_string(depth));
+    out.add("PNG", "Color type", color == PNG_COLOR_TYPE_PALETTE ? "palette" : color == PNG_COLOR_TYPE_GRAY ? "grayscale"
+                                 : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "grayscale + alpha" : color == PNG_COLOR_TYPE_RGB_ALPHA ? "RGB + alpha" : "RGB");
+    png_uint_32 xres = 0, yres = 0;
+    int unit = 0;
+    if (png_get_pHYs(png, info, &xres, &yres, &unit) && unit == PNG_RESOLUTION_METER)
+        out.add("PNG", "Resolution", std::to_string(int(xres * 0.0254 + 0.5)) + " dpi");
+    double gamma = 0;
+    if (png_get_gAMA(png, info, &gamma)) out.add("PNG", "Gamma", std::to_string(gamma).substr(0, 6));
+    int intent = 0;
+    if (png_get_sRGB(png, info, &intent)) out.add("PNG", "sRGB", "yes");
+    png_charp icc_name = nullptr;
+    png_bytep icc = nullptr;
+    png_uint_32 icc_len = 0;
+    int comp = 0;
+    if (png_get_iCCP(png, info, &icc_name, &comp, &icc, &icc_len) && icc_name) out.add("PNG", "ICC profile", icc_name);
+    png_textp text = nullptr;
+    int n_text = 0;
+    if (png_get_text(png, info, &text, &n_text) > 0)
+        for (int i = 0; i < n_text; ++i)
+            if (text[i].key && text[i].text) out.add("PNG text", text[i].key, std::string(text[i].text).substr(0, 2000));
     png_destroy_read_struct(&png, &info, nullptr);
     std::fclose(f);
 

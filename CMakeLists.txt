@@ -20,6 +20,8 @@ add_executable(ifritview
   src/folder.cpp
   src/image.cpp
   src/decoders/decoder.cpp
+  src/encoders/encoder.cpp
+  src/metadata.cpp
   src/decoders/stb.cpp
   src/decoders/pixbuf.cpp
 )
@@ -48,12 +50,14 @@ function(ifrit_backend name define source)
   endif()
 endfunction()
 
-ifrit_backend(jpeg HAVE_JPEG src/decoders/jpeg.cpp libjpeg libexif)
+ifrit_backend(exif HAVE_EXIF src/decoders/exif.cpp libexif)
+ifrit_backend(jpeg HAVE_JPEG src/decoders/jpeg.cpp libjpeg)
 ifrit_backend(png  HAVE_PNG  src/decoders/png.cpp  libpng)
 ifrit_backend(webp HAVE_WEBP src/decoders/webp.cpp libwebp libwebpdemux)
 ifrit_backend(heif HAVE_HEIF src/decoders/heif.cpp libheif)
 ifrit_backend(jxl  HAVE_JXL  src/decoders/jxl.cpp  libjxl)
 ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
+ifrit_backend(pdf  HAVE_PDF  src/decoders/pdf.cpp  poppler-glib)
 
 # LibRaw ships a reentrant variant; prefer it, fall back to the plain one.
 pkg_check_modules(LIBRAW_R QUIET libraw_r)
@@ -81,3 +85,5 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES data/ifritview.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+target_compile_definitions(ifritview PRIVATE IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

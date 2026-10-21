@@ -12,6 +12,16 @@ struct LinearData {
     double auto_gain = 1.0;      // gain that clips 1% of samples: the "as the camera meant it" zero point
 };
 
+// Key/value metadata, grouped for display: "EXIF", "GPS", "Camera", "PNG"...
+struct MetadataItem {
+    std::string key;
+    std::string value;
+};
+struct MetadataGroup {
+    std::string name;
+    std::vector<MetadataItem> items;
+};
+
 // A decoded image in cairo's ARGB32 layout: one native-endian uint32 per
 // pixel, alpha premultiplied, so the buffer can be wrapped by a cairo image
 // surface without a copy.
@@ -25,6 +35,13 @@ struct Image {
     std::string format;          // "JPEG", "Canon RAW", ...
     std::string info;            // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;   // only for raw files
+    std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
+    bool has_location = false;            // GPS position from EXIF, decimal degrees
+    double latitude = 0, longitude = 0;
+
+    std::string location_text() const;    // "48.8584° N, 2.2945° E"
+
+    void add(const std::string& group, std::string key, std::string value);
 
     // Re-render pixels from `linear` with an exposure offset in stops
     // around the automatic gain. No-op without linear data.

@@ -21,12 +21,14 @@ struct Script {
     std::string page;
 };
 
+// The dialog or tool window when one is open, else the main window.
 GtkWindow* frontmost_window() {
     GtkWindow* found = nullptr;
     GList* list = gtk_window_list_toplevels();
     for (GList* l = list; l; l = l->next) {
         auto* w = GTK_WINDOW(l->data);
-        if (gtk_widget_get_visible(GTK_WIDGET(w)) && (!found || gtk_window_is_active(w))) found = w;
+        if (!gtk_widget_get_visible(GTK_WIDGET(w))) continue;
+        if (!found || gtk_window_get_transient_for(w)) found = w;
     }
     g_list_free(list);
     return found;
@@ -80,6 +82,8 @@ gboolean run_script_step(gpointer p) {
         if (GtkWindow* w = frontmost_window(); w && GTK_IS_DIALOG(w)) gtk_dialog_response(GTK_DIALOG(w), GTK_RESPONSE_OK);
     } else if (step.rfind("shot:", 0) == 0) screenshot(frontmost_window(), step.substr(5));
     else if (step == "wait") {}
+    else if (step == "metadata") app.toggle_metadata();
+    else if (step == "copy") app.copy_to_clipboard();
     else if (step.rfind("ev:", 0) == 0) app.set_exposure(std::stod(step.substr(3)));
     else if (step == "quit") app.quit();
     else std::fprintf(stderr, "script: unknown step '%s'\n", step.c_str());

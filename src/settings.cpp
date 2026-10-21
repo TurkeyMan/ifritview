@@ -10,6 +10,13 @@
 
 namespace {
 
+const struct { const char* name; const char* url; } kMapProviders[] = {
+    {"Google Maps", "https://www.google.com/maps?q={lat},{lon}"},
+    {"OpenStreetMap", "https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"},
+    {"Apple Maps", "https://maps.apple.com/?ll={lat},{lon}&q={lat},{lon}"},
+    {"Bing Maps", "https://www.bing.com/maps?cp={lat}~{lon}&lvl=16&sp=point.{lat}_{lon}_Photo"},
+};
+
 struct Widgets {
     GtkWidget* fit_window;
     GtkWidget* min_width;
@@ -24,6 +31,8 @@ struct Widgets {
     GtkWidget* background;
     GtkWidget* fullscreen_background;
     GtkWidget* extensions;   // GtkTextView
+    GtkWidget* map_provider;
+    GtkWidget* map_url;
     std::array<GtkWidget*, size_t(Control::Count)> controls;
 };
 
@@ -145,6 +154,25 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "preview", "Embedded JPEG preview (fastest)");
     gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.raw_mode), cfg.raw_mode.c_str());
     add_row(grid, row, "Decode", w.raw_mode);
+
+    add_heading(grid, row, "Maps");
+    w.map_provider = gtk_combo_box_text_new();
+    for (const auto& m : kMapProviders) gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.map_provider), m.url, m.name);
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.map_provider), "", "Custom");
+    add_row(grid, row, "Open locations in", w.map_provider);
+    w.map_url = gtk_entry_new();
+    gtk_entry_set_width_chars(GTK_ENTRY(w.map_url), 44);
+    gtk_entry_set_text(GTK_ENTRY(w.map_url), cfg.map_url.c_str());
+    gtk_widget_set_tooltip_text(w.map_url, "URL template; {lat} and {lon} are replaced with the coordinates");
+    add_row(grid, row, "URL template", w.map_url);
+    if (!gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.map_provider), cfg.map_url.c_str()))
+        gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.map_provider), "");
+    g_signal_connect(w.map_provider, "changed", G_CALLBACK(+[](GtkComboBox* combo, gpointer entry) {
+                         const gchar* id = gtk_combo_box_get_active_id(combo);
+                         if (id && *id) gtk_entry_set_text(GTK_ENTRY(entry), id);
+                         gtk_widget_set_sensitive(GTK_WIDGET(entry), !id || !*id);
+                     }), w.map_url);
+    gtk_widget_set_sensitive(w.map_url, gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.map_provider))[0] == '\0');
     return grid;
 }
 
@@ -251,6 +279,8 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
     cfg.extensions = parse_extensions(get_text_view(w.extensions));
+    const std::string url = gtk_entry_get_text(GTK_ENTRY(w.map_url));
+    if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos) cfg.map_url = url;
     for (const ControlInfo& c : kControls)
         if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.controls[size_t(c.id)])))
             cfg.controls[size_t(c.id)] = action_from_key(id, Action::None);

@@ -45,8 +45,21 @@ const Decoder& tiff_decoder();
 const Decoder& raw_decoder();
 const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
+const Decoder& pdf_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
 bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error);
+#endif
+
+#ifdef HAVE_EXIF
+// Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF
+// header) into the image's metadata groups. Returns the orientation, 1 when
+// absent, and the camera model when known.
+struct ExifSummary {
+    int orientation = 1;
+    std::string camera;
+};
+ExifSummary read_exif_file(const std::string& path, Image& out);
+ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
 #endif

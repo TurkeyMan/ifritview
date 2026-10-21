@@ -26,6 +26,10 @@ struct Config {
     std::string background = "#262626";
     std::string fullscreen_background = "#000000";
 
+    // Maps: where a GPS location link goes; {lat} and {lon} are substituted.
+    std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
+    std::string map_link(double latitude, double longitude) const;
+
     // Mouse
     Bindings controls = default_bindings();
     Action control(Control c) const { return controls[size_t(c)]; }

@@ -1,6 +1,8 @@
 #include "image.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cmath>
 #include <utility>
 
@@ -99,6 +101,25 @@ void Image::retone(double ev) {
     }
 }
 
+std::string Image::location_text() const {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.5f° %c, %.5f° %c", std::fabs(latitude), latitude < 0 ? 'S' : 'N',
+                  std::fabs(longitude), longitude < 0 ? 'W' : 'E');
+    return buf;
+}
+
+void Image::add(const std::string& group, std::string key, std::string value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) value.pop_back();
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) value.erase(value.begin());
+    if (key.empty() || value.empty()) return;
+    for (MetadataGroup& g : metadata)
+        if (g.name == group) {
+            g.items.push_back({std::move(key), std::move(value)});
+            return;
+        }
+    metadata.push_back({group, {{std::move(key), std::move(value)}}});
+}
+
 Image Image::crop(int x, int y, int w, int h) const {
     x = std::clamp(x, 0, width);
     y = std::clamp(y, 0, height);
@@ -110,6 +131,10 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.bits_per_sample = bits_per_sample;
     out.format = format;
     out.info = info;
+    out.metadata = metadata;
+    out.has_location = has_location;
+    out.latitude = latitude;
+    out.longitude = longitude;
     for (int yy = 0; yy < h; ++yy) std::copy_n(row(y + yy) + x, w, out.row(yy));
     if (linear) {
         auto l = std::make_shared<LinearData>();

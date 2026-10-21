@@ -2,7 +2,10 @@
 
 #include <libraw/libraw.h>
 
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace {
 
@@ -152,6 +155,43 @@ bool decode_raw(const std::string& path, Image& out, std::string& error) {
     out.format = make.empty() ? "RAW" : make + " RAW";
     out.format += ", " + mode;
     out.info = camera_name(raw);
+
+    const auto& id = raw.imgdata.idata;
+    const auto& other = raw.imgdata.other;
+    const auto& lens = raw.imgdata.lens;
+    auto fmt = [](double v, int decimals) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
+        return std::string(buf);
+    };
+    out.add("Camera", "Make", id.make);
+    out.add("Camera", "Model", id.model);
+    if (id.software[0]) out.add("Camera", "Firmware", id.software);
+    if (lens.Lens[0]) out.add("Camera", "Lens", lens.Lens);
+    else if (lens.LensMake[0]) out.add("Camera", "Lens make", lens.LensMake);
+    if (other.iso_speed > 0) out.add("Camera", "ISO", std::to_string(int(other.iso_speed)));
+    if (other.shutter > 0) out.add("Camera", "Shutter", other.shutter >= 1 ? fmt(other.shutter, 1) + " s" : "1/" + std::to_string(int(1 / other.shutter + 0.5)) + " s");
+    if (other.aperture > 0) out.add("Camera", "Aperture", "f/" + fmt(other.aperture, 1));
+    if (other.focal_len > 0) out.add("Camera", "Focal length", fmt(other.focal_len, 0) + " mm");
+    if (other.timestamp) {
+        char buf[64];
+        std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", std::localtime(&other.timestamp));
+        out.add("Camera", "Taken", buf);
+    }
+    if (other.shot_order) out.add("Camera", "Shot number", std::to_string(other.shot_order));
+    if (other.artist[0]) out.add("Camera", "Artist", other.artist);
+    if (other.desc[0]) out.add("Camera", "Description", other.desc);
+    out.add("Raw", "Sensor size", std::to_string(raw.imgdata.sizes.raw_width) + " × " + std::to_string(raw.imgdata.sizes.raw_height));
+    out.add("Raw", "Output size", std::to_string(out.width) + " × " + std::to_string(out.height) + " (" + mode + ")");
+    if (raw.imgdata.color.raw_bps) out.add("Raw", "Bits per sample", std::to_string(raw.imgdata.color.raw_bps));
+    out.add("Raw", "Colour channels", std::to_string(id.colors) + " (" + id.cdesc + ")");
+    if (id.dng_version) out.add("Raw", "DNG version", std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
+    if (id.filters == 9) out.add("Raw", "Mosaic", "X-Trans");
+    else if (id.filters) out.add("Raw", "Mosaic", "Bayer");
+    else out.add("Raw", "Mosaic", "none (linear)");
+    const float* wb = raw.imgdata.color.cam_mul;
+    if (wb[0] > 0 && wb[1] > 0) out.add("Raw", "Camera white balance", fmt(wb[0] / wb[1], 3) + " / 1 / " + fmt(wb[2] / wb[1], 3));
+    if (out.linear) out.add("Raw", "Auto exposure gain", fmt(std::log2(out.linear->auto_gain), 2) + " EV");
     return true;
 }
 

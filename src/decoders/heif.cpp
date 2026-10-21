@@ -3,6 +3,7 @@
 #include <libheif/heif.h>
 
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -54,6 +55,24 @@ bool decode(const std::string& path, Image& out, std::string& error) {
     }
     if (out.format.empty()) out.format = "HEIF";
     if (heif_image_handle_get_number_of_depth_images(handle) > 0) out.info = "has depth map";
+    out.add("HEIF", "Bits per pixel", std::to_string(out.bits_per_sample));
+    out.add("HEIF", "Alpha channel", alpha ? "yes" : "no");
+#ifdef HAVE_EXIF
+    heif_item_id ids[4];
+    const int n = heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", ids, 4);
+    for (int i = 0; i < n; ++i) {
+        const size_t size = heif_image_handle_get_metadata_size(handle, ids[i]);
+        if (size < 8) continue;
+        std::vector<uint8_t> data(size);
+        if (heif_image_handle_get_metadata(handle, ids[i], data.data()).code != heif_error_Ok) continue;
+        // Payload starts with a big-endian offset to the TIFF header.
+        const size_t off = 4 + ((size_t(data[0]) << 24) | (size_t(data[1]) << 16) | (size_t(data[2]) << 8) | data[3]);
+        if (off < size) {
+            const ExifSummary exif = read_exif_blob(data.data() + off, size - off, out);
+            if (out.info.empty()) out.info = exif.camera;
+        }
+    }
+#endif
 
     heif_image_release(img);
     heif_image_handle_release(handle);

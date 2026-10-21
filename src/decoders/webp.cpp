@@ -63,6 +63,19 @@ bool decode(const std::string& path, Image& out, std::string& error) {
 
     out.has_alpha = features.has_alpha;
     out.format = "WebP";
+    out.add("WebP", "Coding", features.format == 2 ? "lossless" : features.format == 1 ? "lossy" : "mixed/undefined");
+    if (features.has_animation) out.add("WebP", "Frames", std::to_string(info.frame_count));
+#ifdef HAVE_EXIF
+    if (WebPDemuxer* demux = WebPDemux(&data)) {
+        WebPChunkIterator it;
+        if (WebPDemuxGetChunk(demux, "EXIF", 1, &it)) {
+            const ExifSummary exif = read_exif_blob(it.chunk.bytes, it.chunk.size, out);
+            out.info = exif.camera;
+            WebPDemuxReleaseChunkIterator(&it);
+        }
+        WebPDemuxDelete(demux);
+    }
+#endif
     if (features.format == 2) out.format += ", lossless";
     if (features.has_animation) out.format += ", animated (" + std::to_string(info.frame_count) + " frames)";
     return true;

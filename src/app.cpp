@@ -1,9 +1,11 @@
 #include "app.h"
 
 #include "decoders/decoder.h"
+#include "encoders/encoder.h"
 #include "settings.h"
 
 #include <gdk/gdkkeysyms.h>
+#include <glib/gstdio.h>
 
 #include <algorithm>
 #include <cmath>
@@ -115,7 +117,10 @@ void App::build_ui() {
     window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window_), "IfritView");
     gtk_window_set_default_size(GTK_WINDOW(window_), cfg_.min_window_width, cfg_.min_window_height);
-    gtk_window_set_icon_name(GTK_WINDOW(window_), "image-x-generic");
+    // Installed builds find the icon by name; a build tree uses the SVG directly.
+    gtk_window_set_default_icon_name("ifritview");
+    if (!gtk_icon_theme_has_icon(gtk_icon_theme_get_default(), "ifritview"))
+        gtk_window_set_default_icon_from_file(IFRIT_SOURCE_DIR "/data/ifritview.svg", nullptr);
 
     GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window_), vbox);
@@ -137,6 +142,8 @@ void App::build_ui() {
     gtk_box_pack_start(GTK_BOX(toolbar_), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     crop_button_ = tool_button("edit-cut-symbolic", "Crop to selection (Ctrl+Y)", &App::crop_to_selection);
     gtk_widget_set_sensitive(crop_button_, FALSE);
+    tool_button("document-save-as-symbolic", "Save as… (Ctrl+S)", &App::save_as);
+    tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata);
 
     smooth_toggle_ = gtk_toggle_button_new();
     gtk_container_add(GTK_CONTAINER(smooth_toggle_), gtk_image_new_from_icon_name("view-grid-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
@@ -221,6 +228,10 @@ void App::build_ui() {
     gtk_label_set_xalign(GTK_LABEL(status_right_), 1.0f);
     gtk_box_pack_start(GTK_BOX(footer_), status_left_, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(footer_), status_center_, FALSE, FALSE, 0);
+    status_location_ = gtk_label_new("");
+    gtk_label_set_track_visited_links(GTK_LABEL(status_location_), FALSE);
+    gtk_widget_set_no_show_all(status_location_, TRUE);
+    gtk_box_pack_start(GTK_BOX(footer_), status_location_, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(footer_), status_right_, FALSE, FALSE, 0);
 
     g_signal_connect(window_, "key-press-event", G_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer self) {
@@ -239,8 +250,71 @@ void App::build_ui() {
                          static_cast<App*>(self)->on_drop(data, time, ctx);
                      }), this);
 
+    metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
     update_status();
     gtk_widget_show_all(window_);
+}
+
+// Ctrl+C: the selection if there is one, otherwise the whole image. The
+// selection is dropped afterwards as the visible sign that it was copied.
+void App::copy_to_clipboard() {
+    if (!image_) return;
+    int x, y, w, h;
+    const Image region = view_->selection(x, y, w, h) ? image_->crop(x, y, w, h) : *image_;
+    std::vector<uint8_t> rgba = to_rgba8(region);
+    GdkPixbuf* pixbuf = gdk_pixbuf_new_from_data(rgba.data(), GDK_COLORSPACE_RGB, TRUE, 8, region.width, region.height,
+                                                 region.width * 4, nullptr, nullptr);
+    GdkPixbuf* copy = gdk_pixbuf_copy(pixbuf);   // owns its pixels, outlives `rgba`
+    g_object_unref(pixbuf);
+    gtk_clipboard_set_image(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), copy);
+    g_object_unref(copy);
+    view_->clear_selection();
+    status_message_ = "Copied " + std::to_string(region.width) + " × " + std::to_string(region.height) + " to clipboard";
+    update_status();
+}
+
+void App::toggle_metadata() {
+    metadata_->toggle();
+    if (metadata_->visible()) refresh_metadata();
+}
+
+std::vector<MetadataGroup> App::collect_metadata() const {
+    std::vector<MetadataGroup> groups;
+    if (!image_) return groups;
+    MetadataGroup file{"File", {}};
+    file.items.push_back({"Name", folder_.current_name()});
+    file.items.push_back({"Folder", folder_.directory()});
+    if (file_size_) file.items.push_back({"Size", human_size(file_size_) + " (" + std::to_string(file_size_) + " bytes)"});
+    GStatBuf st;
+    if (g_stat(image_path_.c_str(), &st) == 0) {
+        if (GDateTime* t = g_date_time_new_from_unix_local(st.st_mtime)) {
+            gchar* text = g_date_time_format(t, "%Y-%m-%d %H:%M:%S");
+            file.items.push_back({"Modified", text});
+            g_free(text);
+            g_date_time_unref(t);
+        }
+    }
+    groups.push_back(std::move(file));
+    MetadataGroup img{"Image", {}};
+    img.items.push_back({"Dimensions", std::to_string(image_->width) + " × " + std::to_string(image_->height)});
+    img.items.push_back({"Format", image_->format});
+    img.items.push_back({"Source depth", std::to_string(image_->bits_per_sample) + " bits per sample"});
+    img.items.push_back({"Alpha", image_->has_alpha ? "yes" : "no"});
+    if (!image_->info.empty()) img.items.push_back({"Notes", image_->info});
+    groups.push_back(std::move(img));
+    for (const MetadataGroup& g : image_->metadata) groups.push_back(g);
+    if (image_->has_location) {
+        bool has_gps = false;
+        for (const MetadataGroup& g : groups) has_gps |= g.name == "GPS";
+        if (!has_gps) groups.push_back({"GPS", {}});
+    }
+    return groups;
+}
+
+void App::refresh_metadata() {
+    if (!metadata_ || !metadata_->visible()) return;
+    const std::string url = image_ && image_->has_location ? cfg_.map_link(image_->latitude, image_->longitude) : "";
+    metadata_->set(folder_.current_name(), collect_metadata(), image_.get(), url);
 }
 
 void App::run() {
@@ -314,6 +388,7 @@ void App::on_loaded(Loader::Result& r) {
     fit_window_to_image();
     update_title();
     update_status();
+    refresh_metadata();
     if (image_->linear) {
         g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
         gtk_range_set_value(GTK_RANGE(exposure_), 0.0);
@@ -340,6 +415,87 @@ void App::crop_to_selection() {
     view_->set_image(image_);
     fit_window_to_image();
     update_status();
+    refresh_metadata();
+}
+
+// Save As with a format chooser; picking a format rewrites the extension of
+// the proposed file name. Quality applies to the lossy formats, 100 = lossless
+// where the format can do it.
+void App::save_as() {
+    if (!image_) return;
+    GtkWidget* dialog = gtk_file_chooser_dialog_new("Save Image As", GTK_WINDOW(window_), GTK_FILE_CHOOSER_ACTION_SAVE,
+                                                    "_Cancel", GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, nullptr);
+    GtkFileChooser* chooser = GTK_FILE_CHOOSER(dialog);
+    gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
+    if (!folder_.directory().empty()) gtk_file_chooser_set_current_folder(chooser, folder_.directory().c_str());
+
+    // Format row + quality row below the file list.
+    GtkWidget* extra = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_pack_start(GTK_BOX(extra), gtk_label_new("Format"), FALSE, FALSE, 0);
+    GtkWidget* format = gtk_combo_box_text_new();
+    const auto& list = encoders();
+    int initial = 0;
+    const std::string current_ext = [&] {
+        auto dot = image_path_.find_last_of('.');
+        std::string e = dot == std::string::npos ? "" : image_path_.substr(dot + 1);
+        std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
+        return e == "jpeg" ? std::string("jpg") : e;
+    }();
+    for (size_t i = 0; i < list.size(); ++i) {
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(format), list[i]->extension, list[i]->name);
+        if (current_ext == list[i]->extension) initial = int(i);
+    }
+    gtk_combo_box_set_active(GTK_COMBO_BOX(format), initial);
+    gtk_box_pack_start(GTK_BOX(extra), format, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(extra), gtk_label_new("Quality"), FALSE, FALSE, 8);
+    GtkWidget* quality = gtk_spin_button_new_with_range(1, 100, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(quality), 90);
+    gtk_widget_set_tooltip_text(quality, "Lossy formats only; 100 is lossless for WebP and JPEG XL");
+    gtk_box_pack_start(GTK_BOX(extra), quality, FALSE, FALSE, 0);
+    gtk_widget_show_all(extra);
+    gtk_file_chooser_set_extra_widget(chooser, extra);
+
+    struct State { GtkFileChooser* chooser; GtkWidget* quality; };
+    State state{chooser, quality};
+    auto on_format = +[](GtkComboBox* combo, gpointer p) {
+        auto* st = static_cast<State*>(p);
+        const gchar* ext = gtk_combo_box_get_active_id(combo);
+        if (!ext) return;
+        for (const Encoder* e : encoders())
+            if (std::string(e->extension) == ext) gtk_widget_set_sensitive(st->quality, e->lossy);
+        gchar* name = gtk_file_chooser_get_current_name(st->chooser);
+        std::string n = name ? name : "";
+        g_free(name);
+        auto dot = n.find_last_of('.');
+        n = (dot == std::string::npos ? n : n.substr(0, dot)) + "." + ext;
+        gtk_file_chooser_set_current_name(st->chooser, n.c_str());
+    };
+    g_signal_connect(format, "changed", G_CALLBACK(on_format), &state);
+    gtk_file_chooser_set_current_name(chooser, folder_.current_name().c_str());
+    on_format(GTK_COMBO_BOX(format), &state);   // apply the initial format's extension
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        gchar* path = gtk_file_chooser_get_filename(chooser);
+        const gchar* ext = gtk_combo_box_get_active_id(GTK_COMBO_BOX(format));
+        EncodeOptions options;
+        options.quality = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(quality));
+        std::string error;
+        bool ok = false;
+        for (const Encoder* e : list)
+            if (ext && std::string(e->extension) == ext) ok = e->encode(*image_, path, options, error);
+        if (ok) {
+            gchar* base = g_path_get_basename(path);
+            status_message_ = std::string("Saved ") + base;
+            g_free(base);
+            folder_.rescan(cfg_);   // the new file may now be part of the folder
+        } else {
+            status_message_ = "Save failed: " + error;
+        }
+        g_free(path);
+        update_status();
+        update_title();
+    }
+    gtk_widget_destroy(dialog);
 }
 
 void App::on_exposure_changed() {
@@ -443,6 +599,7 @@ void App::open_settings(const char* page) {
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     view_->config_changed();
+    refresh_metadata();
     if (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) load_current();
     update_status();
 }
@@ -489,6 +646,16 @@ void App::update_status() {
         const int percent = int(std::lround(view_->zoom() * 100.0));
         right = std::to_string(percent) + "%";
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0) right += " (fit)";
+    }
+    if (image_ && image_->has_location) {
+        gchar* markup = g_markup_printf_escaped("<a href=\"%s\">%s</a>", cfg_.map_link(image_->latitude, image_->longitude).c_str(),
+                                                image_->location_text().c_str());
+        gtk_label_set_markup(GTK_LABEL(status_location_), markup);
+        g_free(markup);
+        gtk_widget_set_tooltip_text(status_location_, "Open in maps");
+        gtk_widget_show(status_location_);
+    } else {
+        gtk_widget_hide(status_location_);
     }
     gtk_label_set_text(GTK_LABEL(status_left_), left.c_str());
     gtk_label_set_text(GTK_LABEL(status_center_), center.c_str());
@@ -545,6 +712,14 @@ gboolean App::on_key(GdkEventKey* e) {
             break;
         case GDK_KEY_y: case GDK_KEY_Y:
             if (ctrl) { crop_to_selection(); return TRUE; }
+            break;
+        case GDK_KEY_s: case GDK_KEY_S:
+            if (ctrl) { save_as(); return TRUE; }
+            break;
+        case GDK_KEY_i: case GDK_KEY_I:
+            toggle_metadata(); return TRUE;
+        case GDK_KEY_c: case GDK_KEY_C:
+            if (ctrl) { copy_to_clipboard(); return TRUE; }
             break;
         default:
             break;

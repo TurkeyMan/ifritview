@@ -5,6 +5,7 @@
 #include <glib.h>
 
 #include <algorithm>
+#include <cstdio>
 
 namespace {
 
@@ -12,6 +13,7 @@ const char* kFiles = "files";
 const char* kWindow = "window";
 const char* kView = "view";
 const char* kControlsGroup = "controls";
+const char* kMaps = "maps";
 
 bool get_bool(GKeyFile* kf, const char* group, const char* key, bool fallback) {
     GError* err = nullptr;
@@ -54,6 +56,16 @@ void Config::reset_extensions() {
     extensions = default_extensions();
 }
 
+std::string Config::map_link(double latitude, double longitude) const {
+    char lat[32], lon[32];
+    std::snprintf(lat, sizeof lat, "%.6f", latitude);
+    std::snprintf(lon, sizeof lon, "%.6f", longitude);
+    std::string url = map_url;
+    for (auto pos = url.find("{lat}"); pos != std::string::npos; pos = url.find("{lat}")) url.replace(pos, 5, lat);
+    for (auto pos = url.find("{lon}"); pos != std::string::npos; pos = url.find("{lon}")) url.replace(pos, 5, lon);
+    return url;
+}
+
 bool Config::accepts_extension(const std::string& ext) const {
     return std::find(extensions.begin(), extensions.end(), ext) != extensions.end();
 }
@@ -91,6 +103,9 @@ void Config::load() {
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
+    map_url = get_string(kf, kMaps, "url", map_url);
+    if (map_url.find("{lat}") == std::string::npos || map_url.find("{lon}") == std::string::npos)
+        map_url = "https://www.google.com/maps?q={lat},{lon}";
     for (const ControlInfo& c : kControls) {
         Action& a = controls[size_t(c.id)];
         a = action_from_key(get_string(kf, kControlsGroup, c.key, action_info(a).key), a);
@@ -120,6 +135,7 @@ bool Config::save() const {
     g_key_file_set_string(kf, kView, "fullscreen_background", fullscreen_background.c_str());
     for (const ControlInfo& c : kControls)
         g_key_file_set_string(kf, kControlsGroup, c.key, action_info(controls[size_t(c.id)]).key);
+    g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
 
     const std::string p = path();
     gchar* dir = g_path_get_dirname(p.c_str());

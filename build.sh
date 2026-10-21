@@ -10,6 +10,9 @@ cd "$(dirname "$0")"
 SYSROOT="$HOME/.local/ifrit-sysroot/root"
 if [ -d "$SYSROOT" ]; then
   export PKG_CONFIG_PATH="$SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig:$SYSROOT/usr/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  # Some runtime libs live only in the sysroot; DT_RPATH (unlike RUNPATH)
+  # also covers their own dependencies.
+  set -- "$@" "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags"
 fi
 
 cmake -S . -B build -G Ninja "$@"
