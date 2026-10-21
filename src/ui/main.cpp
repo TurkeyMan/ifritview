@@ -51,6 +51,8 @@ void run_step(App& app, const std::string& step)
         app.zoom_original();
     else if (step == "reload")
         app.reload();
+    else if (step.rfind("settings", 0) == 0)
+        app.open_settings_page(step.size() > 9 ? std::atoi(step.c_str() + 9) : 0);  // "settings:2" opens Controls
     else if (step == "wait")
     {
     }

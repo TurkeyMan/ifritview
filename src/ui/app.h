@@ -42,7 +42,8 @@ public:
     void zoom_original();
     void zoom_fit();
     void open_dialog();
-    void open_settings();
+    void open_settings() { open_settings_page(0); }
+    void open_settings_page(int page);
     void quit();
     void crop_to_selection();
     void save_as();

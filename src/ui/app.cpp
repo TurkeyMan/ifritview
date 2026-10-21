@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "platform.h"
+#include "settings.h"
 
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
@@ -1327,15 +1328,43 @@ void App::open_dialog()
                     });
 }
 
-// TODO: the settings dialog on anyui. Until then, the GTK front end's settings
-// edit the same config file.
-void App::open_settings()
+void App::open_settings_page(int page)
 {
-    MessageSpec m;
-    m.title = "Settings";
-    m.text = "The settings dialog isn't ported to this front end yet.";
-    m.detail = "Settings are shared with the GTK version (" + Config::path() + ").";
-    ui_.message(window_.get(), m);
+    const std::string old_raw_mode = cfg_.raw_mode;
+    const bool old_apply_xmp = cfg_.apply_xmp_edits;
+    const bool old_raw_crop = cfg_.raw_camera_crop;
+    open_settings_dialog(
+        ui_, window_.get(), cfg_,
+        [this, old_raw_mode, old_apply_xmp, old_raw_crop](bool ok)
+        {
+            if (!ok)
+                return;
+            cfg_.save();
+            set_decode_options(decode_options_for(cfg_));
+            cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
+            geocoder_.set_provider(cfg_.geocoder_url);
+            if (image_)
+                request_place(image_);
+            video_.set_loop(cfg_.video_loop);
+            video_.set_muted(cfg_.video_muted);
+            view_->set_video_muted(cfg_.video_muted);
+            folder_.rescan(cfg_);
+            smooth_toggle_->setChecked(cfg_.smooth_upscale);
+            xmp_toggle_->setChecked(cfg_.apply_xmp_edits);
+            view_->config_changed();
+            refresh_metadata();
+            const bool reload =
+                ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->format.find("RAW") != std::string::npos) ||
+                (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
+            if (reload)
+            {
+                cache_.erase(image_path_);
+                image_.reset();
+                load_current();
+            }
+            update_status();
+        },
+        page);
 }
 
 // --------------------------------------------------------------- status

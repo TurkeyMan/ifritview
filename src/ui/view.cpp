@@ -549,8 +549,8 @@ anyui::Image* View::scaled_image(double zoom)
     const int64_t t1 = now_us();
     scaled_ = ui_.createImage(w, h, APixelFormat::Bgra8Premultiplied, px.data(), size_t(w) * 4);
     if (std::getenv("IFRIT_TRACE"))
-        std::fprintf(stderr, "scale: %dx%d -> %dx%d  downscale %.1f ms  upload %.1f ms  (%zu mips)\n", image_->width, image_->height, w, h,
-                     (t1 - t0) / 1000.0, (now_us() - t1) / 1000.0, image_->mips.size());
+        std::fprintf(stderr, "scale: %dx%d -> %dx%d  downscale %.1f ms  upload %.1f ms  (%zu mips)\n", image_->width, image_->height, w, h, (t1 - t0) / 1000.0,
+                     (now_us() - t1) / 1000.0, image_->mips.size());
     scaled_zoom_ = zoom;
     return scaled_.get();
 }
