@@ -109,7 +109,7 @@ private:
     void on_xmp_toggled();
     void refresh_metadata();
     std::vector<MetadataGroup> collect_metadata() const;
-    std::vector<std::string> overlay_lines() const;
+    ImageView::OverlaySections overlay_sections() const;
 
     Config cfg_;
     Folder folder_;

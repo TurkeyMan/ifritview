@@ -425,9 +425,11 @@ std::vector<MetadataGroup> App::collect_metadata() const {
 }
 
 // The fullscreen HUD, assembled by category from what the decoders found.
-std::vector<std::string> App::overlay_lines() const {
+ImageView::OverlaySections App::overlay_sections() const {
+    ImageView::OverlaySections sections;
+    if (!image_) return sections;
     std::vector<std::string> lines;
-    if (!image_) return lines;
+    auto flush = [&] { if (!lines.empty()) sections.push_back(std::move(lines)); lines.clear(); };
     auto find = [&](std::initializer_list<const char*> groups, std::initializer_list<const char*> keys) -> std::string {
         for (const MetadataGroup& g : image_->metadata)
             for (const char* gn : groups)
@@ -450,6 +452,7 @@ std::vector<std::string> App::overlay_lines() const {
             }
         if (!line.empty()) lines.push_back(line);
     }
+    flush();
     if (cfg_.overlay_format) {
         std::string line = std::to_string(image_->width) + " × " + std::to_string(image_->height) + "  ·  " +
                            std::to_string(image_->bits_per_sample) + "-bit" + (image_->has_alpha ? " + alpha" : "") + "  ·  " + image_->format;
@@ -465,6 +468,7 @@ std::vector<std::string> App::overlay_lines() const {
         append("mosaic", find({"Raw"}, {"Mosaic"}));
         if (!detail.empty()) lines.push_back(detail);
     }
+    flush();
     if (cfg_.overlay_shot) {
         const std::string make = find({"Camera", "EXIF"}, {"Make", "Manufacturer"});
         const std::string model = find({"Camera", "EXIF"}, {"Model"});
@@ -484,7 +488,9 @@ std::vector<std::string> App::overlay_lines() const {
         const std::string taken = find({"Camera", "EXIF"}, {"Taken", "Date and Time (Original)", "Date/time original"});
         if (!taken.empty()) lines.push_back(taken);
     }
+    flush();
     if (cfg_.overlay_location && image_->has_location) lines.push_back(image_->location_text());
+    flush();
     if (cfg_.overlay_view) {
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
@@ -496,7 +502,8 @@ std::vector<std::string> App::overlay_lines() const {
         }
         lines.push_back(line);
     }
-    return lines;
+    flush();
+    return sections;
 }
 
 void App::refresh_metadata() {
@@ -1057,7 +1064,7 @@ void App::update_status() {
         gtk_spinner_stop(GTK_SPINNER(spinner_));
         gtk_widget_hide(spinner_);
     }
-    view_->set_overlay(overlay_lines());
+    view_->set_overlay(overlay_sections());
     gtk_label_set_text(GTK_LABEL(status_left_), left.c_str());
     gtk_label_set_text(GTK_LABEL(status_center_), center.c_str());
     gtk_label_set_text(GTK_LABEL(status_right_), right.c_str());
