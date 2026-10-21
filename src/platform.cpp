@@ -217,4 +217,35 @@ void free_pixels(void* p)
     std::free(p);
 }
 
+namespace
+{
+MainDispatch& main_dispatch()
+{
+    static MainDispatch d;
+    return d;
+}
+}  // namespace
+
+void set_main_dispatch(MainDispatch dispatch)
+{
+    main_dispatch() = std::move(dispatch);
+}
+
+void post_main(std::function<void()> fn)
+{
+    if (main_dispatch())
+    {
+        main_dispatch()(std::move(fn));
+        return;
+    }
+    g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        +[](gpointer p) -> gboolean
+        {
+            (*static_cast<std::function<void()>*>(p))();
+            return G_SOURCE_REMOVE;
+        },
+        new std::function<void()>(std::move(fn)), +[](gpointer p) { delete static_cast<std::function<void()>*>(p); });
+}
+
 }  // namespace platform

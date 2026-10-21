@@ -1,4 +1,5 @@
 #include "app.h"
+#include "platform.h"
 #include "probe.h"
 
 #include <anyui/anyui.h>
@@ -85,6 +86,8 @@ void run_step(App& app, const std::string& step)
 
 }  // namespace
 
+int run_app(anyui::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start);
+
 int main(int argc, char** argv)
 {
     const auto t_start = std::chrono::steady_clock::now();
@@ -112,12 +115,23 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "%s\n", ui.error().c_str());
         return 1;
     }
-    App app(**ui);
+    // Results from worker threads (lookups, video frames) come back through
+    // the toolkit's loop; with Win32 there is no GLib loop to carry them.
+    anyui::Ui& toolkit = **ui;
+    platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
+    const int rc = run_app(**ui, argc, argv, t_start);
+    platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
+    return rc;
+}
+
+int run_app(anyui::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
+{
+    App app(ui);
     if (argc > 1)
         app.open_path(argv[1]);
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "startup: %.0f ms to window creation (%s)\n",
-                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string((*ui)->backendName()).c_str());
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string(ui.backendName()).c_str());
 
     anyui::Subscription script;
     std::vector<std::string> steps;
@@ -130,7 +144,7 @@ int main(int argc, char** argv)
                 steps.push_back(*p);
         g_strfreev(parts);
         const char* ms = g_getenv("IFRIT_SCRIPT_MS");
-        script = (*ui)->timer(ms ? std::atoi(ms) : 400, true,
+        script = ui.timer(ms ? std::atoi(ms) : 400, true,
                               [&]
                               {
                                   if (next < steps.size())

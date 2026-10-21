@@ -3,11 +3,15 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <map>
+#include <thread>
 #include <vector>
+
+#include "platform.h"
 
 #ifdef HAVE_GEOCODE
 #include "http.h"
@@ -49,7 +53,8 @@ struct Geocoder::Impl
     std::deque<std::pair<std::string, std::pair<double, double>>> queue;
     std::string language;
     bool in_flight = false;
-    guint timer = 0;
+    bool spacing = false;  // between requests (Nominatim's rate limit)
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 #ifdef HAVE_GEOCODE
     std::shared_ptr<void> request;  // the lookup in flight; dropping it cancels
 #endif
@@ -100,7 +105,7 @@ struct Geocoder::Impl
 
     void pump()
     {
-        if (in_flight || queue.empty() || timer)
+        if (in_flight || queue.empty() || spacing)
             return;
         auto [key, coords] = queue.front();
         queue.pop_front();
@@ -211,16 +216,21 @@ void Geocoder::Impl::send(const std::string& key, double lat, double lon)
                            in_flight = false;
                            resolve(key, place);
                            // Nominatim asks for at most one request per second.
-                           timer = g_timeout_add(
-                               1100,
-                               +[](gpointer p) -> gboolean
+                           spacing = true;
+                           std::thread(
+                               [this, alive = alive]
                                {
-                                   auto* impl = static_cast<Impl*>(p);
-                                   impl->timer = 0;
-                                   impl->pump();
-                                   return G_SOURCE_REMOVE;
-                               },
-                               this);
+                                   std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+                                   platform::post_main(
+                                       [this, alive]
+                                       {
+                                           if (!*alive)
+                                               return;
+                                           spacing = false;
+                                           pump();
+                                       });
+                               })
+                               .detach();
                        });
 }
 #else
@@ -246,8 +256,7 @@ Geocoder::Geocoder() : impl_(new Impl)
 
 Geocoder::~Geocoder()
 {
-    if (impl_->timer)
-        g_source_remove(impl_->timer);
+    *impl_->alive = false;  // a pending pump() won't run
 #ifdef HAVE_GEOCODE
     impl_->request.reset();  // cancel; its callback won't run
 #endif

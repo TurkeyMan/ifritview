@@ -153,9 +153,18 @@ endif()
 # Videos: poster frames and playback through GStreamer, which is optional at
 # runtime: the build needs its headers, but the viewer dlopens the libraries
 # (src/gst_api.cpp) rather than linking them. Without GStreamer installed,
-# videos just aren't part of the series.
+# videos just aren't part of the series. Windows uses its own Media
+# Foundation instead (also loaded at runtime: N editions don't have it).
+if(WIN32)
+  target_sources(ifrit_core PRIVATE src/mf.cpp src/video_mf.cpp src/decoders/video_poster_mf.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_VIDEO)
+  target_link_libraries(ifrit_core PUBLIC mfuuid ole32 oleaut32 windowscodecs)
+  message(STATUS "video: enabled (Media Foundation)")
+else()
 pkg_check_modules(VIDEO gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-audio-1.0)
-if(VIDEO_FOUND)
+endif()
+if(WIN32)
+elseif(VIDEO_FOUND)
   target_sources(ifrit_core PRIVATE src/gst_api.cpp src/decoders/video_poster.cpp)
   target_compile_definitions(ifrit_core PUBLIC HAVE_VIDEO)
   target_include_directories(ifrit_core PUBLIC ${VIDEO_INCLUDE_DIRS})

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <string>
 
 namespace platform
@@ -39,6 +40,13 @@ std::string executable_path();
 bool library_installed(const char* name);
 void* open_library(const char* name, std::string* error = nullptr);
 void* library_symbol(void* library, const char* symbol);
+
+// Work for the main (UI) thread, from any thread. The front end installs its
+// toolkit's way of doing that at startup; until then (and in the GTK front
+// end) it goes through GLib's main loop, which the Win32 one doesn't run.
+using MainDispatch = std::function<void(std::function<void()>)>;
+void set_main_dispatch(MainDispatch dispatch);
+void post_main(std::function<void()> fn);
 
 // Large pixel buffers: aligned for huge pages where the system offers them.
 void* allocate_pixels(size_t bytes);

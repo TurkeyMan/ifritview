@@ -1,6 +1,6 @@
 #include "video.h"
 
-#ifdef HAVE_VIDEO
+#if defined(HAVE_VIDEO) && !defined(_WIN32)  // Windows: video_mf.cpp
 
 #include "gst_api.h"
 
@@ -258,7 +258,7 @@ double VideoPlayer::duration() const
     return 0;
 }
 
-#else
+#elif !defined(HAVE_VIDEO)
 
 struct VideoPlayer::Impl
 {

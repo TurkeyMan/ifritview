@@ -1,5 +1,7 @@
 #include "http.h"
 
+#include "platform.h"
+
 #include <gio/gio.h>
 
 #include <cstdlib>
@@ -185,17 +187,12 @@ std::shared_ptr<void> http_get(const std::string& url, const HttpHeaders& header
         [job]
         {
             job->response = fetch(job->url, job->headers, job->cancel);
-            auto* keep = new std::shared_ptr<Job>(job);
-            g_idle_add_full(
-                G_PRIORITY_LOW,
-                +[](gpointer p) -> gboolean
+            platform::post_main(
+                [job]
                 {
-                    auto& j = *static_cast<std::shared_ptr<Job>*>(p);
-                    if (!g_cancellable_is_cancelled(j->cancel))
-                        j->done(j->response);
-                    return G_SOURCE_REMOVE;
-                },
-                keep, +[](gpointer p) { delete static_cast<std::shared_ptr<Job>*>(p); });
+                    if (!g_cancellable_is_cancelled(job->cancel))
+                        job->done(job->response);
+                });
         })
         .detach();
     return token;
