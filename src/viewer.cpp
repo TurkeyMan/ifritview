@@ -4,6 +4,7 @@
 #include "controls.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 
 namespace {
@@ -496,15 +497,23 @@ gboolean ImageView::on_motion(GdkEventMotion* e) {
 }
 
 gboolean ImageView::on_scroll(GdkEventScroll* e) {
+    if (g_getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "scroll: dir=%d dy=%.3f emulated=%d stop=%d accum=%.3f\n", int(e->direction), e->delta_y,
+                     int(gdk_event_get_pointer_emulated(reinterpret_cast<GdkEvent*>(e))), int(e->is_stop), scroll_accum_);
     int direction = 0;
     if (e->direction == GDK_SCROLL_SMOOTH) {
         // A wheel click on Wayland arrives as both a discrete event and an
         // emulated smooth one; the discrete event is enough.
         if (gdk_event_get_pointer_emulated(reinterpret_cast<GdkEvent*>(e))) return TRUE;
+        // Some compositors deliver a wheel notch as 0.9 rather than 1.0, so
+        // fire at half a notch and carry the remainder; a change of direction
+        // starts afresh so the carry can't swallow the first tick back.
+        if (e->delta_y * scroll_accum_ < 0) scroll_accum_ = 0;
         scroll_accum_ += e->delta_y;
-        if (std::fabs(scroll_accum_) >= 1.0) {
+        if (std::fabs(scroll_accum_) >= 0.5) {
             direction = scroll_accum_ > 0 ? 1 : -1;
-            scroll_accum_ = 0;
+            scroll_accum_ -= direction;
+            if (std::fabs(scroll_accum_) >= 0.5) scroll_accum_ = 0;   // large touchpad flicks: one step, not a burst
         }
     } else if (e->direction == GDK_SCROLL_UP) {
         direction = -1;

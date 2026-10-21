@@ -518,7 +518,7 @@ void App::on_loaded(Loader::Result& r) {
     showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
     status_message_ = r.preview && develop_requested_ ? "Developing…" : "";
-    if (r.preview && !from_cache) {
+    if (r.preview) {
         // Edits that need real pixels mean the preview can't stand for long.
         const XmpDevelop& d = r.image->xmp;
         if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
