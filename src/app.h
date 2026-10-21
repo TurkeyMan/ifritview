@@ -144,6 +144,7 @@ private:
     GtkWidget* footer_ = nullptr;
     GtkWidget* paned_ = nullptr;  // image | metadata pane
     bool paned_adjusting_ = false;
+    bool paned_dragging_ = false;        // the user has hold of the divider
     GtkWidget* exposure_box_ = nullptr;  // EV slider, shown for raw files only
     GtkWidget* exposure_ = nullptr;
     GtkWidget* smooth_toggle_ = nullptr;

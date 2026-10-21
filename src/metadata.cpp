@@ -89,8 +89,14 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
     };
     auto* wrap = new Wrap{value, value_col, 0};
     g_object_set_data_full(G_OBJECT(tree_), "wrap", wrap, +[](gpointer p) { delete static_cast<Wrap*>(p); });
-    g_signal_connect(tree_, "size-allocate",
-                     G_CALLBACK(+[](GtkWidget* tree, GdkRectangle* alloc, gpointer p)
+
+    // EXTERNAL: the scroller doesn't adopt the tree's minimum width (which the
+    // wrap width would otherwise pin), so the divider can move freely both
+    // ways; the wrap follows the scroller's width instead.
+    GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_EXTERNAL, GTK_POLICY_AUTOMATIC);
+    g_signal_connect(scroller, "size-allocate",
+                     G_CALLBACK(+[](GtkWidget*, GdkRectangle* alloc, gpointer p)
                                 {
                                     auto* w = static_cast<Wrap*>(p);
                                     const int width = std::max(80, alloc->width - 150 - 24);  // minus the Tag column and padding
@@ -99,12 +105,8 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
                                     w->last = width;
                                     g_object_set(w->renderer, "wrap-width", width, nullptr);
                                     gtk_tree_view_column_queue_resize(w->column);
-                                    (void)tree;
                                 }),
                      wrap);
-
-    GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_container_add(GTK_CONTAINER(scroller), tree_);
     gtk_box_pack_start(GTK_BOX(pane_), scroller, TRUE, TRUE, 0);
     gtk_widget_show_all(title_);
