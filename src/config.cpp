@@ -93,6 +93,7 @@ void Config::load() {
     raw_mode = get_string(kf, kFiles, "raw_mode", raw_mode);
     if (raw_mode != "full" && raw_mode != "half" && raw_mode != "preview") raw_mode = "half";
     apply_xmp_edits = get_bool(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
+    raw_develop_on_demand = get_bool(kf, kFiles, "raw_develop_on_demand", raw_develop_on_demand);
 
     fit_window_to_image = get_bool(kf, kWindow, "fit_to_image", fit_window_to_image);
     min_window_width = std::max(200, get_int(kf, kWindow, "min_width", min_window_width));
@@ -124,6 +125,7 @@ bool Config::save() const {
     g_key_file_set_boolean(kf, kFiles, "show_hidden", show_hidden);
     g_key_file_set_string(kf, kFiles, "raw_mode", raw_mode.c_str());
     g_key_file_set_boolean(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
+    g_key_file_set_boolean(kf, kFiles, "raw_develop_on_demand", raw_develop_on_demand);
 
     g_key_file_set_boolean(kf, kWindow, "fit_to_image", fit_window_to_image);
     g_key_file_set_integer(kf, kWindow, "min_width", min_window_width);

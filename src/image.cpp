@@ -1,5 +1,6 @@
 #include "image.h"
 
+#include <glib.h>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -177,6 +178,7 @@ void reorient(const T* src, int W, int H, int channels, int o, T* dst, int dw, i
 
 void Image::apply_orientation(int o) {
     if (o < 2 || o > 8) return;
+    if (g_getenv("IFRIT_TRACE")) std::fprintf(stderr, "apply_orientation(%d) on %dx%d\n", o, width, height);
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;

@@ -24,17 +24,36 @@ Loader::~Loader() {
     thread_.join();
 }
 
-void Loader::request(uint64_t generation, const std::string& path) {
+void Loader::request(uint64_t generation, const std::string& path, bool develop) {
     {
         std::lock_guard lock(mutex_);
-        pending_ = {generation, path};
+        pending_ = Job{generation, path, develop};
     }
     wake_.notify_one();
 }
 
+bool Loader::superseded(uint64_t generation) {
+    std::lock_guard lock(mutex_);
+    return stop_ || (pending_ && pending_->generation != generation);
+}
+
+void Loader::post(Result* r) {
+    struct Dispatch {
+        Loader* loader;
+        Result* result;
+    };
+    g_idle_add_full(G_PRIORITY_DEFAULT, +[](gpointer p) -> gboolean {
+        auto* d = static_cast<Dispatch*>(p);
+        d->loader->callback_(*d->result);
+        delete d->result;
+        delete d;
+        return G_SOURCE_REMOVE;
+    }, new Dispatch{this, r}, nullptr);
+}
+
 void Loader::run() {
     for (;;) {
-        std::pair<uint64_t, std::string> job;
+        Job job;
         {
             std::unique_lock lock(mutex_);
             wake_.wait(lock, [this] { return stop_ || pending_; });
@@ -42,19 +61,21 @@ void Loader::run() {
             job = *pending_;
             pending_.reset();
         }
-        auto* r = new Result{job.first, job.second, std::make_shared<Image>(), {}};
+        // Quick stand-in first (a raw's embedded JPEG), so flicking through a
+        // folder shows something at once. The real decode follows only when
+        // asked for and only if the user is still on this file.
+        static uint64_t previewed = 0;
+        if (previewed != job.generation) {
+            auto preview = std::make_shared<Image>();
+            if (decode_preview(job.path, *preview)) {
+                previewed = job.generation;
+                post(new Result{job.generation, job.path, preview, {}, true});
+                if (!job.develop || superseded(job.generation)) continue;
+            }
+        }
+        auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
         if (!decode_image(r->path, *r->image, r->error)) r->image.reset();
-        struct Dispatch {
-            Loader* loader;
-            Result* result;
-        };
-        g_idle_add_full(G_PRIORITY_DEFAULT, +[](gpointer p) -> gboolean {
-            auto* d = static_cast<Dispatch*>(p);
-            d->loader->callback_(*d->result);
-            delete d->result;
-            delete d;
-            return G_SOURCE_REMOVE;
-        }, new Dispatch{this, r}, nullptr);
+        post(r);
     }
 }
 
@@ -154,6 +175,17 @@ void App::build_ui() {
                          static_cast<App*>(self)->on_smooth_toggled();
                      }), this);
     gtk_box_pack_start(GTK_BOX(toolbar_), smooth_toggle_, FALSE, FALSE, 0);
+
+    xmp_toggle_ = gtk_toggle_button_new();
+    gtk_container_add(GTK_CONTAINER(xmp_toggle_), gtk_image_new_from_icon_name("document-edit-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+    gtk_button_set_relief(GTK_BUTTON(xmp_toggle_), GTK_RELIEF_NONE);
+    gtk_widget_set_tooltip_text(xmp_toggle_, "Apply edits from XMP sidecars (exposure, crop, rotation)");
+    gtk_widget_set_can_focus(xmp_toggle_, FALSE);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
+    g_signal_connect(xmp_toggle_, "toggled", G_CALLBACK(+[](GtkToggleButton*, gpointer self) {
+                         static_cast<App*>(self)->on_xmp_toggled();
+                     }), this);
+    gtk_box_pack_start(GTK_BOX(toolbar_), xmp_toggle_, FALSE, FALSE, 0);
 
     GtkWidget* settings = tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings_action);
     gtk_box_set_child_packing(GTK_BOX(toolbar_), settings, FALSE, FALSE, 0, GTK_PACK_END);
@@ -277,6 +309,7 @@ void App::copy_to_clipboard() {
 
 void App::transform(int exif_orientation) {
     if (!image_) return;
+    if (showing_preview_) preview_edits_.push_back({exif_orientation, 0, 0, 1, 1});
     image_->apply_orientation(exif_orientation);
     view_->set_image(image_);   // dimensions may have swapped
     fit_window_to_image();
@@ -355,7 +388,10 @@ void App::load_current() {
     }
     status_message_ = "Loading " + folder_.current_name() + "…";
     update_status();
-    loader_.request(++load_generation_, path);
+    showing_preview_ = false;
+    develop_requested_ = !cfg_.raw_develop_on_demand;
+    preview_edits_.clear();
+    loader_.request(++load_generation_, path, develop_requested_);
 }
 
 void App::navigate(int delta) {
@@ -380,7 +416,21 @@ void App::reload() {
 
 void App::on_loaded(Loader::Result& r) {
     if (r.generation != load_generation_) return;  // superseded
-    status_message_.clear();
+    showing_preview_ = r.preview;
+    if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview));
+    status_message_ = r.preview && develop_requested_ ? "Developing…" : "";
+    if (r.preview) {
+        // Edits that need real pixels mean the preview can't stand for long.
+        const XmpDevelop& d = r.image->xmp;
+        if (cfg_.apply_xmp_edits && d.present && (d.has_crop || d.exposure != 0 || d.orientation != 1)) ensure_developed();
+    } else if (!preview_edits_.empty() && r.image) {
+        for (const Edit& e : preview_edits_) {   // redo what was done to the preview
+            if (e.orientation != 1) r.image->apply_orientation(e.orientation);
+            else *r.image = r.image->crop(int(e.x * r.image->width), int(e.y * r.image->height),
+                                          int(e.w * r.image->width), int(e.h * r.image->height));
+        }
+        preview_edits_.clear();
+    }
     if (!r.image) {
         image_.reset();
         image_path_ = r.path;
@@ -400,7 +450,9 @@ void App::on_loaded(Loader::Result& r) {
     update_title();
     update_status();
     refresh_metadata();
-    if (image_->linear) {
+    const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
+    const bool slider_moved = !r.preview && gtk_widget_get_visible(exposure_box_) && std::fabs(slider_before - image_->exposure_bias) > 1e-6;
+    if (image_->linear || showing_preview_) {
         // The slider reads in the shooter's units: it rests at the camera's
         // exposure compensation, which is already in the pixels, and the
         // render uses the difference from that.
@@ -413,7 +465,8 @@ void App::on_loaded(Loader::Result& r) {
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
 
         gtk_widget_show(exposure_box_);
-        if (cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
+        if (!showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
+        else if (slider_moved) gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
     } else if (cfg_.apply_xmp_edits && image_->xmp.present) {
         apply_xmp_edits();
     } else {
@@ -430,6 +483,7 @@ void App::set_exposure(double ev) {
 void App::crop_to_selection() {
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h)) return;
+    if (showing_preview_) preview_edits_.push_back({1, double(x) / image_->width, double(y) / image_->height, double(w) / image_->width, double(h) / image_->height});
     auto cropped = std::make_shared<Image>(image_->crop(x, y, w, h));
     if (cropped->linear) cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - cropped->exposure_bias);
     cropped->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
@@ -524,7 +578,19 @@ void App::on_exposure_changed() {
     retone();
 }
 
+void App::ensure_developed() {
+    if (!showing_preview_ || develop_requested_) return;
+    develop_requested_ = true;
+    status_message_ = "Developing…";
+    update_status();
+    loader_.request(load_generation_, folder_.current(), true);
+}
+
 void App::retone() {
+    if (showing_preview_) {
+        ensure_developed();   // the slider value is picked up once the real pixels arrive
+        return;
+    }
     if (!image_ || !image_->linear) return;
     image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias);
     view_->image_changed();
@@ -550,6 +616,12 @@ void App::apply_xmp_edits() {
     }
     status_message_ = "XMP edits applied";
     update_status();
+}
+
+void App::on_xmp_toggled() {
+    cfg_.apply_xmp_edits = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(xmp_toggle_));
+    cfg_.save();
+    if (image_ && image_->xmp.present) load_current();   // re-read with or without the edits
 }
 
 void App::on_smooth_toggled() {
@@ -646,6 +718,7 @@ void App::open_settings(const char* page) {
     set_decode_options(decode_options_for(cfg_));
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
     view_->config_changed();
     refresh_metadata();
     if (cfg_.raw_mode != old_raw_mode && image_ && image_->format.find("RAW") != std::string::npos) load_current();
@@ -691,6 +764,7 @@ void App::update_status() {
         if (!image_->format.empty()) center += "  ·  " + image_->format;
         if (file_size_) center += "  ·  " + human_size(file_size_);
         if (!image_->info.empty()) center += "  ·  " + image_->info;
+        if (showing_preview_ && status_message_.empty()) center += "  ·  embedded preview";
         const int percent = int(std::lround(view_->zoom() * 100.0));
         right = std::to_string(percent) + "%";
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0) right += " (fit)";

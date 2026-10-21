@@ -26,6 +26,7 @@ struct Widgets {
     GtkWidget* show_hidden;
     GtkWidget* raw_mode;
     GtkWidget* apply_xmp;
+    GtkWidget* raw_on_demand;
     GtkWidget* smooth_upscale;
     GtkWidget* smooth_downscale;
     GtkWidget* fullscreen_upscale;
@@ -156,6 +157,7 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "preview", "Embedded JPEG preview (fastest)");
     gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.raw_mode), cfg.raw_mode.c_str());
     add_row(grid, row, "Decode", w.raw_mode);
+    w.raw_on_demand = add_check(grid, row, "Show the embedded preview; develop only when needed (exposure, edits, crop, save)", cfg.raw_develop_on_demand);
     w.apply_xmp = add_check(grid, row, "Apply edits from XMP sidecars (exposure, crop, rotation)", cfg.apply_xmp_edits);
 
     add_heading(grid, row, "Maps");
@@ -305,6 +307,7 @@ void apply(const Widgets& w, Config& cfg) {
     cfg.show_hidden = checked(w.show_hidden);
     if (const gchar* id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(w.raw_mode))) cfg.raw_mode = id;
     cfg.apply_xmp_edits = checked(w.apply_xmp);
+    cfg.raw_develop_on_demand = checked(w.raw_on_demand);
     cfg.smooth_upscale = checked(w.smooth_upscale);
     cfg.smooth_downscale = checked(w.smooth_downscale);
     cfg.fullscreen_upscale = checked(w.fullscreen_upscale);

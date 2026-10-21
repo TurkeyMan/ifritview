@@ -125,6 +125,24 @@ bool decode_image(const std::string& path, Image& out, std::string& error) {
     return false;
 }
 
+bool decode_preview(const std::string& path, Image& out) {
+    const std::string ext = lowercase_extension(path);
+    for (const Decoder* d : decoders())
+        if (d->preview && claims_extension(*d, ext)) {
+            out = Image{};
+            if (!d->preview(path, out)) return false;
+            uint8_t head[64];
+            size_t head_len = 0;
+            if (FILE* f = std::fopen(path.c_str(), "rb")) {
+                head_len = std::fread(head, 1, sizeof head, f);
+                std::fclose(f);
+            }
+            enrich_metadata(path, out, head, head_len);
+            return true;
+        }
+    return false;
+}
+
 std::vector<std::string> default_extensions() {
     std::vector<std::string> all;
     for (const Decoder* d : decoders())

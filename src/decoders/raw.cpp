@@ -2,6 +2,8 @@
 
 #include <libraw/libraw.h>
 
+#include <glib.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -70,22 +72,6 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error) {
 #endif
 }
 
-// Same rule as LibRaw's auto-brightness: the gain that pushes 1% of all
-// samples past white.
-double auto_gain(const std::vector<uint16_t>& rgb) {
-    std::vector<uint32_t> histogram(4096, 0);
-    for (uint16_t v : rgb) ++histogram[v >> 4];
-    const size_t allow = rgb.size() / 100;
-    size_t seen = 0;
-    int bin = 4095;
-    for (; bin > 0; --bin) {
-        seen += histogram[bin];
-        if (seen > allow) break;
-    }
-    const double white = (bin + 1) * 16.0;
-    return white > 0 ? 65535.0 / white : 1.0;
-}
-
 bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.half_size = half ? 1 : 0;
     // Linear 16-bit, no auto-brightening: tone mapping is done by the viewer
@@ -94,36 +80,77 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error) {
     raw.imgdata.params.gamm[0] = 1.0;
     raw.imgdata.params.gamm[1] = 1.0;
     raw.imgdata.params.no_auto_bright = 1;
+    const bool timing = g_getenv("IFRIT_RAW_TIMING") != nullptr;
+    gint64 t0 = g_get_monotonic_time();
+    auto lap = [&](const char* what) {
+        if (!timing) return;
+        const gint64 t = g_get_monotonic_time();
+        std::fprintf(stderr, "raw: %-14s %5.0f ms\n", what, (t - t0) / 1000.0);
+        t0 = t;
+    };
     int r = raw.unpack();
+    lap("unpack");
     if (r != LIBRAW_SUCCESS) {
         error = libraw_strerror(r);
         return false;
     }
     r = raw.dcraw_process();
+    lap("process");
     if (r != LIBRAW_SUCCESS) {
         error = libraw_strerror(r);
         return false;
     }
-    libraw_processed_image_t* img = raw.dcraw_make_mem_image(&r);
-    if (!img) {
-        error = libraw_strerror(r);
+    // After dcraw_process, imgdata.image holds output-space linear 16-bit
+    // as ushort[4] per pixel; read it directly rather than via
+    // dcraw_make_mem_image, and build the clip histogram in the same pass.
+    const auto& sz = raw.imgdata.sizes;
+    const int w = sz.iwidth, h = sz.iheight;
+    const ushort (*px)[4] = raw.imgdata.image;
+    if (!px || w <= 0 || h <= 0 || raw.imgdata.idata.colors < 3) {
+        error = "unexpected LibRaw output";
         return false;
     }
-    bool ok = false;
-    if (img->type == LIBRAW_IMAGE_BITMAP && img->colors == 3 && img->bits == 16) {
-        auto linear = std::make_shared<LinearData>();
-        const auto* px = reinterpret_cast<const uint16_t*>(img->data);
-        linear->rgb.assign(px, px + size_t(img->width) * img->height * 3);
-        linear->auto_gain = auto_gain(linear->rgb);
-        out.allocate(img->width, img->height);
-        out.linear = std::move(linear);
-        out.retone(0.0);
-        ok = true;
-    } else {
-        error = "unexpected LibRaw output";
+    auto linear = std::make_shared<LinearData>();
+    linear->rgb.resize(size_t(w) * h * 3);
+    std::vector<uint32_t> histogram(4096, 0);
+    uint16_t* d = linear->rgb.data();
+    for (size_t i = 0, n = size_t(w) * h; i < n; ++i, d += 3) {
+        d[0] = px[i][0];
+        d[1] = px[i][1];
+        d[2] = px[i][2];
+        if ((i & 3) == 0) {   // every fourth pixel is plenty for the 1% clip point
+            ++histogram[d[0] >> 4];
+            ++histogram[d[1] >> 4];
+            ++histogram[d[2] >> 4];
+        }
     }
-    LibRaw::dcraw_clear_mem(img);
-    return ok;
+    lap("copy+histogram");
+    const size_t allow = size_t(w) * h * 3 / 4 / 100;
+    size_t seen = 0;
+    int bin = 4095;
+    for (; bin > 0; --bin) {
+        seen += histogram[bin];
+        if (seen > allow) break;
+    }
+    linear->auto_gain = 65535.0 / ((bin + 1) * 16.0);
+    out.allocate(w, h);
+    out.linear = std::move(linear);
+    out.retone(0.0);
+    lap("retone");
+    return true;
+}
+
+// The embedded JPEG, used as the on-screen stand-in while the real decode
+// runs; not offered when the configured mode is the preview anyway.
+bool preview(const std::string& path, Image& out) {
+    if (decode_options().raw_mode == DecodeOptions::RawMode::Preview) return false;
+    LibRaw raw;
+    if (raw.open_file(path.c_str()) != LIBRAW_SUCCESS) return false;
+    std::string error;
+    if (!decode_preview(raw, out, error)) return false;
+    out.format = "RAW preview";
+    out.info = camera_name(raw);
+    return true;
 }
 
 // LibRaw keeps no field for ExposureBiasValue (EXIF 0x9204); catch it as
@@ -222,6 +249,6 @@ const Decoder& raw_decoder() {
         "RAW",
         {"cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "dng", "raw",
          "rwl", "3fr", "erf", "kdc", "mef", "mos", "mrw", "x3f", "iiq", "srw", "fff", "dcr"},
-        sniff, decode_raw};
+        sniff, decode_raw, preview};
     return d;
 }

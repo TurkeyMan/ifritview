@@ -84,6 +84,7 @@ gboolean run_script_step(gpointer p) {
     else if (step == "wait") {}
     else if (step == "metadata") app.toggle_metadata();
     else if (step == "copy") app.copy_to_clipboard();
+    else if (step == "develop") app.set_exposure(app.view().image() ? 0.0 : 0.0), app.set_exposure(0.01);
     else if (step == "rotl") app.transform(8);
     else if (step == "rotr") app.transform(6);
     else if (step.rfind("ev:", 0) == 0) app.set_exposure(std::stod(step.substr(3)));
@@ -103,6 +104,8 @@ int probe(int argc, char** argv) {
         if (ok) {
             std::printf("ok    %-40s %5dx%-5d %s%s %s (%.0f ms)\n", argv[i], img.width, img.height,
                         img.format.c_str(), img.has_alpha ? " +alpha" : "", img.info.c_str(), ms);
+            if (img.xmp.present)
+                std::printf("        xmp develop: exposure %+.2f temp %.0f orientation %d crop %d\n", img.xmp.exposure, img.xmp.temperature, img.xmp.orientation, int(img.xmp.has_crop));
             for (const MetadataGroup& g : img.metadata) {
                 std::printf("        %s (%zu)", g.name.c_str(), g.items.size());
                 if (g_getenv("IFRIT_PROBE_VERBOSE"))

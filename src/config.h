@@ -12,6 +12,7 @@ struct Config {
     bool wrap_around = true;               // next after the last image goes to the first
     bool show_hidden = false;
     std::string raw_mode = "half";         // full | half | preview
+    bool raw_develop_on_demand = true;     // show the embedded JPEG until real pixels are needed
     bool apply_xmp_edits = true;           // honour exposure/crop/orientation from XMP
 
     // Window

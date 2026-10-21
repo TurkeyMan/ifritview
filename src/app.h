@@ -25,20 +25,26 @@ public:
         std::string path;
         std::shared_ptr<Image> image;   // null on failure
         std::string error;
+        bool preview = false;           // a quick stand-in; the real decode follows
     };
     using Callback = std::function<void(Result&)>;   // runs on the GTK main thread
 
     explicit Loader(Callback callback);
     ~Loader();
-    void request(uint64_t generation, const std::string& path);
+    // `develop` false: stop after the quick preview when one exists.
+    void request(uint64_t generation, const std::string& path, bool develop);
 
 private:
     void run();
+    bool superseded(uint64_t generation);
+    bool preview_shown_ = false;   // this generation already posted its preview
+    void post(Result* r);
 
     Callback callback_;
     std::mutex mutex_;
     std::condition_variable wake_;
-    std::optional<std::pair<uint64_t, std::string>> pending_;
+    struct Job { uint64_t generation; std::string path; bool develop; };
+    std::optional<Job> pending_;
     bool stop_ = false;
     std::thread thread_;
 };
@@ -89,7 +95,9 @@ private:
     void on_exposure_changed();
     void retone();                           // re-render the raw from both sliders
     void apply_xmp_edits();
+    void ensure_developed();                 // kick off the real decode behind a preview
     void on_smooth_toggled();
+    void on_xmp_toggled();
     void refresh_metadata();
     std::vector<MetadataGroup> collect_metadata() const;
 
@@ -113,6 +121,13 @@ private:
 
     bool fullscreen_ = false;
     uint64_t load_generation_ = 0;
+    bool showing_preview_ = false;          // a raw's embedded JPEG stands in for the real pixels
+    bool develop_requested_ = false;
+    // Edits made while the preview is showing, replayed on the developed
+    // image. Crops are fractions so they survive the size difference.
+    struct Edit { int orientation; double x, y, w, h; };
+    std::vector<Edit> preview_edits_;
+    GtkWidget* xmp_toggle_ = nullptr;
     std::shared_ptr<Image> image_;
     std::string image_path_;
     uint64_t file_size_ = 0;

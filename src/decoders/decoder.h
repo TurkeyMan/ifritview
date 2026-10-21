@@ -13,6 +13,9 @@ struct Decoder {
     std::vector<std::string> extensions;                        // lowercase, without the dot
     bool (*sniff)(const uint8_t* head, size_t len);             // may be null
     bool (*decode)(const std::string& path, Image& out, std::string& error);
+    // Optional quick approximation (a raw's embedded JPEG) shown while the
+    // real decode runs. May be null; returns false when there is none.
+    bool (*preview)(const std::string& path, Image& out) = nullptr;
 };
 
 // Options the decoders consult. Set from the main thread, read from the
@@ -30,6 +33,9 @@ const std::vector<const Decoder*>& decoders();
 // Decode a file with whichever decoder claims it; `error` describes the
 // failure of the most relevant decoder.
 bool decode_image(const std::string& path, Image& out, std::string& error);
+
+// A quick stand-in for the file if its decoder offers one.
+bool decode_preview(const std::string& path, Image& out);
 
 // Every extension handled by the compiled-in decoders, in priority order.
 std::vector<std::string> default_extensions();
