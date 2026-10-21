@@ -390,8 +390,6 @@ void Image::apply_orientation(int o)
     if (is_preview())
         pending_edits.push_back({o, 0, 0, 0, 0});
     mips.clear();
-    if (g_getenv("IFRIT_TRACE"))
-        std::fprintf(stderr, "apply_orientation(%d) on %dx%d\n", o, width, height);
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;

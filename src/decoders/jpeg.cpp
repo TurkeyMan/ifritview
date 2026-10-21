@@ -3,8 +3,6 @@
 
 #include <jpeglib.h>
 
-#include <glib.h>
-
 #include <algorithm>
 #include <csetjmp>
 #include <cstdio>
@@ -147,18 +145,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
     ErrorManager err{};
     setup(cinfo, err);
     jpeg_mem_src(&cinfo, bytes, static_cast<unsigned long>(size));
-    const gint64 t0 = g_get_monotonic_time();
     const bool ok = decode_from(cinfo, err, out, error);
     if (!ok)
         return false;
-    const gint64 t1 = g_get_monotonic_time();
 #ifdef HAVE_EXIF
     const ExifSummary exif = read_exif_file(path, out);
-    const gint64 t2 = g_get_monotonic_time();
     out.apply_orientation(exif.orientation);
-    if (g_getenv("IFRIT_DECODE_TIMING"))
-        std::fprintf(stderr, "  jpeg: libjpeg %.1f  exif %.1f  orient(%d) %.1f ms\n", (t1 - t0) / 1000.0, (t2 - t1) / 1000.0, exif.orientation,
-                     (g_get_monotonic_time() - t2) / 1000.0);
     out.info = exif.camera;
     if (out.color_space.empty())
         out.color_space = exif.color_space;  // an embedded profile is more specific than the EXIF flag

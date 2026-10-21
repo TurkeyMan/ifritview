@@ -43,9 +43,10 @@ public:
 
     explicit Loader(Callback callback);
     ~Loader();
-    // The image to show now. `skip_preview`: its preview is already on screen
-    // (from the cache), so only the develop is wanted.
-    void request(uint64_t generation, const std::string& path, bool develop, bool skip_preview = false);
+    // The image to show now; a preview, if it has one, is followed by its develop.
+    void request(uint64_t generation, const std::string& path);
+    // Only the develop: the preview is already on screen (from the cache).
+    void request_develop(uint64_t generation, const std::string& path);
     // Files to decode when idle, nearest first; replaces the previous list.
     void prefetch(std::vector<std::string> paths);
 
@@ -68,8 +69,6 @@ private:
     {
         uint64_t generation;
         std::string path;
-        bool develop;
-        bool skip_preview;
     };
     std::optional<Job> pending_;  // foreground
     std::optional<Job> develop_;  // background, ahead of prefetches
@@ -155,11 +154,10 @@ private:
     Config cfg_;
     Folder folder_;
     std::unique_ptr<ImageView> view_;
-    std::unique_ptr<MetadataWindow> metadata_;
+    std::unique_ptr<MetadataPane> metadata_;
     Loader loader_;
     ImageCache cache_;
     Geocoder geocoder_;
-    bool image_modified_ = false;  // edited or re-toned since it was loaded
 
     GtkWidget* window_ = nullptr;
     GtkWidget* toolbar_ = nullptr;
@@ -205,7 +203,6 @@ private:
     void show_animation_frame(size_t index);
     static GSourceFunc animation_timer_callback();
     uint64_t load_generation_ = 0;
-    bool develop_requested_ = false;
     GtkWidget* xmp_toggle_ = nullptr;
     std::shared_ptr<Image> image_;
     std::string image_path_;

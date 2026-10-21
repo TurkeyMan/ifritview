@@ -996,9 +996,6 @@ gboolean ImageView::on_motion(GdkEventMotion* e)
 
 gboolean ImageView::on_scroll(GdkEventScroll* e)
 {
-    if (g_getenv("IFRIT_TRACE"))
-        std::fprintf(stderr, "scroll: dir=%d dy=%.3f emulated=%d stop=%d accum=%.3f\n", int(e->direction), e->delta_y,
-                     int(gdk_event_get_pointer_emulated(reinterpret_cast<GdkEvent*>(e))), int(e->is_stop), scroll_accum_);
     int direction = 0;
     if (e->direction == GDK_SCROLL_SMOOTH)
     {

@@ -70,7 +70,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (features.has_animation && info.frame_count > 1)
     {
         auto animation = std::make_shared<Animation>();
-        animation->loops = int(info.loop_count);
         const size_t budget = size_t(512) << 20;
         size_t used = 0;
         int prev_ts = timestamp;

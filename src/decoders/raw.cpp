@@ -181,27 +181,13 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     raw.imgdata.params.gamm[1] = 1.0;
     raw.imgdata.params.no_auto_bright = 1;
     const bool framed = apply_camera_crop(raw);
-    if (const char* q = g_getenv("IFRIT_RAW_QUAL"))
-        raw.imgdata.params.user_qual = std::atoi(q);
-    const bool timing = g_getenv("IFRIT_RAW_TIMING") != nullptr;
-    gint64 t0 = g_get_monotonic_time();
-    auto lap = [&](const char* what)
-    {
-        if (!timing)
-            return;
-        const gint64 t = g_get_monotonic_time();
-        std::fprintf(stderr, "raw: %-14s %5.0f ms\n", what, (t - t0) / 1000.0);
-        t0 = t;
-    };
     int r = raw.unpack();
-    lap("unpack");
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);
         return false;
     }
     r = raw.dcraw_process();
-    lap("process");
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);
@@ -234,7 +220,6 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
             ++histogram[d[2] >> 4];
         }
     }
-    lap("copy+histogram");
     const size_t allow = size_t(w) * h * 3 / 4 / 100;
     size_t seen = 0;
     int bin = 4095;
@@ -251,13 +236,11 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
         std::string ignored;
         if (decode_preview(raw, preview, ignored) && preview.width > 0)
             linear->tone = match_tone_to_preview(*linear, preview);
-        lap("tone match");
     }
 #endif
     out.allocate(w, h);
     out.linear = std::move(linear);
     out.retone(0.0);
-    lap("retone");
     if (framed)
     {
         const auto& c = raw.imgdata.sizes.raw_inset_crops[0];

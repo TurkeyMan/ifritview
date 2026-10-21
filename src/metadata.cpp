@@ -44,9 +44,8 @@ gboolean on_click(GtkWidget* tree, GdkEventButton* e, gpointer)
 
 }  // namespace
 
-MetadataWindow::MetadataWindow(GtkWindow* parent)
+MetadataPane::MetadataPane()
 {
-    (void)parent;
     pane_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_size_request(pane_, 240, -1);  // minimum; the paned divider sets the actual width
     gtk_widget_set_no_show_all(pane_, TRUE);
@@ -113,22 +112,22 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
     gtk_widget_show_all(scroller);
 }
 
-bool MetadataWindow::visible() const
+bool MetadataPane::visible() const
 {
     return gtk_widget_get_visible(pane_);
 }
 
-void MetadataWindow::set_width(int w)
+void MetadataPane::set_width(int w)
 {
     width_ = std::max(240, w);
 }
 
-void MetadataWindow::toggle()
+void MetadataPane::toggle()
 {
     gtk_widget_set_visible(pane_, !visible());
 }
 
-void MetadataWindow::set(const std::string& title, const std::vector<MetadataGroup>& groups, const Image* image, const std::string& map_url)
+void MetadataPane::set(const std::string& title, const std::vector<MetadataGroup>& groups, const Image* image, const std::string& map_url)
 {
     gtk_label_set_text(GTK_LABEL(title_), title.empty() ? "Metadata" : title.c_str());
     gtk_list_store_clear(store_);

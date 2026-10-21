@@ -44,17 +44,22 @@ Loader::~Loader()
         t.join();
 }
 
-void Loader::request(uint64_t generation, const std::string& path, bool develop, bool skip_preview)
+void Loader::request(uint64_t generation, const std::string& path)
 {
     {
         std::lock_guard lock(mutex_);
         develop_.reset();  // a develop for an image we've left, not yet started, is dropped
-        if (skip_preview)
-            develop_ = Job{generation, path, true, true};
-        else
-            pending_ = Job{generation, path, develop, false};
+        pending_ = Job{generation, path};
     }
     fg_wake_.notify_one();
+}
+
+void Loader::request_develop(uint64_t generation, const std::string& path)
+{
+    {
+        std::lock_guard lock(mutex_);
+        develop_ = Job{generation, path};
+    }
     bg_wake_.notify_one();
 }
 
@@ -120,14 +125,7 @@ void Loader::run_foreground()
         {
             preview->build_mips();
             post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);
-            if (job.develop)
-            {
-                {
-                    std::lock_guard lock(mutex_);
-                    develop_ = Job{job.generation, job.path, true, true};
-                }
-                bg_wake_.notify_one();
-            }
+            request_develop(job.generation, job.path);
             continue;
         }
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
@@ -232,23 +230,11 @@ std::string human_size(uint64_t bytes)
 
 App::App() : loader_([this](Loader::Result& r) { on_loaded(r); }), cache_(0)
 {
-    const bool trace = g_getenv("IFRIT_TRACE") != nullptr;
-    gint64 t = g_get_monotonic_time();
-    auto lap = [&](const char* what)
-    {
-        if (!trace)
-            return;
-        const gint64 now = g_get_monotonic_time();
-        std::fprintf(stderr, "startup:   %-16s %4.0f ms\n", what, (now - t) / 1000.0);
-        t = now;
-    };
     cfg_.load();
-    lap("config");
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
     set_decode_options(decode_options_for(cfg_));
     build_ui();
-    lap("build_ui");
 }
 
 GtkWidget* App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
@@ -275,22 +261,10 @@ GtkWidget* App::tool_button(const char* icon, const char* tooltip, void (App::*a
 
 void App::build_ui()
 {
-    const bool trace = g_getenv("IFRIT_TRACE") != nullptr;
-    gint64 t = g_get_monotonic_time();
-    auto lap = [&](const char* what)
-    {
-        if (!trace)
-            return;
-        const gint64 now = g_get_monotonic_time();
-        std::fprintf(stderr, "startup:     %-14s %4.0f ms\n", what, (now - t) / 1000.0);
-        t = now;
-    };
     GtkCssProvider* css = gtk_css_provider_new();
     gtk_css_provider_load_from_data(css, kCss, -1, nullptr);
     gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(css);
-
-    lap("css");
     window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     set_icon_reference(window_);  // icon cache keyed by this window's theme, scale and colour
     gtk_window_set_title(GTK_WINDOW(window_), "IfritView");
@@ -408,8 +382,6 @@ void App::build_ui()
     gtk_widget_set_no_show_all(exposure_box_, TRUE);
     GtkWidget* metadata = tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata);
     gtk_box_set_child_packing(GTK_BOX(toolbar_), metadata, FALSE, FALSE, 0, GTK_PACK_END);
-
-    lap("toolbar");
     view_ = std::make_unique<ImageView>(cfg_);
     view_->on_action = [this](Action a)
     {
@@ -447,7 +419,7 @@ void App::build_ui()
     // Image panel with the metadata pane docked to its right, divider draggable.
     paned_ = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_pack1(GTK_PANED(paned_), view_->widget(), TRUE, FALSE);
-    metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
+    metadata_ = std::make_unique<MetadataPane>();
     metadata_->set_width(cfg_.metadata_pane_width);
     gtk_paned_pack2(GTK_PANED(paned_), metadata_->widget(), FALSE, FALSE);
     gtk_box_pack_start(GTK_BOX(vbox), paned_, TRUE, TRUE, 0);
@@ -503,8 +475,6 @@ void App::build_ui()
                                     }
                                 }),
                      this);
-
-    lap("view");
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_style_context_add_class(gtk_widget_get_style_context(footer_), "ifrit-footer");
     gtk_box_pack_start(GTK_BOX(vbox), footer_, FALSE, FALSE, 0);
@@ -526,8 +496,6 @@ void App::build_ui()
     gtk_widget_set_no_show_all(status_location_, TRUE);
     gtk_box_pack_start(GTK_BOX(footer_), status_location_, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(footer_), status_right_, FALSE, FALSE, 0);
-
-    lap("footer");
     g_signal_connect(window_, "key-press-event", G_CALLBACK(+[](GtkWidget*, GdkEventKey* e, gpointer self) { return static_cast<App*>(self)->on_key(e); }),
                      this);
     g_signal_connect(window_, "window-state-event",
@@ -579,11 +547,8 @@ void App::build_ui()
                      G_CALLBACK(+[](GtkWidget*, GdkDragContext* ctx, gint, gint, GtkSelectionData* data, guint, guint time, gpointer self)
                                 { static_cast<App*>(self)->on_drop(data, time, ctx); }),
                      this);
-
-    lap("signals+dnd");
     update_status();
     gtk_widget_show_all(window_);
-    lap("show_all");
 }
 
 // Ctrl+C: the selection if there is one, otherwise the whole image. The
@@ -609,7 +574,6 @@ void App::transform(int exif_orientation)
 {
     if (!image_)
         return;
-    image_modified_ = true;
     image_->apply_orientation(exif_orientation);  // a preview remembers it for its develop
     view_->image_changed();
     fit_window_to_image();
@@ -1039,8 +1003,6 @@ void App::load_current()
     // the shots of a burst wants.
     if (image_ && !image_path_.empty())
         cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
-    image_modified_ = false;
-    develop_requested_ = true;  // the preview is only a stand-in; the real decode always follows
     ++load_generation_;
     ImageCache::Entry hit;
     if (cache_.get(path, hit))
@@ -1051,7 +1013,7 @@ void App::load_current()
     }
     status_message_ = "Loading " + folder_.current_name() + "…";
     update_status();
-    loader_.request(load_generation_, path, develop_requested_);
+    loader_.request(load_generation_, path);
 }
 
 void App::navigate(int delta)
@@ -1192,11 +1154,8 @@ void App::on_loaded(Loader::Result& r)
     status_message_ = image_->is_preview() && image_->is_raw ? "Developing…" : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
-    if (image_->is_preview() && from_cache)
-    {  // its develop never finished (or was skipped when the user moved on)
-        develop_requested_ = false;
+    if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
-    }
     view_->set_image(image_);
     if (nav_stamp_us_)
         view_->stamp_present(nav_stamp_us_, image_.get());
@@ -1244,7 +1203,6 @@ void App::crop_to_selection()
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h))
         return;
-    image_modified_ = true;
     *image_ = image_->crop(x, y, w, h);  // same object: the view, cache and pane keep their pointer
     if (image_->linear)
         image_->retone(image_->exposure_edit);
@@ -1399,7 +1357,7 @@ void App::request_place(const std::shared_ptr<Image>& image)
     if (!image || !image->has_location || !image->place.empty())
         return;
     std::weak_ptr<Image> weak = image;
-    geocoder_.lookup(image->latitude, image->longitude, "",
+    geocoder_.lookup(image->latitude, image->longitude,
                      [this, weak](const std::string& place)
                      {
                          auto img = weak.lock();
@@ -1416,22 +1374,20 @@ void App::request_place(const std::shared_ptr<Image>& image)
 
 void App::ensure_developed()
 {
-    if (!image_ || !image_->is_preview() || develop_requested_)
+    if (!image_ || !image_->is_preview())
         return;
-    develop_requested_ = true;
     if (image_->is_raw)
     {
         status_message_ = "Developing…";
         update_status();
     }
-    loader_.request(load_generation_, folder_.current(), true, /*skip_preview=*/true);
+    loader_.request_develop(load_generation_, folder_.current());
 }
 
 void App::retone()
 {
     if (!image_ || !image_->linear)
         return;
-    image_modified_ = true;
     image_->exposure_edit = gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias;
     request_retone();
 }

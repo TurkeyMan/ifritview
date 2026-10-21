@@ -293,7 +293,7 @@ void Geocoder::set_provider(const std::string& url_template)
     impl_->queue.clear();
 }
 
-bool Geocoder::lookup(double lat, double lon, const std::string&, Callback cb)
+bool Geocoder::lookup(double lat, double lon, Callback cb)
 {
     const std::string key = key_for(lat, lon);
     auto it = impl_->known.find(key);

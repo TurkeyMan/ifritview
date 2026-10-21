@@ -10,10 +10,10 @@
 // A two-column list of everything known about the current image, docked
 // as a pane to the right of the image (a separate window can't be placed
 // sensibly on Wayland). Follows image changes while shown.
-class MetadataWindow
+class MetadataPane
 {
 public:
-    explicit MetadataWindow(GtkWindow* parent);
+    MetadataPane();
     GtkWidget* widget() const { return pane_; }
     void toggle();
     bool visible() const;

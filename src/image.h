@@ -52,7 +52,6 @@ struct Animation
         int delay_ms;
     };
     std::vector<Frame> frames;
-    int loops = 0;  // 0 = forever
 };
 
 // A decoded image in cairo's ARGB32 layout: one native-endian uint32 per

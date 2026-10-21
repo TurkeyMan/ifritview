@@ -26,7 +26,7 @@ public:
     // Returns true and sets `place` when already known; otherwise queues a
     // request and calls `cb` on the main thread when it resolves. A cached
     // miss (previous lookup found nothing) returns true with an empty place.
-    bool lookup(double latitude, double longitude, const std::string& language, Callback cb);
+    bool lookup(double latitude, double longitude, Callback cb);
 
     // Presets offered in settings.
     struct Provider

@@ -181,18 +181,7 @@ int main(int argc, char** argv)
     const gint64 t_start = g_get_monotonic_time();
     g_set_prgname("ifritview");
     g_set_application_name("IfritView");
-    const bool trace = g_getenv("IFRIT_TRACE") != nullptr;
-    gint64 t_lap = t_start;
-    auto lap = [&](const char* what)
-    {
-        if (!trace)
-            return;
-        const gint64 t = g_get_monotonic_time();
-        std::fprintf(stderr, "startup: %-18s %4.0f ms\n", what, (t - t_lap) / 1000.0);
-        t_lap = t;
-    };
     gtk_init(&argc, &argv);
-    lap("gtk_init");
 
     if (argc > 1 && (std::strcmp(argv[1], "-h") == 0 || std::strcmp(argv[1], "--help") == 0))
     {
@@ -205,10 +194,8 @@ int main(int argc, char** argv)
         return probe(argc - 2, argv + 2);
 
     App app;
-    lap("App (ui + config)");
     if (argc > 1)
         app.open_path(argv[1]);
-    lap("open_path");
     if (g_getenv("IFRIT_TRACE"))
     {
         std::fprintf(stderr, "startup: %.0f ms to window creation\n", (g_get_monotonic_time() - t_start) / 1000.0);
