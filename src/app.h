@@ -87,6 +87,8 @@ private:
     void on_window_state(GdkEventWindowState* e);
     void on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx);
     void on_exposure_changed();
+    void retone();                           // re-render the raw from both sliders
+    void apply_xmp_edits();
     void on_smooth_toggled();
     void refresh_metadata();
     std::vector<MetadataGroup> collect_metadata() const;

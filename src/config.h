@@ -12,6 +12,7 @@ struct Config {
     bool wrap_around = true;               // next after the last image goes to the first
     bool show_hidden = false;
     std::string raw_mode = "half";         // full | half | preview
+    bool apply_xmp_edits = true;           // honour exposure/crop/orientation from XMP
 
     // Window
     bool fit_window_to_image = true;

@@ -189,6 +189,7 @@ void App::build_ui() {
                          static_cast<App*>(self)->on_exposure_changed();
                      }), this);
     gtk_box_pack_start(GTK_BOX(exposure_box_), exposure_, FALSE, FALSE, 0);
+
     gtk_box_pack_end(GTK_BOX(toolbar_), exposure_box_, FALSE, FALSE, 8);   // sits left of the settings button
     // Children are shown now; the box itself is toggled per image.
     gtk_widget_show_all(exposure_box_);
@@ -407,11 +408,14 @@ void App::on_loaded(Loader::Result& r) {
         g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
         gtk_range_set_range(GTK_RANGE(exposure_), bias - 3.0, bias + 3.0);
         gtk_scale_clear_marks(GTK_SCALE(exposure_));
-        gtk_scale_add_mark(GTK_SCALE(exposure_), bias, GTK_POS_BOTTOM, nullptr);
-        if (bias != 0) gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_TOP, nullptr);
+        gtk_scale_add_mark(GTK_SCALE(exposure_), bias, GTK_POS_BOTTOM, nullptr);   // the unmodified image
         gtk_range_set_value(GTK_RANGE(exposure_), bias);
         g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+
         gtk_widget_show(exposure_box_);
+        if (cfg_.apply_xmp_edits && image_->xmp.present) apply_xmp_edits();
+    } else if (cfg_.apply_xmp_edits && image_->xmp.present) {
+        apply_xmp_edits();
     } else {
         gtk_widget_hide(exposure_box_);
     }
@@ -517,9 +521,35 @@ void App::save_as() {
 }
 
 void App::on_exposure_changed() {
+    retone();
+}
+
+void App::retone() {
     if (!image_ || !image_->linear) return;
     image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias);
     view_->image_changed();
+}
+
+// Orientation and crop change the pixels; exposure just moves the slider,
+// which re-renders. White balance from XMP is parsed but not applied yet.
+void App::apply_xmp_edits() {
+    const XmpDevelop d = image_->xmp;
+    if (d.has_crop) {
+        const int x = int(d.crop_left * image_->width), y = int(d.crop_top * image_->height);
+        const int w = int((d.crop_right - d.crop_left) * image_->width), h = int((d.crop_bottom - d.crop_top) * image_->height);
+        if (w > 1 && h > 1) *image_ = image_->crop(x, y, w, h);
+    }
+    if (d.orientation != 1) image_->apply_orientation(d.orientation);
+    if (d.has_crop || d.orientation != 1) {
+        view_->set_image(image_);
+        fit_window_to_image();
+    }
+    if (image_->linear) {
+        if (d.exposure != 0) gtk_range_set_value(GTK_RANGE(exposure_), image_->exposure_bias + d.exposure);
+        else retone();
+    }
+    status_message_ = "XMP edits applied";
+    update_status();
 }
 
 void App::on_smooth_toggled() {

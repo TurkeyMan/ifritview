@@ -133,6 +133,7 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.info = info;
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
+    out.xmp = xmp;
     out.has_location = has_location;
     out.latitude = latitude;
     out.longitude = longitude;

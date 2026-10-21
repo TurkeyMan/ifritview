@@ -12,6 +12,17 @@ struct LinearData {
     double auto_gain = 1.0;      // gain that clips 1% of samples: the "as the camera meant it" zero point
 };
 
+// Edits found in XMP (embedded or sidecar) that the viewer can honour.
+struct XmpDevelop {
+    bool present = false;
+    double exposure = 0;         // crs:Exposure2012, EV on top of as-shot
+    double temperature = 0;      // crs:Temperature in Kelvin, 0 = as shot (parsed, not applied yet)
+    int orientation = 1;         // tiff:Orientation
+    bool has_crop = false;
+    double crop_left = 0, crop_top = 0, crop_right = 1, crop_bottom = 1;   // fractions of the un-rotated image
+};
+
+
 // Key/value metadata, grouped for display: "EXIF", "GPS", "Camera", "PNG"...
 struct MetadataItem {
     std::string key;
@@ -36,6 +47,7 @@ struct Image {
     std::string info;            // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;   // only for raw files
     double exposure_bias = 0;             // the camera's exposure compensation, in EV, already baked in
+    XmpDevelop xmp;                       // edits read from XMP, applied by the app if enabled
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
     bool has_location = false;            // GPS position from EXIF, decimal degrees
     double latitude = 0, longitude = 0;

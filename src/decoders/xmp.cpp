@@ -44,6 +44,48 @@ void collect(XmpPtr xmp, const std::string& group, Image& out) {
     xmp_iterator_free(it);
 }
 
+const char* kCrs = "http://ns.adobe.com/camera-raw-settings/1.0/";
+const char* kTiff = "http://ns.adobe.com/tiff/1.0/";
+
+bool get_double(XmpPtr xmp, const char* ns, const char* name, double& value) {
+    XmpStringPtr str = xmp_string_new();
+    bool ok = xmp_get_property(xmp, ns, name, str, nullptr) && xmp_string_cstr(str) && *xmp_string_cstr(str);
+    if (ok) value = g_ascii_strtod(xmp_string_cstr(str), nullptr);
+    xmp_string_free(str);
+    return ok;
+}
+
+std::string get_string(XmpPtr xmp, const char* ns, const char* name) {
+    XmpStringPtr str = xmp_string_new();
+    std::string value;
+    if (xmp_get_property(xmp, ns, name, str, nullptr) && xmp_string_cstr(str)) value = xmp_string_cstr(str);
+    xmp_string_free(str);
+    return value;
+}
+
+// Later sources (a sidecar) override earlier ones (the embedded packet).
+void collect_develop(XmpPtr xmp, Image& out) {
+    XmpDevelop& d = out.xmp;
+    double v = 0;
+    if (get_double(xmp, kCrs, "Exposure2012", v) || get_double(xmp, kCrs, "Exposure", v)) { d.exposure = v; d.present = true; }
+    const std::string wb = get_string(xmp, kCrs, "WhiteBalance");
+    if (wb != "As Shot" && get_double(xmp, kCrs, "Temperature", v) && v > 0) { d.temperature = v; d.present = true; }
+    if (get_double(xmp, kTiff, "Orientation", v) && v >= 1 && v <= 8) { d.orientation = int(v); d.present = true; }
+    const std::string has_crop = get_string(xmp, kCrs, "HasCrop");
+    if (has_crop == "True" || has_crop == "true") {
+        double l = 0, t = 0, r = 1, b = 1;
+        get_double(xmp, kCrs, "CropLeft", l);
+        get_double(xmp, kCrs, "CropTop", t);
+        get_double(xmp, kCrs, "CropRight", r);
+        get_double(xmp, kCrs, "CropBottom", b);
+        if (r > l && b > t) {
+            d.has_crop = true;
+            d.crop_left = l; d.crop_top = t; d.crop_right = r; d.crop_bottom = b;
+            d.present = true;
+        }
+    }
+}
+
 bool read_sidecar(const std::string& sidecar, Image& out) {
     gchar* text = nullptr;
     gsize len = 0;
@@ -55,6 +97,7 @@ bool read_sidecar(const std::string& sidecar, Image& out) {
         out.add("XMP sidecar", "File", base);
         g_free(base);
         collect(xmp, "XMP sidecar", out);
+        collect_develop(xmp, out);
     }
     xmp_free(xmp);
     g_free(text);
@@ -68,6 +111,7 @@ void read_xmp(const std::string& path, Image& out) {
     if (XmpFilePtr file = xmp_files_open_new(path.c_str(), XmpOpenFileOptions(XMP_OPEN_READ | XMP_OPEN_ONLYXMP))) {
         if (XmpPtr xmp = xmp_files_get_new_xmp(file)) {
             collect(xmp, "XMP", out);
+            collect_develop(xmp, out);
             xmp_free(xmp);
         }
         xmp_files_close(file, XMP_CLOSE_NOOPTION);
