@@ -137,6 +137,8 @@ private:
     bool video_audio_ = false;  // no audio stream: no speaker or volume
     double video_volume_ = 0.7;
     bool volume_dragging_ = false;
+    bool volume_hover_ = false;  // the pointer is on the speaker (or the volume line it revealed)
+    void update_volume_hover(double device_x, double device_y);
     gint64 controls_until_ = 0;  // controls visible until this time
     guint controls_timer_ = 0;
     bool scrubbing_ = false;

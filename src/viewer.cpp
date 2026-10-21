@@ -589,6 +589,7 @@ void ImageView::set_video(bool on, bool audio)
 {
     video_ = on;
     video_audio_ = audio;
+    volume_hover_ = false;
     scrubbing_ = false;
     video_fraction_ = 0;
     if (!on)
@@ -761,8 +762,9 @@ void ImageView::draw_video_controls(cairo_t* cr, int scale)
     mark(4.0 * scale, 0, 0, 0, 0.5);
     mark(1.8 * scale, 1, 1, 1, 0.95);
 
-    // Volume: a vertical line and knob above the speaker, only with sound on.
-    if (!video_muted_)
+    // Volume: a vertical line and knob above the speaker, with sound on and
+    // the pointer on the speaker.
+    if (!video_muted_ && (volume_hover_ || volume_dragging_))
     {
         const double vx = sx - 3.5 * u, top = g.volume_top, bottom = g.volume_bottom;
         const double knob_y = bottom - (bottom - top) * video_volume_;
@@ -1155,8 +1157,8 @@ gboolean ImageView::on_button(GdkEventButton* e)
             poke_controls();
             return TRUE;
         }
-        if (e->type == GDK_BUTTON_PRESS && controls_visible() && video_audio_ && !video_muted_ && std::fabs(dx - vx) < 14 * s && dy > g.volume_top - 12 * s &&
-            dy < g.volume_bottom + 6 * s)
+        if (e->type == GDK_BUTTON_PRESS && controls_visible() && video_audio_ && !video_muted_ && volume_hover_ && std::fabs(dx - vx) < 14 * s &&
+            dy > g.volume_top - 12 * s && dy < g.volume_bottom + 6 * s)
         {
             volume_dragging_ = true;
             video_volume_ = volume_at(dy);
@@ -1260,9 +1262,30 @@ gboolean ImageView::on_button(GdkEventButton* e)
     return TRUE;
 }
 
+// Hovering the speaker reveals the volume line; it stays while the pointer is
+// on the speaker or moves up along the line.
+void ImageView::update_volume_hover(double dx, double dy)
+{
+    bool hover = false;
+    if (video_ && video_audio_)
+    {
+        const double s = scale_factor();
+        const ControlsGeometry g = controls_geometry();
+        const bool on_speaker = std::fabs(dx - g.speaker_x) < 16 * s && std::fabs(dy - g.y) < 16 * s;
+        const bool on_line = std::fabs(dx - (g.speaker_x - 3.5 * s)) < 20 * s && dy > g.volume_top - 14 * s && dy < g.y + 16 * s;
+        hover = on_speaker || (volume_hover_ && on_line);
+    }
+    if (hover != volume_hover_)
+    {
+        volume_hover_ = hover;
+        gtk_widget_queue_draw(area_);
+    }
+}
+
 gboolean ImageView::on_motion(GdkEventMotion* e)
 {
     poke_controls();
+    update_volume_hover(e->x * scale_factor(), e->y * scale_factor());
     if (volume_dragging_)
     {
         const ControlsGeometry g = controls_geometry();
@@ -1304,9 +1327,9 @@ gboolean ImageView::on_scroll(GdkEventScroll* e)
     if (video_ && video_audio_ && controls_visible())
     {
         const int s = scale_factor();
-        const ControlsGeometry g = controls_geometry();
         const double dx = e->x * s, dy = e->y * s;
-        if (std::fabs(dx - g.speaker_x) < 20 * s && dy > g.volume_top - 12 * s && dy < g.y + 16 * s)
+        update_volume_hover(dx, dy);
+        if (volume_hover_)
         {
             double step = 0;
             if (e->direction == GDK_SCROLL_UP)
