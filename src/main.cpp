@@ -127,6 +127,8 @@ gboolean run_script_step(gpointer p)
         app.script_toggle_video();
     else if (step == "controls")
         app.script_poke_controls();
+    else if (step == "volume")
+        app.script_show_volume();
     else if (step == "rotl")
         app.transform(8);
     else if (step == "rotr")

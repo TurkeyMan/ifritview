@@ -766,7 +766,8 @@ void ImageView::draw_video_controls(cairo_t* cr, int scale)
     // the pointer on the speaker.
     if (!video_muted_ && (volume_hover_ || volume_dragging_))
     {
-        const double vx = sx - 3.5 * u, top = g.volume_top, bottom = g.volume_bottom;
+        // Centred on the whole icon (body from -8 to the waves at +10), not just the body.
+        const double vx = sx + 1 * u, top = g.volume_top, bottom = g.volume_bottom;
         const double knob_y = bottom - (bottom - top) * video_volume_;
         auto vline = [&](double width, double r, double gr, double b, double a, double from, double to)
         {
@@ -1149,7 +1150,7 @@ gboolean ImageView::on_button(GdkEventButton* e)
         const int s = scale_factor();
         const double dx = e->x * s, dy = e->y * s;
         const ControlsGeometry g = controls_geometry();
-        const double vx = g.speaker_x - 3.5 * s;
+        const double vx = g.speaker_x + 1 * s;
         auto volume_at = [&](double y) { return std::clamp((g.volume_bottom - y) / (g.volume_bottom - g.volume_top), 0.0, 1.0); };
         if (e->type == GDK_BUTTON_RELEASE && volume_dragging_)
         {
@@ -1272,7 +1273,7 @@ void ImageView::update_volume_hover(double dx, double dy)
         const double s = scale_factor();
         const ControlsGeometry g = controls_geometry();
         const bool on_speaker = std::fabs(dx - g.speaker_x) < 16 * s && std::fabs(dy - g.y) < 16 * s;
-        const bool on_line = std::fabs(dx - (g.speaker_x - 3.5 * s)) < 20 * s && dy > g.volume_top - 14 * s && dy < g.y + 16 * s;
+        const bool on_line = std::fabs(dx - (g.speaker_x + 1 * s)) < 20 * s && dy > g.volume_top - 14 * s && dy < g.y + 16 * s;
         hover = on_speaker || (volume_hover_ && on_line);
     }
     if (hover != volume_hover_)

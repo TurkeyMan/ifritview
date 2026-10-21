@@ -81,7 +81,13 @@ public:
     void set_video_progress(double fraction, bool playing);
     void set_video_muted(bool muted);
     void set_video_volume(double volume);
-    void poke_controls();  // the mouse moved: show the controls for a moment
+    void poke_controls();      // the mouse moved: show the controls for a moment
+    void script_show_volume()  // scripts can't hover: reveal the volume line as if they did
+    {
+        volume_hover_ = true;
+        poke_controls();
+        gtk_widget_queue_draw(area_);
+    }
     std::function<void()> on_video_toggle;
     std::function<void()> on_video_mute;
     std::function<void(double volume)> on_video_volume;

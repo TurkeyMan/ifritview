@@ -115,6 +115,7 @@ public:
     void set_exposure(double ev);
     void script_toggle_video() { toggle_video(); }
     void script_poke_controls() { poke_video_controls(); }
+    void script_show_volume() { view_->script_show_volume(); }
 
 private:
     void build_ui();
