@@ -50,6 +50,9 @@ struct Image {
     std::string info;            // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;   // only for raw files
     double exposure_bias = 0;             // the camera's exposure compensation, in EV, already baked in
+    // For a stand-in (a raw's embedded JPEG): the size the real image will
+    // have, so the window and zoom can be chosen for that instead. 0 = none.
+    int final_width = 0, final_height = 0;
     XmpDevelop xmp;                       // edits read from XMP, applied by the app if enabled
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
     bool has_location = false;            // GPS position from EXIF, decimal degrees

@@ -162,6 +162,10 @@ Image Image::crop(int x, int y, int w, int h) const {
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
     out.xmp = xmp;
+    if (final_width > 0 && width > 0 && height > 0) {
+        out.final_width = std::max(1, int(std::lround(double(final_width) * w / width)));
+        out.final_height = std::max(1, int(std::lround(double(final_height) * h / height)));
+    }
     out.has_location = has_location;
     out.latitude = latitude;
     out.longitude = longitude;
@@ -224,4 +228,5 @@ void Image::apply_orientation(int o) {
     width = dw;
     height = dh;
     stride = dw * 4;
+    if (transposed) std::swap(final_width, final_height);
 }

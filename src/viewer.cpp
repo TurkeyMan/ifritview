@@ -163,10 +163,15 @@ double ImageView::fit_zoom() const {
     int vw, vh;
     view_size(vw, vh);
     if (!image_ || vw <= 0 || vh <= 0) return 1.0;
-    double z = std::min(double(vw) / image_->width, double(vh) / image_->height);
+    // A stand-in is shown at the size its real image will have.
+    const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
+    const double w = stand_in ? image_->final_width : image_->width;
+    const double h = stand_in ? image_->final_height : image_->height;
+    double z = std::min(vw / w, vh / h);
     if (!(fullscreen_ && cfg_.fullscreen_upscale)) z = std::min(z, 1.0);
     // A window sized for the image may be a pixel or two larger from rounding to logical units.
     if (std::fabs(z - 1.0) < 0.01) z = 1.0;
+    if (stand_in) z *= w / image_->width;
     return std::clamp(z, kMinZoom, kMaxZoom);
 }
 

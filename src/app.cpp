@@ -836,7 +836,9 @@ void App::fit_window_to_image() {
     const int margin_x = 24, margin_y = 72;
     const int max_w = work.width - margin_x, max_h = work.height - margin_y;
     const double scale = view_->scale_factor();
-    const double iw = image_->width / scale, ih = image_->height / scale;   // logical pixels at 1:1
+    const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
+    const double iw = (stand_in ? image_->final_width : image_->width) / scale;    // logical pixels at 1:1
+    const double ih = (stand_in ? image_->final_height : image_->height) / scale;
     const double s = std::min({1.0, max_w / iw, (max_h - chrome_h) / ih});
     const int cw = int(std::ceil(iw * s)), ch = int(std::ceil(ih * s));
     const int w = std::clamp(cw, cfg_.min_window_width, max_w);
@@ -950,7 +952,9 @@ void App::update_status() {
         if (file_size_) center += "  ·  " + human_size(file_size_);
         if (!image_->info.empty()) center += "  ·  " + image_->info;
         if (showing_preview_ && status_message_.empty()) center += "  ·  embedded preview";
-        const int percent = int(std::lround(view_->zoom() * 100.0));
+        // For a stand-in, report the zoom of the image it stands for.
+        const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
+        const int percent = int(std::lround(shown * 100.0));
         right = std::to_string(percent) + "%";
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0) right += " (fit)";
     }

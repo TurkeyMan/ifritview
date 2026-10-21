@@ -204,6 +204,12 @@ bool preview(const std::string& path, Image& out) {
     out.format = "RAW preview";
     out.info = camera_name(raw);
     out.exposure_bias = bias;
+    // What the develop will produce, so the window can be sized for it now.
+    raw.imgdata.params.half_size = decode_options().raw_mode == DecodeOptions::RawMode::Half ? 1 : 0;
+    if (raw.adjust_sizes_info_only() == LIBRAW_SUCCESS) {
+        out.final_width = raw.imgdata.sizes.iwidth;
+        out.final_height = raw.imgdata.sizes.iheight;
+    }
     return true;
 }
 
