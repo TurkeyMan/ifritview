@@ -22,7 +22,7 @@ struct Decoder {
 // loader thread; copied under a lock so a settings change can't tear.
 struct DecodeOptions {
     enum class RawMode { Full, Half, Preview };
-    RawMode raw_mode = RawMode::Half;
+    RawMode raw_mode = RawMode::Full;
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();

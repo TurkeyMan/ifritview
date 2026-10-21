@@ -153,9 +153,9 @@ GtkWidget* build_general(const Config& cfg, Widgets& w) {
 
     add_heading(grid, row, "Camera RAW");
     w.raw_mode = gtk_combo_box_text_new();
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "full", "Full size (slow)");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "half", "Half size (fast)");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "preview", "Embedded JPEG preview (fastest)");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "full", "Full resolution");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "half", "Half size (fast, bins 2×2 photosites)");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w.raw_mode), "preview", "Embedded JPEG only (never develop)");
     gtk_combo_box_set_active_id(GTK_COMBO_BOX(w.raw_mode), cfg.raw_mode.c_str());
     add_row(grid, row, "Decode", w.raw_mode);
     w.raw_on_demand = add_check(grid, row, "Show the embedded preview; develop only when needed (exposure, edits, crop, save)", cfg.raw_develop_on_demand);

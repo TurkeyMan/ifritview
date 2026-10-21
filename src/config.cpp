@@ -92,7 +92,7 @@ void Config::load() {
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);
     raw_mode = get_string(kf, kFiles, "raw_mode", raw_mode);
-    if (raw_mode != "full" && raw_mode != "half" && raw_mode != "preview") raw_mode = "half";
+    if (raw_mode != "full" && raw_mode != "half" && raw_mode != "preview") raw_mode = "full";
     apply_xmp_edits = get_bool(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
     raw_develop_on_demand = get_bool(kf, kFiles, "raw_develop_on_demand", raw_develop_on_demand);
 
