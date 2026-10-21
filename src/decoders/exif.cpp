@@ -29,7 +29,11 @@ void visit_entry(ExifEntry* e, void* user)
     const char* value = exif_entry_get_value(e, buf, sizeof buf);
     if (!name || !value || !*value)
         return;
-    v->out->add(v->group, name, value);
+    std::string title = name;
+    for (const auto& [from, to] : {std::pair{"Maximum ", "Max "}, std::pair{"Minimum ", "Min "}})
+        for (auto pos = title.find(from); pos != std::string::npos; pos = title.find(from))
+            title.replace(pos, std::strlen(from), to);
+    v->out->add(v->group, title, value);
 }
 
 ExifSummary read(ExifData* ed, Image& out)

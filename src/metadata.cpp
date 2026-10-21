@@ -63,7 +63,6 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
     store_ = gtk_list_store_new(COUNT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_BOOLEAN, G_TYPE_STRING);
     tree_ = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store_));
     gtk_tree_view_set_row_separator_func(GTK_TREE_VIEW(tree_), is_separator, nullptr, nullptr);
-    gtk_tree_view_set_tooltip_column(GTK_TREE_VIEW(tree_), VALUE);  // long values readable on hover
     gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(tree_)), GTK_SELECTION_NONE);
     g_signal_connect(tree_, "button-press-event", G_CALLBACK(on_click), nullptr);
 
@@ -77,10 +76,32 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_), key_col);
 
     GtkCellRenderer* value = gtk_cell_renderer_text_new();
-    g_object_set(value, "ellipsize", PANGO_ELLIPSIZE_END, "xpad", 8, nullptr);
+    g_object_set(value, "wrap-mode", PANGO_WRAP_WORD_CHAR, "wrap-width", 200, "xpad", 8, nullptr);
     GtkTreeViewColumn* value_col = gtk_tree_view_column_new_with_attributes("Value", value, "markup", VALUE, nullptr);
     gtk_tree_view_column_set_expand(value_col, TRUE);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_), value_col);
+    // Long values wrap to whatever width the pane has, so nothing hides off the right.
+    struct Wrap
+    {
+        GtkCellRenderer* renderer;
+        GtkTreeViewColumn* column;
+        int last = 0;
+    };
+    auto* wrap = new Wrap{value, value_col, 0};
+    g_object_set_data_full(G_OBJECT(tree_), "wrap", wrap, +[](gpointer p) { delete static_cast<Wrap*>(p); });
+    g_signal_connect(tree_, "size-allocate",
+                     G_CALLBACK(+[](GtkWidget* tree, GdkRectangle* alloc, gpointer p)
+                                {
+                                    auto* w = static_cast<Wrap*>(p);
+                                    const int width = std::max(80, alloc->width - 150 - 24);  // minus the Tag column and padding
+                                    if (width == w->last)
+                                        return;
+                                    w->last = width;
+                                    g_object_set(w->renderer, "wrap-width", width, nullptr);
+                                    gtk_tree_view_column_queue_resize(w->column);
+                                    (void)tree;
+                                }),
+                     wrap);
 
     GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);

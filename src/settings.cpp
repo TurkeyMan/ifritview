@@ -194,9 +194,9 @@ GtkWidget* build_general(const Config& cfg, Widgets& w)
     add_heading(grid, row, "Window");
     w.fit_window = add_check(grid, row, "Resize the window to fit each image", cfg.fit_window_to_image);
     w.min_width = spin(cfg.min_window_width, 200, 8192, 10);
-    add_row(grid, row, "Minimum window width", w.min_width);
+    add_row(grid, row, "Min window width", w.min_width);
     w.min_height = spin(cfg.min_window_height, 150, 8192, 10);
-    add_row(grid, row, "Minimum window height", w.min_height);
+    add_row(grid, row, "Min window height", w.min_height);
 
     add_heading(grid, row, "Browsing");
     w.wrap_around = add_check(grid, row, "Wrap around at the end of the folder", cfg.wrap_around);
