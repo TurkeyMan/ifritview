@@ -476,6 +476,16 @@ void App::transform(int exif_orientation)
     image_->apply_orientation(exif_orientation);  // a preview remembers it for its develop
     view_->image_changed();
     fit_window_to_image();
+    // Wayland ignores a resize while the previous one is still being
+    // configured; a quick second rotation needs this follow-up.
+    g_timeout_add(
+        120,
+        +[](gpointer self) -> gboolean
+        {
+            static_cast<App*>(self)->fit_window_to_image();
+            return G_SOURCE_REMOVE;
+        },
+        this);
     update_status();
     refresh_metadata();
 }
@@ -969,6 +979,7 @@ void App::on_loaded(Loader::Result& r)
         {
             status_message_.clear();
             view_->image_changed();
+            fit_window_to_image();  // a no-op when the frame already matches; corrects a resize the compositor dropped
             sync_exposure_slider();
             update_status();
             refresh_metadata();
