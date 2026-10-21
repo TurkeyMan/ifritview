@@ -535,6 +535,7 @@ void App::on_loaded(Loader::Result& r) {
         return;
     }
     const bool from_cache = r.cached;
+    const bool showing_preview_before = showing_preview_;
     schedule_prefetch();
     showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image) std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
@@ -569,13 +570,16 @@ void App::on_loaded(Loader::Result& r) {
         update_title();
         return;
     }
+    // A develop replacing its own preview keeps the window exactly as it is:
+    // the preview was already shown at the developed size.
+    const bool replacing_preview = !r.preview && showing_preview_before && image_ && image_path_ == r.path;
     image_ = r.image;
     image_path_ = r.path;
     std::error_code ec;
     file_size_ = std::filesystem::file_size(r.path, ec);
     if (ec) file_size_ = 0;
     view_->set_image(image_);
-    fit_window_to_image();
+    if (!replacing_preview) fit_window_to_image();
     update_title();
     update_status();
     refresh_metadata();
