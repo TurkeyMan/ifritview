@@ -290,6 +290,10 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     w.fullscreen_upscale = add_check(grid, row, "In fullscreen, enlarge small images to fill the screen", cfg.fullscreen_upscale);
 
     add_heading(grid, row, "Background");
+    w.background = color_button(cfg.background);
+    add_row(grid, row, "Window", w.background);
+    w.fullscreen_background = color_button(cfg.fullscreen_background);
+    add_row(grid, row, "Fullscreen", w.fullscreen_background);
     w.checkerboard = add_check(grid, row, "Show transparency as a checkerboard", cfg.checkerboard);
     w.animate = add_check(grid, row, "Play animated GIF and WebP (A toggles)", cfg.animate);
 
@@ -297,10 +301,6 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     w.video_autoplay = add_check(grid, row, "Play videos as soon as they are shown (Space toggles)", cfg.video_autoplay);
     w.video_muted = add_check(grid, row, "Start muted (M toggles)", cfg.video_muted);
     w.video_loop = add_check(grid, row, "Loop", cfg.video_loop);
-    w.background = color_button(cfg.background);
-    add_row(grid, row, "Window", w.background);
-    w.fullscreen_background = color_button(cfg.fullscreen_background);
-    add_row(grid, row, "Fullscreen", w.fullscreen_background);
 
     add_heading(grid, row, "Slideshow");
     w.ss_seconds = gtk_spin_button_new_with_range(0.5, 600, 0.5);
@@ -316,6 +316,7 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     add_row(grid, row, "Cross-fade (ms, 0 = cut)", w.ss_fade);
 
     add_heading(grid, row, "Fullscreen info overlay");
+    const int overlay_row = row;
     w.ov_enabled = add_check(grid, row, "Show the overlay (I toggles it in fullscreen)", cfg.overlay_enabled);
     w.ov_file = add_check(grid, row, "File: name, position in folder, size, date", cfg.overlay_file);
     w.ov_format = add_check(grid, row, "Format: dimensions, depth, codec details, colour profile", cfg.overlay_format);
@@ -327,6 +328,31 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     add_row(grid, row, "Text colour", w.ov_color);
     w.ov_font = spin(cfg.overlay_font_pt, 6, 40, 1);
     add_row(grid, row, "Text size (pt)", w.ov_font);
+
+    // Everything below "Show the overlay" is greyed while it's off.
+    struct OverlayRows
+    {
+        GtkWidget* grid;
+        int first;
+    };
+    auto* rows = new OverlayRows{grid, overlay_row + 1};
+    auto sync = +[](GtkToggleButton* enabled, gpointer p)
+    {
+        auto* r = static_cast<OverlayRows*>(p);
+        const bool on = gtk_toggle_button_get_active(enabled);
+        GList* children = gtk_container_get_children(GTK_CONTAINER(r->grid));
+        for (GList* c = children; c; c = c->next)
+        {
+            int top = 0;
+            gtk_container_child_get(GTK_CONTAINER(r->grid), GTK_WIDGET(c->data), "top-attach", &top, nullptr);
+            if (top >= r->first)
+                gtk_widget_set_sensitive(GTK_WIDGET(c->data), on);
+        }
+        g_list_free(children);
+    };
+    g_object_set_data_full(G_OBJECT(w.ov_enabled), "rows", rows, +[](gpointer p) { delete static_cast<OverlayRows*>(p); });
+    g_signal_connect(w.ov_enabled, "toggled", G_CALLBACK(sync), rows);
+    sync(GTK_TOGGLE_BUTTON(w.ov_enabled), rows);
     return grid;
 }
 
