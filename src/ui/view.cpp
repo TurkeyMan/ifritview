@@ -101,7 +101,13 @@ Node View::node()
 {
     return anyui::layout::Canvas{}
         .onPaint([this](Painter& p, SizeF s) { paint(p, s); })
-        .onResize([this](SizeF) { layout(); })
+        .onResize(
+            [this](SizeF)
+            {
+                layout();
+                if (on_resized)
+                    on_resized();
+            })
         .onPointer([this](const PointerEvent& e) { return pointer(e); })
         .onScroll([this](const ScrollEvent& e) { return scroll(e); })
         .bind(canvas_)

@@ -72,6 +72,7 @@ public:
 
     std::function<void()> on_zoom_changed;
     std::function<void()> on_presented;
+    std::function<void()> on_resized;  // after the toolkit's layout gave the view a new size
 
     void set_video(bool on, bool audio);
     void set_video_progress(double fraction, bool playing);

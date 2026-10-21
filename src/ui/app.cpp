@@ -194,7 +194,6 @@ void App::build_ui()
                 VBox{
                     L::List{{{"Tag", anyui::Extent{14, anyui::Extent::Unit::Chars}}, {"Value", {}, true}}, &metadata_model_}
                         .selection(SelectionMode::Single)
-                        .headers(false)
                         .onActivate(
                             [this](size_t row)
                             {
@@ -263,6 +262,13 @@ void App::build_ui()
     };
     view_->on_zoom_changed = [this] { update_status(); };
     view_->on_presented = [this] { image_presented(); };
+    view_->on_resized = [this]
+    {
+        if (!refit_after_layout_)
+            return;
+        refit_after_layout_ = false;
+        fit_window_to_image();
+    };
     view_->on_video_toggle = [this] { toggle_video(); };
     view_->on_video_mute = [this] { toggle_mute(); };
     view_->on_video_volume = [this](double v)
@@ -647,7 +653,19 @@ void App::toggle_metadata()
         splitter_->setSizes({std::max(100.f, s.w - float(cfg_.metadata_pane_width)), float(cfg_.metadata_pane_width)});
         refresh_metadata();
     }
-    fit_window_to_image();  // grow to make room for the pane, or shrink back
+    // Grow to make room for the pane, or shrink back: measured once the
+    // toolkit has laid the pane in or out (it does that later, not here),
+    // or shortly if the view's size didn't change.
+    refit_after_layout_ = true;
+    refit_timer_ = ui_.timer(150, false,
+                             [this]
+                             {
+                                 if (refit_after_layout_)
+                                 {
+                                     refit_after_layout_ = false;
+                                     fit_window_to_image();
+                                 }
+                             });
 }
 
 std::vector<MetadataGroup> App::collect_metadata() const

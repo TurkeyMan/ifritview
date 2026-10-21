@@ -157,4 +157,5 @@ private:
     uint64_t file_size_ = 0;
     std::string status_message_;
     anyui::Subscription refit_timer_;
+    bool refit_after_layout_ = false;
 };
