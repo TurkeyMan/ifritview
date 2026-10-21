@@ -136,6 +136,7 @@ void Config::load()
     slideshow_shuffle = get_bool(kf, kView, "slideshow_shuffle", slideshow_shuffle);
     background = get_string(kf, kView, "background", background);
     fullscreen_background = get_string(kf, kView, "fullscreen_background", fullscreen_background);
+    overlay_enabled = get_bool(kf, kOverlay, "enabled", overlay_enabled);
     overlay_file = get_bool(kf, kOverlay, "file", overlay_file);
     overlay_format = get_bool(kf, kOverlay, "format", overlay_format);
     overlay_shot = get_bool(kf, kOverlay, "shot", overlay_shot);
@@ -202,6 +203,7 @@ bool Config::save() const
     }
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
     g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
+    g_key_file_set_boolean(kf, kOverlay, "enabled", overlay_enabled);
     g_key_file_set_boolean(kf, kOverlay, "file", overlay_file);
     g_key_file_set_boolean(kf, kOverlay, "format", overlay_format);
     g_key_file_set_boolean(kf, kOverlay, "shot", overlay_shot);

@@ -40,6 +40,7 @@ struct Config
     std::string fullscreen_background = "#000000";
 
     // Fullscreen info overlay: categories of metadata drawn over the image.
+    bool overlay_enabled = true;  // master switch; I toggles it in fullscreen
     bool overlay_file = true;
     bool overlay_format = false;
     bool overlay_shot = true;

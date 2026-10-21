@@ -503,7 +503,7 @@ void ImageView::draw(cairo_t* cr)
 
     // Info overlay: small text in a contrasting colour over a faint backdrop,
     // one block per category with a thin rule between them.
-    if (!overlay_.empty() && (fullscreen_ || cfg_.overlay_windowed))
+    if (cfg_.overlay_enabled && !overlay_.empty() && (fullscreen_ || cfg_.overlay_windowed))
     {
         GdkRGBA colour;
         if (!gdk_rgba_parse(&colour, cfg_.overlay_color.c_str()))

@@ -1733,7 +1733,15 @@ gboolean App::on_key(GdkEventKey* e)
             return TRUE;
         case GDK_KEY_i:
         case GDK_KEY_I:
-            toggle_metadata();
+            if (fullscreen_)
+            {
+                // In fullscreen, I is the overlay switch; the choice is kept.
+                cfg_.overlay_enabled = !cfg_.overlay_enabled;
+                cfg_.save();
+                view_->config_changed();
+            }
+            else
+                toggle_metadata();
             return TRUE;
         case GDK_KEY_a:
         case GDK_KEY_A:

@@ -48,6 +48,7 @@ struct Widgets
     GtkWidget* ss_shuffle;
     GtkWidget* background;
     GtkWidget* fullscreen_background;
+    GtkWidget* ov_enabled;
     GtkWidget* ov_file;
     GtkWidget* ov_format;
     GtkWidget* ov_shot;
@@ -304,6 +305,7 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     w.ss_shuffle = add_check(grid, row, "Shuffle", cfg.slideshow_shuffle);
 
     add_heading(grid, row, "Fullscreen info overlay");
+    w.ov_enabled = add_check(grid, row, "Show the overlay (I toggles it in fullscreen)", cfg.overlay_enabled);
     w.ov_file = add_check(grid, row, "File: name, position in folder, size, date", cfg.overlay_file);
     w.ov_format = add_check(grid, row, "Format: dimensions, depth, codec details, colour profile", cfg.overlay_format);
     w.ov_shot = add_check(grid, row, "Shot: camera, lens, aperture, shutter, ISO, focal length", cfg.overlay_shot);
@@ -490,6 +492,7 @@ void apply(const Widgets& w, Config& cfg)
     cfg.slideshow_shuffle = checked(w.ss_shuffle);
     cfg.background = color_hex(w.background);
     cfg.fullscreen_background = color_hex(w.fullscreen_background);
+    cfg.overlay_enabled = checked(w.ov_enabled);
     cfg.overlay_file = checked(w.ov_file);
     cfg.overlay_format = checked(w.ov_format);
     cfg.overlay_shot = checked(w.ov_shot);
