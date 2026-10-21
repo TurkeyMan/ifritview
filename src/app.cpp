@@ -161,9 +161,9 @@ void App::build_ui() {
                      }), nullptr);
     gtk_scale_add_mark(GTK_SCALE(exposure_), 0.0, GTK_POS_BOTTOM, nullptr);
     gtk_widget_set_size_request(exposure_, 200, -1);
-    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness.\nWheel: 0.1 per notch, Shift for 0.01. Arrows: 0.01, Shift for 0.1");
+    gtk_widget_set_tooltip_text(exposure_, "Exposure (EV) relative to the automatic brightness.\nWheel or arrows: 0.1 per step, hold Shift for 0.01");
     gtk_widget_set_can_focus(exposure_, TRUE);
-    // Wheel: 0.1 per notch, Shift refines to 0.01 (arrows are the other way round: fine by default).
+    // Wheel: 0.1 per notch, Shift refines to 0.01.
     gtk_widget_add_events(exposure_, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
     g_signal_connect(exposure_, "scroll-event", G_CALLBACK(+[](GtkWidget*, GdkEventScroll* e, gpointer self) -> gboolean {
                          auto* app = static_cast<App*>(self);
@@ -479,7 +479,7 @@ gboolean App::on_key(GdkEventKey* e) {
     const bool ctrl = e->state & GDK_CONTROL_MASK;
     const bool shift = e->state & GDK_SHIFT_MASK;
     if (gtk_widget_has_focus(exposure_) && gtk_widget_get_visible(exposure_box_)) {
-        const double step = shift ? 0.1 : 0.01;
+        const double step = shift ? 0.01 : 0.1;   // Shift refines, same as the wheel
         switch (e->keyval) {
             case GDK_KEY_Left: case GDK_KEY_Down:
                 set_exposure(gtk_range_get_value(GTK_RANGE(exposure_)) - step); return TRUE;
