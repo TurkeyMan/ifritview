@@ -105,6 +105,7 @@ private:
     void go_next_action();
     void on_loaded(Loader::Result& r);
     void fit_window_to_image();
+    void place_window(int w, int h, const GdkRectangle& work);
     void update_status();
     void update_title();
     gboolean on_key(GdkEventKey* e);

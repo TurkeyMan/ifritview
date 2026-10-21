@@ -6,6 +6,9 @@
 #include "settings.h"
 
 #include <gdk/gdkkeysyms.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif
 #include <glib/gstdio.h>
 
 #include <algorithm>
@@ -367,7 +370,12 @@ void App::build_ui()
         int x, y, w, h;
         gtk_widget_set_sensitive(crop_button_, view_->selection(x, y, w, h));
     };
-    gtk_box_pack_start(GTK_BOX(vbox), view_->widget(), TRUE, TRUE, 0);
+    // Image panel with the metadata pane docked to its right.
+    GtkWidget* middle = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_pack_start(GTK_BOX(middle), view_->widget(), TRUE, TRUE, 0);
+    metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
+    gtk_box_pack_start(GTK_BOX(middle), metadata_->widget(), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), middle, TRUE, TRUE, 0);
 
     lap("view");
     footer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -423,8 +431,6 @@ void App::build_ui()
                      this);
 
     lap("signals+dnd");
-    metadata_ = std::make_unique<MetadataWindow>(GTK_WINDOW(window_));
-    lap("metadata window");
     update_status();
     gtk_widget_show_all(window_);
     lap("show_all");
@@ -652,6 +658,7 @@ void App::toggle_metadata()
     metadata_->toggle();
     if (metadata_->visible())
         refresh_metadata();
+    fit_window_to_image();  // grow to make room for the pane, or shrink back
 }
 
 std::vector<MetadataGroup> App::collect_metadata() const
@@ -1387,13 +1394,53 @@ void App::fit_window_to_image()
     const double ih = (stand_in ? image_->final_height : image_->height) / scale;
     const double s = std::min({1.0, max_w / iw, (max_h - chrome_h) / ih});
     const int cw = int(std::ceil(iw * s)), ch = int(std::ceil(ih * s));
-    const int w = std::clamp(cw, cfg_.min_window_width, max_w);
+    const int pane_w = metadata_ && metadata_->visible() ? metadata_->width() : 0;
+    const int w = std::clamp(cw + pane_w, cfg_.min_window_width, max_w);
     const int h = std::clamp(ch + chrome_h, cfg_.min_window_height, max_h);
 
     int cur_w = 0, cur_h = 0;
     gtk_window_get_size(GTK_WINDOW(window_), &cur_w, &cur_h);
     if (cur_w != w || cur_h != h)
+    {
+        place_window(w, h, work);
         gtk_window_resize(GTK_WINDOW(window_), w, h);
+    }
+}
+
+// Keep the window on screen when it changes size. Growth keeps the top-left
+// corner (so it extends right and down); an edge that would cross the work
+// area pushes the window back the other way. Only X11 lets a client place
+// its window; on Wayland the compositor does this itself.
+void App::place_window(int w, int h, const GdkRectangle& work)
+{
+#ifdef GDK_WINDOWING_X11
+    GdkDisplay* display = gtk_widget_get_display(window_);
+    if (!GDK_IS_X11_DISPLAY(display))
+        return;
+    int x = 0, y = 0;
+    gtk_window_get_position(GTK_WINDOW(window_), &x, &y);
+    // Frame extents: the position excludes the title bar the WM draws.
+    GdkRectangle frame{x, y, w, h};
+    if (GdkWindow* gw = gtk_widget_get_window(window_))
+    {
+        gdk_window_get_frame_extents(gw, &frame);
+        frame.width = w + (frame.width - gdk_window_get_width(gw));
+        frame.height = h + (frame.height - gdk_window_get_height(gw));
+    }
+    int nx = frame.x, ny = frame.y;
+    if (nx + frame.width > work.x + work.width)
+        nx = work.x + work.width - frame.width;
+    if (ny + frame.height > work.y + work.height)
+        ny = work.y + work.height - frame.height;
+    nx = std::max(nx, work.x);
+    ny = std::max(ny, work.y);
+    if (nx != frame.x || ny != frame.y)
+        gtk_window_move(GTK_WINDOW(window_), nx, ny);
+#else
+    (void)w;
+    (void)h;
+    (void)work;
+#endif
 }
 
 void App::toggle_fullscreen()

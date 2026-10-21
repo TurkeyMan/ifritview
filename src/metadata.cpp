@@ -44,13 +44,19 @@ gboolean on_click(GtkWidget* tree, GdkEventButton* e, gpointer)
 
 MetadataWindow::MetadataWindow(GtkWindow* parent)
 {
-    window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(window_), "Metadata");
-    gtk_window_set_default_size(GTK_WINDOW(window_), 460, 640);
-    gtk_window_set_transient_for(GTK_WINDOW(window_), parent);  // stays above its parent on Wayland
-    gtk_window_set_keep_above(GTK_WINDOW(window_), TRUE);       // and on X11
-    gtk_window_set_type_hint(GTK_WINDOW(window_), GDK_WINDOW_TYPE_HINT_UTILITY);
-    g_signal_connect(window_, "delete-event", G_CALLBACK(gtk_widget_hide_on_delete), nullptr);
+    (void)parent;
+    pane_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_size_request(pane_, width(), -1);
+    gtk_widget_set_no_show_all(pane_, TRUE);
+    title_ = gtk_label_new("Metadata");
+    gtk_widget_set_margin_top(title_, 6);
+    gtk_widget_set_margin_bottom(title_, 6);
+    gtk_label_set_ellipsize(GTK_LABEL(title_), PANGO_ELLIPSIZE_MIDDLE);
+    PangoAttrList* attrs = pango_attr_list_new();
+    pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    gtk_label_set_attributes(GTK_LABEL(title_), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(pane_), title_, FALSE, FALSE, 0);
 
     store_ = gtk_list_store_new(COUNT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_BOOLEAN, G_TYPE_STRING);
     tree_ = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store_));
@@ -72,27 +78,26 @@ MetadataWindow::MetadataWindow(GtkWindow* parent)
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree_), value_col);
 
     GtkWidget* scroller = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_container_add(GTK_CONTAINER(scroller), tree_);
-    gtk_container_add(GTK_CONTAINER(window_), scroller);
+    gtk_box_pack_start(GTK_BOX(pane_), scroller, TRUE, TRUE, 0);
+    gtk_widget_show_all(title_);
     gtk_widget_show_all(scroller);
 }
 
 bool MetadataWindow::visible() const
 {
-    return gtk_widget_get_visible(window_);
+    return gtk_widget_get_visible(pane_);
 }
 
 void MetadataWindow::toggle()
 {
-    if (visible())
-        gtk_widget_hide(window_);
-    else
-        gtk_window_present(GTK_WINDOW(window_));
+    gtk_widget_set_visible(pane_, !visible());
 }
 
 void MetadataWindow::set(const std::string& title, const std::vector<MetadataGroup>& groups, const Image* image, const std::string& map_url)
 {
-    gtk_window_set_title(GTK_WINDOW(window_), (title.empty() ? std::string("Metadata") : title + " – Metadata").c_str());
+    gtk_label_set_text(GTK_LABEL(title_), title.empty() ? "Metadata" : title.c_str());
     gtk_list_store_clear(store_);
     GtkTreeIter iter;
     bool first = true;
