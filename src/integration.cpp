@@ -80,7 +80,7 @@ bool ensure_desktop_entry(std::string& error)
     return true;
 }
 
-int set_default_for_extensions(const std::vector<std::string>& extensions, std::vector<std::string>& skipped, std::string& error)
+int set_default_for_extensions(const std::vector<std::string>& extensions, bool images_only, std::vector<std::string>& skipped, std::string& error)
 {
     if (!ensure_desktop_entry(error))
         return 0;
@@ -103,6 +103,8 @@ int set_default_for_extensions(const std::vector<std::string>& extensions, std::
             skipped.push_back(ext);
             continue;
         }
+        if (images_only && mime.rfind("image/", 0) != 0)
+            continue;
         if (!done.insert(mime).second)
             continue;
         GError* err = nullptr;

@@ -42,6 +42,9 @@ struct Widgets
     GtkWidget* fullscreen_upscale;
     GtkWidget* checkerboard;
     GtkWidget* animate;
+    GtkWidget* video_autoplay;
+    GtkWidget* video_muted;
+    GtkWidget* video_loop;
     GtkWidget* ss_seconds;
     GtkWidget* ss_motion;
     GtkWidget* ss_zoom;
@@ -289,6 +292,11 @@ GtkWidget* build_viewing(const Config& cfg, Widgets& w)
     add_heading(grid, row, "Background");
     w.checkerboard = add_check(grid, row, "Show transparency as a checkerboard", cfg.checkerboard);
     w.animate = add_check(grid, row, "Play animated GIF and WebP (A toggles)", cfg.animate);
+
+    add_heading(grid, row, "Video");
+    w.video_autoplay = add_check(grid, row, "Play videos as soon as they are shown (Space toggles)", cfg.video_autoplay);
+    w.video_muted = add_check(grid, row, "Start muted (M toggles)", cfg.video_muted);
+    w.video_loop = add_check(grid, row, "Loop", cfg.video_loop);
     w.background = color_button(cfg.background);
     add_row(grid, row, "Window", w.background);
     w.fullscreen_background = color_button(cfg.fullscreen_background);
@@ -360,17 +368,22 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w)
     gtk_label_set_line_wrap(GTK_LABEL(result), TRUE);
     gtk_label_set_xalign(GTK_LABEL(result), 0.0f);
     gtk_widget_set_halign(result, GTK_ALIGN_START);
+    GtkWidget* images_only = gtk_check_button_new_with_label("Images only");
+    gtk_widget_set_tooltip_text(images_only, "Leave videos and documents with the apps that open them now");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(images_only), TRUE);
     struct DefaultsCtx
     {
         GtkWidget* view;
         GtkWidget* result;
+        GtkWidget* images_only;
     };
     auto on_defaults = +[](GtkWidget*, gpointer p)
     {
         auto* ctx = static_cast<DefaultsCtx*>(p);
         std::vector<std::string> skipped;
         std::string error;
-        const int n = set_default_for_extensions(parse_extensions(get_text_view(ctx->view)), skipped, error);
+        const bool images = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->images_only));
+        const int n = set_default_for_extensions(parse_extensions(get_text_view(ctx->view)), images, skipped, error);
         std::string msg = n ? "IfritView is now the default for " + std::to_string(n) + " file types." : "No file types were set.";
         if (!skipped.empty())
         {
@@ -383,12 +396,13 @@ GtkWidget* build_file_types(const Config& cfg, Widgets& w)
             msg += " Error: " + error;
         gtk_label_set_text(GTK_LABEL(ctx->result), msg.c_str());
     };
-    auto* ctx = new DefaultsCtx{w.extensions, result};
+    auto* ctx = new DefaultsCtx{w.extensions, result, images_only};
     g_object_set_data_full(G_OBJECT(defaults), "ctx", ctx, +[](gpointer p) { delete static_cast<DefaultsCtx*>(p); });
     g_signal_connect(defaults, "clicked", G_CALLBACK(on_defaults), ctx);
 
     GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_pack_start(GTK_BOX(buttons), defaults, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(buttons), images_only, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(buttons), reset, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), buttons, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), result, FALSE, FALSE, 0);
@@ -489,6 +503,9 @@ void apply(const Widgets& w, Config& cfg)
     cfg.fullscreen_upscale = checked(w.fullscreen_upscale);
     cfg.checkerboard = checked(w.checkerboard);
     cfg.animate = checked(w.animate);
+    cfg.video_autoplay = checked(w.video_autoplay);
+    cfg.video_muted = checked(w.video_muted);
+    cfg.video_loop = checked(w.video_loop);
     cfg.slideshow_seconds = gtk_spin_button_get_value(GTK_SPIN_BUTTON(w.ss_seconds));
     cfg.slideshow_motion = checked(w.ss_motion);
     cfg.slideshow_zoom = gtk_spin_button_get_value(GTK_SPIN_BUTTON(w.ss_zoom)) / 100.0;

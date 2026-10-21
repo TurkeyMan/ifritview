@@ -32,6 +32,8 @@ IrfanView. GTK3, C++20, and the system's own format libraries.
 | I | metadata window (windowed) / info overlay on–off (fullscreen) |
 | A | pause / resume an animation |
 | S | slideshow: fullscreen, timed, gentle pan/zoom |
+| Space (on a video) | play / pause |
+| M (on a video) | mute / unmute |
 | Ctrl+O | open file |
 | Ctrl+P | settings |
 | Ctrl+Q | quit |
@@ -56,6 +58,7 @@ colour and size, and whether it also shows in the window.
 | Camera RAW: Canon CR2/CR3/CRW, Nikon NEF, Fuji RAF, Sony ARW, DNG, Olympus, Panasonic, Pentax, … | LibRaw |
 | PSD (flattened), TGA, PNM, HDR, PIC | vendored stb_image |
 | PDF (first page) | poppler-glib |
+| Video: MP4/MOV (phones), MTS/M2TS (cameras), MKV, WebM, AVI, 3GP | GStreamer (+ gst-libav for H.264/HEVC/AV1) |
 | PlayStation TIM (4/8-bit CLUT, 16/24-bit) | hand-written |
 | Amiga IFF ILBM/PBM (palette, EHB, HAM6/8, 24/32-bit, masks) | hand-written |
 | PCX (mono, EGA, 256-colour, 24-bit) | hand-written |
@@ -79,7 +82,8 @@ that decoder is left out.
 
     sudo apt install cmake ninja-build libgtk-3-dev libjpeg-dev libexif-dev \
         libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev \
-        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libsoup-3.0-dev libjson-glib-dev
+        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libsoup-3.0-dev libjson-glib-dev \
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-libav
     ./build.sh
     ./build/ifritview some/picture.jpg
 

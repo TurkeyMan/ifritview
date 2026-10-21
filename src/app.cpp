@@ -411,6 +411,22 @@ void App::build_ui()
     };
     view_->on_zoom_changed = [this] { update_status(); };
     view_->on_presented = [this] { image_presented(); };
+    view_->on_video_toggle = [this] { toggle_video(); };
+    view_->on_video_seek = [this](double f, bool final) { video_.seek(f, final); };
+    video_.on_frame = [this]
+    {
+        if (!image_)
+            return;
+        const int w = image_->width, h = image_->height;
+        view_->image_changed();
+        if (video_.duration() > 0)
+            view_->set_video_progress(video_.position() / video_.duration(), video_.playing());
+        static int last_w = 0, last_h = 0;  // a rotated stream can change shape after the poster
+        if (w != last_w || h != last_h)
+            fit_window_to_image();
+        last_w = w;
+        last_h = h;
+    };
     view_->on_selection_changed = [this]
     {
         int x, y, w, h;
@@ -733,6 +749,51 @@ GSourceFunc App::animation_timer_callback()
     };
 }
 
+// --------------------------------------------------------------- video
+
+void App::play_video()
+{
+    if (!image_ || !image_->is_video)
+        return;
+    video_.start(image_path_, image_, cfg_.video_muted, cfg_.video_loop);
+    if (!video_timer_)  // position for the knob and the status bar, a few times a second
+        video_timer_ = g_timeout_add(
+            250,
+            +[](gpointer self) -> gboolean
+            {
+                auto* app = static_cast<App*>(self);
+                if (!app->video_.active())
+                {
+                    app->video_timer_ = 0;
+                    return G_SOURCE_REMOVE;
+                }
+                if (app->video_.duration() > 0)
+                    app->view_->set_video_progress(app->video_.position() / app->video_.duration(), app->video_.playing());
+                app->update_status();
+                return G_SOURCE_CONTINUE;
+            },
+            this);
+}
+
+void App::toggle_video()
+{
+    if (!video_.active())
+        play_video();
+    else
+        video_.toggle();
+    if (video_.duration() > 0)
+        view_->set_video_progress(video_.position() / video_.duration(), video_.playing());
+    update_status();
+}
+
+void App::stop_video()
+{
+    video_.stop();
+    if (video_timer_)
+        g_source_remove(video_timer_);
+    video_timer_ = 0;
+}
+
 // Animation: frames are swapped into the image's pixel buffer in place, so
 // everything else (zoom, selection, save, copy) sees the current frame.
 void App::show_animation_frame(size_t index)
@@ -1001,6 +1062,7 @@ void App::load_current()
     // Leaving an image: keep it (edits included) and remember the slider so
     // coming back shows exactly what was left, which is what flipping between
     // the shots of a burst wants.
+    stop_video();
     if (image_ && !image_path_.empty())
         cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
     ++load_generation_;
@@ -1167,6 +1229,9 @@ void App::on_loaded(Loader::Result& r)
     refresh_metadata();
     if (cfg_.animate && image_->animation)
         start_animation();
+    view_->set_video(image_->is_video);
+    if (image_->is_video && cfg_.video_autoplay)
+        play_video();
     if (slideshow_)
         slideshow_start_slide();
 }
@@ -1670,6 +1735,8 @@ void App::open_settings(const char* page)
     geocoder_.set_provider(cfg_.geocoder_url);
     if (image_)
         request_place(image_);
+    video_.set_loop(cfg_.video_loop);
+    video_.set_muted(cfg_.video_muted);
     folder_.rescan(cfg_);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(smooth_toggle_), cfg_.smooth_upscale);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(xmp_toggle_), cfg_.apply_xmp_edits);
@@ -1741,7 +1808,7 @@ void App::update_status()
             center += "  ·  " + image_->format;
         if (file_size_)
             center += "  ·  " + human_size(file_size_);
-        if (!image_->info.empty())
+        if (!image_->info.empty() && !image_->is_video)
             center += "  ·  " + image_->info;
         if (image_->is_preview() && status_message_.empty())
             center += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
@@ -1749,6 +1816,17 @@ void App::update_status()
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
         const int percent = int(std::lround(shown * 100.0));
         right = std::to_string(percent) + "%";
+        if (image_->is_video && video_.active() && video_.duration() > 0)
+        {
+            auto clock = [](double t)
+            {
+                const int v = int(t + 0.5);
+                char buf[32];
+                std::snprintf(buf, sizeof buf, "%d:%02d", v / 60, v % 60);
+                return std::string(buf);
+            };
+            right = clock(video_.position()) + " / " + clock(video_.duration()) + (cfg_.video_muted ? "  ·  muted" : "") + "  ·  " + right;
+        }
         if (view_->zoom_mode() == ImageView::ZoomMode::Fit && view_->zoom() < 1.0)
             right += " (fit)";
     }
@@ -1822,10 +1900,28 @@ gboolean App::on_key(GdkEventKey* e)
         case GDK_KEY_BackSpace:
             navigate(-1);
             return TRUE;
+        case GDK_KEY_space:
+            if (image_ && image_->is_video)
+            {
+                toggle_video();  // on a video, Space is play/pause
+                return TRUE;
+            }
+            navigate(+1);
+            return TRUE;
         case GDK_KEY_Right:
         case GDK_KEY_Page_Down:
-        case GDK_KEY_space:
             navigate(+1);
+            return TRUE;
+        case GDK_KEY_m:
+        case GDK_KEY_M:
+            if (image_ && image_->is_video)
+            {
+                cfg_.video_muted = !cfg_.video_muted;
+                cfg_.save();
+                video_.set_muted(cfg_.video_muted);
+                status_message_ = cfg_.video_muted ? "Muted" : "Sound on";
+                update_status();
+            }
             return TRUE;
         case GDK_KEY_Home:
             go_first();

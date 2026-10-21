@@ -27,6 +27,7 @@ add_executable(ifritview
   src/cache.cpp
   src/icons.cpp
   src/geocode.cpp
+  src/video.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
   src/decoders/ilbm.cpp
@@ -75,6 +76,17 @@ if(LIBRAW_R_FOUND)
   ifrit_backend(raw HAVE_RAW src/decoders/raw.cpp libraw_r)
 else()
   ifrit_backend(raw HAVE_RAW src/decoders/raw.cpp libraw)
+endif()
+
+# Videos: poster frames and playback through GStreamer (optional).
+pkg_check_modules(VIDEO IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+if(VIDEO_FOUND)
+  target_sources(ifritview PRIVATE src/decoders/video_poster.cpp)
+  target_compile_definitions(ifritview PRIVATE HAVE_VIDEO)
+  target_link_libraries(ifritview PRIVATE PkgConfig::VIDEO)
+  message(STATUS "video: enabled")
+else()
+  message(STATUS "video: not found (gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0), skipping")
 endif()
 
 # Reverse geocoding of GPS positions (optional; the viewer works without it).

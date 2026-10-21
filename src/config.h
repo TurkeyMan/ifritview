@@ -30,7 +30,10 @@ struct Config
     bool smooth_downscale = true;
     bool fullscreen_upscale = false;  // scale small images up to fill the screen in fullscreen
     bool checkerboard = true;         // show transparency over a checkerboard
-    bool animate = true;              // play animated GIF/WebP
+    bool animate = true;
+    bool video_autoplay = true;
+    bool video_muted = true;
+    bool video_loop = false;  // play animated GIF/WebP
 
     // Slideshow
     double slideshow_seconds = 5.0;

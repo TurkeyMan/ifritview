@@ -18,6 +18,8 @@ struct Decoder
     // Optional quick approximation (a raw's embedded JPEG) shown while the
     // real decode runs. May be null; returns false when there is none.
     bool (*preview)(const std::string& path, Image& out) = nullptr;
+    // Reads the file itself (videos): no preload, no container metadata pass.
+    bool streaming = false;
 };
 
 // Options the decoders consult. Set from the main thread, read from the
@@ -72,6 +74,7 @@ const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();
 const Decoder& tim_decoder();
+const Decoder& video_decoder();
 const Decoder& ilbm_decoder();
 const Decoder& pcx_decoder();
 

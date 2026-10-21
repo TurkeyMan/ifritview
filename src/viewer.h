@@ -71,6 +71,14 @@ public:
 
     std::function<void()> on_zoom_changed;
     std::function<void()> on_presented;  // first paint of a newly set image
+
+    // Video controls: a line with a position knob (and play/pause glyph) over
+    // the bottom of the picture, shown while the mouse moves.
+    void set_video(bool on);
+    void set_video_progress(double fraction, bool playing);
+    void poke_controls();  // the mouse moved: show the controls for a moment
+    std::function<void()> on_video_toggle;
+    std::function<void(double fraction, bool final)> on_video_seek;
     std::function<void()> on_selection_changed;
     std::function<void(Action)> on_action;  // app-level actions the view can't do itself
 
@@ -115,6 +123,20 @@ private:
     } motion_;
     double frame_ms_ = 0;
     gint64 present_since_ = 0;
+    bool video_ = false;
+    double video_fraction_ = 0;
+    bool video_playing_ = false;
+    gint64 controls_until_ = 0;  // controls visible until this time
+    guint controls_timer_ = 0;
+    bool scrubbing_ = false;
+    struct ControlsGeometry
+    {
+        double glyph_x, line_x0, line_x1, y, radius;
+    };
+    ControlsGeometry controls_geometry() const;
+    bool controls_visible() const;
+    double fraction_at(double device_x) const;
+    void draw_video_controls(cairo_t* cr, int scale);
     const Image* presented_ = nullptr;  // the image whose first paint has been reported
     const Image* present_image_ = nullptr;
     // Outgoing slide during a cross-fade: its own pre-scaled surface and motion.

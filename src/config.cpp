@@ -107,6 +107,11 @@ void Config::load()
                 extensions.push_back(e);
         }
         g_strfreev(list);
+        if (get_int(kf, kFiles, "extensions_version", 1) < 2)
+            for (const std::string& e : default_extensions())
+                if (!accepts_extension(e) &&
+                    (e == "mp4" || e == "m4v" || e == "mov" || e == "mts" || e == "m2ts" || e == "mkv" || e == "webm" || e == "avi" || e == "3gp"))
+                    extensions.push_back(e);
     }
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);
@@ -129,6 +134,9 @@ void Config::load()
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     animate = get_bool(kf, kView, "animate", animate);
+    video_autoplay = get_bool(kf, kView, "video_autoplay", video_autoplay);
+    video_muted = get_bool(kf, kView, "video_muted", video_muted);
+    video_loop = get_bool(kf, kView, "video_loop", video_loop);
     slideshow_seconds = std::clamp(g_key_file_get_double(kf, kView, "slideshow_seconds", nullptr), 0.5, 600.0);
     if (!g_key_file_has_key(kf, kView, "slideshow_seconds", nullptr))
         slideshow_seconds = 5.0;
@@ -175,6 +183,7 @@ bool Config::save() const
     for (const std::string& e : extensions)
         exts.push_back(e.c_str());
     g_key_file_set_string_list(kf, kFiles, "extensions", exts.data(), exts.size());
+    g_key_file_set_integer(kf, kFiles, "extensions_version", 2);
     g_key_file_set_boolean(kf, kFiles, "wrap_around", wrap_around);
     g_key_file_set_boolean(kf, kFiles, "show_hidden", show_hidden);
     g_key_file_set_integer(kf, kFiles, "prefetch_ahead", prefetch_ahead);
@@ -194,6 +203,9 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_boolean(kf, kView, "animate", animate);
+    g_key_file_set_boolean(kf, kView, "video_autoplay", video_autoplay);
+    g_key_file_set_boolean(kf, kView, "video_muted", video_muted);
+    g_key_file_set_boolean(kf, kView, "video_loop", video_loop);
     g_key_file_set_double(kf, kView, "slideshow_seconds", slideshow_seconds);
     g_key_file_set_boolean(kf, kView, "slideshow_motion", slideshow_motion);
     g_key_file_set_double(kf, kView, "slideshow_zoom", slideshow_zoom);

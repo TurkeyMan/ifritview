@@ -186,6 +186,9 @@ const std::vector<const Decoder*>& decoders()
 #ifdef HAVE_PDF
         v.push_back(&pdf_decoder());
 #endif
+#ifdef HAVE_VIDEO
+        v.push_back(&video_decoder());
+#endif
         v.push_back(&tim_decoder());
         v.push_back(&ilbm_decoder());
         v.push_back(&pcx_decoder());
@@ -200,6 +203,10 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
 {
     error.clear();
     const std::string ext = lowercase_extension(path);
+    // Videos: GStreamer streams the file; don't read gigabytes for a poster frame.
+    for (const Decoder* d : decoders())
+        if (d->streaming && claims_extension(*d, ext))
+            return try_decode(*d, path, out, error);
     const uint8_t* data = nullptr;  // read once; every decode releases the bytes when done, so this is fresh
     size_t size = 0;
     if (!file_bytes(path, data, size))

@@ -123,6 +123,10 @@ gboolean run_script_step(gpointer p)
         app.toggle_xmp();
     else if (step == "slideshow")
         app.toggle_slideshow();
+    else if (step == "play")
+        app.script_toggle_video();
+    else if (step == "controls")
+        app.script_poke_controls();
     else if (step == "rotl")
         app.transform(8);
     else if (step == "rotr")
@@ -222,6 +226,22 @@ int main(int argc, char** argv)
         g_strfreev(parts);
         const char* ms = g_getenv("IFRIT_SCRIPT_MS");
         g_timeout_add(ms ? guint(std::atoi(ms)) : 400u, run_script_step, s);
+        // A scripted run must not pick up the user's real input: no keyboard
+        // focus, and an empty input region so the pointer passes through.
+        gtk_window_set_accept_focus(GTK_WINDOW(app.window()), FALSE);
+        gtk_window_set_focus_on_map(GTK_WINDOW(app.window()), FALSE);
+        g_signal_connect(app.window(), "map-event",
+                         G_CALLBACK(+[](GtkWidget* w, GdkEvent*, gpointer) -> gboolean
+                                    {
+                                        if (GdkWindow* gw = gtk_widget_get_window(w))
+                                        {
+                                            cairo_region_t* none = cairo_region_create();
+                                            gdk_window_input_shape_combine_region(gw, none, 0, 0);
+                                            cairo_region_destroy(none);
+                                        }
+                                        return FALSE;
+                                    }),
+                         nullptr);
     }
     app.run();
     return 0;

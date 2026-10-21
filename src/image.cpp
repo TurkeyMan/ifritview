@@ -377,6 +377,7 @@ void Image::adopt(Image&& f)
             metadata.push_back(std::move(g));
     }
     is_raw = is_raw || f.is_raw;
+    is_video = is_video || f.is_video;
     final_width = final_height = 0;
     stage = Stage::Final;
     if (linear && exposure_edit != 0)

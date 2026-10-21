@@ -53,6 +53,8 @@ void ImageView::cancel_deferred_click()
 
 ImageView::~ImageView()
 {
+    if (controls_timer_)
+        g_source_remove(controls_timer_);
     drop_outgoing();
     set_busy(false);
     end_motion();
@@ -574,6 +576,119 @@ cairo_surface_t* ImageView::scaled_surface(double zoom)
     return scaled_;
 }
 
+void ImageView::set_video(bool on)
+{
+    video_ = on;
+    scrubbing_ = false;
+    video_fraction_ = 0;
+    if (!on)
+        controls_until_ = 0;
+    gtk_widget_queue_draw(area_);
+}
+
+void ImageView::set_video_progress(double fraction, bool playing)
+{
+    if (scrubbing_)
+        return;  // the knob follows the pointer while dragging
+    const bool changed = std::fabs(fraction - video_fraction_) > 1e-4 || playing != video_playing_;
+    video_fraction_ = std::clamp(fraction, 0.0, 1.0);
+    video_playing_ = playing;
+    if (changed && controls_visible())
+        gtk_widget_queue_draw(area_);
+}
+
+ImageView::ControlsGeometry ImageView::controls_geometry() const
+{
+    int vw, vh;
+    view_size(vw, vh);
+    const double s = scale_factor();
+    const double margin = 28 * s;
+    return {margin, margin + 30 * s, vw - margin, vh - 34 * s, 7 * s};
+}
+
+bool ImageView::controls_visible() const
+{
+    return video_ && (scrubbing_ || g_get_monotonic_time() < controls_until_);
+}
+
+void ImageView::poke_controls()
+{
+    if (!video_)
+        return;
+    const bool was = controls_visible();
+    controls_until_ = g_get_monotonic_time() + 1500000;
+    if (!was)
+        gtk_widget_queue_draw(area_);
+    if (controls_timer_)
+        g_source_remove(controls_timer_);
+    controls_timer_ = g_timeout_add(
+        1550,
+        +[](gpointer self) -> gboolean
+        {
+            auto* view = static_cast<ImageView*>(self);
+            view->controls_timer_ = 0;
+            gtk_widget_queue_draw(view->area_);
+            return G_SOURCE_REMOVE;
+        },
+        this);
+}
+
+double ImageView::fraction_at(double device_x) const
+{
+    const ControlsGeometry g = controls_geometry();
+    return std::clamp((device_x - g.line_x0) / std::max(1.0, g.line_x1 - g.line_x0), 0.0, 1.0);
+}
+
+// -----O------ with a play/pause glyph: white over a dark outline, so it reads
+// on any picture without a panel behind it.
+void ImageView::draw_video_controls(cairo_t* cr, int scale)
+{
+    const ControlsGeometry g = controls_geometry();
+    const double knob_x = g.line_x0 + (g.line_x1 - g.line_x0) * video_fraction_;
+    auto strokes = [&](double r, double gr, double b, double a, double width)
+    {
+        cairo_set_source_rgba(cr, r, gr, b, a);
+        cairo_set_line_width(cr, width);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_move_to(cr, g.line_x0, g.y);
+        cairo_line_to(cr, g.line_x1, g.y);
+        cairo_stroke(cr);
+    };
+    strokes(0, 0, 0, 0.45, 5.0 * scale);
+    strokes(1, 1, 1, 0.45, 2.0 * scale);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.95);  // played part
+    cairo_set_line_width(cr, 2.0 * scale);
+    cairo_move_to(cr, g.line_x0, g.y);
+    cairo_line_to(cr, knob_x, g.y);
+    cairo_stroke(cr);
+    cairo_arc(cr, knob_x, g.y, g.radius, 0, 2 * G_PI);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+    cairo_set_line_width(cr, 2.0 * scale);
+    cairo_stroke_preserve(cr);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+    cairo_fill(cr);
+    // Glyph: pause bars while playing, a triangle while paused.
+    const double h = 14 * scale, x = g.glyph_x, top = g.y - h / 2;
+    cairo_new_path(cr);
+    if (video_playing_)
+    {
+        cairo_rectangle(cr, x, top, 4 * scale, h);
+        cairo_rectangle(cr, x + 8 * scale, top, 4 * scale, h);
+    }
+    else
+    {
+        cairo_move_to(cr, x, top);
+        cairo_line_to(cr, x + 12 * scale, g.y);
+        cairo_line_to(cr, x, top + h);
+        cairo_close_path(cr);
+    }
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+    cairo_set_line_width(cr, 2.0 * scale);
+    cairo_stroke_preserve(cr);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.95);
+    cairo_fill(cr);
+}
+
 void ImageView::draw(cairo_t* cr)
 {
     const int scale = scale_factor();
@@ -635,7 +750,7 @@ void ImageView::draw(cairo_t* cr)
         cairo_set_source_surface(cr, base, 0, 0);
         filter = CAIRO_FILTER_BILINEAR;
     }
-    else if (zoom_ < 1.0 && cfg_.smooth_downscale)
+    else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video)
     {
         cairo_set_source_surface(cr, scaled_surface(zoom_), pan_x_, pan_y_);
     }
@@ -644,7 +759,7 @@ void ImageView::draw(cairo_t* cr)
         cairo_translate(cr, pan_x_, pan_y_);
         cairo_scale(cr, zoom_, zoom_);
         cairo_set_source_surface(cr, surface_, 0, 0);
-        if (zoom_ > 1.0 && cfg_.smooth_upscale)
+        if ((zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video))
             filter = CAIRO_FILTER_BILINEAR;
     }
     cairo_pattern_set_filter(cairo_get_source(cr), filter);
@@ -745,6 +860,9 @@ void ImageView::draw(cairo_t* cr)
             g_object_unref(layouts[i]);
         }
     }
+
+    if (controls_visible())
+        draw_video_controls(cr, scale);
 
     if (has_selection_)
     {
@@ -912,6 +1030,39 @@ Control drag_control(unsigned button)
 
 gboolean ImageView::on_button(GdkEventButton* e)
 {
+    if (video_ && e->button == 1)
+    {
+        const int s = scale_factor();
+        const double dx = e->x * s, dy = e->y * s;
+        const ControlsGeometry g = controls_geometry();
+        if (e->type == GDK_BUTTON_RELEASE && scrubbing_)
+        {
+            scrubbing_ = false;
+            if (on_video_seek)
+                on_video_seek(fraction_at(dx), true);
+            poke_controls();
+            return TRUE;
+        }
+        if (e->type == GDK_BUTTON_PRESS && controls_visible() && std::fabs(dy - g.y) < 16 * s)
+        {
+            if (dx < g.line_x0 - 6 * s)
+            {
+                if (on_video_toggle)
+                    on_video_toggle();
+            }
+            else
+            {
+                scrubbing_ = true;
+                video_fraction_ = fraction_at(dx);
+                if (on_video_seek)
+                    on_video_seek(video_fraction_, false);
+            }
+            gtk_widget_queue_draw(area_);
+            return TRUE;
+        }
+        if ((e->type == GDK_2BUTTON_PRESS || e->type == GDK_BUTTON_RELEASE) && controls_visible() && std::fabs(dy - g.y) < 16 * s)
+            return TRUE;  // the rest of a click on the controls
+    }
     if (e->button < 1 || e->button > 3)
         return FALSE;
     // Fullscreen is for flicking through: plain left/right clicks have their
@@ -976,6 +1127,15 @@ gboolean ImageView::on_button(GdkEventButton* e)
 
 gboolean ImageView::on_motion(GdkEventMotion* e)
 {
+    poke_controls();
+    if (scrubbing_)
+    {
+        video_fraction_ = fraction_at(e->x * scale_factor());
+        if (on_video_seek)
+            on_video_seek(video_fraction_, false);
+        gtk_widget_queue_draw(area_);
+        return TRUE;
+    }
     if (!pressed_button_)
     {
         update_cursor(e->x, e->y);

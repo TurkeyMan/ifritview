@@ -6,6 +6,7 @@
 #include "geocode.h"
 #include "image.h"
 #include "metadata.h"
+#include "video.h"
 #include "viewer.h"
 
 #include <gtk/gtk.h>
@@ -112,6 +113,8 @@ public:
     void toggle_animation();
     void toggle_slideshow();
     void set_exposure(double ev);
+    void script_toggle_video() { toggle_video(); }
+    void script_poke_controls() { poke_video_controls(); }
 
 private:
     void build_ui();
@@ -155,6 +158,13 @@ private:
     Folder folder_;
     std::unique_ptr<ImageView> view_;
     std::unique_ptr<MetadataPane> metadata_;
+    VideoPlayer video_;  // after view_: stops (and its frame callbacks) before the view goes
+    guint video_timer_ = 0;
+    void play_video();
+    void toggle_video();
+    const ImageView& view_ref() const { return *view_; }
+    void poke_video_controls() { view_->poke_controls(); }
+    void stop_video();
     Loader loader_;
     ImageCache cache_;
     Geocoder geocoder_;
