@@ -16,10 +16,7 @@ public:
     struct Entry
     {
         std::shared_ptr<Image> image;
-        bool preview = false;       // a raw's embedded JPEG rather than the developed image
-        int64_t mtime = 0;          // file modification time when decoded
-        bool has_exposure = false;  // slider position the pixels were rendered with
-        double exposure = 0;
+        int64_t mtime = 0;  // file modification time when decoded
     };
 
     // Budget in bytes; 0 picks a share of the memory available right now.

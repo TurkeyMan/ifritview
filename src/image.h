@@ -64,17 +64,39 @@ struct Image
     int stride = 0;  // bytes per row, always width * 4
     std::vector<uint8_t> pixels;
     bool has_alpha = false;
-    int bits_per_sample = 8;             // depth of the source file, for the status bar
-    std::string format;                  // "JPEG", "Canon RAW", ...
-    PixelFormat pixel_format;            // how the file stores its pixels
-    std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
-    std::string info;                    // extra detail for the status bar, may be empty
+    int bits_per_sample = 8;               // depth of the source file, for the status bar
+    std::string format;                    // "JPEG", "Canon RAW", ...
+    PixelFormat pixel_format;              // how the file stores its pixels
+    std::string color_space;               // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
+    std::string info;                      // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;    // only for raw files
     std::shared_ptr<Animation> animation;  // frames when the file animates; pixels hold the first
-    double exposure_bias = 0;            // the camera's exposure compensation, in EV, already baked in
-    // For a stand-in (a raw's embedded JPEG): the size the real image will
-    // have, so the window and zoom can be chosen for that instead. 0 = none.
+    double exposure_bias = 0;              // the camera's exposure compensation, in EV, already baked in
+    // One Image is one file. A raw starts life as its embedded JPEG (a
+    // Preview) and becomes Final when the develop is adopted in place; the
+    // object, and so everyone holding it, keeps its identity throughout.
+    enum class Stage
+    {
+        Final,
+        Preview
+    };
+    Stage stage = Stage::Final;
+    bool is_preview() const { return stage == Stage::Preview; }
+    // While a preview: the size the final pixels will have, so the window and
+    // zoom are chosen for that. 0 = unknown.
     int final_width = 0, final_height = 0;
+    // Edits made while a preview, replayed on the final pixels on adoption.
+    struct PendingEdit
+    {
+        int orientation;    // != 1: rotate/mirror
+        double x, y, w, h;  // == 1: crop, as fractions of the image
+    };
+    std::vector<PendingEdit> pending_edits;
+    double exposure_edit = 0;  // EV chosen by the user or XMP, relative to the camera's bias
+
+    // Take the final pixels of this same file: pending edits are replayed on
+    // them, then they replace ours in place (metadata merged, identity kept).
+    void adopt(Image&& final);
     XmpDevelop xmp;                       // edits read from XMP, applied by the app if enabled
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
     bool has_location = false;            // GPS position from EXIF, decimal degrees
@@ -88,6 +110,9 @@ struct Image
     // Re-render pixels from `linear` with an exposure offset in stops
     // around the automatic gain. No-op without linear data.
     void retone(double ev);
+    // Same rendering into a fresh buffer, safe to run off the main thread while
+    // `pixels` is being displayed; the caller swaps it in.
+    std::vector<uint8_t> retone_buffer(double ev) const;
 
     void allocate(int w, int h);
     uint32_t* row(int y) { return reinterpret_cast<uint32_t*>(pixels.data() + size_t(y) * stride); }

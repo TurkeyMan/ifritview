@@ -29,7 +29,7 @@ public:
     const Image* image() const { return image_.get(); }
     void set_fullscreen(bool on);
     void config_changed();
-    void image_changed();  // pixels were rewritten in place
+    void image_changed();  // the image's pixels (and maybe its size) changed in place
     using OverlaySections = std::vector<std::vector<std::string>>;
     void set_overlay(OverlaySections sections);  // info drawn over the image (fullscreen HUD), a rule between sections
 

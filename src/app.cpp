@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <thread>
 
 // ---------------------------------------------------------------- Loader
 
@@ -472,10 +473,8 @@ void App::transform(int exif_orientation)
     if (!image_)
         return;
     image_modified_ = true;
-    if (showing_preview_)
-        preview_edits_.push_back({exif_orientation, 0, 0, 1, 1});
-    image_->apply_orientation(exif_orientation);
-    view_->set_image(image_);  // dimensions may have swapped
+    image_->apply_orientation(exif_orientation);  // a preview remembers it for its develop
+    view_->image_changed();
     fit_window_to_image();
     update_status();
     refresh_metadata();
@@ -547,12 +546,16 @@ void App::slideshow_start_slide()
         slide_.fy1 = g_random_double();
         apply_slide_motion();
     }
-    slideshow_timer_ = g_timeout_add(guint(ms), +[](gpointer self) -> gboolean {
-        auto* app = static_cast<App*>(self);
-        app->slideshow_timer_ = 0;
-        app->slideshow_advance();
-        return G_SOURCE_REMOVE;
-    }, this);
+    slideshow_timer_ = g_timeout_add(
+        guint(ms),
+        +[](gpointer self) -> gboolean
+        {
+            auto* app = static_cast<App*>(self);
+            app->slideshow_timer_ = 0;
+            app->slideshow_advance();
+            return G_SOURCE_REMOVE;
+        },
+        this);
 }
 
 // Translate the slide's relative motion into this image's coordinates. The
@@ -566,7 +569,8 @@ void App::apply_slide_motion()
     view_->view_size(vw, vh);
     const double w = image_->width, h = image_->height;
     const double fit = std::min(vw / w, vh / h);
-    auto centre = [&](double z, double fx, double fy, double& cx, double& cy) {
+    auto centre = [&](double z, double fx, double fy, double& cx, double& cy)
+    {
         const double half_w = vw / (2 * z), half_h = vh / (2 * z);
         const double lo_x = std::min(half_w, w - half_w), hi_x = std::max(half_w, w - half_w);
         const double lo_y = std::min(half_h, h - half_h), hi_y = std::max(half_h, h - half_h);
@@ -603,7 +607,8 @@ void App::slideshow_advance()
 
 GSourceFunc App::animation_timer_callback()
 {
-    return +[](gpointer self) -> gboolean {
+    return +[](gpointer self) -> gboolean
+    {
         auto* app = static_cast<App*>(self);
         app->animation_timer_ = 0;
         if (!app->animation_playing_ || !app->image_ || !app->image_->animation)
@@ -611,7 +616,8 @@ GSourceFunc App::animation_timer_callback()
         const size_t n = app->image_->animation->frames.size();
         app->animation_frame_ = (app->animation_frame_ + 1) % n;
         app->show_animation_frame(app->animation_frame_);
-        app->animation_timer_ = g_timeout_add(guint(std::max(10, app->image_->animation->frames[app->animation_frame_].delay_ms)), animation_timer_callback(), self);
+        app->animation_timer_ =
+            g_timeout_add(guint(std::max(10, app->image_->animation->frames[app->animation_frame_].delay_ms)), animation_timer_callback(), self);
         return G_SOURCE_REMOVE;
     };
 }
@@ -828,7 +834,7 @@ ImageView::OverlaySections App::overlay_sections() const
     {
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
-        if (showing_preview_)
+        if (image_->is_preview())
             line += "  ·  embedded preview";
         else if (image_->linear)
         {
@@ -884,32 +890,15 @@ void App::load_current()
     // coming back shows exactly what was left, which is what flipping between
     // the shots of a burst wants.
     if (image_ && !image_path_.empty())
-    {
-        ImageCache::Entry e{image_, showing_preview_, ImageCache::file_mtime(image_path_)};
-        if (gtk_widget_get_visible(exposure_box_))
-        {
-            e.has_exposure = true;
-            e.exposure = gtk_range_get_value(GTK_RANGE(exposure_));
-        }
-        cache_.put(image_path_, e);
-    }
+        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
     image_modified_ = false;
-    showing_preview_ = false;
-    slider_pending_ = false;
     develop_requested_ = true;  // the preview is only a stand-in; the real decode always follows
-    preview_edits_.clear();
     ++load_generation_;
     ImageCache::Entry hit;
     if (cache_.get(path, hit))
     {
-        Loader::Result r{load_generation_, path, hit.image, {}, hit.preview, false, true};
+        Loader::Result r{load_generation_, path, hit.image, {}, hit.image->is_preview(), false, true};
         on_loaded(r);
-        if (hit.has_exposure && gtk_widget_get_visible(exposure_box_))
-        {  // pixels already match this value
-            g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-            gtk_range_set_value(GTK_RANGE(exposure_), hit.exposure);
-            g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-        }
         return;
     }
     status_message_ = "Loading " + folder_.current_name() + "…";
@@ -958,7 +947,7 @@ void App::on_loaded(Loader::Result& r)
     {
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_path_ && !cache_.contains(r.path))
-            cache_.put(r.path, {r.image, r.preview, ImageCache::file_mtime(r.path)});
+            cache_.put(r.path, {r.image, ImageCache::file_mtime(r.path)});
         if (r.image && r.path == folder_.current() && !image_)
         {  // user moved onto it while it was decoding
             r.generation = load_generation_;
@@ -969,61 +958,39 @@ void App::on_loaded(Loader::Result& r)
             return;
         }
     }
+    // A develop for the image on screen is adopted in place: nothing else in
+    // the app needs to know, bar the slider coming alive.
+    if (!r.preview && !r.cached && r.image && image_ && image_->is_preview() && image_path_ == r.path)
+    {
+        image_->adopt(std::move(*r.image));
+        if (g_getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "developed %s %dx%d\n", r.path.c_str(), image_->width, image_->height);
+        if (r.generation == load_generation_)
+        {
+            status_message_.clear();
+            view_->image_changed();
+            sync_exposure_slider();
+            update_status();
+            refresh_metadata();
+        }
+        return;
+    }
     if (r.generation != load_generation_)
     {
-        // Too late to show, but not wasted: a developed raw replaces its
-        // preview in the cache so the next visit is instant.
-        if (r.image && !r.preview && !r.cached && r.path != image_path_)
+        // Too late to show, but a develop still completes its cached preview.
+        if (r.image && !r.preview && !r.cached)
         {
             ImageCache::Entry old;
-            if (!cache_.get(r.path, old) || old.preview)
-            {
-                if (cfg_.apply_xmp_edits && r.image->xmp.present)
-                {
-                    apply_xmp_geometry(*r.image);
-                    if (r.image->linear)
-                        r.image->retone(r.image->xmp.exposure);
-                }
-                cache_.put(r.path, {r.image, false, ImageCache::file_mtime(r.path)});
-            }
+            if (cache_.get(r.path, old) && old.image->is_preview())
+                old.image->adopt(std::move(*r.image));
         }
         return;
     }
     const bool from_cache = r.cached;
-    const bool showing_preview_before = showing_preview_;
     schedule_prefetch();
-    showing_preview_ = r.preview;
     if (g_getenv("IFRIT_TRACE") && r.image)
-        std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.preview), cache_.bytes() >> 20);
-    status_message_ = r.preview ? "Developing…" : "";
-    if (r.preview)
-    {
-        const XmpDevelop& d = r.image->xmp;
-        if (cfg_.apply_xmp_edits && d.present && !from_cache)
-        {
-            // Geometry applies to the JPEG just as well; do it now so the
-            // preview already has the right shape. Exposure needs the develop.
-            apply_xmp_geometry(*r.image);
-        }
-        // A cached preview means the develop never finished (or was skipped
-        // when the user moved on); start it again.
-        if (from_cache)
-        {
-            develop_requested_ = false;
-            ensure_developed();
-        }
-    }
-    else if (!preview_edits_.empty() && r.image)
-    {
-        for (const Edit& e : preview_edits_)
-        {  // redo what was done to the preview
-            if (e.orientation != 1)
-                r.image->apply_orientation(e.orientation);
-            else
-                *r.image = r.image->crop(int(e.x * r.image->width), int(e.y * r.image->height), int(e.w * r.image->width), int(e.h * r.image->height));
-        }
-        preview_edits_.clear();
-    }
+        std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.image->is_preview()),
+                     cache_.bytes() >> 20);
     if (!r.image)
     {
         image_.reset();
@@ -1034,9 +1001,6 @@ void App::on_loaded(Loader::Result& r)
         update_title();
         return;
     }
-    // A develop replacing its own preview keeps the window exactly as it is:
-    // the preview was already shown at the developed size.
-    const bool replacing_preview = !r.preview && showing_preview_before && image_ && image_path_ == r.path;
     stop_animation();
     image_ = r.image;
     image_path_ = r.path;
@@ -1044,59 +1008,44 @@ void App::on_loaded(Loader::Result& r)
     file_size_ = std::filesystem::file_size(r.path, ec);
     if (ec)
         file_size_ = 0;
+    status_message_ = image_->is_preview() ? "Developing…" : "";
+    if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
+        apply_xmp(true);
+    if (image_->is_preview() && from_cache)
+    {  // its develop never finished (or was skipped when the user moved on)
+        develop_requested_ = false;
+        ensure_developed();
+    }
     view_->set_image(image_);
-    if (!replacing_preview)
-        fit_window_to_image();
+    fit_window_to_image();
     update_title();
+    sync_exposure_slider();
     update_status();
     refresh_metadata();
     if (cfg_.animate && image_->animation)
         start_animation();
     if (slideshow_)
-    {
-        if (replacing_preview)
-            apply_slide_motion();  // same slide, same phase, sharper pixels
-        else
-            slideshow_start_slide();
-    }
-    const double slider_before = gtk_range_get_value(GTK_RANGE(exposure_));
-    const bool slider_moved = !r.preview && slider_pending_;  // the user set this on the preview of this very file
-    slider_pending_ = false;
-    if (image_->linear || showing_preview_)
-    {
-        // The slider reads in the shooter's units: it rests at the camera's
-        // exposure compensation, which is already in the pixels, and the
-        // render uses the difference from that.
-        const double bias = image_->exposure_bias;
-        g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-        gtk_range_set_range(GTK_RANGE(exposure_), bias - 3.0, bias + 3.0);
-        gtk_scale_clear_marks(GTK_SCALE(exposure_));
-        gtk_scale_add_mark(GTK_SCALE(exposure_), bias, GTK_POS_BOTTOM, nullptr);  // the unmodified image
-        gtk_range_set_value(GTK_RANGE(exposure_), bias);
-        g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+        slideshow_start_slide();
+}
 
-        gtk_widget_set_sensitive(exposure_, !showing_preview_);  // greyed while the camera JPEG stands in
-        if (!fullscreen_)
-            gtk_widget_show(exposure_box_);
-        if (!from_cache && !showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present)
-            apply_xmp_edits();
-        else if (slider_moved)
-            gtk_range_set_value(GTK_RANGE(exposure_), slider_before);
-        else if (showing_preview_ && cfg_.apply_xmp_edits && image_->xmp.present && image_->xmp.exposure != 0)
-        {
-            g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-            gtk_range_set_value(GTK_RANGE(exposure_), bias + image_->xmp.exposure);  // what the develop will use
-            g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
-        }
-    }
-    else if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
-    {
-        apply_xmp_edits();
-    }
-    else if (!fullscreen_)
-    {
-        gtk_widget_hide(exposure_box_);
-    }
+// The slider reads in the shooter's units: it rests at the camera's exposure
+// compensation (already in the pixels) and the render uses the difference.
+// Greyed while the embedded JPEG stands in for the raw.
+void App::sync_exposure_slider()
+{
+    const bool raw = image_ && (image_->linear || image_->is_preview());
+    if (!fullscreen_)
+        gtk_widget_set_visible(exposure_box_, raw);
+    if (!raw)
+        return;
+    const double bias = image_->exposure_bias;
+    g_signal_handlers_block_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+    gtk_range_set_range(GTK_RANGE(exposure_), bias - 3.0, bias + 3.0);
+    gtk_scale_clear_marks(GTK_SCALE(exposure_));
+    gtk_scale_add_mark(GTK_SCALE(exposure_), bias, GTK_POS_BOTTOM, nullptr);  // the unmodified image
+    gtk_range_set_value(GTK_RANGE(exposure_), bias + image_->exposure_edit);
+    g_signal_handlers_unblock_matched(exposure_, G_SIGNAL_MATCH_DATA, 0, 0, nullptr, nullptr, this);
+    gtk_widget_set_sensitive(exposure_, !image_->is_preview());
 }
 
 void App::set_exposure(double ev)
@@ -1112,14 +1061,11 @@ void App::crop_to_selection()
     if (!image_ || !view_->selection(x, y, w, h))
         return;
     image_modified_ = true;
-    if (showing_preview_)
-        preview_edits_.push_back({1, double(x) / image_->width, double(y) / image_->height, double(w) / image_->width, double(h) / image_->height});
-    auto cropped = std::make_shared<Image>(image_->crop(x, y, w, h));
-    if (cropped->linear)
-        cropped->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - cropped->exposure_bias);
-    cropped->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
-    image_ = cropped;
-    view_->set_image(image_);
+    *image_ = image_->crop(x, y, w, h);  // same object: the view, cache and pane keep their pointer
+    if (image_->linear)
+        image_->retone(image_->exposure_edit);
+    image_->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
+    view_->image_changed();
     fit_window_to_image();
     update_status();
     refresh_metadata();
@@ -1286,7 +1232,7 @@ void App::request_place(const std::shared_ptr<Image>& image)
 
 void App::ensure_developed()
 {
-    if (!showing_preview_ || develop_requested_)
+    if (!image_ || !image_->is_preview() || develop_requested_)
         return;
     develop_requested_ = true;
     status_message_ = "Developing…";
@@ -1296,17 +1242,55 @@ void App::ensure_developed()
 
 void App::retone()
 {
-    if (showing_preview_)
-    {
-        slider_pending_ = true;
-        ensure_developed();  // the slider value is picked up once the real pixels arrive
-        return;
-    }
     if (!image_ || !image_->linear)
         return;
     image_modified_ = true;
-    image_->retone(gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias);
-    view_->image_changed();
+    image_->exposure_edit = gtk_range_get_value(GTK_RANGE(exposure_)) - image_->exposure_bias;
+    request_retone();
+}
+
+// Render the current exposure on a thread into a fresh buffer; swap it in on
+// the main thread. If the slider moved meanwhile, go again. Dropped if the
+// image changed underneath (crop, develop) before the render finished.
+void App::request_retone()
+{
+    if (retone_busy_ || !image_ || !image_->linear)
+        return;
+    retone_busy_ = true;
+    struct Job
+    {
+        App* app;
+        std::shared_ptr<Image> image;
+        std::shared_ptr<LinearData> linear;
+        double ev;
+        std::vector<uint8_t> result;
+    };
+    auto* job = new Job{this, image_, image_->linear, image_->exposure_edit, {}};
+    std::thread(
+        [job]
+        {
+            job->result = job->image->retone_buffer(job->ev);
+            g_idle_add(
+                +[](gpointer p) -> gboolean
+                {
+                    auto* j = static_cast<Job*>(p);
+                    App* app = j->app;
+                    app->retone_busy_ = false;
+                    const bool current = j->image->linear == j->linear && j->result.size() == j->image->pixels.size();
+                    if (current)
+                    {
+                        j->image->pixels = std::move(j->result);
+                        if (j->image == app->image_)
+                            app->view_->image_changed();
+                    }
+                    if (j->image == app->image_ && app->image_->linear && std::fabs(app->image_->exposure_edit - j->ev) > 1e-9)
+                        app->request_retone();  // the slider moved on while we rendered
+                    delete j;
+                    return G_SOURCE_REMOVE;
+                },
+                job);
+        })
+        .detach();
 }
 
 // Orientation and crop change the pixels; exposure just moves the slider,
@@ -1326,23 +1310,19 @@ bool App::apply_xmp_geometry(Image& image)
     return d.has_crop || d.orientation != 1;
 }
 
-void App::apply_xmp_edits()
+// Sidecar edits: geometry on a fresh decode (a preview records it for its
+// develop), exposure as the image's edit value. White balance is parsed but
+// not applied yet.
+void App::apply_xmp(bool fresh)
 {
-    const XmpDevelop d = image_->xmp;
-    if (apply_xmp_geometry(*image_))
-    {
-        view_->set_image(image_);
-        fit_window_to_image();
-    }
+    if (!image_ || !image_->xmp.present)
+        return;
+    if (fresh)
+        apply_xmp_geometry(*image_);
+    image_->exposure_edit = image_->xmp.exposure;
     if (image_->linear)
-    {
-        if (d.exposure != 0)
-            gtk_range_set_value(GTK_RANGE(exposure_), image_->exposure_bias + d.exposure);
-        else
-            retone();
-    }
+        image_->retone(image_->exposure_edit);
     status_message_ = "XMP edits applied";
-    update_status();
 }
 
 void App::on_xmp_toggled()
@@ -1484,7 +1464,7 @@ void App::on_window_state(GdkEventWindowState* e)
     if (!fs)
     {
         update_title();
-        gtk_widget_set_visible(exposure_box_, image_ && (image_->linear || showing_preview_));
+        gtk_widget_set_visible(exposure_box_, image_ && (image_->linear || image_->is_preview()));
     }
     chrome_pending_ = true;
     view_->set_fullscreen(fs);
@@ -1619,7 +1599,7 @@ void App::update_status()
             center += "  ·  " + human_size(file_size_);
         if (!image_->info.empty())
             center += "  ·  " + image_->info;
-        if (showing_preview_ && status_message_.empty())
+        if (image_->is_preview() && status_message_.empty())
             center += "  ·  embedded preview";
         // For a stand-in, report the zoom of the image it stands for.
         const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();

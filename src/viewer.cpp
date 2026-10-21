@@ -176,7 +176,8 @@ void ImageView::set_image(std::shared_ptr<Image> image)
         outgoing_.fade_us = gint64(pending_crossfade_ms_) * 1000;
         outgoing_.tick = gtk_widget_add_tick_callback(
             area_,
-            +[](GtkWidget* w, GdkFrameClock* clock, gpointer self) -> gboolean {
+            +[](GtkWidget* w, GdkFrameClock* clock, gpointer self) -> gboolean
+            {
                 auto* view = static_cast<ImageView*>(self);
                 if (!view->outgoing_.surface)
                     return G_SOURCE_REMOVE;
@@ -231,11 +232,39 @@ void ImageView::set_fullscreen(bool on)
     zoom_fit();
 }
 
+// The image object stayed; its pixels, and possibly its dimensions, did not.
+// A size change (a preview adopting its develop) keeps what is on screen
+// where it is: zoom and any motion are rescaled so the picture doesn't move.
 void ImageView::image_changed()
 {
     drop_caches();
+    if (!image_)
+        return;
+    const int old_w = surface_ ? cairo_image_surface_get_width(surface_) : image_->width;
     if (surface_)
-        cairo_surface_mark_dirty(surface_);
+        cairo_surface_destroy(surface_);
+    surface_ = nullptr;
+    if (image_->width > 0 && image_->height > 0)
+        surface_ = cairo_image_surface_create_for_data(image_->pixels.data(), CAIRO_FORMAT_ARGB32, image_->width, image_->height, image_->stride);
+    if (old_w > 0 && old_w != image_->width)
+    {
+        const double ratio = double(old_w) / image_->width;  // old image px per new image px
+        zoom_ *= ratio;
+        if (motion_.active)
+        {
+            motion_.z0 *= ratio;
+            motion_.z1 *= ratio;
+            motion_.z_cache *= ratio;
+            motion_.cx0 /= ratio;
+            motion_.cy0 /= ratio;
+            motion_.cx1 /= ratio;
+            motion_.cy1 /= ratio;
+        }
+        if (mode_ == ZoomMode::Fit)
+            layout();
+        else
+            clamp_pan();
+    }
     gtk_widget_queue_draw(area_);
 }
 
@@ -392,7 +421,8 @@ void ImageView::begin_motion(double zoom0, double zoom1, double cx0, double cy0,
     motion_frame(g_get_monotonic_time());
     motion_.tick = gtk_widget_add_tick_callback(
         area_,
-        +[](GtkWidget*, GdkFrameClock* clock, gpointer self) -> gboolean {
+        +[](GtkWidget*, GdkFrameClock* clock, gpointer self) -> gboolean
+        {
             auto* view = static_cast<ImageView*>(self);
             if (!view->motion_.active)
                 return G_SOURCE_REMOVE;
@@ -413,14 +443,16 @@ void ImageView::set_busy(bool busy)
     if (busy)
         busy_tick_ = gtk_widget_add_tick_callback(
             area_,
-            +[](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean {
+            +[](GtkWidget* w, GdkFrameClock*, gpointer self) -> gboolean
+            {
                 auto* view = static_cast<ImageView*>(self);
                 if (!view->busy_)
                     return G_SOURCE_REMOVE;
                 // Redraw only the ring's corner.
                 const int scale = view->scale_factor();
                 const int s = 40 * scale;
-                gtk_widget_queue_draw_area(w, gtk_widget_get_allocated_width(w) - s / scale, gtk_widget_get_allocated_height(w) - s / scale, s / scale, s / scale);
+                gtk_widget_queue_draw_area(w, gtk_widget_get_allocated_width(w) - s / scale, gtk_widget_get_allocated_height(w) - s / scale, s / scale,
+                                           s / scale);
                 return G_SOURCE_CONTINUE;
             },
             this, nullptr);
@@ -544,6 +576,18 @@ void ImageView::draw(cairo_t* cr)
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
         cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_NONE);
         cairo_paint(cr);
+        cairo_restore(cr);
+        // Where the incoming image won't cover it, the outgoing one fades to
+        // the background at the same rate, instead of vanishing at the end.
+        int vw, vh;
+        view_size(vw, vh);
+        cairo_save(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        cairo_rectangle(cr, 0, 0, vw, vh);
+        cairo_rectangle(cr, pan_x_, pan_y_, std::ceil(image_->width * zoom_), std::ceil(image_->height * zoom_));
+        cairo_clip(cr);
+        gdk_cairo_set_source_rgba(cr, &bg);
+        cairo_paint_with_alpha(cr, fade_alpha);
         cairo_restore(cr);
     }
     const double sw = image_->width * zoom_, sh = image_->height * zoom_;

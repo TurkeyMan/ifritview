@@ -125,26 +125,35 @@ void Image::retone(double ev)
 {
     if (!linear)
         return;
+    pixels = retone_buffer(ev);
+}
+
+std::vector<uint8_t> Image::retone_buffer(double ev) const
+{
+    std::vector<uint8_t> out(pixels.size());
+    if (!linear || out.empty())
+        return out;
+    auto row_of = [&](int y) { return reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride); };
     const double exposure = std::pow(2.0, ev);
     if (linear->tone.empty())
     {
         // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
-        static std::vector<uint8_t> lut(65536);
+        std::vector<uint8_t> lut(65536);
         const double gain = linear->auto_gain * exposure;
         for (int i = 0; i < 65536; ++i)
             lut[i] = uint8_t(std::lround(srgb_encode(i / 65535.0 * gain) * 255.0));
         const uint16_t* s = linear->rgb.data();
         for (int y = 0; y < height; ++y)
         {
-            uint32_t* d = row(y);
+            uint32_t* d = row_of(y);
             for (int x = 0; x < width; ++x, s += 3)
                 d[x] = pack_premultiplied(lut[s[0]], lut[s[1]], lut[s[2]], 255);
         }
-        return;
+        return out;
     }
     // Camera-matched curve: it maps scene luminance to display luminance;
     // the pixel's colour is scaled by the same ratio so hue is kept.
-    static std::vector<uint8_t> encode(4096);
+    std::vector<uint8_t> encode(4096);
     for (int i = 0; i < 4096; ++i)
         encode[i] = uint8_t(std::lround(srgb_encode(i / 4095.0) * 255.0));
     const std::vector<float>& tone = linear->tone;
@@ -152,17 +161,18 @@ void Image::retone(double ev)
     const float scale = float(exposure / 65535.0);
     for (int y = 0; y < height; ++y)
     {
-        uint32_t* d = row(y);
+        uint32_t* d = row_of(y);
         for (int x = 0; x < width; ++x, s += 3)
         {
             const float r = s[0] * scale, g = s[1] * scale, b = s[2] * scale;
             const float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-            const float out = tone[std::min(4095, int(lum * 4095.0f + 0.5f))];
-            const float ratio = lum > 1e-6f ? out / lum : 0.0f;
+            const float o = tone[std::min(4095, int(lum * 4095.0f + 0.5f))];
+            const float ratio = lum > 1e-6f ? o / lum : 0.0f;
             auto enc = [&](float v) { return encode[std::clamp(int(v * ratio * 4095.0f + 0.5f), 0, 4095)]; };
             d[x] = pack_premultiplied(enc(r), enc(g), enc(b), 255);
         }
     }
+    return out;
 }
 
 std::string Image::location_text() const
@@ -206,6 +216,11 @@ Image Image::crop(int x, int y, int w, int h) const
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
     out.xmp = xmp;
+    out.stage = stage;
+    out.exposure_edit = exposure_edit;
+    out.pending_edits = pending_edits;
+    if (is_preview() && width > 0 && height > 0)
+        out.pending_edits.push_back({1, double(x) / width, double(y) / height, double(w) / width, double(h) / height});
     if (final_width > 0 && width > 0 && height > 0)
     {
         out.final_width = std::max(1, int(std::lround(double(final_width) * w / width)));
@@ -283,10 +298,65 @@ void reorient(const T* src, int W, int H, int channels, int o, T* dst, int dw, i
 
 }  // namespace
 
+void Image::adopt(Image&& f)
+{
+    for (const PendingEdit& e : pending_edits)
+    {
+        if (e.orientation != 1)
+            f.apply_orientation(e.orientation);
+        else if (e.w > 0 && e.h > 0)
+            f = f.crop(int(e.x * f.width), int(e.y * f.height), int(e.w * f.width), int(e.h * f.height));
+    }
+    pending_edits.clear();
+    width = f.width;
+    height = f.height;
+    stride = f.stride;
+    pixels = std::move(f.pixels);
+    has_alpha = f.has_alpha;
+    bits_per_sample = f.bits_per_sample;
+    format = std::move(f.format);
+    pixel_format = f.pixel_format;
+    if (!f.color_space.empty())
+        color_space = std::move(f.color_space);
+    if (!f.info.empty())
+        info = std::move(f.info);
+    linear = std::move(f.linear);
+    animation = std::move(f.animation);
+    if (f.exposure_bias != 0)
+        exposure_bias = f.exposure_bias;
+    if (f.has_location)
+    {
+        has_location = true;
+        latitude = f.latitude;
+        longitude = f.longitude;
+    }
+    // The final decode knows things the preview didn't (Camera, Raw...);
+    // groups it brings replace ours of the same name, the rest stay.
+    for (MetadataGroup& g : f.metadata)
+    {
+        bool replaced = false;
+        for (MetadataGroup& mine : metadata)
+            if (mine.name == g.name)
+            {
+                mine = std::move(g);
+                replaced = true;
+                break;
+            }
+        if (!replaced)
+            metadata.push_back(std::move(g));
+    }
+    final_width = final_height = 0;
+    stage = Stage::Final;
+    if (linear)
+        retone(exposure_edit);
+}
+
 void Image::apply_orientation(int o)
 {
     if (o < 2 || o > 8)
         return;
+    if (is_preview())
+        pending_edits.push_back({o, 0, 0, 0, 0});
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "apply_orientation(%d) on %dx%d\n", o, width, height);
     const int W = width, H = height;

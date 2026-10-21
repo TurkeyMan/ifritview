@@ -105,6 +105,11 @@ private:
     void go_prev_action();
     void go_next_action();
     void on_loaded(Loader::Result& r);
+    void sync_exposure_slider();  // range, tick, value and sensitivity from the current image
+    // Exposure renders run on a thread; the slider moves freely meanwhile and a
+    // render that finishes behind the slider triggers another.
+    void request_retone();
+    bool retone_busy_ = false;
     void fit_window_to_image();
     void place_window(int w, int h, const GdkRectangle& work);
     void update_status();
@@ -113,8 +118,8 @@ private:
     void on_window_state(GdkEventWindowState* e);
     void on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx);
     void on_exposure_changed();
-    void retone();  // re-render the raw from both sliders
-    void apply_xmp_edits();
+    void retone();                          // re-render the raw from both sliders
+    void apply_xmp(bool fresh);             // exposure always; geometry only for a fresh decode
     bool apply_xmp_geometry(Image& image);  // crop + orientation; true if anything changed
     void ensure_developed();                // kick off the real decode behind a preview
     void schedule_prefetch();
@@ -149,7 +154,7 @@ private:
 
     bool fullscreen_ = false;
     bool slideshow_pending_start_ = false;  // first slide starts once the fullscreen allocation has arrived
-    bool chrome_pending_ = false;  // toolbar/footer visibility to apply on the next window allocation
+    bool chrome_pending_ = false;           // toolbar/footer visibility to apply on the next window allocation
     bool slideshow_ = false;
     guint slideshow_timer_ = 0;
     std::vector<int> slideshow_order_;  // shuffled indices when shuffling
@@ -157,7 +162,7 @@ private:
     struct Slide  // the current slide's motion in image-relative terms, so a developed image can take over mid-way
     {
         bool active = false;
-        double z0 = 1, z1 = 1;              // zoom relative to fit
+        double z0 = 1, z1 = 1;                              // zoom relative to fit
         double fx0 = 0.5, fy0 = 0.5, fx1 = 0.5, fy1 = 0.5;  // centre as fractions of the image
         gint64 start_us = 0;
         int duration_ms = 0;
@@ -174,17 +179,7 @@ private:
     void show_animation_frame(size_t index);
     static GSourceFunc animation_timer_callback();
     uint64_t load_generation_ = 0;
-    bool showing_preview_ = false;  // a raw's embedded JPEG stands in for the real pixels
     bool develop_requested_ = false;
-    bool slider_pending_ = false;  // slider moved on the preview; apply when the develop lands
-    // Edits made while the preview is showing, replayed on the developed
-    // image. Crops are fractions so they survive the size difference.
-    struct Edit
-    {
-        int orientation;
-        double x, y, w, h;
-    };
-    std::vector<Edit> preview_edits_;
     GtkWidget* xmp_toggle_ = nullptr;
     std::shared_ptr<Image> image_;
     std::string image_path_;

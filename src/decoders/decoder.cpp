@@ -173,6 +173,7 @@ bool decode_preview(const std::string& path, Image& out)
             out = Image{};
             if (!d->preview(path, out))
                 return false;
+            out.stage = Image::Stage::Preview;
             uint8_t head[64];
             size_t head_len = 0;
             if (FILE* f = std::fopen(path.c_str(), "rb"))
