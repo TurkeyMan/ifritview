@@ -19,32 +19,32 @@
 #include <random>
 #include <thread>
 
-using anyui::Canvas;
-using anyui::Color;
-using anyui::Cursor;
-using anyui::Extent;
-using anyui::FileDialogSpec;
-using anyui::Filter;
-using anyui::Icon;
-using anyui::Key;
-using anyui::KeyEvent;
-using anyui::LineCap;
-using anyui::MessageSpec;
-using anyui::ModCtrl;
-using anyui::ModShift;
-using anyui::Node;
-using anyui::Paint;
-using anyui::Painter;
-using anyui::PointerEvent;
-using anyui::PointF;
-using anyui::RectF;
-using anyui::ScrollEvent;
-using anyui::SelectionMode;
-using anyui::SizeF;
-using anyui::TextStyle;
-using anyui::ThemeColor;
-using anyui::Ui;
-using APixelFormat = anyui::PixelFormat;
+using rap::Canvas;
+using rap::Color;
+using rap::Cursor;
+using rap::Extent;
+using rap::FileDialogSpec;
+using rap::Filter;
+using rap::Icon;
+using rap::Key;
+using rap::KeyEvent;
+using rap::LineCap;
+using rap::MessageSpec;
+using rap::ModCtrl;
+using rap::ModShift;
+using rap::Node;
+using rap::Paint;
+using rap::Painter;
+using rap::PointerEvent;
+using rap::PointF;
+using rap::RectF;
+using rap::ScrollEvent;
+using rap::SelectionMode;
+using rap::SizeF;
+using rap::TextStyle;
+using rap::ThemeColor;
+using rap::Ui;
+using APixelFormat = rap::PixelFormat;
 
 namespace
 {
@@ -126,13 +126,13 @@ App::~App()
 
 Node App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
 {
-    return anyui::layout::ToolButton{Icon::named(icon), tooltip}.onClick([this, action] { (this->*action)(); });
+    return rap::layout::ToolButton{Icon::named(icon), tooltip}.onClick([this, action] { (this->*action)(); });
 }
 
 void App::build_ui()
 {
     view_ = std::make_unique<View>(ui_, cfg_);
-    namespace L = anyui::layout;
+    namespace L = rap::layout;
     using L::HBox;
     using L::Horizontal;
     using L::Separator;
@@ -149,7 +149,7 @@ void App::build_ui()
                 .mark(0.0)
                 .onChanged([this](double) { retone(); })
                 .bind(exposure_)
-                .width(anyui::Extent{24, anyui::Extent::Unit::Chars})
+                .width(rap::Extent{24, rap::Extent::Unit::Chars})
                 .tooltip("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
                          "Greyed while the embedded preview stands in for the raw"),
         }
@@ -198,7 +198,7 @@ void App::build_ui()
                 Horizontal,
                 view_->node(),
                 VBox{
-                    L::List{{{"Tag", anyui::Extent{14, anyui::Extent::Unit::Chars}}, {"Value", {}, true}}, &metadata_model_}
+                    L::List{{{"Tag", rap::Extent{14, rap::Extent::Unit::Chars}}, {"Value", {}, true}}, &metadata_model_}
                         .selection(SelectionMode::Single)
                         .onActivate(
                             [this](size_t row)
@@ -1091,10 +1091,6 @@ void App::crop_to_selection()
     refresh_metadata();
 }
 
-// Save As: the format follows the chosen file's extension; quality 90 for
-// the lossy formats.
-// TODO: a format and quality chooser in the dialog (anyui needs extra
-// widgets on file dialogs).
 namespace
 {
 

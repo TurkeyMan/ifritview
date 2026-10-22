@@ -12,32 +12,32 @@
 #include <cstring>
 #include <numbers>
 
-using anyui::Canvas;
-using anyui::Color;
-using anyui::Cursor;
-using anyui::Extent;
-using anyui::FileDialogSpec;
-using anyui::Filter;
-using anyui::Icon;
-using anyui::Key;
-using anyui::KeyEvent;
-using anyui::LineCap;
-using anyui::MessageSpec;
-using anyui::ModCtrl;
-using anyui::ModShift;
-using anyui::Node;
-using anyui::Paint;
-using anyui::Painter;
-using anyui::PointerEvent;
-using anyui::PointF;
-using anyui::RectF;
-using anyui::ScrollEvent;
-using anyui::SelectionMode;
-using anyui::SizeF;
-using anyui::TextStyle;
-using anyui::ThemeColor;
-using anyui::Ui;
-using APixelFormat = anyui::PixelFormat;
+using rap::Canvas;
+using rap::Color;
+using rap::Cursor;
+using rap::Extent;
+using rap::FileDialogSpec;
+using rap::Filter;
+using rap::Icon;
+using rap::Key;
+using rap::KeyEvent;
+using rap::LineCap;
+using rap::MessageSpec;
+using rap::ModCtrl;
+using rap::ModShift;
+using rap::Node;
+using rap::Paint;
+using rap::Painter;
+using rap::PointerEvent;
+using rap::PointF;
+using rap::RectF;
+using rap::ScrollEvent;
+using rap::SelectionMode;
+using rap::SizeF;
+using rap::TextStyle;
+using rap::ThemeColor;
+using rap::Ui;
+using APixelFormat = rap::PixelFormat;
 
 namespace
 {
@@ -99,7 +99,7 @@ View::~View()
 
 Node View::node()
 {
-    return anyui::layout::Canvas{}
+    return rap::layout::Canvas{}
         .onPaint([this](Painter& p, SizeF s) { paint(p, s); })
         .onResize(
             [this](SizeF)
@@ -224,7 +224,7 @@ void View::set_image(std::shared_ptr<Image> image)
         // zoom (or the current zoom) plus the motion itself, so it carries on.
         const double z = motion_.active ? motion_.z_cache : zoom_;
         // At 1:1 or larger that's the full-size upload itself, not a scaled copy.
-        const anyui::Image* snap = scaled_image(z);
+        const rap::Image* snap = scaled_image(z);
         if (snap && snap == scaled_.get())
         {
             outgoing_.image = std::move(scaled_);
@@ -551,7 +551,7 @@ void View::zoom_fit()
 
 // ------------------------------------------------------------- pixels
 
-anyui::Image* View::base_image()
+rap::Image* View::base_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return nullptr;
@@ -565,7 +565,7 @@ anyui::Image* View::base_image()
 
 // Downscaling a many-megapixel image with a quality filter on every redraw
 // is too slow for smooth panning, so render it once per zoom level.
-anyui::Image* View::scaled_image(double zoom)
+rap::Image* View::scaled_image(double zoom)
 {
     if (scaled_ && scaled_zoom_ == zoom)
         return scaled_.get();
@@ -587,7 +587,7 @@ anyui::Image* View::scaled_image(double zoom)
 }
 
 // Transparency checkerboard, 8 device px squares, the size of the view.
-anyui::Image* View::checker_image(int w, int h)
+rap::Image* View::checker_image(int w, int h)
 {
     if (checker_ && checker_->width() == w && checker_->height() == h)
         return checker_.get();
@@ -676,20 +676,20 @@ void View::paint(Painter& p, SizeF)
     if (motion_.active)
     {
         // Pre-scaled to the motion's largest zoom; each frame only shrinks it a little.
-        anyui::Image* src = scaled_image(motion_.z_cache);
+        rap::Image* src = scaled_image(motion_.z_cache);
         if (src)
             p.image(*src, {0, 0, float(src->width()), float(src->height())}, dst, Filter::Linear, alpha);
     }
     else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video)
     {
-        anyui::Image* src = scaled_image(zoom_);
+        rap::Image* src = scaled_image(zoom_);
         if (src)
             p.image(*src, {0, 0, float(src->width()), float(src->height())}, {L(pan_x_), L(pan_y_), L(src->width()), L(src->height())}, Filter::Nearest, alpha);
     }
     else
     {
         const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video);
-        if (anyui::Image* base = base_image())  // the full-size upload, only when it's what gets drawn
+        if (rap::Image* base = base_image())  // the full-size upload, only when it's what gets drawn
             p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? Filter::Linear : Filter::Nearest, alpha);
     }
     if (motion_.active)

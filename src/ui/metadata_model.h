@@ -2,7 +2,7 @@
 
 #include "image.h"
 
-#include <anyui/anyui.h>
+#include <rapport/rapport.h>
 
 #include <string>
 #include <vector>
@@ -10,7 +10,7 @@
 // The metadata pane's rows: each group as a bold heading, then its tags.
 // A photo with GPS gets a "Location" row first in its group; activating it
 // opens the map link.
-class MetadataModel : public anyui::ListModel
+class MetadataModel : public rap::ListModel
 {
 public:
     void set(const std::vector<MetadataGroup>& groups, const Image* image, const std::string& map_url)
@@ -39,15 +39,15 @@ public:
             return {};
         return column == 0 ? rows_[row].key : rows_[row].value;
     }
-    anyui::TextStyle style(size_t row, size_t column) const override
+    rap::TextStyle style(size_t row, size_t column) const override
     {
-        anyui::TextStyle s;
+        rap::TextStyle s;
         if (row >= rows_.size())
             return s;
         if (rows_[row].kind == Kind::Heading)
             s.bold = true;
         if (rows_[row].kind == Kind::Link && column == 1)
-            s.fg = anyui::Paint{anyui::ThemeColor::Link};
+            s.fg = rap::Paint{rap::ThemeColor::Link};
         return s;
     }
 

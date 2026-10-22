@@ -2,7 +2,7 @@
 #include "platform.h"
 #include "probe.h"
 
-#include <anyui/anyui.h>
+#include <rapport/rapport.h>
 
 #include <glib.h>
 
@@ -17,19 +17,19 @@
 // Statically linked backends, registered here (a registration inside the
 // static backend library would be dropped by the linker).
 #ifdef IFRIT_BACKEND_gtk3
-ANYUI_BUILTIN_BACKEND(gtk3);
+RAPPORT_BUILTIN_BACKEND(gtk3);
 #endif
 #ifdef IFRIT_BACKEND_gtk4
-ANYUI_BUILTIN_BACKEND(gtk4);
+RAPPORT_BUILTIN_BACKEND(gtk4);
 #endif
 #ifdef IFRIT_BACKEND_qt6
-ANYUI_BUILTIN_BACKEND(qt6);
+RAPPORT_BUILTIN_BACKEND(qt6);
 #endif
 #ifdef IFRIT_BACKEND_win32
-ANYUI_BUILTIN_BACKEND(win32);
+RAPPORT_BUILTIN_BACKEND(win32);
 #endif
 #ifdef IFRIT_BACKEND_null
-ANYUI_BUILTIN_BACKEND(null);
+RAPPORT_BUILTIN_BACKEND(null);
 #endif
 
 namespace
@@ -37,7 +37,7 @@ namespace
 
 // Development aid: IFRIT_SCRIPT="next;next;fullscreen;quit" drives the app
 // without a human, one step every IFRIT_SCRIPT_MS (default 400). Screenshots:
-// run with ANYUI_SNAPSHOT=file.png (and ANYUI_SNAPSHOT_DELAY) set.
+// run with RAPPORT_SNAPSHOT=file.png (and RAPPORT_SNAPSHOT_DELAY) set.
 void run_step(App& app, const std::string& step)
 {
     std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
@@ -94,7 +94,7 @@ void run_step(App& app, const std::string& step)
 
 }  // namespace
 
-int run_app(anyui::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start);
+int run_app(rap::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start);
 
 int main(int argc, char** argv)
 {
@@ -120,7 +120,7 @@ int main(int argc, char** argv)
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
 
-    auto ui = anyui::Ui::load(argc, argv);
+    auto ui = rap::Ui::load(argc, argv);
     if (!ui)
     {
         std::fprintf(stderr, "%s\n", ui.error().c_str());
@@ -128,14 +128,14 @@ int main(int argc, char** argv)
     }
     // Results from worker threads (lookups, video frames) come back through
     // the toolkit's loop; with Win32 there is no GLib loop to carry them.
-    anyui::Ui& toolkit = **ui;
+    rap::Ui& toolkit = **ui;
     platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
     const int rc = run_app(**ui, argc, argv, t_start);
     platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
     return rc;
 }
 
-int run_app(anyui::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
+int run_app(rap::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
 {
     App app(ui);
     if (argc > 1)
@@ -144,7 +144,7 @@ int run_app(anyui::Ui& ui, int argc, char** argv, std::chrono::steady_clock::tim
         std::fprintf(stderr, "startup: %.0f ms to window creation (%s)\n",
                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string(ui.backendName()).c_str());
 
-    anyui::Subscription script;
+    rap::Subscription script;
     std::vector<std::string> steps;
     size_t next = 0;
     if (const char* text = g_getenv("IFRIT_SCRIPT"))

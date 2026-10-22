@@ -58,7 +58,7 @@ else()
   target_sources(ifrit_core PRIVATE src/integration.cpp)
 endif()
 
-# The GTK 3 front end (the shipping one on Linux, until the anyui one has caught up).
+# The GTK 3 front end (the shipping one on Linux, until the rapport one has caught up).
 if(GTK_FOUND)
   add_executable(ifritview
     src/main.cpp
@@ -72,54 +72,54 @@ if(GTK_FOUND)
   target_link_libraries(ifritview PRIVATE ifrit_core PkgConfig::GTK)
 endif()
 
-# The anyui front end: native widgets from whichever toolkit is at hand (GTK 3
+# The rapport front end: native widgets from whichever toolkit is at hand (GTK 3
 # here, Win32 on Windows), linked in statically from the third_party/rapport submodule
 # (github.com/TurkeyMan/rapport).
-set(IFRIT_ANYUI_DIR "${CMAKE_SOURCE_DIR}/third_party/rapport" CACHE PATH "anyui source tree")
-option(IFRIT_UI_ANYUI "Build the anyui front end (ifritview-anyui)" ON)
-if(IFRIT_UI_ANYUI AND EXISTS "${IFRIT_ANYUI_DIR}/CMakeLists.txt")
-  set(ANYUI_STATIC ON CACHE BOOL "" FORCE)
-  set(ANYUI_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(IFRIT_RAPPORT_DIR "${CMAKE_SOURCE_DIR}/third_party/rapport" CACHE PATH "rapport source tree")
+option(IFRIT_UI_RAPPORT "Build the rapport front end (ifritview-rapport)" ON)
+if(IFRIT_UI_RAPPORT AND EXISTS "${IFRIT_RAPPORT_DIR}/CMakeLists.txt")
+  set(RAPPORT_STATIC ON CACHE BOOL "" FORCE)
+  set(RAPPORT_EXAMPLES OFF CACHE BOOL "" FORCE)
   # One GTK per program: 3 (the default) or 4. Windows uses neither.
-  set(IFRIT_GTK 3 CACHE STRING "GTK major version for the anyui front end (3 or 4)")
+  set(IFRIT_GTK 3 CACHE STRING "GTK major version for the rapport front end (3 or 4)")
   if(WIN32)
-    set(ANYUI_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
-    set(ANYUI_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
   elseif(IFRIT_GTK STREQUAL "4")
-    set(ANYUI_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
-    set(ANYUI_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
   else()
-    set(ANYUI_BACKEND_GTK3 ON CACHE BOOL "" FORCE)
-    set(ANYUI_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK3 ON CACHE BOOL "" FORCE)
+    set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
   endif()
-  add_subdirectory(${IFRIT_ANYUI_DIR} anyui EXCLUDE_FROM_ALL)
-  add_executable(ifritview-anyui
+  add_subdirectory(${IFRIT_RAPPORT_DIR} rapport EXCLUDE_FROM_ALL)
+  add_executable(ifritview-rapport
     src/ui/main.cpp
     src/ui/app.cpp
     src/ui/view.cpp
     src/ui/settings.cpp
     src/ui/save.cpp
   )
-  set_target_properties(ifritview-anyui PROPERTIES CXX_STANDARD 23)
-  target_compile_options(ifritview-anyui PRIVATE -Wall -Wextra)
-  target_include_directories(ifritview-anyui PRIVATE src/ui)
-  target_link_libraries(ifritview-anyui PRIVATE ifrit_core anyui::anyui)
+  set_target_properties(ifritview-rapport PROPERTIES CXX_STANDARD 23)
+  target_compile_options(ifritview-rapport PRIVATE -Wall -Wextra)
+  target_include_directories(ifritview-rapport PRIVATE src/ui)
+  target_link_libraries(ifritview-rapport PRIVATE ifrit_core rapport::rapport)
   if(WIN32)
     # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
     enable_language(RC)
-    target_sources(ifritview-anyui PRIVATE data/windows/ifritview.rc)
-    set_target_properties(ifritview-anyui PROPERTIES OUTPUT_NAME ifritview)
+    target_sources(ifritview-rapport PRIVATE data/windows/ifritview.rc)
+    set_target_properties(ifritview-rapport PROPERTIES OUTPUT_NAME ifritview)
   endif()
-  # Qt 6 alongside GTK when it's installed; ANYUI_BACKEND / --ui choose.
+  # Qt 6 alongside GTK when it's installed; RAPPORT_BACKEND / --ui choose.
   foreach(backend gtk3 gtk4 qt6 null win32)
-    if(TARGET anyui::backend_${backend})
-      target_link_libraries(ifritview-anyui PRIVATE anyui::backend_${backend})
-      target_compile_definitions(ifritview-anyui PRIVATE IFRIT_BACKEND_${backend})
+    if(TARGET rapport::backend_${backend})
+      target_link_libraries(ifritview-rapport PRIVATE rapport::backend_${backend})
+      target_compile_definitions(ifritview-rapport PRIVATE IFRIT_BACKEND_${backend})
     endif()
   endforeach()
-  message(STATUS "anyui front end: enabled (${IFRIT_ANYUI_DIR})")
+  message(STATUS "rapport front end: enabled (${IFRIT_RAPPORT_DIR})")
 else()
-  message(STATUS "anyui front end: off (no ${IFRIT_ANYUI_DIR})")
+  message(STATUS "rapport front end: off (no ${IFRIT_RAPPORT_DIR})")
 endif()
 
 # Optional format backends. Each is on by default and simply left out, with a

@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-namespace L = anyui::layout;
-using anyui::Color;
-using anyui::Extent;
+namespace L = rap::layout;
+using rap::Color;
+using rap::Extent;
 
 namespace
 {
@@ -118,31 +118,31 @@ struct State
     State(Config& c, std::function<void(bool)> d) : cfg(c), done(std::move(d)) {}
     Config& cfg;
     std::function<void(bool)> done;
-    std::unique_ptr<anyui::Window> window;
+    std::unique_ptr<rap::Window> window;
 
-    anyui::Check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
-    anyui::Spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
-    anyui::Select *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr;
-    anyui::Entry *map_url = nullptr, *geo_url = nullptr;
+    rap::Check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
+    rap::Spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
+    rap::Select *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr;
+    rap::Entry *map_url = nullptr, *geo_url = nullptr;
 
-    anyui::Check *smooth_upscale = nullptr, *smooth_downscale = nullptr, *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
-    anyui::Check *video_autoplay = nullptr, *video_muted = nullptr, *video_loop = nullptr;
-    anyui::Spin *ss_seconds = nullptr, *ss_zoom = nullptr, *ss_fade = nullptr;
-    anyui::Check *ss_motion = nullptr, *ss_shuffle = nullptr;
-    anyui::ColorButton *background = nullptr, *fullscreen_background = nullptr;
-    anyui::Check *ov_enabled = nullptr, *ov_file = nullptr, *ov_format = nullptr, *ov_shot = nullptr, *ov_location = nullptr, *ov_view = nullptr,
+    rap::Check *smooth_upscale = nullptr, *smooth_downscale = nullptr, *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
+    rap::Check *video_autoplay = nullptr, *video_muted = nullptr, *video_loop = nullptr;
+    rap::Spin *ss_seconds = nullptr, *ss_zoom = nullptr, *ss_fade = nullptr;
+    rap::Check *ss_motion = nullptr, *ss_shuffle = nullptr;
+    rap::ColorButton *background = nullptr, *fullscreen_background = nullptr;
+    rap::Check *ov_enabled = nullptr, *ov_file = nullptr, *ov_format = nullptr, *ov_shot = nullptr, *ov_location = nullptr, *ov_view = nullptr,
                  *ov_windowed = nullptr;
-    anyui::ColorButton* ov_color = nullptr;
-    anyui::Spin* ov_font = nullptr;
-    anyui::Widget* overlay_details = nullptr;
+    rap::ColorButton* ov_color = nullptr;
+    rap::Spin* ov_font = nullptr;
+    rap::Widget* overlay_details = nullptr;
 
-    std::array<anyui::Select*, size_t(Control::Count)> controls{};
-    std::array<anyui::Select*, size_t(Control::Count)> fullscreen_controls{};
+    std::array<rap::Select*, size_t(Control::Count)> controls{};
+    std::array<rap::Select*, size_t(Control::Count)> fullscreen_controls{};
 
-    anyui::TextView* extensions = nullptr;
-    anyui::Check *default_videos = nullptr, *default_documents = nullptr;
-    anyui::Label* default_result = nullptr;
-    anyui::Tabs* tabs = nullptr;
+    rap::TextView* extensions = nullptr;
+    rap::Check *default_videos = nullptr, *default_documents = nullptr;
+    rap::Label* default_result = nullptr;
+    rap::Tabs* tabs = nullptr;
 
     std::vector<std::string> geo_urls;  // per geo_provider item: "off", provider urls, "" = custom
 
@@ -226,7 +226,7 @@ struct State
     }
 };
 
-anyui::Node general_page(const Config& cfg, State& st)
+rap::Node general_page(const Config& cfg, State& st)
 {
     std::vector<std::string> maps;
     int map_index = int(std::size(kMapProviders));  // Custom
@@ -325,7 +325,7 @@ anyui::Node general_page(const Config& cfg, State& st)
     }};
 }
 
-anyui::Node viewing_page(const Config& cfg, State& st)
+rap::Node viewing_page(const Config& cfg, State& st)
 {
     State* s = &st;
     return L::Scroll{L::VBox{
@@ -377,10 +377,10 @@ anyui::Node viewing_page(const Config& cfg, State& st)
     }};
 }
 
-anyui::Node controls_page(const Config& cfg, State& st)
+rap::Node controls_page(const Config& cfg, State& st)
 {
     // One row per control: windowed and fullscreen actions side by side.
-    anyui::Nodes rows;
+    rap::Nodes rows;
     std::vector<std::string> form_labels;
     // A blank label, not an empty one (which would span both columns), so
     // the headings sit over the fields.
@@ -396,10 +396,10 @@ anyui::Node controls_page(const Config& cfg, State& st)
             L::Select{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(30)),
         });
     }
-    anyui::spec::Form form{form_labels, rows};
+    rap::spec::Form form{form_labels, rows};
     State* s = &st;
     return L::Scroll{L::VBox{
-        anyui::Node{form, {}},
+        rap::Node{form, {}},
         L::HBox{
             L::Spacer{},
             L::Button{"Reset to defaults"}.onClick(
@@ -417,7 +417,7 @@ anyui::Node controls_page(const Config& cfg, State& st)
     }};
 }
 
-anyui::Node file_types_page(const Config& cfg, State& st)
+rap::Node file_types_page(const Config& cfg, State& st)
 {
     State* s = &st;
     return L::VBox{
@@ -458,7 +458,7 @@ anyui::Node file_types_page(const Config& cfg, State& st)
 
 }  // namespace
 
-void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std::function<void(bool)> done, int page)
+void open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::function<void(bool)> done, int page)
 {
     const bool trace = std::getenv("IFRIT_TRACE");
     const auto t0 = std::chrono::steady_clock::now();
@@ -492,9 +492,9 @@ void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std
     lap("create");
     st->tabs->setCurrent(page);
     st->window->onFinished(
-        [st, &ui](anyui::DialogRole role)
+        [st, &ui](rap::DialogRole role)
         {
-            const bool ok = role == anyui::DialogRole::Ok;
+            const bool ok = role == rap::DialogRole::Ok;
             if (ok)
                 st->apply();
             if (st->done)

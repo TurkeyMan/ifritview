@@ -3,7 +3,7 @@
 #include "controls.h"
 #include "image.h"
 
-#include <anyui/anyui.h>
+#include <rapport/rapport.h>
 
 #include <cstdint>
 #include <functional>
@@ -13,22 +13,22 @@
 
 struct Config;
 
-// The image panel on an anyui::Canvas. Everything else in the window follows
+// The image panel on an rap::Canvas. Everything else in the window follows
 // the UI scale; this view renders device pixels 1:1, so 100% is one image
 // pixel per screen pixel whatever the desktop scaling is. Geometry is kept
 // in device pixels and converted to logical ones only when drawing.
 class View
 {
 public:
-    View(anyui::Ui& ui, const Config& cfg);
+    View(rap::Ui& ui, const Config& cfg);
     ~View();
     View(const View&) = delete;
     View& operator=(const View&) = delete;
 
     // The canvas node for the window layout, and attaching to the created widget.
-    anyui::Node node();
-    void attach(anyui::Canvas* canvas);
-    anyui::Canvas* canvas() const { return canvas_; }
+    rap::Node node();
+    void attach(rap::Canvas* canvas);
+    rap::Canvas* canvas() const { return canvas_; }
 
     void set_image(std::shared_ptr<Image> image);  // resets zoom to fit
     const Image* image() const { return image_.get(); }
@@ -105,35 +105,35 @@ private:
     void begin_drag(Action a, double x, double y);
     void drag_to(Action a, double x, double y);
     void run_wheel(Action a, int direction, double x, double y);
-    void paint(anyui::Painter& p, anyui::SizeF size);
-    void draw_overlay(anyui::Painter& p);
-    void draw_video_controls(anyui::Painter& p);
-    anyui::Image* base_image();
-    anyui::Image* scaled_image(double zoom);
-    anyui::Image* checker_image(int w, int h);
+    void paint(rap::Painter& p, rap::SizeF size);
+    void draw_overlay(rap::Painter& p);
+    void draw_video_controls(rap::Painter& p);
+    rap::Image* base_image();
+    rap::Image* scaled_image(double zoom);
+    rap::Image* checker_image(int w, int h);
     void drop_caches();
     void zoom_changed();
-    bool pointer(const anyui::PointerEvent& e);
-    bool scroll(const anyui::ScrollEvent& e);
+    bool pointer(const rap::PointerEvent& e);
+    bool scroll(const rap::ScrollEvent& e);
     void motion_frame(int64_t now_us);
     void drop_outgoing();
     void outgoing_transform(int64_t now_us, double& zoom, double& px, double& py) const;
     void cancel_deferred_click();
 
-    anyui::Ui& ui_;
+    rap::Ui& ui_;
     const Config& cfg_;
-    anyui::Canvas* canvas_ = nullptr;
+    rap::Canvas* canvas_ = nullptr;
     OverlaySections overlay_;
     std::shared_ptr<Image> image_;
     std::shared_ptr<Image> previewed_;  // the real image while a preview stands in for it
 
     // Uploaded pixels: the image itself, a downscaled copy for the current
     // zoom, and a checkerboard for transparency.
-    std::unique_ptr<anyui::Image> base_;
+    std::unique_ptr<rap::Image> base_;
     bool base_dirty_ = true;
-    std::unique_ptr<anyui::Image> scaled_;
+    std::unique_ptr<rap::Image> scaled_;
     double scaled_zoom_ = 0;
-    std::unique_ptr<anyui::Image> checker_;
+    std::unique_ptr<rap::Image> checker_;
 
     struct Motion
     {
@@ -142,7 +142,7 @@ private:
         double z_cache = 1;
         int64_t start_us = 0, duration_us = 0;
     } motion_;
-    anyui::Subscription motion_tick_;
+    rap::Subscription motion_tick_;
     double frame_ms_ = 0;
     int64_t present_since_ = 0;
     const Image* presented_ = nullptr;
@@ -150,7 +150,7 @@ private:
 
     struct Outgoing
     {
-        std::unique_ptr<anyui::Image> image;  // pre-scaled at `scale_zoom`
+        std::unique_ptr<rap::Image> image;  // pre-scaled at `scale_zoom`
         double scale_zoom = 1;
         Motion motion;
         double zoom = 1, pan_x = 0, pan_y = 0;
@@ -158,14 +158,14 @@ private:
         bool has_alpha = false;
         int64_t fade_start_us = 0, fade_us = 0;
     } outgoing_;
-    anyui::Subscription outgoing_tick_;
+    rap::Subscription outgoing_tick_;
     int pending_crossfade_ms_ = 0;
     bool pending_live_ = false;
     std::shared_ptr<Image> outgoing_live_;
-    std::unique_ptr<anyui::Image> outgoing_live_image_;
+    std::unique_ptr<rap::Image> outgoing_live_image_;
 
     bool busy_ = false;
-    anyui::Subscription busy_tick_;
+    rap::Subscription busy_tick_;
 
     // Video controls.
     bool video_ = false;
@@ -178,7 +178,7 @@ private:
     bool volume_hover_ = false;
     void update_volume_hover(double device_x, double device_y);
     int64_t controls_until_ = 0;
-    anyui::Subscription controls_timer_;
+    rap::Subscription controls_timer_;
     bool scrubbing_ = false;
     struct ControlsGeometry
     {
@@ -189,7 +189,7 @@ private:
     bool controls_visible() const;
     double fraction_at(double device_x) const;
 
-    anyui::Cursor cursor_ = anyui::Cursor::Default;
+    rap::Cursor cursor_ = rap::Cursor::Default;
     ZoomMode mode_ = ZoomMode::Fit;
     double zoom_ = 1.0;
     double pan_x_ = 0, pan_y_ = 0;  // image origin in device pixels
@@ -205,5 +205,5 @@ private:
     double scroll_accum_ = 0;
     // In fullscreen a single click waits out the double-click interval when
     // the same button also has a double-click action.
-    anyui::Subscription deferred_click_;
+    rap::Subscription deferred_click_;
 };

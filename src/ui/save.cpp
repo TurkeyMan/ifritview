@@ -2,10 +2,10 @@
 
 #include <algorithm>
 
-namespace L = anyui::layout;
-using anyui::Extent;
+namespace L = rap::layout;
+using rap::Extent;
 
-std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* parent, const std::string& own_extension,
+std::shared_ptr<SaveDialog> SaveDialog::open(rap::Ui& ui, rap::Window* parent, const std::string& own_extension,
                                              std::map<std::string, EncodeOptions>& remembered, Callbacks callbacks)
 {
     auto d = std::shared_ptr<SaveDialog>(new SaveDialog);
@@ -30,7 +30,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
     size_t most = 1;
     for (const Page& p : d->pages_)
         most = std::max(most, p.encoder->settings.size());
-    anyui::Nodes pages;
+    rap::Nodes pages;
     for (Page& p : d->pages_)
         pages.push_back(d->page_node(p));
     SaveDialog* s = d.get();
@@ -49,7 +49,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
                                                                             })
                                                                         .bind(s->preview_)}}},
                                          L::Separator{},
-                                         anyui::Node{anyui::spec::Box{anyui::Orientation::Vertical, pages}, {}},
+                                         rap::Node{rap::spec::Box{rap::Orientation::Vertical, pages}, {}},
                                          L::Spacer{},
                                          L::Buttons{L::Ok("_Save…"), L::Cancel},
                                      }}}
@@ -59,13 +59,13 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
                            parent);
     for (Page& p : d->pages_)
         d->update_enabled(p);
-    d->window_->onFinished([s](anyui::DialogRole role) { s->finish(role == anyui::DialogRole::Ok); });
+    d->window_->onFinished([s](rap::DialogRole role) { s->finish(role == rap::DialogRole::Ok); });
     d->show_format(initial);
     d->window_->show();
     return d;
 }
 
-anyui::Node SaveDialog::page_node(Page& page)
+rap::Node SaveDialog::page_node(Page& page)
 {
     const Encoder& e = *page.encoder;
     const EncodeOptions& known = (*remembered_)[e.extension];
@@ -77,7 +77,7 @@ anyui::Node SaveDialog::page_node(Page& page)
         const EncodeSetting& set = e.settings[i];
         const int value = known.get(set.key, set.initial);
         Control& c = page.controls[i];
-        anyui::Node beside = L::Label{set.note ? set.note : ""};  // a few words
+        rap::Node beside = L::Label{set.note ? set.note : ""};  // a few words
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
@@ -110,13 +110,13 @@ anyui::Node SaveDialog::page_node(Page& page)
     }
     if (rows.empty())
         rows.push_back({"", L::Label{std::string(e.name) + " has no settings."}});
-    anyui::spec::Form form;
+    rap::spec::Form form;
     for (L::FormRow& r : rows)
     {
         form.labels.push_back(r.label);
         form.fields.push_back(std::move(r.field));
     }
-    anyui::Node node{std::move(form), {}};
+    rap::Node node{std::move(form), {}};
     node.common.handle = &page.box;
     return node;
 }
