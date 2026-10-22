@@ -1095,20 +1095,34 @@ void App::save_as()
     spec.mode = FileDialogSpec::Mode::Save;
     spec.title = "Save Image As";
     spec.initialPath = folder_.directory().empty() ? folder_.current_name() : folder_.directory() + "/" + folder_.current_name();
-    for (const Encoder* e : encoders())
+    // The image's own format first: it's the default for a name typed
+    // without an extension.
+    const auto lower_ext = [](const std::string& path)
+    {
+        std::string ext = std::filesystem::path(path).extension().string();
+        if (!ext.empty())
+            ext = ext.substr(1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        return ext == "jpeg" ? std::string("jpg") : ext;
+    };
+    std::vector<const Encoder*> order = encoders();
+    const std::string own = lower_ext(image_path_);
+    std::stable_partition(order.begin(), order.end(), [&](const Encoder* e) { return own == e->extension; });
+    for (const Encoder* e : order)
         spec.filters.push_back({e->name, std::string("*.") + e->extension});
     ui_.chooseFiles(window_.get(), spec,
-                    [this](std::vector<std::string> files)
+                    [this, lower_ext, fallback = order.empty() ? std::string() : std::string(order.front()->extension)](std::vector<std::string> files)
                     {
                         if (files.empty() || !image_)
                             return;
-                        const std::string& path = files.front();
-                        std::string ext = std::filesystem::path(path).extension().string();
-                        if (!ext.empty())
-                            ext = ext.substr(1);
-                        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-                        if (ext == "jpeg")
-                            ext = "jpg";
+                        std::string path = files.front();
+                        std::string ext = lower_ext(path);
+                        if (ext.empty() && !fallback.empty())
+                        {
+                            // Not every toolkit's dialog adds one.
+                            path += "." + fallback;
+                            ext = fallback;
+                        }
                         EncodeOptions options;
                         options.quality = 90;
                         std::string error = "unknown format ." + ext;
