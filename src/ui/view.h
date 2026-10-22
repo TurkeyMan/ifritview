@@ -83,6 +83,7 @@ public:
     void set_video_muted(bool muted);
     void set_video_volume(double volume);
     void poke_controls();
+    void script_show_volume();  // scripts can't hover: reveal the volume line as if they did
     std::function<void()> on_video_toggle;
     std::function<void()> on_video_mute;
     std::function<void(double volume)> on_video_volume;

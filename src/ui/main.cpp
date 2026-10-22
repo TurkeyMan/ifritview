@@ -71,7 +71,13 @@ void run_step(App& app, const std::string& step)
     else if (step == "copy")
         app.copy_to_clipboard();
     else if (step == "xmp")
-        app.toggle_xmp();
+        app.script_toggle_xmp();
+    else if (step == "volume")
+        app.script_show_volume();
+    else if (step == "close-dialog")
+        app.script_end_dialog(false);
+    else if (step == "accept-dialog")
+        app.script_end_dialog(true);
     else if (step == "slideshow")
         app.toggle_slideshow();
     else if (step == "play")

@@ -61,6 +61,9 @@ public:
     void set_exposure(double ev);
     void script_toggle_video() { toggle_video(); }
     void script_poke_controls() { view_->poke_controls(); }
+    void script_show_volume() { view_->script_show_volume(); }
+    void script_toggle_xmp();
+    void script_end_dialog(bool accept);
 
 private:
     void build_ui();
@@ -120,6 +123,7 @@ private:
     rap::Slider* exposure_ = nullptr;
     rap::ToolButton* smooth_toggle_ = nullptr;
     rap::ToolButton* xmp_toggle_ = nullptr;
+    std::function<void(bool)> end_settings_;  // while Settings is open
     rap::ToolButton* crop_button_ = nullptr;
     rap::Label* status_left_ = nullptr;
     rap::Label* status_center_ = nullptr;

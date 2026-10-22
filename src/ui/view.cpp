@@ -851,6 +851,13 @@ bool View::controls_visible() const
     return video_ && (scrubbing_ || now_us() < controls_until_);
 }
 
+void View::script_show_volume()
+{
+    volume_hover_ = true;
+    poke_controls();
+    invalidate();
+}
+
 void View::poke_controls()
 {
     if (!video_)

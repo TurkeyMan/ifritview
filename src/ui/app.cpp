@@ -215,8 +215,9 @@ void App::build_ui()
                 .bind(splitter_)
                 .stretch(),
             HBox{
-                L::Label{""}.bind(status_left_).stretch(),
-                L::Label{""}.bind(status_center_),
+                // Long names and details give way, so they never hold the window wide.
+                L::Label{""}.ellipsize().bind(status_left_).stretch(),
+                L::Label{""}.ellipsize().bind(status_center_),
                 L::Button{""}.flat().onClick([this] { open_url(location_url_); }).bind(status_location_),
                 L::Label{""}.bind(status_right_),
             }
@@ -230,7 +231,7 @@ void App::build_ui()
     window_->onCloseRequest(
         [this]
         {
-            ui_.quit();
+            quit();
             return true;
         });
     window_->setIcon(Icon::named("ifritview"));
@@ -355,6 +356,25 @@ void App::transform(int exif_orientation)
     refit_timer_ = ui_.timer(120, false, [this] { fit_window_to_image(); });
     update_status();
     refresh_metadata();
+}
+
+void App::script_toggle_xmp()
+{
+    xmp_toggle_->setChecked(!xmp_toggle_->checked());  // set from code: no callback
+    toggle_xmp();
+}
+
+// Scripts end the dialog in front: Save As (only cancelled: accepting it
+// opens the file chooser), else Settings.
+void App::script_end_dialog(bool accept)
+{
+    if (save_dialog_ && !accept)
+        save_dialog_->close();
+    else if (end_settings_)
+    {
+        const auto end = end_settings_;  // ending it clears end_settings_
+        end(accept);
+    }
 }
 
 void App::toggle_xmp()
@@ -1500,10 +1520,11 @@ void App::open_settings_page(int page)
     const std::string old_raw_mode = cfg_.raw_mode;
     const bool old_apply_xmp = cfg_.apply_xmp_edits;
     const bool old_raw_crop = cfg_.raw_camera_crop;
-    open_settings_dialog(
+    end_settings_ = open_settings_dialog(
         ui_, window_.get(), cfg_,
         [this, old_raw_mode, old_apply_xmp, old_raw_crop](bool ok)
         {
+            end_settings_ = nullptr;
             if (!ok)
                 return;
             cfg_.save();

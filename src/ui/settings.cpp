@@ -119,6 +119,7 @@ struct State
     Config& cfg;
     std::function<void(bool)> done;
     std::unique_ptr<rap::Window> window;
+    bool finished = false;
 
     rap::Check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
     rap::Spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
@@ -458,7 +459,7 @@ rap::Node file_types_page(const Config& cfg, State& st)
 
 }  // namespace
 
-void open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::function<void(bool)> done, int page)
+std::function<void(bool)> open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::function<void(bool)> done, int page)
 {
     const bool trace = std::getenv("IFRIT_TRACE");
     const auto t0 = std::chrono::steady_clock::now();
@@ -491,17 +492,21 @@ void open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::fu
                            parent);
     lap("create");
     st->tabs->setCurrent(page);
-    st->window->onFinished(
-        [st, &ui](rap::DialogRole role)
-        {
-            const bool ok = role == rap::DialogRole::Ok;
-            if (ok)
-                st->apply();
-            if (st->done)
-                st->done(ok);
-            // Not from inside the window's own callback: destroy it afterwards.
-            ui.post([st] { st->window.reset(); });
-        });
+    // Once, whichever way it ends.
+    auto finish = [st, &ui](bool ok)
+    {
+        if (!st->window || st->finished)
+            return;
+        st->finished = true;
+        if (ok)
+            st->apply();
+        if (st->done)
+            st->done(ok);
+        st->window->close();
+        // Not from inside the window's own callback: destroy it afterwards.
+        ui.post([st] { st->window.reset(); });
+    };
+    st->window->onFinished([finish](rap::DialogRole role) { finish(role == rap::DialogRole::Ok); });
     st->window->show();
     lap("show");
     if (trace)  // the first paint has happened by the time the loop gets here
@@ -511,4 +516,5 @@ void open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::fu
                 std::fprintf(stderr, "settings: on screen %6.1f ms after the click\n",
                              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
             });
+    return finish;
 }
