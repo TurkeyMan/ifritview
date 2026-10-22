@@ -209,6 +209,8 @@ void App::build_ui()
             if (!paths.empty())
                 open_path(paths.front());
         });
+    // A width the user drags the info pane to is kept for next time.
+    splitter_->on_moved([this] { remember_pane_width(); });
     window_->on_fullscreen_changed([this](bool fs) { on_fullscreen_changed(fs); });
     window_->on_close_request(
         [this]
@@ -645,6 +647,20 @@ void App::toggle_animation()
 }
 
 // -- metadata -----------------------------------------------------------------
+void App::remember_pane_width()
+{
+    const std::vector<float> sizes = splitter_->sizes();
+    if (!metadata_visible_ || sizes.size() < 2 || sizes[1] <= 0)
+        return;
+    const int width = std::max(240, int(std::lround(sizes[1])));
+    if (width == cfg_.metadata_pane_width)
+        return;
+    if (pane_extra_ > 0)
+        pane_extra_ += float(width - cfg_.metadata_pane_width);  // the divider's share is unchanged
+    cfg_.metadata_pane_width = width;
+    cfg_.save();
+}
+
 void App::toggle_metadata()
 {
     const rap::size_f before = window_->size();
@@ -1383,7 +1399,8 @@ void App::apply_xmp(bool fresh)
 // the work area. Where the platform lets us, keep it on screen.
 void App::fit_window_to_image()
 {
-    if (!image_ || fullscreen_ || !cfg_.fit_window_to_image || !window_)
+    // A maximized or snapped window has the size the user gave it.
+    if (!image_ || fullscreen_ || !cfg_.fit_window_to_image || !window_ || window_->maximized())
         return;
     rap::rect_f work = window_->work_area();
     if (work.w <= 0 || work.h <= 0)
@@ -1605,6 +1622,33 @@ bool App::on_key(const rap::key_event& e)
 {
     if (!e.press)
         return false;
+    // The exposure slider keeps its keys while it has focus: arrows step it
+    // (Shift refines, as on the wheel), Home is the camera's own exposure,
+    // and Esc or Enter hand the keys back to the image.
+    if (exposure_->has_focus())
+    {
+        const double step = e.modifiers & rap::mod_shift ? 0.01 : 0.1;
+        switch (e.key)
+        {
+            case rap::key::left:
+            case rap::key::down:
+                set_exposure(exposure_->value() - step);
+                return true;
+            case rap::key::right:
+            case rap::key::up:
+                set_exposure(exposure_->value() + step);
+                return true;
+            case rap::key::home:
+                set_exposure(image_ ? image_->exposure_bias : 0.0);
+                return true;
+            case rap::key::escape:
+            case rap::key::enter:
+                view_->canvas()->focus();
+                return true;
+            default:
+                break;  // everything else keeps its usual meaning
+        }
+    }
     const bool ctrl = e.modifiers & rap::mod_ctrl;
     const char32_t c = e.key == rap::key::character ? e.codepoint : 0;
     switch (e.key)

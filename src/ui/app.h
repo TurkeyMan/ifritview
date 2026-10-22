@@ -63,6 +63,7 @@ public:
     void script_poke_controls() { view_->poke_controls(); }
     void script_show_volume() { view_->script_show_volume(); }
     void script_toggle_xmp();
+    void remember_pane_width();
     void script_end_dialog(bool accept);
 
 private:

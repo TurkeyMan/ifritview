@@ -74,6 +74,12 @@ void run_step(App& app, const std::string& step)
         app.script_toggle_xmp();
     else if (step == "volume")
         app.script_show_volume();
+    else if (step.rfind("shot:", 0) == 0)
+    {
+        // The window in front (a dialog over the main window, say), as drawn now.
+        if (!app.ui().save_snapshot(step.substr(5)))
+            std::fprintf(stderr, "script: no snapshot saved to %s\n", step.substr(5).c_str());
+    }
     else if (step == "close-dialog")
         app.script_end_dialog(false);
     else if (step == "accept-dialog")
