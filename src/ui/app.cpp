@@ -202,6 +202,13 @@ void App::build_ui()
                              .margins(false));
     view_->attach(view_->canvas());
     window_->on_key([this](const rap::key_event& e) { return on_key(e); });
+    // A dropped file opens with its folder, as if opened from the menu.
+    window_->on_files_dropped(
+        [this](const std::vector<std::string>& paths)
+        {
+            if (!paths.empty())
+                open_path(paths.front());
+        });
     window_->on_fullscreen_changed([this](bool fs) { on_fullscreen_changed(fs); });
     window_->on_close_request(
         [this]
