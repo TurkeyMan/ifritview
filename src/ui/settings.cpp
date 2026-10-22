@@ -146,7 +146,20 @@ struct State
 
     std::vector<std::string> geo_urls;  // per geo_provider item: "off", provider urls, "" = custom
 
+    // Pages are built when first shown: only those can have changed.
     void apply()
+    {
+        if (fit_window)
+            apply_general();
+        if (smooth_upscale)
+            apply_viewing();
+        if (controls[0])
+            apply_controls();
+        if (extensions)
+            cfg.extensions = parse_extensions(extensions->text());
+    }
+
+    void apply_general()
     {
         cfg.fit_window_to_image = fit_window->checked();
         cfg.min_window_width = int(min_width->value());
@@ -160,6 +173,19 @@ struct State
             cfg.raw_mode = kRawModes[raw_mode->current()];
         cfg.raw_camera_crop = raw_crop->checked();
         cfg.apply_xmp_edits = apply_xmp->checked();
+        const std::string url = map_url->text();
+        if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos)
+            cfg.map_url = url;
+        const int geo = geo_provider->current();
+        const std::string geo_text = geo_url->text();
+        if (geo >= 0 && geo_urls[size_t(geo)] == "off")
+            cfg.geocoder_url.clear();
+        else if (geo_text.find("{lat}") != std::string::npos && geo_text.find("{lon}") != std::string::npos)
+            cfg.geocoder_url = geo_text;
+    }
+
+    void apply_viewing()
+    {
         cfg.smooth_upscale = smooth_upscale->checked();
         cfg.smooth_downscale = smooth_downscale->checked();
         cfg.fullscreen_upscale = fullscreen_upscale->checked();
@@ -184,16 +210,10 @@ struct State
         cfg.overlay_windowed = ov_windowed->checked();
         cfg.overlay_color = colour_hex(ov_color->color());
         cfg.overlay_font_pt = int(ov_font->value());
-        cfg.extensions = parse_extensions(extensions->text());
-        const std::string url = map_url->text();
-        if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos)
-            cfg.map_url = url;
-        const int geo = geo_provider->current();
-        const std::string geo_text = geo_url->text();
-        if (geo >= 0 && geo_urls[size_t(geo)] == "off")
-            cfg.geocoder_url.clear();
-        else if (geo_text.find("{lat}") != std::string::npos && geo_text.find("{lon}") != std::string::npos)
-            cfg.geocoder_url = geo_text;
+    }
+
+    void apply_controls()
+    {
         for (const ControlInfo& c : kControls)
         {
             const std::vector<Action> acts = actions_for(c.kind);
@@ -277,7 +297,11 @@ anyui::Node general_page(const Config& cfg, State& st)
                                                    })
                                                .bind(st.map_provider)},
                      {"URL template",
-                      L::Entry{cfg.map_url}.tooltip("URL template; {lat} and {lon} are replaced with the coordinates").bind(st.map_url).width(chars(44))},
+                      L::Entry{cfg.map_url}
+                          .tooltip("URL template; {lat} and {lon} are replaced with the coordinates")
+                          .enabled(map_index >= int(std::size(kMapProviders)))
+                          .bind(st.map_url)
+                          .width(chars(44))},
                      {"Look up place names with", L::Select{geos, geo_index}
                                                       .onChanged(
                                                           [s](int i)
@@ -294,6 +318,7 @@ anyui::Node general_page(const Config& cfg, State& st)
                                                       .bind(st.geo_provider)},
                      {"Lookup URL template", L::Entry{cfg.geocoder_url}
                                                  .tooltip("Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced")
+                                                 .enabled(st.geo_urls[size_t(geo_index)].empty())
                                                  .bind(st.geo_url)
                                                  .width(chars(44))},
                  }},
@@ -346,6 +371,7 @@ anyui::Node viewing_page(const Config& cfg, State& st)
                          {"Text colour", L::ColorButton{parse_colour(cfg.overlay_color), "Overlay text"}.bind(st.ov_color)},
                          {"Text size (pt)", L::Spin{6, 40, double(cfg.overlay_font_pt)}.bind(st.ov_font)},
                      }
+                         .enabled(cfg.overlay_enabled)
                          .handle(st.overlay_details),
                  }},
     }};
@@ -443,33 +469,25 @@ void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std
         t = now;
     };
     auto st = std::make_shared<State>(cfg, std::move(done));
-    anyui::Node general = general_page(cfg, *st);
-    lap("general");
-    anyui::Node viewing = viewing_page(cfg, *st);
-    lap("viewing");
-    anyui::Node controls = controls_page(cfg, *st);
-    lap("controls");
-    anyui::Node types = file_types_page(cfg, *st);
-    lap("types");
+    // Each page is built the first time it's shown (the window owns them and
+    // goes before the state does).
+    State* s = st.get();
     st->window = ui.create(L::Dialog{"Settings",
                                      {L::VBox{
                                          L::Tabs{
-                                             {"General", general},
-                                             {"Viewing", viewing},
-                                             {"Controls", controls},
-                                             {"File Types", types},
+                                             {"General", L::Lazy{[&cfg, s] { return general_page(cfg, *s); }}},
+                                             {"Viewing", L::Lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
+                                             {"Controls", L::Lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
+                                             {"File Types", L::Lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
                                          }
+                                             .sidebar()
                                              .bind(st->tabs)
                                              .stretch(),
                                          L::Buttons{L::Cancel, L::Ok},
                                      }}}
-                               .size(chars(90), Extent{40, Extent::Unit::Lines}),
+                               .size(chars(104), Extent{40, Extent::Unit::Lines}),
                            parent);
     lap("create");
-    // Initial enabled states that follow other fields.
-    st->map_url->setEnabled(st->map_provider->current() >= int(std::size(kMapProviders)));
-    st->geo_url->setEnabled(st->geo_urls[size_t(std::max(0, st->geo_provider->current()))].empty());
-    st->overlay_details->setEnabled(cfg.overlay_enabled);
     st->tabs->setCurrent(page);
     st->window->onFinished(
         [st, &ui](anyui::DialogRole role)
