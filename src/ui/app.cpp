@@ -19,32 +19,7 @@
 #include <random>
 #include <thread>
 
-using rap::Canvas;
-using rap::Color;
-using rap::Cursor;
-using rap::Extent;
-using rap::FileDialogSpec;
-using rap::Filter;
-using rap::Icon;
-using rap::Key;
-using rap::KeyEvent;
-using rap::LineCap;
-using rap::MessageSpec;
-using rap::ModCtrl;
-using rap::ModShift;
-using rap::Node;
-using rap::Paint;
-using rap::Painter;
-using rap::PointerEvent;
-using rap::PointF;
-using rap::RectF;
-using rap::ScrollEvent;
-using rap::SelectionMode;
-using rap::SizeF;
-using rap::TextStyle;
-using rap::ThemeColor;
-using rap::Ui;
-using APixelFormat = rap::PixelFormat;
+using APixelFormat = rap::pixel_format;
 
 namespace
 {
@@ -104,7 +79,7 @@ double random01()
 
 }  // namespace
 
-App::App(Ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
+App::App(rap::ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
 {
     cfg_.load();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
@@ -124,59 +99,59 @@ App::~App()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
-Node App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
+rap::node App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
 {
-    return rap::layout::ToolButton{Icon::named(icon), tooltip}.onClick([this, action] { (this->*action)(); });
+    return rap::layout::tool_button{rap::icon::named(icon), tooltip}.on_click([this, action] { (this->*action)(); });
 }
 
 void App::build_ui()
 {
     view_ = std::make_unique<View>(ui_, cfg_);
     namespace L = rap::layout;
-    using L::HBox;
-    using L::Horizontal;
-    using L::Separator;
-    using L::Spacer;
-    using L::VBox;
+    using L::hbox;
+    using L::horizontal;
+    using L::separator;
+    using L::spacer;
+    using L::vbox;
 
     // Exposure, in stops around the camera's compensation; raw only.
-    Node exposure =
-        HBox{
-            L::Label{"EV"},
-            L::Slider{-3.0, 3.0, 0.0}
+    rap::node exposure =
+        hbox{
+            L::label{"EV"},
+            L::slider{-3.0, 3.0, 0.0}
                 .step(0.1, 1.0)
-                .showValue(2)
+                .show_value(2)
                 .mark(0.0)
-                .onChanged([this](double) { retone(); })
+                .on_changed([this](double) { retone(); })
                 .bind(exposure_)
-                .width(rap::Extent{24, rap::Extent::Unit::Chars})
+                .width(rap::extent{24, rap::extent::unit::chars})
                 .tooltip("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
                          "Greyed while the embedded preview stands in for the raw"),
         }
             .handle(exposure_box_);
 
-    window_ = ui_.create(L::Window{
+    window_ = ui_.create(L::window{
         "IfritView",
-        {VBox{
-            L::Toolbar{
+        {vbox{
+            L::toolbar{
                 tool_button("document-open-symbolic", "Open… (Ctrl+O)", &App::open_dialog),
                 tool_button("media-floppy-symbolic", "Save as… (Ctrl+S)", &App::save_as),
-                Separator{},
-                L::ToolButton{Icon::named("go-previous-symbolic"), "Previous image (Left, wheel up)"}.onClick([this] { navigate(-1); }),
-                L::ToolButton{Icon::named("go-next-symbolic"), "Next image (Right, wheel down)"}.onClick([this] { navigate(+1); }),
-                Separator{},
+                separator{},
+                L::tool_button{rap::icon::named("go-previous-symbolic"), "Previous image (Left, wheel up)"}.on_click([this] { navigate(-1); }),
+                L::tool_button{rap::icon::named("go-next-symbolic"), "Next image (Right, wheel down)"}.on_click([this] { navigate(+1); }),
+                separator{},
                 tool_button("zoom-out-symbolic", "Zoom out (-, Ctrl+wheel)", &App::zoom_out),
                 tool_button("zoom-in-symbolic", "Zoom in (+, Ctrl+wheel)", &App::zoom_in),
                 tool_button("zoom-original-symbolic", "Actual pixels (1)", &App::zoom_original),
                 tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit),
-                Separator{},
+                separator{},
                 tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen),
                 tool_button("media-playback-start-symbolic", "Slideshow (S): fullscreen, timed, with gentle motion", &App::toggle_slideshow),
-                Separator{},
-                L::ToolButton{Icon::named("edit-cut-symbolic"), "Crop to selection (Ctrl+Y)"}.onClick([this] { crop_to_selection(); }).bind(crop_button_),
-                L::ToolButton{Icon::named("view-grid-symbolic"), "Smooth when zoomed in (off shows crisp pixels)"}
+                separator{},
+                L::tool_button{rap::icon::named("edit-cut-symbolic"), "Crop to selection (Ctrl+Y)"}.on_click([this] { crop_to_selection(); }).bind(crop_button_),
+                L::tool_button{rap::icon::named("view-grid-symbolic"), "Smooth when zoomed in (off shows crisp pixels)"}
                     .toggle(cfg_.smooth_upscale)
-                    .onToggled(
+                    .on_toggled(
                         [this](bool on)
                         {
                             cfg_.smooth_upscale = on;
@@ -184,23 +159,23 @@ void App::build_ui()
                             view_->config_changed();
                         })
                     .bind(smooth_toggle_),
-                L::ToolButton{Icon::named("document-edit-symbolic"), "Apply edits from XMP sidecars (exposure, crop, rotation)"}
+                L::tool_button{rap::icon::named("document-edit-symbolic"), "Apply edits from XMP sidecars (exposure, crop, rotation)"}
                     .toggle(cfg_.apply_xmp_edits)
-                    .onToggled([this](bool) { toggle_xmp(); })
+                    .on_toggled([this](bool) { toggle_xmp(); })
                     .bind(xmp_toggle_),
-                Spacer{},
+                spacer{},
                 exposure,
                 tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata),
                 tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings),
             }
                 .handle(toolbar_),
-            L::Splitter{
-                Horizontal,
+            L::splitter{
+                horizontal,
                 view_->node(),
-                VBox{
-                    L::List{{{"Tag", rap::Extent{14, rap::Extent::Unit::Chars}}, {"Value", {}, true}}, &metadata_model_}
-                        .selection(SelectionMode::Single)
-                        .onActivate(
+                vbox{
+                    L::list{{{"Tag", rap::extent{14, rap::extent::unit::chars}}, {"Value", {}, true}}, &metadata_model_}
+                        .selection(rap::selection_mode::single)
+                        .on_activate(
                             [this](size_t row)
                             {
                                 const std::string url = metadata_model_.url(row);
@@ -214,32 +189,32 @@ void App::build_ui()
             }
                 .bind(splitter_)
                 .stretch(),
-            HBox{
+            hbox{
                 // Long names and details give way, so they never hold the window wide.
-                L::Label{""}.ellipsize().bind(status_left_).stretch(),
-                L::Label{""}.ellipsize().bind(status_center_),
-                L::Button{""}.flat().onClick([this] { open_url(location_url_); }).bind(status_location_),
-                L::Label{""}.bind(status_right_),
+                L::label{""}.ellipsize().bind(status_left_).stretch(),
+                L::label{""}.ellipsize().bind(status_center_),
+                L::button{""}.flat().on_click([this] { open_url(location_url_); }).bind(status_location_),
+                L::label{""}.bind(status_right_),
             }
                 .margins()
                 .handle(footer_),
-        }}}.size(Extent{float(cfg_.min_window_width), Extent::Unit::Px}, Extent{float(cfg_.min_window_height), Extent::Unit::Px})
+        }}}.size(rap::extent{float(cfg_.min_window_width), rap::extent::unit::px}, rap::extent{float(cfg_.min_window_height), rap::extent::unit::px})
                              .margins(false));
     view_->attach(view_->canvas());
-    window_->onKey([this](const KeyEvent& e) { return on_key(e); });
-    window_->onFullscreenChanged([this](bool fs) { on_fullscreen_changed(fs); });
-    window_->onCloseRequest(
+    window_->on_key([this](const rap::key_event& e) { return on_key(e); });
+    window_->on_fullscreen_changed([this](bool fs) { on_fullscreen_changed(fs); });
+    window_->on_close_request(
         [this]
         {
             quit();
             return true;
         });
-    window_->setIcon(Icon::named("ifritview"));
-    metadata_pane_->setVisible(false);
-    exposure_box_->setVisible(false);
-    crop_button_->setEnabled(false);
-    status_location_->setVisible(false);
-    status_location_->setTooltip("Open in maps");
+    window_->set_icon(rap::icon::named("ifritview"));
+    metadata_pane_->set_visible(false);
+    exposure_box_->set_visible(false);
+    crop_button_->set_enabled(false);
+    status_location_->set_visible(false);
+    status_location_->set_tooltip("Open in maps");
 
     view_->on_action = [this](Action a)
     {
@@ -317,7 +292,7 @@ void App::build_ui()
     view_->on_selection_changed = [this]
     {
         int x, y, w, h;
-        crop_button_->setEnabled(view_->selection(x, y, w, h));
+        crop_button_->set_enabled(view_->selection(x, y, w, h));
     };
     update_status();
     window_->show();
@@ -338,7 +313,7 @@ void App::copy_to_clipboard()
         return;
     int x, y, w, h;
     const Image region = view_->selection(x, y, w, h) ? image_->crop(x, y, w, h) : *image_;
-    ui_.setClipboardImage(region.width, region.height, APixelFormat::Bgra8Premultiplied, region.pixels.data(), region.stride);
+    ui_.set_clipboard_image(region.width, region.height, APixelFormat::bgra8_premultiplied, region.pixels.data(), region.stride);
     view_->clear_selection();
     status_message_ = "Copied " + std::to_string(region.width) + " × " + std::to_string(region.height) + " to clipboard";
     update_status();
@@ -360,7 +335,7 @@ void App::transform(int exif_orientation)
 
 void App::script_toggle_xmp()
 {
-    xmp_toggle_->setChecked(!xmp_toggle_->checked());  // set from code: no callback
+    xmp_toggle_->set_checked(!xmp_toggle_->checked());  // set from code: no callback
     toggle_xmp();
 }
 
@@ -669,12 +644,12 @@ void App::toggle_animation()
 
 void App::toggle_metadata()
 {
-    const SizeF before = window_->size();
+    const rap::size_f before = window_->size();
     metadata_visible_ = !metadata_visible_;
-    metadata_pane_->setVisible(metadata_visible_);
+    metadata_pane_->set_visible(metadata_visible_);
     if (metadata_visible_)
     {
-        splitter_->setSizes({std::max(100.f, before.w), float(cfg_.metadata_pane_width)});
+        splitter_->set_sizes({std::max(100.f, before.w), float(cfg_.metadata_pane_width)});
         refresh_metadata();
     }
     // The window takes (or gives back) what the pane adds in the same step,
@@ -686,7 +661,7 @@ void App::toggle_metadata()
     if (image_ && !fullscreen_ && cfg_.fit_window_to_image)
     {
         float w = before.w + (metadata_visible_ ? pane_extra_ : -pane_extra_);
-        const RectF work = window_->workArea();
+        const rap::rect_f work = window_->work_area();
         if (work.w > 0)
             w = std::min(w, work.w - 24);
         window_->resize({std::max(w, float(cfg_.min_window_width)), before.h});
@@ -710,7 +685,7 @@ void App::refit_after_pane_toggle()
     fit_window_to_image();
     // Learn exactly what the pane adds (its width and the divider), for next time.
     const float now = window_->size().w;
-    const RectF work = window_->workArea();
+    const rap::rect_f work = window_->work_area();
     const bool limited = work.w > 0 && now >= work.w - 25;
     if (pane_toggled_from_ > 0 && !limited)
     {
@@ -1079,18 +1054,18 @@ void App::sync_exposure_slider()
 {
     const bool raw = image_ && image_->is_raw;
     if (!fullscreen_)
-        exposure_box_->setVisible(raw);
+        exposure_box_->set_visible(raw);
     if (!raw)
         return;
     const double bias = image_->exposure_bias;
-    exposure_->setRange(bias - 3.0, bias + 3.0);
-    exposure_->setValue(bias + image_->exposure_edit);
-    exposure_->setEnabled(!image_->is_preview());
+    exposure_->set_range(bias - 3.0, bias + 3.0);
+    exposure_->set_value(bias + image_->exposure_edit);
+    exposure_->set_enabled(!image_->is_preview());
 }
 
 void App::set_exposure(double ev)
 {
-    exposure_->setValue(ev);
+    exposure_->set_value(ev);
     retone();
 }
 
@@ -1240,14 +1215,14 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o)
 {
     if (!image_)
         return;
-    FileDialogSpec spec;
-    spec.mode = FileDialogSpec::Mode::Save;
+    rap::file_dialog_spec spec;
+    spec.mode = rap::file_dialog_spec::mode::save;
     spec.title = std::string("Save as ") + e.name;
     const std::string stem = std::filesystem::path(folder_.current_name()).stem().string();
     const std::string name = (stem.empty() ? std::string("image") : stem) + "." + e.extension;
-    spec.initialPath = folder_.directory().empty() ? name : folder_.directory() + "/" + name;
+    spec.initial_path = folder_.directory().empty() ? name : folder_.directory() + "/" + name;
     spec.filters = {{e.name, std::string("*.") + e.extension}};
-    ui_.chooseFiles(window_.get(), spec,
+    ui_.choose_files(window_.get(), spec,
                     [this, enc = &e, o](std::vector<std::string> files)
                     {
                         if (files.empty() || !image_)
@@ -1409,14 +1384,14 @@ void App::fit_window_to_image()
 {
     if (!image_ || fullscreen_ || !cfg_.fit_window_to_image || !window_)
         return;
-    RectF work = window_->workArea();
+    rap::rect_f work = window_->work_area();
     if (work.w <= 0 || work.h <= 0)
         work = {0, 0, 1920, 1080};
     // Chrome: what the window holds besides the image area.
     int vw = 0, vh = 0;
     view_->view_size(vw, vh);
     const double scale = view_->scale_factor();
-    const SizeF cur = window_->size();
+    const rap::size_f cur = window_->size();
     const float pane_w = metadata_visible_ ? float(cfg_.metadata_pane_width) : 0.f;
     const float chrome_w = vw > 0 ? std::max(0.f, cur.w - float(vw / scale) - pane_w) : 0.f;
     const float chrome_h = vh > 0 ? std::max(0.f, cur.h - float(vh / scale)) : 80.f;
@@ -1450,7 +1425,7 @@ void App::fit_window_to_image()
 
 void App::toggle_fullscreen()
 {
-    window_->setFullscreen(!fullscreen_);
+    window_->set_fullscreen(!fullscreen_);
 }
 
 void App::on_fullscreen_changed(bool fs)
@@ -1460,20 +1435,20 @@ void App::on_fullscreen_changed(bool fs)
     fullscreen_ = fs;
     if (!fs && slideshow_)
         stop_slideshow();
-    toolbar_->setVisible(!fs);
-    footer_->setVisible(!fs);
+    toolbar_->set_visible(!fs);
+    footer_->set_visible(!fs);
     // The info pane gives way to the fullscreen overlay, and comes back after.
     if (fs)
     {
         pane_before_fullscreen_ = metadata_visible_;
-        metadata_pane_->setVisible(false);
+        metadata_pane_->set_visible(false);
     }
     else
     {
         if (pane_before_fullscreen_)
-            metadata_pane_->setVisible(true);
+            metadata_pane_->set_visible(true);
         update_title();
-        exposure_box_->setVisible(image_ && image_->is_raw);
+        exposure_box_->set_visible(image_ && image_->is_raw);
     }
     view_->set_fullscreen(fs);
     if (fs && slideshow_)
@@ -1499,15 +1474,15 @@ void App::zoom_fit()
 
 void App::open_dialog()
 {
-    FileDialogSpec spec;
-    spec.mode = FileDialogSpec::Mode::Open;
+    rap::file_dialog_spec spec;
+    spec.mode = rap::file_dialog_spec::mode::open;
     spec.title = "Open Image";
-    spec.initialPath = folder_.directory();
+    spec.initial_path = folder_.directory();
     std::string patterns;
     for (const std::string& e : cfg_.extensions)
         patterns += (patterns.empty() ? "*." : ";*.") + e;
     spec.filters = {{"Images", patterns}, {"All files", "*"}};
-    ui_.chooseFiles(window_.get(), spec,
+    ui_.choose_files(window_.get(), spec,
                     [this](std::vector<std::string> files)
                     {
                         if (!files.empty())
@@ -1537,8 +1512,8 @@ void App::open_settings_page(int page)
             video_.set_muted(cfg_.video_muted);
             view_->set_video_muted(cfg_.video_muted);
             folder_.rescan(cfg_);
-            smooth_toggle_->setChecked(cfg_.smooth_upscale);
-            xmp_toggle_->setChecked(cfg_.apply_xmp_edits);
+            smooth_toggle_->set_checked(cfg_.smooth_upscale);
+            xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
             view_->config_changed();
             refresh_metadata();
             const bool reload =
@@ -1566,7 +1541,7 @@ void App::update_title()
     std::string title = "IfritView";
     if (!folder_.empty())
         title = folder_.current_name() + " (" + std::to_string(folder_.index() + 1) + "/" + std::to_string(folder_.count()) + ") – IfritView";
-    window_->setTitle(title);
+    window_->set_title(title);
 }
 
 void App::update_status()
@@ -1611,35 +1586,35 @@ void App::update_status()
     {
         const std::string place = image_->place == " " ? "" : image_->place;
         location_url_ = cfg_.map_link(image_->latitude, image_->longitude);
-        status_location_->setText(image_->location_text() + (place.empty() ? "" : "  ·  " + place));
-        status_location_->setVisible(true);
+        status_location_->set_text(image_->location_text() + (place.empty() ? "" : "  ·  " + place));
+        status_location_->set_visible(true);
     }
     else
     {
-        status_location_->setVisible(false);
+        status_location_->set_visible(false);
     }
     const bool busy = status_message_.rfind("Loading", 0) == 0 || status_message_.rfind("Developing", 0) == 0;
     view_->set_busy(busy);
     view_->set_overlay(overlay_sections());
-    status_left_->setText(left);
-    status_center_->setText(center);
-    status_right_->setText(right);
+    status_left_->set_text(left);
+    status_center_->set_text(center);
+    status_right_->set_text(right);
 }
 
-bool App::on_key(const KeyEvent& e)
+bool App::on_key(const rap::key_event& e)
 {
     if (!e.press)
         return false;
-    const bool ctrl = e.modifiers & ModCtrl;
-    const char32_t c = e.key == Key::Character ? e.codepoint : 0;
+    const bool ctrl = e.modifiers & rap::mod_ctrl;
+    const char32_t c = e.key == rap::key::character ? e.codepoint : 0;
     switch (e.key)
     {
-        case Key::Left:
-        case Key::PageUp:
-        case Key::Backspace:
+        case rap::key::left:
+        case rap::key::page_up:
+        case rap::key::backspace:
             navigate(-1);
             return true;
-        case Key::Space:
+        case rap::key::space:
             if (image_ && image_->is_video)
             {
                 toggle_video();  // on a video, Space is play/pause
@@ -1647,21 +1622,21 @@ bool App::on_key(const KeyEvent& e)
             }
             navigate(+1);
             return true;
-        case Key::Right:
-        case Key::PageDown:
+        case rap::key::right:
+        case rap::key::page_down:
             navigate(+1);
             return true;
-        case Key::Home:
+        case rap::key::home:
             go_first();
             return true;
-        case Key::End:
+        case rap::key::end:
             go_last();
             return true;
-        case Key::Enter:
-        case Key::F11:
+        case rap::key::enter:
+        case rap::key::f11:
             toggle_fullscreen();
             return true;
-        case Key::Escape:
+        case rap::key::escape:
             if (slideshow_)
                 stop_slideshow();
             if (fullscreen_)
@@ -1669,7 +1644,7 @@ bool App::on_key(const KeyEvent& e)
             else
                 quit();
             return true;
-        case Key::F5:
+        case rap::key::f5:
             reload();
             return true;
         default:

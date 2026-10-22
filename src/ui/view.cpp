@@ -12,32 +12,7 @@
 #include <cstring>
 #include <numbers>
 
-using rap::Canvas;
-using rap::Color;
-using rap::Cursor;
-using rap::Extent;
-using rap::FileDialogSpec;
-using rap::Filter;
-using rap::Icon;
-using rap::Key;
-using rap::KeyEvent;
-using rap::LineCap;
-using rap::MessageSpec;
-using rap::ModCtrl;
-using rap::ModShift;
-using rap::Node;
-using rap::Paint;
-using rap::Painter;
-using rap::PointerEvent;
-using rap::PointF;
-using rap::RectF;
-using rap::ScrollEvent;
-using rap::SelectionMode;
-using rap::SizeF;
-using rap::TextStyle;
-using rap::ThemeColor;
-using rap::Ui;
-using APixelFormat = rap::PixelFormat;
+using APixelFormat = rap::pixel_format;
 
 namespace
 {
@@ -54,7 +29,7 @@ int64_t now_us()
 }
 
 // "#rrggbb" (or "rrggbb"); `fallback` otherwise.
-Color parse_colour(const std::string& s, Color fallback)
+rap::color parse_colour(const std::string& s, rap::color fallback)
 {
     const char* p = s.c_str();
     if (*p == '#')
@@ -62,12 +37,12 @@ Color parse_colour(const std::string& s, Color fallback)
     unsigned v = 0;
     if (std::strlen(p) != 6 || std::sscanf(p, "%x", &v) != 1)
         return fallback;
-    return Color{uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v), 255};
+    return rap::color{uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v), 255};
 }
 
-Color rgba(double r, double g, double b, double a)
+rap::color rgba(double r, double g, double b, double a)
 {
-    return Color{uint8_t(r * 255 + 0.5), uint8_t(g * 255 + 0.5), uint8_t(b * 255 + 0.5), uint8_t(a * 255 + 0.5)};
+    return rap::color{uint8_t(r * 255 + 0.5), uint8_t(g * 255 + 0.5), uint8_t(b * 255 + 0.5), uint8_t(a * 255 + 0.5)};
 }
 
 Control click_control(int button, bool twice)
@@ -90,31 +65,31 @@ Control drag_control(int button)
 
 }  // namespace
 
-View::View(Ui& ui, const Config& cfg) : ui_(ui), cfg_(cfg) {}
+View::View(rap::ui& ui, const Config& cfg) : ui_(ui), cfg_(cfg) {}
 
 View::~View()
 {
     drop_outgoing();
 }
 
-Node View::node()
+rap::node View::node()
 {
-    return rap::layout::Canvas{}
-        .onPaint([this](Painter& p, SizeF s) { paint(p, s); })
-        .onResize(
-            [this](SizeF)
+    return rap::layout::canvas{}
+        .on_paint([this](rap::painter& p, rap::size_f s) { paint(p, s); })
+        .on_resize(
+            [this](rap::size_f)
             {
                 layout();
                 if (on_resized)
                     on_resized();
             })
-        .onPointer([this](const PointerEvent& e) { return pointer(e); })
-        .onScroll([this](const ScrollEvent& e) { return scroll(e); })
+        .on_pointer([this](const rap::pointer_event& e) { return pointer(e); })
+        .on_scroll([this](const rap::scroll_event& e) { return scroll(e); })
         .bind(canvas_)
         .stretch();
 }
 
-void View::attach(Canvas* canvas)
+void View::attach(rap::canvas* canvas)
 {
     canvas_ = canvas;
 }
@@ -127,13 +102,13 @@ void View::invalidate()
 
 int View::scale_factor() const
 {
-    return canvas_ ? std::max(1, int(std::lround(canvas_->deviceScale()))) : 1;
+    return canvas_ ? std::max(1, int(std::lround(canvas_->device_scale()))) : 1;
 }
 
 void View::view_size(int& w, int& h) const
 {
     const int scale = scale_factor();
-    const SizeF s = canvas_ ? canvas_->size() : SizeF{};
+    const rap::size_f s = canvas_ ? canvas_->size() : rap::size_f{};
     w = int(s.w) * scale;
     h = int(s.h) * scale;
 }
@@ -147,22 +122,22 @@ void View::cancel_deferred_click()
 // hand while panning.
 void View::update_cursor(double x, double y)
 {
-    Cursor want = Cursor::Default;
+    rap::cursor want = rap::cursor::default_;
     if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_), fullscreen_) == Action::Pan)
     {
-        want = Cursor::Grabbing;
+        want = rap::cursor::grabbing;
     }
     else if (has_selection_ && image_ && !pressed_button_)
     {
         double ix, iy;
         to_image(x, y, ix, iy);
         if (ix >= sel_x0_ && ix < sel_x1_ && iy >= sel_y0_ && iy < sel_y1_)
-            want = Cursor::ZoomIn;
+            want = rap::cursor::zoom_in;
     }
     if (want == cursor_ || !canvas_)
         return;
     cursor_ = want;
-    canvas_->setCursor(want);
+    canvas_->set_cursor(want);
 }
 
 void View::crossfade_next(int ms)
@@ -224,7 +199,7 @@ void View::set_image(std::shared_ptr<Image> image)
         // zoom (or the current zoom) plus the motion itself, so it carries on.
         const double z = motion_.active ? motion_.z_cache : zoom_;
         // At 1:1 or larger that's the full-size upload itself, not a scaled copy.
-        const rap::Image* snap = scaled_image(z);
+        const rap::image* snap = scaled_image(z);
         if (snap && snap == scaled_.get())
         {
             outgoing_.image = std::move(scaled_);
@@ -245,7 +220,7 @@ void View::set_image(std::shared_ptr<Image> image)
         outgoing_.fade_start_us = now_us();
         outgoing_.fade_us = int64_t(pending_crossfade_ms_) * 1000;
         if (canvas_)
-            outgoing_tick_ = canvas_->onFrame(
+            outgoing_tick_ = canvas_->on_frame(
                 [this](double)
                 {
                     if (now_us() >= outgoing_.fade_start_us + outgoing_.fade_us)
@@ -486,7 +461,7 @@ void View::begin_motion(double zoom0, double zoom1, double cx0, double cy0, doub
     scaled_image(motion_.z_cache);  // build the intermediate now, not on the first frame
     motion_frame(now_us());
     if (canvas_)
-        motion_tick_ = canvas_->onFrame(
+        motion_tick_ = canvas_->on_frame(
             [this](double)
             {
                 if (motion_.active)
@@ -501,7 +476,7 @@ void View::set_busy(bool busy)
     busy_ = busy;
     busy_tick_.reset();
     if (busy && canvas_)
-        busy_tick_ = canvas_->onFrame([this](double) { invalidate(); });
+        busy_tick_ = canvas_->on_frame([this](double) { invalidate(); });
     invalidate();
 }
 
@@ -551,13 +526,13 @@ void View::zoom_fit()
 
 // ------------------------------------------------------------- pixels
 
-rap::Image* View::base_image()
+rap::image* View::base_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return nullptr;
     if (!base_ || base_dirty_)
     {
-        base_ = ui_.createImage(image_->width, image_->height, APixelFormat::Bgra8Premultiplied, image_->pixels.data(), image_->stride);
+        base_ = ui_.create_image(image_->width, image_->height, APixelFormat::bgra8_premultiplied, image_->pixels.data(), image_->stride);
         base_dirty_ = false;
     }
     return base_.get();
@@ -565,7 +540,7 @@ rap::Image* View::base_image()
 
 // Downscaling a many-megapixel image with a quality filter on every redraw
 // is too slow for smooth panning, so render it once per zoom level.
-rap::Image* View::scaled_image(double zoom)
+rap::image* View::scaled_image(double zoom)
 {
     if (scaled_ && scaled_zoom_ == zoom)
         return scaled_.get();
@@ -578,7 +553,7 @@ rap::Image* View::scaled_image(double zoom)
     const int64_t t0 = now_us();
     const PixelBuffer px = downscale(*image_, w, h);
     const int64_t t1 = now_us();
-    scaled_ = ui_.createImage(w, h, APixelFormat::Bgra8Premultiplied, px.data(), size_t(w) * 4);
+    scaled_ = ui_.create_image(w, h, APixelFormat::bgra8_premultiplied, px.data(), size_t(w) * 4);
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "scale: %dx%d -> %dx%d  downscale %.1f ms  upload %.1f ms  (%zu mips)\n", image_->width, image_->height, w, h, (t1 - t0) / 1000.0,
                      (now_us() - t1) / 1000.0, image_->mips.size());
@@ -587,7 +562,7 @@ rap::Image* View::scaled_image(double zoom)
 }
 
 // Transparency checkerboard, 8 device px squares, the size of the view.
-rap::Image* View::checker_image(int w, int h)
+rap::image* View::checker_image(int w, int h)
 {
     if (checker_ && checker_->width() == w && checker_->height() == h)
         return checker_.get();
@@ -601,20 +576,20 @@ rap::Image* View::checker_image(int w, int h)
             p[0] = p[1] = p[2] = v;
             p[3] = 255;
         }
-    checker_ = ui_.createImage(w, h, APixelFormat::Bgra8Premultiplied, px.data(), size_t(w) * 4);
+    checker_ = ui_.create_image(w, h, APixelFormat::bgra8_premultiplied, px.data(), size_t(w) * 4);
     return checker_.get();
 }
 
 // ------------------------------------------------------------- drawing
 
-void View::paint(Painter& p, SizeF)
+void View::paint(rap::painter& p, rap::size_f)
 {
-    const double scale = p.deviceScale();
+    const double scale = p.device_scale();
     const auto L = [scale](double device) { return float(device / scale); };  // device px -> logical
     int vw, vh;
     view_size(vw, vh);
 
-    const Color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, Color{38, 38, 38});
+    const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
     p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
@@ -627,7 +602,7 @@ void View::paint(Painter& p, SizeF)
         const double x1 = std::min(double(vw), x + std::ceil(w)), y1 = std::min(double(vh), y + std::ceil(h));
         if (x1 > x0 && y1 > y0)
             p.image(*checker_image(vw, vh), {float(x0), float(y0), float(x1 - x0), float(y1 - y0)}, {L(x0), L(y0), L(x1 - x0), L(y1 - y0)},
-                    Filter::Nearest, alpha);
+                    rap::filter::nearest, alpha);
     };
 
     double fade_alpha = 1.0;
@@ -643,22 +618,22 @@ void View::paint(Painter& p, SizeF)
         {
             // Still playing: draw its current frame.
             if (!outgoing_live_image_)
-                outgoing_live_image_ = ui_.createImage(outgoing_live_->width, outgoing_live_->height, APixelFormat::Bgra8Premultiplied,
+                outgoing_live_image_ = ui_.create_image(outgoing_live_->width, outgoing_live_->height, APixelFormat::bgra8_premultiplied,
                                                        outgoing_live_->pixels.data(), outgoing_live_->stride);
             else
                 outgoing_live_image_->update(outgoing_live_->pixels.data(), outgoing_live_->stride);
             p.image(*outgoing_live_image_, {0, 0, float(outgoing_.width), float(outgoing_.height)},
-                    {L(ox), L(oy), L(outgoing_.width * oz), L(outgoing_.height * oz)}, Filter::Linear);
+                    {L(ox), L(oy), L(outgoing_.width * oz), L(outgoing_.height * oz)}, rap::filter::linear);
         }
         else
         {
             const auto& img = *outgoing_.image;
-            p.image(img, {0, 0, float(img.width()), float(img.height())}, {L(ox), L(oy), L(outgoing_.width * oz), L(outgoing_.height * oz)}, Filter::Linear);
+            p.image(img, {0, 0, float(img.width()), float(img.height())}, {L(ox), L(oy), L(outgoing_.width * oz), L(outgoing_.height * oz)}, rap::filter::linear);
         }
         // Where the incoming image won't cover it, the outgoing one fades to
         // the background at the same rate (four bands around the image).
         const double ix0 = pan_x_, iy0 = pan_y_, ix1 = pan_x_ + std::ceil(image_->width * zoom_), iy1 = pan_y_ + std::ceil(image_->height * zoom_);
-        const Color veil{bg.r, bg.g, bg.b, uint8_t(255 * fade_alpha)};
+        const rap::color veil{bg.r, bg.g, bg.b, uint8_t(255 * fade_alpha)};
         p.rect({0, 0, L(vw), L(std::max(0.0, iy0))}, 0, veil, std::nullopt);
         p.rect({0, L(iy1), L(vw), L(std::max(0.0, vh - iy1))}, 0, veil, std::nullopt);
         p.rect({0, L(iy0), L(std::max(0.0, ix0)), L(iy1 - iy0)}, 0, veil, std::nullopt);
@@ -666,7 +641,7 @@ void View::paint(Painter& p, SizeF)
     }
 
     const double sw = image_->width * zoom_, sh = image_->height * zoom_;
-    const RectF dst{L(pan_x_), L(pan_y_), L(sw), L(sh)};
+    const rap::rect_f dst{L(pan_x_), L(pan_y_), L(sw), L(sh)};
     // Mid-fade the checkerboard fades in with its image (not quite a group
     // fade where the image is part-transparent, but close).
     if (image_->has_alpha && cfg_.checkerboard)
@@ -676,21 +651,21 @@ void View::paint(Painter& p, SizeF)
     if (motion_.active)
     {
         // Pre-scaled to the motion's largest zoom; each frame only shrinks it a little.
-        rap::Image* src = scaled_image(motion_.z_cache);
+        rap::image* src = scaled_image(motion_.z_cache);
         if (src)
-            p.image(*src, {0, 0, float(src->width()), float(src->height())}, dst, Filter::Linear, alpha);
+            p.image(*src, {0, 0, float(src->width()), float(src->height())}, dst, rap::filter::linear, alpha);
     }
     else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video)
     {
-        rap::Image* src = scaled_image(zoom_);
+        rap::image* src = scaled_image(zoom_);
         if (src)
-            p.image(*src, {0, 0, float(src->width()), float(src->height())}, {L(pan_x_), L(pan_y_), L(src->width()), L(src->height())}, Filter::Nearest, alpha);
+            p.image(*src, {0, 0, float(src->width()), float(src->height())}, {L(pan_x_), L(pan_y_), L(src->width()), L(src->height())}, rap::filter::nearest, alpha);
     }
     else
     {
         const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video);
-        if (rap::Image* base = base_image())  // the full-size upload, only when it's what gets drawn
-            p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? Filter::Linear : Filter::Nearest, alpha);
+        if (rap::image* base = base_image())  // the full-size upload, only when it's what gets drawn
+            p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? rap::filter::linear : rap::filter::nearest, alpha);
     }
     if (motion_.active)
         frame_ms_ = (now_us() - t_draw) / 1000.0;
@@ -717,8 +692,8 @@ void View::paint(Painter& p, SizeF)
     {
         const double r = 9.0 * scale, cx = vw - 20.0 * scale, cy = vh - 20.0 * scale;
         const double phase = (now_us() % 1000000) / 1000000.0 * 2 * kPi;
-        p.arc({L(cx), L(cy)}, L(r), 0, float(2 * kPi), rgba(1, 1, 1, 0.18), 2.5f, LineCap::Round);
-        p.arc({L(cx), L(cy)}, L(r), float(phase), float(phase + kPi * 0.6), rgba(1, 1, 1, 0.75), 2.5f, LineCap::Round);
+        p.arc({L(cx), L(cy)}, L(r), 0, float(2 * kPi), rgba(1, 1, 1, 0.18), 2.5f, rap::line_cap::round);
+        p.arc({L(cx), L(cy)}, L(r), float(phase), float(phase + kPi * 0.6), rgba(1, 1, 1, 0.75), 2.5f, rap::line_cap::round);
     }
 
     if (cfg_.overlay_enabled && !overlay_.empty() && (fullscreen_ || cfg_.overlay_windowed))
@@ -733,7 +708,7 @@ void View::paint(Painter& p, SizeF)
         const double x = std::floor(pan_x_ + sel_x0_ * zoom_) + 0.5, y = std::floor(pan_y_ + sel_y0_ * zoom_) + 0.5;
         const double w = std::round((sel_x1_ - sel_x0_) * zoom_) - 1, h = std::round((sel_y1_ - sel_y0_) * zoom_) - 1;
         const float lw = float(1.0 / scale);
-        p.rect({L(x), L(y), L(w), L(h)}, 0, std::nullopt, Color{255, 255, 255});
+        p.rect({L(x), L(y), L(w), L(h)}, 0, std::nullopt, rap::color{255, 255, 255});
         const double dash = 4.0 * scale;
         auto dashes = [&](double ax, double ay, double bx, double by)
         {
@@ -741,7 +716,7 @@ void View::paint(Painter& p, SizeF)
             for (double d = 0; d < len; d += 2 * dash)
             {
                 const double e = std::min(len, d + dash);
-                p.line({L(ax + (bx - ax) * d / len), L(ay + (by - ay) * d / len)}, {L(ax + (bx - ax) * e / len), L(ay + (by - ay) * e / len)}, Color{0, 0, 0},
+                p.line({L(ax + (bx - ax) * d / len), L(ay + (by - ay) * d / len)}, {L(ax + (bx - ax) * e / len), L(ay + (by - ay) * e / len)}, rap::color{0, 0, 0},
                        lw);
             }
         };
@@ -754,11 +729,11 @@ void View::paint(Painter& p, SizeF)
 
 // Info overlay: small text in a contrasting colour over a faint backdrop,
 // one block per category with a thin rule between them. Logical px.
-void View::draw_overlay(Painter& p)
+void View::draw_overlay(rap::painter& p)
 {
-    const Color colour = parse_colour(cfg_.overlay_color, Color{166, 217, 106});
-    TextStyle style;
-    style.fg = Paint{colour};
+    const rap::color colour = parse_colour(cfg_.overlay_color, rap::color{166, 217, 106});
+    rap::text_style style;
+    style.fg = rap::paint{colour};
     style.size = float(cfg_.overlay_font_pt);
     std::vector<std::string> blocks;
     float width = 0, height = 0;
@@ -769,7 +744,7 @@ void View::draw_overlay(Painter& p)
         std::string text;
         for (const std::string& l : section)
             text += (text.empty() ? "" : "\n") + l;
-        const SizeF s = p.measure(text, style);
+        const rap::size_f s = p.measure(text, style);
         width = std::max(width, s.w);
         height += s.h + (blocks.empty() ? 0 : 2 * gap + 1);
         blocks.push_back(std::move(text));
@@ -782,7 +757,7 @@ void View::draw_overlay(Painter& p)
         if (i > 0)
         {
             y += gap;
-            p.rect({margin + pad, std::floor(y), width, 1}, 0, Color{colour.r, colour.g, colour.b, 128}, std::nullopt);
+            p.rect({margin + pad, std::floor(y), width, 1}, 0, rap::color{colour.r, colour.g, colour.b, 128}, std::nullopt);
             y += gap + 1;
         }
         p.text({margin + pad, y}, blocks[i], style);
@@ -877,15 +852,15 @@ double View::fraction_at(double device_x) const
 
 // -----O------ with a play/pause glyph: white over a dark outline, so it reads
 // on any picture without a panel behind it.
-void View::draw_video_controls(Painter& p)
+void View::draw_video_controls(rap::painter& p)
 {
-    const double scale = p.deviceScale();
+    const double scale = p.device_scale();
     const auto L = [scale](double device) { return float(device / scale); };
     const ControlsGeometry g = controls_geometry();
     const double knob_x = g.line_x0 + (g.line_x1 - g.line_x0) * video_fraction_;
-    const Color dark = rgba(0, 0, 0, 0.5), white = rgba(1, 1, 1, 0.95);
-    p.line({L(g.line_x0), L(g.y)}, {L(g.line_x1), L(g.y)}, rgba(0, 0, 0, 0.45), 5, LineCap::Round);
-    p.line({L(g.line_x0), L(g.y)}, {L(g.line_x1), L(g.y)}, rgba(1, 1, 1, 0.45), 2, LineCap::Round);
+    const rap::color dark = rgba(0, 0, 0, 0.5), white = rgba(1, 1, 1, 0.95);
+    p.line({L(g.line_x0), L(g.y)}, {L(g.line_x1), L(g.y)}, rgba(0, 0, 0, 0.45), 5, rap::line_cap::round);
+    p.line({L(g.line_x0), L(g.y)}, {L(g.line_x1), L(g.y)}, rgba(1, 1, 1, 0.45), 2, rap::line_cap::round);
     p.line({L(g.line_x0), L(g.y)}, {L(knob_x), L(g.y)}, white, 2);  // played part
     p.circle({L(knob_x), L(g.y)}, L(g.radius), white, dark);
     // Glyph: pause bars while playing, a triangle while paused.
@@ -911,17 +886,17 @@ void View::draw_video_controls(Painter& p)
                {L(sx - 4 * u), L(sy + 3 * u)},
                {L(sx - 8 * u), L(sy + 3 * u)}},
               white, dark, 2);
-    auto mark = [&](float width, Color c)
+    auto mark = [&](float width, rap::color c)
     {
         if (video_muted_)
         {
-            p.line({L(sx + 4 * u), L(sy - 4 * u)}, {L(sx + 11 * u), L(sy + 4 * u)}, c, width, LineCap::Round);
-            p.line({L(sx + 11 * u), L(sy - 4 * u)}, {L(sx + 4 * u), L(sy + 4 * u)}, c, width, LineCap::Round);
+            p.line({L(sx + 4 * u), L(sy - 4 * u)}, {L(sx + 11 * u), L(sy + 4 * u)}, c, width, rap::line_cap::round);
+            p.line({L(sx + 11 * u), L(sy - 4 * u)}, {L(sx + 4 * u), L(sy + 4 * u)}, c, width, rap::line_cap::round);
         }
         else
         {
-            p.arc({L(sx + 1 * u), L(sy)}, 5, -0.8f, 0.8f, c, width, LineCap::Round);
-            p.arc({L(sx + 1 * u), L(sy)}, 9, -0.8f, 0.8f, c, width, LineCap::Round);
+            p.arc({L(sx + 1 * u), L(sy)}, 5, -0.8f, 0.8f, c, width, rap::line_cap::round);
+            p.arc({L(sx + 1 * u), L(sy)}, 9, -0.8f, 0.8f, c, width, rap::line_cap::round);
         }
     };
     mark(4.0f, dark);
@@ -933,9 +908,9 @@ void View::draw_video_controls(Painter& p)
     {
         const double vx = sx + 1 * u, top_y = g.volume_top, bottom = g.volume_bottom;
         const double knob_y = bottom - (bottom - top_y) * video_volume_;
-        p.line({L(vx), L(top_y)}, {L(vx), L(bottom)}, rgba(0, 0, 0, 0.45), 5, LineCap::Round);
-        p.line({L(vx), L(top_y)}, {L(vx), L(bottom)}, rgba(1, 1, 1, 0.45), 2, LineCap::Round);
-        p.line({L(vx), L(knob_y)}, {L(vx), L(bottom)}, white, 2, LineCap::Round);
+        p.line({L(vx), L(top_y)}, {L(vx), L(bottom)}, rgba(0, 0, 0, 0.45), 5, rap::line_cap::round);
+        p.line({L(vx), L(top_y)}, {L(vx), L(bottom)}, rgba(1, 1, 1, 0.45), 2, rap::line_cap::round);
+        p.line({L(vx), L(knob_y)}, {L(vx), L(bottom)}, white, 2, rap::line_cap::round);
         p.circle({L(vx), L(knob_y)}, L(g.radius), white, dark);
     }
 }
@@ -1085,14 +1060,14 @@ void View::update_volume_hover(double dx, double dy)
     }
 }
 
-bool View::pointer(const PointerEvent& e)
+bool View::pointer(const rap::pointer_event& e)
 {
-    using T = PointerEvent::Type;
+    using T = rap::pointer_event_type;
     const int s = scale_factor();
     const double ex = e.pos.x, ey = e.pos.y;
     const double dx = ex * s, dy = ey * s;
 
-    if (e.type == T::Move || e.type == T::Enter)
+    if (e.type == T::move || e.type == T::enter)
     {
         poke_controls();
         update_volume_hover(dx, dy);
@@ -1130,10 +1105,10 @@ bool View::pointer(const PointerEvent& e)
         drag_to(a, ex, ey);
         return true;
     }
-    if (e.type == T::Leave)
+    if (e.type == T::leave)
         return false;
 
-    const bool press = e.type == T::Press;
+    const bool press = e.type == T::press;
     if (video_ && e.button == 1)
     {
         const ControlsGeometry g = controls_geometry();
@@ -1237,7 +1212,7 @@ bool View::pointer(const PointerEvent& e)
     return true;
 }
 
-bool View::scroll(const ScrollEvent& e)
+bool View::scroll(const rap::scroll_event& e)
 {
     // Over the speaker or the volume line, the wheel is the volume.
     if (video_ && video_audio_ && controls_visible())
@@ -1275,7 +1250,7 @@ bool View::scroll(const ScrollEvent& e)
     }
     if (direction == 0)
         return true;
-    const Control c = (e.modifiers & ModCtrl) ? Control::CtrlWheel : (e.modifiers & ModShift) ? Control::ShiftWheel : Control::Wheel;
+    const Control c = (e.modifiers & rap::mod_ctrl) ? Control::CtrlWheel : (e.modifiers & rap::mod_shift) ? Control::ShiftWheel : Control::Wheel;
     run_wheel(cfg_.control(c, fullscreen_), direction, e.pos.x, e.pos.y);
     return true;
 }

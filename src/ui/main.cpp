@@ -100,7 +100,7 @@ void run_step(App& app, const std::string& step)
 
 }  // namespace
 
-int run_app(rap::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start);
+int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start);
 
 int main(int argc, char** argv)
 {
@@ -126,7 +126,7 @@ int main(int argc, char** argv)
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
 
-    auto ui = rap::Ui::load(argc, argv);
+    auto ui = rap::ui::load(argc, argv);
     if (!ui)
     {
         std::fprintf(stderr, "%s\n", ui.error().c_str());
@@ -134,23 +134,23 @@ int main(int argc, char** argv)
     }
     // Results from worker threads (lookups, video frames) come back through
     // the toolkit's loop; with Win32 there is no GLib loop to carry them.
-    rap::Ui& toolkit = **ui;
+    rap::ui& toolkit = **ui;
     platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
     const int rc = run_app(**ui, argc, argv, t_start);
     platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
     return rc;
 }
 
-int run_app(rap::Ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
+int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
 {
     App app(ui);
     if (argc > 1)
         app.open_path(argv[1]);
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "startup: %.0f ms to window creation (%s)\n",
-                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string(ui.backendName()).c_str());
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string(ui.backend_name()).c_str());
 
-    rap::Subscription script;
+    rap::subscription script;
     std::vector<std::string> steps;
     size_t next = 0;
     if (const char* text = g_getenv("IFRIT_SCRIPT"))

@@ -12,5 +12,5 @@ struct Config;
 // `page`: the tab to open on (0 General, 1 Viewing, 2 Controls, 3 File Types).
 // Returns a function that ends the dialog as OK (true) or Cancel would; it
 // does nothing once the dialog has gone.
-std::function<void(bool ok)> open_settings_dialog(rap::Ui& ui, rap::Window* parent, Config& cfg, std::function<void(bool ok)> done,
+std::function<void(bool ok)> open_settings_dialog(rap::ui& ui, rap::window* parent, Config& cfg, std::function<void(bool ok)> done,
                                                   int page = 0);

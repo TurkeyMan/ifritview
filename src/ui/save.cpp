@@ -3,9 +3,8 @@
 #include <algorithm>
 
 namespace L = rap::layout;
-using rap::Extent;
 
-std::shared_ptr<SaveDialog> SaveDialog::open(rap::Ui& ui, rap::Window* parent, const std::string& own_extension,
+std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
                                              std::map<std::string, EncodeOptions>& remembered, Callbacks callbacks)
 {
     auto d = std::shared_ptr<SaveDialog>(new SaveDialog);
@@ -30,46 +29,46 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::Ui& ui, rap::Window* parent, c
     size_t most = 1;
     for (const Page& p : d->pages_)
         most = std::max(most, p.encoder->settings.size());
-    rap::Nodes pages;
+    rap::nodes pages;
     for (Page& p : d->pages_)
         pages.push_back(d->page_node(p));
     SaveDialog* s = d.get();
-    d->window_ = ui.create(L::Dialog{"Save Image As",
-                                     {L::VBox{
+    d->window_ = ui.create(L::dialog{"Save Image As",
+                                     {L::vbox{
                                          // The preview's file size and its toggle sit with the format,
                                          // in the same place whatever the format's settings.
-                                         L::Form{{"Format", L::HBox{L::Select{names, initial}.onChanged([s](int i) { s->show_format(i); }).bind(s->format_),
-                                                                    L::Label{""}.bind(s->info_).width(Extent{8, Extent::Unit::Chars}),
-                                                                    L::Check{"Preview", true}
-                                                                        .onToggled(
+                                         L::form{{"Format", L::hbox{L::drop_down{names, initial}.on_changed([s](int i) { s->show_format(i); }).bind(s->format_),
+                                                                    L::label{""}.bind(s->info_).width(rap::extent{8, rap::extent::unit::chars}),
+                                                                    L::check{"Preview", true}
+                                                                        .on_toggled(
                                                                             [s](bool on)
                                                                             {
                                                                                 if (s->callbacks_.preview_shown)
                                                                                     s->callbacks_.preview_shown(on);
                                                                             })
                                                                         .bind(s->preview_)}}},
-                                         L::Separator{},
-                                         rap::Node{rap::spec::Box{rap::Orientation::Vertical, pages}, {}},
-                                         L::Spacer{},
-                                         L::Buttons{L::Ok("_Save…"), L::Cancel},
+                                         L::separator{},
+                                         rap::node{rap::spec::box{rap::orientation::vertical, pages}, {}},
+                                         L::spacer{},
+                                         L::buttons{L::ok("_Save…"), L::cancel},
                                      }}}
-                               .size(Extent{62, Extent::Unit::Chars}, Extent{float(5 + 2.2 * double(most)), Extent::Unit::Lines})
+                               .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(5 + 2.2 * double(most)), rap::extent::unit::lines})
                                .modeless()
                                .resizable(false),
                            parent);
     for (Page& p : d->pages_)
         d->update_enabled(p);
-    d->window_->onFinished([s](rap::DialogRole role) { s->finish(role == rap::DialogRole::Ok); });
+    d->window_->on_finished([s](rap::dialog_role role) { s->finish(role == rap::dialog_role::ok); });
     d->show_format(initial);
     d->window_->show();
     return d;
 }
 
-rap::Node SaveDialog::page_node(Page& page)
+rap::node SaveDialog::page_node(Page& page)
 {
     const Encoder& e = *page.encoder;
     const EncodeOptions& known = (*remembered_)[e.extension];
-    std::vector<L::FormRow> rows;
+    std::vector<L::form_row> rows;
     SaveDialog* s = this;
     Page* p = &page;
     for (size_t i = 0; i < e.settings.size(); ++i)
@@ -77,21 +76,21 @@ rap::Node SaveDialog::page_node(Page& page)
         const EncodeSetting& set = e.settings[i];
         const int value = known.get(set.key, set.initial);
         Control& c = page.controls[i];
-        rap::Node beside = L::Label{set.note ? set.note : ""};  // a few words
+        rap::node beside = L::label{set.note ? set.note : ""};  // a few words
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
-                rows.push_back({set.label, L::HBox{L::Slider{double(set.min), double(set.max), double(value)}
+                rows.push_back({set.label, L::hbox{L::slider{double(set.min), double(set.max), double(value)}
                                                        .step(1, std::max(1, (set.max - set.min) / 10))
-                                                       .showValue(0)
-                                                       .onChanged([s](double) { s->report(); })
+                                                       .show_value(0)
+                                                       .on_changed([s](double) { s->report(); })
                                                        .bind(c.range)
-                                                       .width(Extent{26, Extent::Unit::Chars}),
+                                                       .width(rap::extent{26, rap::extent::unit::chars}),
                                                    beside}});
                 break;
             case EncodeSetting::Kind::Toggle:
-                rows.push_back({"", L::HBox{L::Check{set.label, value != 0}
-                                                .onToggled(
+                rows.push_back({"", L::hbox{L::check{set.label, value != 0}
+                                                .on_toggled(
                                                     [s, p](bool)
                                                     {
                                                         s->update_enabled(*p);
@@ -103,20 +102,20 @@ rap::Node SaveDialog::page_node(Page& page)
             case EncodeSetting::Kind::Choice:
             {
                 std::vector<std::string> choices(set.choices.begin(), set.choices.end());
-                rows.push_back({set.label, L::HBox{L::Select{choices, value}.onChanged([s](int) { s->report(); }).bind(c.choice), beside}});
+                rows.push_back({set.label, L::hbox{L::drop_down{choices, value}.on_changed([s](int) { s->report(); }).bind(c.choice), beside}});
                 break;
             }
         }
     }
     if (rows.empty())
-        rows.push_back({"", L::Label{std::string(e.name) + " has no settings."}});
-    rap::spec::Form form;
-    for (L::FormRow& r : rows)
+        rows.push_back({"", L::label{std::string(e.name) + " has no settings."}});
+    rap::spec::form form;
+    for (L::form_row& r : rows)
     {
         form.labels.push_back(r.label);
         form.fields.push_back(std::move(r.field));
     }
-    rap::Node node{std::move(form), {}};
+    rap::node node{std::move(form), {}};
     node.common.handle = &page.box;
     return node;
 }
@@ -174,11 +173,11 @@ void SaveDialog::update_enabled(Page& page)
             const bool enabled = o.get(off, 0) == 0;
             const Control& c = page.controls[i];
             if (c.range)
-                c.range->setEnabled(enabled);
+                c.range->set_enabled(enabled);
             if (c.choice)
-                c.choice->setEnabled(enabled);
+                c.choice->set_enabled(enabled);
             if (c.toggle)
-                c.toggle->setEnabled(enabled);
+                c.toggle->set_enabled(enabled);
         }
 }
 
@@ -186,7 +185,7 @@ void SaveDialog::show_format(int index)
 {
     for (size_t i = 0; i < pages_.size(); ++i)
         if (pages_[i].box)
-            pages_[i].box->setVisible(int(i) == index);
+            pages_[i].box->set_visible(int(i) == index);
     report();
 }
 
@@ -198,14 +197,14 @@ void SaveDialog::report()
     const Page& p = pages_[size_t(i)];
     const EncodeOptions o = options(p);
     if (preview_)
-        preview_->setEnabled(p.encoder->lossy(o));  // nothing to preview when it's kept exactly
+        preview_->set_enabled(p.encoder->lossy(o));  // nothing to preview when it's kept exactly
     callbacks_.changed(*p.encoder, o);
 }
 
 void SaveDialog::set_info(const std::string& text)
 {
     if (info_)
-        info_->setText(text);
+        info_->set_text(text);
 }
 
 void SaveDialog::close()

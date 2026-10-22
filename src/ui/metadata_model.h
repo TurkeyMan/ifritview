@@ -10,7 +10,7 @@
 // The metadata pane's rows: each group as a bold heading, then its tags.
 // A photo with GPS gets a "Location" row first in its group; activating it
 // opens the map link.
-class MetadataModel : public rap::ListModel
+class MetadataModel : public rap::list_model
 {
 public:
     void set(const std::vector<MetadataGroup>& groups, const Image* image, const std::string& map_url)
@@ -26,28 +26,28 @@ public:
             for (const MetadataItem& item : g.items)
                 rows_.push_back({item.key, item.value, Kind::Item, ""});
         }
-        notifyReset();
+        notify_reset();
     }
 
     // The map link of a row, if it has one.
     std::string url(size_t row) const { return row < rows_.size() ? rows_[row].url : std::string(); }
 
-    size_t rowCount() const override { return rows_.size(); }
+    size_t row_count() const override { return rows_.size(); }
     std::string text(size_t row, size_t column) const override
     {
         if (row >= rows_.size())
             return {};
         return column == 0 ? rows_[row].key : rows_[row].value;
     }
-    rap::TextStyle style(size_t row, size_t column) const override
+    rap::text_style style(size_t row, size_t column) const override
     {
-        rap::TextStyle s;
+        rap::text_style s;
         if (row >= rows_.size())
             return s;
         if (rows_[row].kind == Kind::Heading)
             s.bold = true;
         if (rows_[row].kind == Kind::Link && column == 1)
-            s.fg = rap::Paint{rap::ThemeColor::Link};
+            s.fg = rap::paint{rap::theme_color::link};
         return s;
     }
 
