@@ -20,6 +20,8 @@ public:
     {
         // A format or setting changed (and once at the start): for the preview.
         std::function<void(const Encoder&, const EncodeOptions&)> changed;
+        // The Preview toggle: show the preview or the image (no re-encode).
+        std::function<void(bool)> preview_shown;
         // Save… was pressed.
         std::function<void(const Encoder&, const EncodeOptions&)> chosen;
         // The dialog has gone, either way.
@@ -32,7 +34,8 @@ public:
     static std::shared_ptr<SaveDialog> open(anyui::Ui& ui, anyui::Window* parent, const std::string& own_extension,
                                             std::map<std::string, EncodeOptions>& remembered, Callbacks callbacks);
 
-    void set_info(const std::string& text);  // beside the quality: the preview's file size
+    void set_info(const std::string& text);  // beside the format: the preview's file size
+    bool preview_shown() const { return !preview_ || preview_->checked(); }
     void close();                            // as Cancel
 
 private:
@@ -47,7 +50,6 @@ private:
     {
         const Encoder* encoder;
         anyui::Widget* box = nullptr;
-        anyui::Label* info = nullptr;   // beside the quality slider
         std::vector<Control> controls;  // per setting, sized before building
     };
 
@@ -66,4 +68,6 @@ private:
     Callbacks callbacks_;
     std::weak_ptr<SaveDialog> self_;
     bool finished_ = false;
+    anyui::Label* info_ = nullptr;
+    anyui::Check* preview_ = nullptr;
 };

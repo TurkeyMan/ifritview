@@ -163,6 +163,7 @@ private:
     std::string status_message_;
     anyui::Subscription refit_timer_;
     std::shared_ptr<SaveDialog> save_dialog_;
+    std::shared_ptr<Image> preview_image_;  // the latest preview, shown while its toggle is on
     std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
     // Shared with the preview workers, which may outlive a request: the
     // latest generation wins, and the app waits for running ones on exit.

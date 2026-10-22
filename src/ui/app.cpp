@@ -876,9 +876,9 @@ void App::open_path(const std::string& path)
 
 void App::load_current()
 {
-    if (save_dialog_)
-        save_dialog_->close();  // it was saving (and previewing) the image going away
     const std::string path = folder_.current();
+    if (save_dialog_ && path != image_path_)
+        save_dialog_->close();  // it was saving (and previewing) the image going away
     if (path.empty())
     {
         status_message_ = folder_.directory().empty() ? "No image open" : "No images in " + folder_.directory();
@@ -1127,6 +1127,14 @@ void App::save_as()
         return;
     SaveDialog::Callbacks cb;
     cb.changed = [this](const Encoder& e, const EncodeOptions& o) { preview_save(e, o); };
+    cb.preview_shown = [this](bool on)
+    {
+        // The encode is already done: this only swaps what the view shows.
+        if (on && preview_image_)
+            view_->show_preview(preview_image_);
+        else
+            view_->end_preview();
+    };
     cb.chosen = [this](const Encoder& e, const EncodeOptions& o)
     {
         // After the dialog has gone, so the file dialog has the main window as parent.
@@ -1135,6 +1143,7 @@ void App::save_as()
     cb.closed = [this]
     {
         ++preview_->generation;
+        preview_image_.reset();
         view_->end_preview();
         save_dialog_.reset();
         status_message_.clear();
@@ -1150,6 +1159,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
     const uint64_t generation = ++preview_->generation;
     if (!image_ || !e.lossy(o))
     {
+        preview_image_.reset();
         view_->end_preview();
         if (save_dialog_)
             save_dialog_->set_info("");
@@ -1201,7 +1211,9 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
                         update_status();
                         return;
                     }
-                    view_->show_preview(result);
+                    preview_image_ = result;
+                    if (save_dialog_->preview_shown())
+                        view_->show_preview(result);
                     save_dialog_->set_info(human_bytes(size));
                 });
         })

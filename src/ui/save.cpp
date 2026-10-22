@@ -20,7 +20,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
         if (own_extension == e->extension)
             initial = int(d->pages_.size());
         names.push_back(e->name);
-        d->pages_.push_back({e, nullptr, nullptr, std::vector<Control>(e->settings.size())});
+        d->pages_.push_back({e, nullptr, std::vector<Control>(e->settings.size())});
     }
     if (d->pages_.empty())
         return nullptr;
@@ -36,7 +36,18 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
     SaveDialog* s = d.get();
     d->window_ = ui.create(L::Dialog{"Save Image As",
                                      {L::VBox{
-                                         L::Form{{"Format", L::Select{names, initial}.onChanged([s](int i) { s->show_format(i); }).bind(s->format_)}},
+                                         // The preview's file size and its toggle sit with the format,
+                                         // in the same place whatever the format's settings.
+                                         L::Form{{"Format", L::HBox{L::Select{names, initial}.onChanged([s](int i) { s->show_format(i); }).bind(s->format_),
+                                                                    L::Label{""}.bind(s->info_).width(Extent{8, Extent::Unit::Chars}),
+                                                                    L::Check{"Preview", true}
+                                                                        .onToggled(
+                                                                            [s](bool on)
+                                                                            {
+                                                                                if (s->callbacks_.preview_shown)
+                                                                                    s->callbacks_.preview_shown(on);
+                                                                            })
+                                                                        .bind(s->preview_)}}},
                                          L::Separator{},
                                          anyui::Node{anyui::spec::Box{anyui::Orientation::Vertical, pages}, {}},
                                          L::Spacer{},
@@ -66,10 +77,7 @@ anyui::Node SaveDialog::page_node(Page& page)
         const EncodeSetting& set = e.settings[i];
         const int value = known.get(set.key, set.initial);
         Control& c = page.controls[i];
-        // Beside the control: its note, or for the quality, the preview's file size.
-        const bool quality = std::string(set.key) == "quality";
-        anyui::Node beside = quality ? anyui::Node(L::Label{""}.bind(page.info).width(Extent{9, Extent::Unit::Chars}))
-                                     : anyui::Node(L::Label{set.note ? set.note : ""});
+        anyui::Node beside = L::Label{set.note ? set.note : ""};  // a few words
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
@@ -188,14 +196,16 @@ void SaveDialog::report()
     if (i < 0 || !callbacks_.changed)
         return;
     const Page& p = pages_[size_t(i)];
-    callbacks_.changed(*p.encoder, options(p));
+    const EncodeOptions o = options(p);
+    if (preview_)
+        preview_->setEnabled(p.encoder->lossy(o));  // nothing to preview when it's kept exactly
+    callbacks_.changed(*p.encoder, o);
 }
 
 void SaveDialog::set_info(const std::string& text)
 {
-    const int i = format_ ? format_->current() : -1;
-    if (i >= 0 && pages_[size_t(i)].info)
-        pages_[size_t(i)].info->setText(text);
+    if (info_)
+        info_->setText(text);
 }
 
 void SaveDialog::close()
