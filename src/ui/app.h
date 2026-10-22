@@ -20,8 +20,8 @@
 #include <string>
 #include <vector>
 
-// IfritView on rapport: the same app as the GTK front end, with the toolkit
-// picked at runtime (GTK 3 here, Win32 on Windows).
+// IfritView on rapport, with the toolkit picked at runtime (GTK or Qt on
+// Linux, Win32 on Windows).
 class App
 {
 public:

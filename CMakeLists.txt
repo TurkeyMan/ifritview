@@ -13,18 +13,15 @@ set(IFRIT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version stamped into the bi
 
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
-# The core needs GLib/GIO and gdk-pixbuf; GTK only for the GTK front end.
+# The core needs GLib/GIO and gdk-pixbuf; the toolkits come with rapport.
 if(WIN32)
   pkg_check_modules(CORE REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0 gdk-pixbuf-2.0)
 else()
   pkg_check_modules(CORE REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0 gio-unix-2.0 gdk-pixbuf-2.0)
 endif()
-if(NOT WIN32)
-  pkg_check_modules(GTK IMPORTED_TARGET gtk+-3.0)
-endif()
 
 # Everything that isn't UI: decoders, the image model, loader, cache, config,
-# folders, video, geocoding. Both front ends link it.
+# folders, video, geocoding.
 add_library(ifrit_core STATIC
   src/config.cpp
   src/folder.cpp
@@ -58,69 +55,51 @@ else()
   target_sources(ifrit_core PRIVATE src/integration.cpp)
 endif()
 
-# The GTK 3 front end (the shipping one on Linux, until the rapport one has caught up).
-if(GTK_FOUND)
-  add_executable(ifritview
-    src/main.cpp
-    src/app.cpp
-    src/viewer.cpp
-    src/settings.cpp
-    src/metadata.cpp
-    src/icons.cpp
-  )
-  target_compile_options(ifritview PRIVATE -Wall -Wextra)
-  target_link_libraries(ifritview PRIVATE ifrit_core PkgConfig::GTK)
-endif()
-
-# The rapport front end: native widgets from whichever toolkit is at hand (GTK 3
-# here, Win32 on Windows), linked in statically from the third_party/rapport submodule
-# (github.com/TurkeyMan/rapport).
+# The app: native widgets from whichever toolkit is at hand (GTK or Qt on
+# Linux, Win32 on Windows), through rapport, linked in statically from the
+# third_party/rapport submodule (github.com/TurkeyMan/rapport).
 set(IFRIT_RAPPORT_DIR "${CMAKE_SOURCE_DIR}/third_party/rapport" CACHE PATH "rapport source tree")
-option(IFRIT_UI_RAPPORT "Build the rapport front end (ifritview-rapport)" ON)
-if(IFRIT_UI_RAPPORT AND EXISTS "${IFRIT_RAPPORT_DIR}/CMakeLists.txt")
-  set(RAPPORT_STATIC ON CACHE BOOL "" FORCE)
-  set(RAPPORT_EXAMPLES OFF CACHE BOOL "" FORCE)
-  # One GTK per program: 3 (the default) or 4. Windows uses neither.
-  set(IFRIT_GTK 3 CACHE STRING "GTK major version for the rapport front end (3 or 4)")
-  if(WIN32)
-    set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
-    set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
-  elseif(IFRIT_GTK STREQUAL "4")
-    set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
-    set(RAPPORT_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
-  else()
-    set(RAPPORT_BACKEND_GTK3 ON CACHE BOOL "" FORCE)
-    set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
-  endif()
-  add_subdirectory(${IFRIT_RAPPORT_DIR} rapport EXCLUDE_FROM_ALL)
-  add_executable(ifritview-rapport
-    src/ui/main.cpp
-    src/ui/app.cpp
-    src/ui/view.cpp
-    src/ui/settings.cpp
-    src/ui/save.cpp
-  )
-  set_target_properties(ifritview-rapport PROPERTIES CXX_STANDARD 23)
-  target_compile_options(ifritview-rapport PRIVATE -Wall -Wextra)
-  target_include_directories(ifritview-rapport PRIVATE src/ui)
-  target_link_libraries(ifritview-rapport PRIVATE ifrit_core rapport::rapport)
-  if(WIN32)
-    # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
-    enable_language(RC)
-    target_sources(ifritview-rapport PRIVATE data/windows/ifritview.rc)
-    set_target_properties(ifritview-rapport PROPERTIES OUTPUT_NAME ifritview)
-  endif()
-  # Qt 6 alongside GTK when it's installed; RAPPORT_BACKEND / --ui choose.
-  foreach(backend gtk3 gtk4 qt6 null win32)
-    if(TARGET rapport::backend_${backend})
-      target_link_libraries(ifritview-rapport PRIVATE rapport::backend_${backend})
-      target_compile_definitions(ifritview-rapport PRIVATE IFRIT_BACKEND_${backend})
-    endif()
-  endforeach()
-  message(STATUS "rapport front end: enabled (${IFRIT_RAPPORT_DIR})")
-else()
-  message(STATUS "rapport front end: off (no ${IFRIT_RAPPORT_DIR})")
+if(NOT EXISTS "${IFRIT_RAPPORT_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "rapport not found in ${IFRIT_RAPPORT_DIR}: run 'git submodule update --init'")
 endif()
+set(RAPPORT_STATIC ON CACHE BOOL "" FORCE)
+set(RAPPORT_EXAMPLES OFF CACHE BOOL "" FORCE)
+# One GTK per program: 3 (the default) or 4. Windows uses neither.
+set(IFRIT_GTK 3 CACHE STRING "GTK major version (3 or 4)")
+if(WIN32)
+  set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
+  set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
+elseif(IFRIT_GTK STREQUAL "4")
+  set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
+  set(RAPPORT_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
+else()
+  set(RAPPORT_BACKEND_GTK3 ON CACHE BOOL "" FORCE)
+  set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
+endif()
+add_subdirectory(${IFRIT_RAPPORT_DIR} rapport EXCLUDE_FROM_ALL)
+add_executable(ifritview
+  src/ui/main.cpp
+  src/ui/app.cpp
+  src/ui/view.cpp
+  src/ui/settings.cpp
+  src/ui/save.cpp
+)
+set_target_properties(ifritview PROPERTIES CXX_STANDARD 23)
+target_compile_options(ifritview PRIVATE -Wall -Wextra)
+target_include_directories(ifritview PRIVATE src/ui)
+target_link_libraries(ifritview PRIVATE ifrit_core rapport::rapport)
+if(WIN32)
+  # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
+  enable_language(RC)
+  target_sources(ifritview PRIVATE data/windows/ifritview.rc)
+endif()
+# Qt 6 alongside GTK when it's installed; RAPPORT_BACKEND / --ui choose.
+foreach(backend gtk3 gtk4 qt6 null win32)
+  if(TARGET rapport::backend_${backend})
+    target_link_libraries(ifritview PRIVATE rapport::backend_${backend})
+    target_compile_definitions(ifritview PRIVATE IFRIT_BACKEND_${backend})
+  endif()
+endforeach()
 
 # Optional format backends. Each is on by default and simply left out, with a
 # notice, when its library isn't installed.
