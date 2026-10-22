@@ -384,15 +384,18 @@ rap::node controls_page(const Config& cfg, State& st)
     // A blank label, not an empty one (which would span both columns), so
     // the headings sit over the fields.
     form_labels.push_back(" ");
-    rows.push_back(L::hbox{L::label{"Windowed"}.width(chars(30)), L::label{"Fullscreen"}});
+    // Wide enough for the longest action: GTK widens a drop-down to fit its
+    // choices, so a narrower one would push the second column out of line.
+    constexpr float column = 36;
+    rows.push_back(L::hbox{L::label{"Windowed"}.width(chars(column)), L::label{"Fullscreen"}});
     for (const ControlInfo& c : kControls)
     {
         const std::vector<Action> acts = actions_for(c.kind);
         const std::vector<std::string> items = labels(acts);
         form_labels.push_back(c.label);
         rows.push_back(L::hbox{
-            L::drop_down{items, index_of(acts, cfg.control(c.id, false))}.bind(st.controls[size_t(c.id)]).width(chars(30)),
-            L::drop_down{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(30)),
+            L::drop_down{items, index_of(acts, cfg.control(c.id, false))}.bind(st.controls[size_t(c.id)]).width(chars(column)),
+            L::drop_down{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(column)),
         });
     }
     rap::spec::form form{form_labels, rows};
@@ -486,7 +489,7 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
                                              .stretch(),
                                          L::buttons{L::cancel, L::ok},
                                      }}}
-                               .size(chars(104), rap::extent{40, rap::extent::unit::lines}),
+                               .size(chars(116), rap::extent{40, rap::extent::unit::lines}),
                            parent);
     lap("create");
     st->tabs->set_current(page);
