@@ -190,9 +190,9 @@ void App::build_ui()
                 .bind(splitter_)
                 .stretch(),
             hbox{
-                // Long names and details give way, so they never hold the window wide.
+                // A long name gives way, so it never holds the window wide.
                 L::label{""}.ellipsize().bind(status_left_).stretch(),
-                L::label{""}.ellipsize().bind(status_center_),
+                L::label{""}.bind(status_center_),
                 L::button{""}.flat().on_click([this] { open_url(location_url_); }).bind(status_location_),
                 L::label{""}.bind(status_right_),
             }
