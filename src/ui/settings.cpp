@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -430,14 +432,32 @@ anyui::Node file_types_page(const Config& cfg, State& st)
 
 void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std::function<void(bool)> done, int page)
 {
+    const bool trace = std::getenv("IFRIT_TRACE");
+    const auto t0 = std::chrono::steady_clock::now();
+    auto t = t0;
+    const auto lap = [&](const char* what)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (trace)
+            std::fprintf(stderr, "settings: %-8s %6.1f ms\n", what, std::chrono::duration<double, std::milli>(now - t).count());
+        t = now;
+    };
     auto st = std::make_shared<State>(cfg, std::move(done));
+    anyui::Node general = general_page(cfg, *st);
+    lap("general");
+    anyui::Node viewing = viewing_page(cfg, *st);
+    lap("viewing");
+    anyui::Node controls = controls_page(cfg, *st);
+    lap("controls");
+    anyui::Node types = file_types_page(cfg, *st);
+    lap("types");
     st->window = ui.create(L::Dialog{"Settings",
                                      {L::VBox{
                                          L::Tabs{
-                                             {"General", general_page(cfg, *st)},
-                                             {"Viewing", viewing_page(cfg, *st)},
-                                             {"Controls", controls_page(cfg, *st)},
-                                             {"File Types", file_types_page(cfg, *st)},
+                                             {"General", general},
+                                             {"Viewing", viewing},
+                                             {"Controls", controls},
+                                             {"File Types", types},
                                          }
                                              .bind(st->tabs)
                                              .stretch(),
@@ -445,6 +465,7 @@ void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std
                                      }}}
                                .size(chars(90), Extent{40, Extent::Unit::Lines}),
                            parent);
+    lap("create");
     // Initial enabled states that follow other fields.
     st->map_url->setEnabled(st->map_provider->current() >= int(std::size(kMapProviders)));
     st->geo_url->setEnabled(st->geo_urls[size_t(std::max(0, st->geo_provider->current()))].empty());
@@ -462,4 +483,12 @@ void open_settings_dialog(anyui::Ui& ui, anyui::Window* parent, Config& cfg, std
             ui.post([st] { st->window.reset(); });
         });
     st->window->show();
+    lap("show");
+    if (trace)  // the first paint has happened by the time the loop gets here
+        ui.post(
+            [t0]
+            {
+                std::fprintf(stderr, "settings: on screen %6.1f ms after the click\n",
+                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+            });
 }
