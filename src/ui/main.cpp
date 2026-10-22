@@ -78,6 +78,8 @@ void run_step(App& app, const std::string& step)
         app.transform(6);
     else if (step.rfind("ev:", 0) == 0)
         app.set_exposure(std::stod(step.substr(3)));
+    else if (step == "save")
+        app.save_as();
     else if (step == "quit")
         app.quit();
     else

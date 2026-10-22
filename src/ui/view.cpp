@@ -211,6 +211,7 @@ void View::outgoing_transform(int64_t now, double& zoom, double& px, double& py)
 
 void View::set_image(std::shared_ptr<Image> image)
 {
+    previewed_.reset();
     presented_ = nullptr;  // even the same object again counts as a new presentation
     // A same-size replacement (a raw's develop landing) mid-fade keeps the
     // fade; anything else ends it.
@@ -285,6 +286,25 @@ void View::set_fullscreen(bool on)
 
 // The image object stayed; its pixels, and possibly its dimensions, did not.
 // A size change keeps what is on screen where it is.
+void View::show_preview(std::shared_ptr<Image> preview)
+{
+    if (!image_ || !preview || preview->width != image_->width || preview->height != image_->height)
+        return;
+    if (!previewed_)
+        previewed_ = image_;
+    image_ = std::move(preview);
+    image_changed();
+}
+
+void View::end_preview()
+{
+    if (!previewed_)
+        return;
+    image_ = std::move(previewed_);
+    previewed_.reset();
+    image_changed();
+}
+
 void View::image_changed()
 {
     drop_caches();

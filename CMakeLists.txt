@@ -89,6 +89,7 @@ if(IFRIT_UI_ANYUI AND EXISTS "${IFRIT_ANYUI_DIR}/CMakeLists.txt")
     src/ui/app.cpp
     src/ui/view.cpp
     src/ui/settings.cpp
+    src/ui/save.cpp
   )
   set_target_properties(ifritview-anyui PROPERTIES CXX_STANDARD 23)
   target_compile_options(ifritview-anyui PRIVATE -Wall -Wextra)

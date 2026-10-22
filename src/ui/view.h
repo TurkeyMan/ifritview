@@ -35,6 +35,10 @@ public:
     void set_fullscreen(bool on);
     void config_changed();
     void image_changed();  // the image's pixels (and maybe its size) changed in place
+    // Shows `preview` (the same size: the image as it would save) in its
+    // place, keeping zoom and pan; end_preview() puts the image back.
+    void show_preview(std::shared_ptr<Image> preview);
+    void end_preview();
     using OverlaySections = std::vector<std::vector<std::string>>;
     void set_overlay(OverlaySections sections);
 
@@ -121,6 +125,7 @@ private:
     anyui::Canvas* canvas_ = nullptr;
     OverlaySections overlay_;
     std::shared_ptr<Image> image_;
+    std::shared_ptr<Image> previewed_;  // the real image while a preview stands in for it
 
     // Uploaded pixels: the image itself, a downscaled copy for the current
     // zoom, and a checkerboard for transparency.

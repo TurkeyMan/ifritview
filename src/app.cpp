@@ -1282,7 +1282,7 @@ void App::save_as()
             return;
         for (const Encoder* e : encoders())
             if (std::string(e->extension) == ext)
-                gtk_widget_set_sensitive(st->quality, e->lossy);
+                gtk_widget_set_sensitive(st->quality, e->setting("quality") != nullptr);
         gchar* name = gtk_file_chooser_get_current_name(st->chooser);
         std::string n = name ? name : "";
         g_free(name);
@@ -1299,7 +1299,9 @@ void App::save_as()
         gchar* path = gtk_file_chooser_get_filename(chooser);
         const gchar* ext = gtk_combo_box_get_active_id(GTK_COMBO_BOX(format));
         EncodeOptions options;
-        options.quality = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(quality));
+        const int q = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(quality));
+        options.values["quality"] = q;
+        options.values["lossless"] = q >= 100;  // this dialog's convention: 100 is lossless
         std::string error;
         bool ok = false;
         for (const Encoder* e : list)

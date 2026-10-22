@@ -80,7 +80,9 @@ namespace
 {
 
 #ifdef HAVE_PNG
-bool encode_png(const Image& image, const std::string& path, const EncodeOptions&, std::string& error)
+const Encoder& png_encoder();
+
+bool encode_png(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
     FILE* f = platform::fopen(path, "wb");
     if (!f)
@@ -103,9 +105,13 @@ bool encode_png(const Image& image, const std::string& path, const EncodeOptions
         return false;
     }
     png_init_io(png, f);
-    png_set_IHDR(png, info, image.width, image.height, 8, image.has_alpha ? PNG_COLOR_TYPE_RGBA : PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_set_compression_level(png, 9);  // always the smallest: it's lossless, and saving is rare
+    const bool interlaced = png_encoder().value(options, "interlaced") != 0;
+    png_set_IHDR(png, info, image.width, image.height, 8, image.has_alpha ? PNG_COLOR_TYPE_RGBA : PNG_COLOR_TYPE_RGB,
+                 interlaced ? PNG_INTERLACE_ADAM7 : PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png, info);
+    if (interlaced)
+        png_set_interlace_handling(png);
     png_write_image(png, rows.data());
     png_write_end(png, nullptr);
     png_destroy_write_struct(&png, &info);
@@ -122,8 +128,12 @@ struct JpegError
     char message[JMSG_LENGTH_MAX];
 };
 
+const Encoder& jpeg_encoder();
+
 bool encode_jpeg(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
+    const Encoder& self = jpeg_encoder();
+    const int quality = std::clamp(self.value(options, "quality"), 1, 100);
     FILE* f = platform::fopen(path, "wb");
     if (!f)
     {
@@ -155,12 +165,17 @@ bool encode_jpeg(const Image& image, const std::string& path, const EncodeOption
     cinfo.input_components = 3;
     cinfo.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, std::clamp(options.quality, 1, 100), TRUE);
-    if (options.quality >= 90)
-    {  // keep chroma at full resolution for high quality
-        cinfo.comp_info[0].h_samp_factor = 1;
-        cinfo.comp_info[0].v_samp_factor = 1;
-    }
+    jpeg_set_quality(&cinfo, quality, TRUE);
+    // Chroma resolution, as luma samples per chroma sample (h, v): 4:4:4 keeps
+    // full colour, 4:2:0 (the library's default) halves it both ways.
+    int subsampling = self.value(options, "subsampling");  // Auto, 4:4:4, 4:2:2, 4:2:0
+    if (subsampling == 0)
+        subsampling = quality >= 90 ? 1 : 3;
+    cinfo.comp_info[0].h_samp_factor = subsampling == 1 ? 1 : 2;
+    cinfo.comp_info[0].v_samp_factor = subsampling == 3 ? 2 : 1;
+    cinfo.optimize_coding = self.value(options, "optimise") ? TRUE : FALSE;
+    if (self.value(options, "progressive"))
+        jpeg_simple_progression(&cinfo);
     jpeg_start_compress(&cinfo, TRUE);
     while (cinfo.next_scanline < cinfo.image_height)
     {
@@ -175,8 +190,12 @@ bool encode_jpeg(const Image& image, const std::string& path, const EncodeOption
 #endif
 
 #ifdef HAVE_TIFF
-bool encode_tiff(const Image& image, const std::string& path, const EncodeOptions&, std::string& error)
+const Encoder& tiff_encoder();
+
+bool encode_tiff(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
+    static const uint16_t kCompression[] = {COMPRESSION_ADOBE_DEFLATE, COMPRESSION_LZW, COMPRESSION_NONE};
+    const int compression = std::clamp(tiff_encoder().value(options, "compression"), 0, 2);
     TIFF* tif = TIFFOpen(path.c_str(), "w");
     if (!tif)
     {
@@ -192,7 +211,9 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
-    TIFFSetField(tif, TIFFTAG_COMPRESSION, COMPRESSION_ADOBE_DEFLATE);
+    TIFFSetField(tif, TIFFTAG_COMPRESSION, kCompression[compression]);
+    if (compression != 2)
+        TIFFSetField(tif, TIFFTAG_PREDICTOR, PREDICTOR_HORIZONTAL);  // smaller for photos
     TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, 0));
     if (image.has_alpha)
     {
@@ -225,26 +246,48 @@ bool write_file(const std::string& path, const void* data, size_t size, std::str
 }
 
 #ifdef HAVE_WEBP
+const Encoder& webp_encoder();
+
 bool encode_webp(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
-    std::vector<uint8_t> pixels = to_rgba8(image);
-    uint8_t* out = nullptr;
-    size_t size = options.quality >= 100 ? WebPEncodeLosslessRGBA(pixels.data(), image.width, image.height, image.width * 4, &out)
-                                         : WebPEncodeRGBA(pixels.data(), image.width, image.height, image.width * 4, float(options.quality), &out);
-    if (!size)
+    const Encoder& self = webp_encoder();
+    WebPConfig config;
+    if (!WebPConfigInit(&config))
     {
-        error = "WebP encode failed";
+        error = "WebP library mismatch";
         return false;
     }
-    const bool ok = write_file(path, out, size, error);
-    WebPFree(out);
+    config.lossless = self.value(options, "lossless") ? 1 : 0;
+    config.quality = config.lossless ? 75.f : float(std::clamp(self.value(options, "quality"), 1, 100));
+    config.method = std::clamp(self.value(options, "effort"), 0, 6);
+    WebPPicture pic;
+    WebPPictureInit(&pic);
+    pic.use_argb = 1;
+    pic.width = image.width;
+    pic.height = image.height;
+    std::vector<uint8_t> pixels = to_rgba8(image);
+    WebPMemoryWriter writer;
+    WebPMemoryWriterInit(&writer);
+    pic.writer = WebPMemoryWrite;
+    pic.custom_ptr = &writer;
+    bool ok = WebPPictureImportRGBA(&pic, pixels.data(), image.width * 4) && WebPEncode(&config, &pic);
+    if (!ok)
+        error = "WebP encode failed";
+    else
+        ok = write_file(path, writer.mem, writer.size, error);
+    WebPPictureFree(&pic);
+    WebPMemoryWriterClear(&writer);
     return ok;
 }
 #endif
 
 #ifdef HAVE_JXL
+const Encoder& jxl_encoder();
+
 bool encode_jxl(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
+    const Encoder& self = jxl_encoder();
+    const bool lossless = self.value(options, "lossless") != 0;
     std::vector<uint8_t> pixels = image.has_alpha ? to_rgba8(image) : to_rgb8(image);
     std::unique_ptr<JxlEncoder, decltype(&JxlEncoderDestroy)> enc(JxlEncoderCreate(nullptr), JxlEncoderDestroy);
     JxlBasicInfo info;
@@ -255,16 +298,17 @@ bool encode_jxl(const Image& image, const std::string& path, const EncodeOptions
     info.num_extra_channels = image.has_alpha ? 1 : 0;
     info.alpha_bits = image.has_alpha ? 8 : 0;
     info.bits_per_sample = 8;
-    info.uses_original_profile = options.quality >= 100 ? JXL_TRUE : JXL_FALSE;
+    info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
     JxlEncoderSetBasicInfo(enc.get(), &info);
     JxlColorEncoding color;
     JxlColorEncodingSetToSRGB(&color, JXL_FALSE);
     JxlEncoderSetColorEncoding(enc.get(), &color);
     JxlEncoderFrameSettings* fs = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
-    if (options.quality >= 100)
+    if (lossless)
         JxlEncoderSetFrameLossless(fs, JXL_TRUE);
     else
-        JxlEncoderSetFrameDistance(fs, JxlEncoderDistanceFromQuality(float(options.quality)));
+        JxlEncoderSetFrameDistance(fs, JxlEncoderDistanceFromQuality(float(std::clamp(self.value(options, "quality"), 1, 100))));
+    JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_EFFORT, std::clamp(self.value(options, "effort"), 1, 9));
     const JxlPixelFormat fmt{uint32_t(image.has_alpha ? 4 : 3), JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
     if (JxlEncoderAddImageFrame(fs, &fmt, pixels.data(), pixels.size()) != JXL_ENC_SUCCESS)
     {
@@ -293,8 +337,11 @@ bool encode_jxl(const Image& image, const std::string& path, const EncodeOptions
 #endif
 
 #ifdef HAVE_HEIF
+const Encoder& avif_encoder();
+
 bool encode_avif(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
 {
+    const Encoder& self = avif_encoder();
     heif_context* ctx = heif_context_alloc();
     heif_encoder* enc = nullptr;
     heif_error e = heif_context_get_encoder_for_format(ctx, heif_compression_AV1, &enc);
@@ -304,10 +351,10 @@ bool encode_avif(const Image& image, const std::string& path, const EncodeOption
         heif_context_free(ctx);
         return false;
     }
-    if (options.quality >= 100)
+    if (self.value(options, "lossless"))
         heif_encoder_set_lossless(enc, 1);
     else
-        heif_encoder_set_lossy_quality(enc, options.quality);
+        heif_encoder_set_lossy_quality(enc, std::clamp(self.value(options, "quality"), 1, 100));
     heif_image* img = nullptr;
     const heif_chroma chroma = image.has_alpha ? heif_chroma_interleaved_RGBA : heif_chroma_interleaved_RGB;
     heif_image_create(image.width, image.height, heif_colorspace_RGB, chroma, &img);
@@ -355,40 +402,101 @@ bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions
     return ok;
 }
 
+
+// The formats and the settings each offers when saving.
+using Kind = EncodeSetting::Kind;
+
+const EncodeSetting kQuality{"quality", "Quality", Kind::Range, 1, 100, 90, {}, nullptr, "lossless"};
+const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "Every pixel kept exactly; larger files."};
+
+#ifdef HAVE_PNG
+const Encoder& png_encoder()
+{
+    static const Encoder e{"PNG", "png",
+                           {{"interlaced", "Interlaced (Adam7)", Kind::Toggle, 0, 1, 0, {}, "Shows coarse-to-fine while loading; a little larger."}},
+                           encode_png};
+    return e;
+}
+#endif
+#ifdef HAVE_JPEG
+const Encoder& jpeg_encoder()
+{
+    static const Encoder e{"JPEG", "jpg",
+                           {{"quality", "Quality", Kind::Range, 1, 100, 90},
+                            {"subsampling", "Colour detail", Kind::Choice, 0, 3, 0,
+                             {"Automatic (full at quality 90 and above)", "Full (4:4:4)", "Half across (4:2:2)", "Quarter (4:2:0, smallest)"}},
+                            {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "Shows coarse-to-fine while loading; often a little smaller."},
+                            {"optimise", "Optimise coding", Kind::Toggle, 0, 1, 1, {}, "A few percent smaller, at no cost in quality."}},
+                           encode_jpeg};
+    return e;
+}
+#endif
+#ifdef HAVE_TIFF
+const Encoder& tiff_encoder()
+{
+    static const Encoder e{"TIFF", "tif", {{"compression", "Compression", Kind::Choice, 0, 2, 0, {"Deflate (ZIP)", "LZW", "None"}, "All lossless."}},
+                           encode_tiff};
+    return e;
+}
+#endif
+const Encoder& bmp_encoder()
+{
+    static const Encoder e{"BMP", "bmp", {}, encode_bmp};
+    return e;
+}
+#ifdef HAVE_WEBP
+const Encoder& webp_encoder()
+{
+    static const Encoder e{"WebP", "webp",
+                           {kLossless, kQuality, {"effort", "Effort", Kind::Range, 0, 6, 4, {}, "Higher is smaller and slower to save."}},
+                           encode_webp};
+    return e;
+}
+#endif
+#ifdef HAVE_JXL
+const Encoder& jxl_encoder()
+{
+    static const Encoder e{"JPEG XL", "jxl",
+                           {kLossless, kQuality, {"effort", "Effort", Kind::Range, 1, 9, 7, {}, "Higher is smaller and slower to save."}},
+                           encode_jxl};
+    return e;
+}
+#endif
+#ifdef HAVE_HEIF
+const Encoder& avif_encoder()
+{
+    static const Encoder e{"AVIF", "avif", {kLossless, kQuality}, encode_avif};
+    return e;
+}
+#endif
+
 }  // namespace
 
 const std::vector<const Encoder*>& encoders()
 {
-    static const std::vector<Encoder> table = []
-    {
-        std::vector<Encoder> v;
-#ifdef HAVE_PNG
-        v.push_back({"PNG", "png", false, encode_png});
-#endif
-#ifdef HAVE_JPEG
-        v.push_back({"JPEG", "jpg", true, encode_jpeg});
-#endif
-#ifdef HAVE_TIFF
-        v.push_back({"TIFF", "tif", false, encode_tiff});
-#endif
-        v.push_back({"BMP", "bmp", false, encode_bmp});
-#ifdef HAVE_WEBP
-        v.push_back({"WebP", "webp", true, encode_webp});
-#endif
-#ifdef HAVE_JXL
-        v.push_back({"JPEG XL", "jxl", true, encode_jxl});
-#endif
-#ifdef HAVE_HEIF
-        v.push_back({"AVIF", "avif", true, encode_avif});
-#endif
-        return v;
-    }();
     static const std::vector<const Encoder*> list = []
     {
-        std::vector<const Encoder*> p;
-        for (const Encoder& e : table)
-            p.push_back(&e);
-        return p;
+        std::vector<const Encoder*> v;
+#ifdef HAVE_PNG
+        v.push_back(&png_encoder());
+#endif
+#ifdef HAVE_JPEG
+        v.push_back(&jpeg_encoder());
+#endif
+#ifdef HAVE_TIFF
+        v.push_back(&tiff_encoder());
+#endif
+        v.push_back(&bmp_encoder());
+#ifdef HAVE_WEBP
+        v.push_back(&webp_encoder());
+#endif
+#ifdef HAVE_JXL
+        v.push_back(&jxl_encoder());
+#endif
+#ifdef HAVE_HEIF
+        v.push_back(&avif_encoder());
+#endif
+        return v;
     }();
     return list;
 }

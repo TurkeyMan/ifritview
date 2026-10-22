@@ -7,12 +7,15 @@
 #include "image.h"
 #include "loader.h"
 #include "metadata_model.h"
+#include "save.h"
 #include "video.h"
 #include "view.h"
 
 #include <anyui/anyui.h>
 
+#include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,6 +50,8 @@ public:
     void quit();
     void crop_to_selection();
     void save_as();
+    void preview_save(const Encoder& e, const EncodeOptions& o);
+    void choose_save_path(const Encoder& e, const EncodeOptions& o);
     void toggle_metadata();
     void toggle_xmp();
     void copy_to_clipboard();
@@ -157,6 +162,9 @@ private:
     uint64_t file_size_ = 0;
     std::string status_message_;
     anyui::Subscription refit_timer_;
+    std::shared_ptr<SaveDialog> save_dialog_;
+    std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
+    std::atomic<uint64_t> preview_generation_{0};         // the latest preview wins
     bool refit_after_layout_ = false;
     void refit_after_pane_toggle();
     float pane_extra_ = 0;         // what the info pane adds to the window's width (learnt)
