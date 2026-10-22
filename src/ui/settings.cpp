@@ -382,7 +382,9 @@ anyui::Node controls_page(const Config& cfg, State& st)
     // One row per control: windowed and fullscreen actions side by side.
     anyui::Nodes rows;
     std::vector<std::string> form_labels;
-    form_labels.push_back("");
+    // A blank label, not an empty one (which would span both columns), so
+    // the headings sit over the fields.
+    form_labels.push_back(" ");
     rows.push_back(L::HBox{L::Label{"Windowed"}.width(chars(30)), L::Label{"Fullscreen"}});
     for (const ControlInfo& c : kControls)
     {
