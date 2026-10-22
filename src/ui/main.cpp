@@ -100,6 +100,7 @@ int main(int argc, char** argv)
         std::printf(
             "usage: ifritview [image-file | directory]\n"
             "       ifritview --probe file...   decode files and report, no window\n"
+            "       ifritview --convert in out [setting=value...]   save `in` as `out`, no window\n"
             "       ifritview --version\n");
         return 0;
     }
@@ -108,6 +109,8 @@ int main(int argc, char** argv)
         std::printf("IfritView %s\n", IFRIT_VERSION);
         return 0;
     }
+    if (argc > 3 && std::strcmp(argv[1], "--convert") == 0)
+        return convert(argc - 2, argv + 2);
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
 

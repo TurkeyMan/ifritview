@@ -164,7 +164,14 @@ private:
     anyui::Subscription refit_timer_;
     std::shared_ptr<SaveDialog> save_dialog_;
     std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
-    std::atomic<uint64_t> preview_generation_{0};         // the latest preview wins
+    // Shared with the preview workers, which may outlive a request: the
+    // latest generation wins, and the app waits for running ones on exit.
+    struct PreviewState
+    {
+        std::atomic<uint64_t> generation{0};
+        std::atomic<int> running{0};
+    };
+    std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
     bool refit_after_layout_ = false;
     void refit_after_pane_toggle();
     float pane_extra_ = 0;         // what the info pane adds to the window's width (learnt)

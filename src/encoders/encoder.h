@@ -21,7 +21,7 @@ struct EncodeSetting
     Kind kind;
     int min = 0, max = 1, initial = 0;
     std::vector<const char*> choices = {};
-    const char* note = nullptr;      // a line of explanation under the setting
+    const char* note = nullptr;      // a few words beside the setting
     const char* off_when = nullptr;  // greyed while this toggle is on ("quality" under "lossless")
 };
 
@@ -42,6 +42,9 @@ struct Encoder
     const char* extension;  // written onto the file name
     std::vector<EncodeSetting> settings;
     bool (*encode)(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error);
+    // Whether these options lose detail; unset means "has a quality and
+    // isn't set lossless". The save dialog previews what loses detail.
+    bool (*reduces)(const EncodeOptions& options) = nullptr;
 
     const EncodeSetting* setting(const char* key) const
     {
@@ -57,7 +60,10 @@ struct Encoder
         return options.get(key, s ? s->initial : 0);
     }
     // Whether these options lose detail (worth previewing).
-    bool lossy(const EncodeOptions& options) const { return setting("quality") && !value(options, "lossless"); }
+    bool lossy(const EncodeOptions& options) const
+    {
+        return reduces ? reduces(options) : setting("quality") && !value(options, "lossless");
+    }
 };
 
 // Encoders for the formats compiled in, PNG first.

@@ -1,11 +1,13 @@
 // Niche formats with no system library worth linking: Photoshop PSD
-// (flattened composite), Targa, Softimage PIC, Radiance HDR and the PNM
-// family, all via the vendored stb_image.
+// (flattened composite), Targa, BMP (every pixel format IfritView writes,
+// and on Windows, where gdk-pixbuf's loaders aren't there), Softimage PIC,
+// Radiance HDR and the PNM family, all via the vendored stb_image.
 #include "decoder.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PSD
 #define STBI_ONLY_TGA
+#define STBI_ONLY_BMP
 #define STBI_ONLY_PIC
 #define STBI_ONLY_HDR
 #define STBI_ONLY_PNM
@@ -23,6 +25,8 @@ bool sniff(const uint8_t* h, size_t n)
 {
     if (n >= 4 && std::memcmp(h, "8BPS", 4) == 0)
         return true;  // PSD
+    if (n >= 18 && h[0] == 'B' && h[1] == 'M')
+        return true;  // BMP
     if (n >= 10 && std::memcmp(h, "#?RADIANCE", 10) == 0)
         return true;  // HDR
     if (n >= 6 && std::memcmp(h, "#?RGBE", 6) == 0)
@@ -41,6 +45,8 @@ std::string format_name(const std::string& path)
         return "Photoshop PSD";
     if (ext == "tga" || ext == "targa")
         return "Targa";
+    if (ext == "bmp" || ext == "dib")
+        return "BMP";
     if (ext == "pic")
         return "Softimage PIC";
     if (ext == "hdr")
@@ -119,6 +125,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& stb_decoder()
 {
-    static const Decoder d{"stb_image", {"psd", "tga", "targa", "pic", "hdr", "pgm", "ppm", "pnm"}, sniff, decode};
+    static const Decoder d{"stb_image", {"psd", "tga", "targa", "bmp", "dib", "pic", "hdr", "pgm", "ppm", "pnm"}, sniff, decode};
     return d;
 }

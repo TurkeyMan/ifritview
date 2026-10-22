@@ -32,6 +32,7 @@ add_library(ifrit_core STATIC
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
   src/encoders/encoder.cpp
+  src/encoders/reduce.cpp
   src/cache.cpp
   src/geocode.cpp
   src/video.cpp

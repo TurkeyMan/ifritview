@@ -32,7 +32,7 @@ public:
     static std::shared_ptr<SaveDialog> open(anyui::Ui& ui, anyui::Window* parent, const std::string& own_extension,
                                             std::map<std::string, EncodeOptions>& remembered, Callbacks callbacks);
 
-    void set_info(const std::string& text);  // under the settings: what the preview found
+    void set_info(const std::string& text);  // beside the quality: the preview's file size
     void close();                            // as Cancel
 
 private:
@@ -47,6 +47,7 @@ private:
     {
         const Encoder* encoder;
         anyui::Widget* box = nullptr;
+        anyui::Label* info = nullptr;   // beside the quality slider
         std::vector<Control> controls;  // per setting, sized before building
     };
 
@@ -61,7 +62,6 @@ private:
     std::unique_ptr<anyui::Window> window_;
     std::vector<Page> pages_;
     anyui::Select* format_ = nullptr;
-    anyui::Label* info_ = nullptr;
     std::map<std::string, EncodeOptions>* remembered_ = nullptr;
     Callbacks callbacks_;
     std::weak_ptr<SaveDialog> self_;

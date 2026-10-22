@@ -1,10 +1,14 @@
 #include "probe.h"
 
 #include "decoders/decoder.h"
+#include "encoders/encoder.h"
 
 #include <glib.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 int probe(int argc, char** argv)
 {
@@ -42,4 +46,55 @@ int probe(int argc, char** argv)
         }
     }
     return failures ? 1 : 0;
+}
+
+int convert(int argc, char** argv)
+{
+    if (argc < 2)
+    {
+        std::fprintf(stderr, "usage: ifritview --convert in out [setting=value...]\n");
+        return 2;
+    }
+    const std::string in = argv[0], out = argv[1];
+    std::string ext = out.substr(out.find_last_of('.') == std::string::npos ? out.size() : out.find_last_of('.') + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (ext == "jpeg")
+        ext = "jpg";
+    const Encoder* encoder = nullptr;
+    for (const Encoder* e : encoders())
+        if (ext == e->extension)
+            encoder = e;
+    if (!encoder)
+    {
+        std::fprintf(stderr, "no encoder for .%s\n", ext.c_str());
+        return 2;
+    }
+    EncodeOptions options;
+    for (int i = 2; i < argc; ++i)
+    {
+        const std::string kv = argv[i];
+        const auto eq = kv.find('=');
+        if (eq == std::string::npos || !encoder->setting(kv.substr(0, eq).c_str()))
+        {
+            std::fprintf(stderr, "%s has no setting \"%s\"; it has:", encoder->name, kv.substr(0, eq).c_str());
+            for (const EncodeSetting& s : encoder->settings)
+                std::fprintf(stderr, " %s", s.key);
+            std::fprintf(stderr, "\n");
+            return 2;
+        }
+        options.values[kv.substr(0, eq)] = std::atoi(kv.c_str() + eq + 1);
+    }
+    Image img;
+    std::string error;
+    if (!decode_image(in, img, error))
+    {
+        std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
+        return 1;
+    }
+    if (!encoder->encode(img, out, options, error))
+    {
+        std::fprintf(stderr, "%s: %s\n", out.c_str(), error.c_str());
+        return 1;
+    }
+    return 0;
 }

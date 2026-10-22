@@ -1,11 +1,12 @@
 // Image writers for the formats worth saving to: PNG, JPEG, TIFF, BMP,
-// WebP, JPEG XL and AVIF. Each sits behind the same HAVE_* define as its
-// decoder (BMP goes through gdk-pixbuf, which is always present).
+// Targa, WebP, JPEG XL and AVIF. Each library-backed one sits behind the
+// same HAVE_* define as its decoder; BMP and Targa are written here.
 #include "encoder.h"
+
+#include "reduce.h"
 
 #include "../platform.h"
 
-#include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -173,7 +174,7 @@ bool encode_jpeg(const Image& image, const std::string& path, const EncodeOption
         subsampling = quality >= 90 ? 1 : 3;
     cinfo.comp_info[0].h_samp_factor = subsampling == 1 ? 1 : 2;
     cinfo.comp_info[0].v_samp_factor = subsampling == 3 ? 2 : 1;
-    cinfo.optimize_coding = self.value(options, "optimise") ? TRUE : FALSE;
+    cinfo.optimize_coding = TRUE;  // lossless, and always smaller
     if (self.value(options, "progressive"))
         jpeg_simple_progression(&cinfo);
     jpeg_start_compress(&cinfo, TRUE);
@@ -259,7 +260,7 @@ bool encode_webp(const Image& image, const std::string& path, const EncodeOption
     }
     config.lossless = self.value(options, "lossless") ? 1 : 0;
     config.quality = config.lossless ? 75.f : float(std::clamp(self.value(options, "quality"), 1, 100));
-    config.method = std::clamp(self.value(options, "effort"), 0, 6);
+    config.method = 6;  // the smallest: it only costs time at save
     WebPPicture pic;
     WebPPictureInit(&pic);
     pic.use_argb = 1;
@@ -308,7 +309,8 @@ bool encode_jxl(const Image& image, const std::string& path, const EncodeOptions
         JxlEncoderSetFrameLossless(fs, JXL_TRUE);
     else
         JxlEncoderSetFrameDistance(fs, JxlEncoderDistanceFromQuality(float(std::clamp(self.value(options, "quality"), 1, 100))));
-    JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_EFFORT, std::clamp(self.value(options, "effort"), 1, 9));
+    // libjxl's default; 8 and 9 take minutes on a large photo for little gain.
+    JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_EFFORT, 7);
     const JxlPixelFormat fmt{uint32_t(image.has_alpha ? 4 : 3), JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
     if (JxlEncoderAddImageFrame(fs, &fmt, pixels.data(), pixels.size()) != JXL_ENC_SUCCESS)
     {
@@ -386,20 +388,216 @@ bool encode_avif(const Image& image, const std::string& path, const EncodeOption
 }
 #endif
 
-bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions&, std::string& error)
+// Little-endian fields for the BMP and Targa headers.
+void put16(std::vector<uint8_t>& out, uint32_t v)
 {
-    std::vector<uint8_t> pixels = to_rgb8(image);
-    GdkPixbuf* pb = gdk_pixbuf_new_from_data(pixels.data(), GDK_COLORSPACE_RGB, FALSE, 8, image.width, image.height, image.width * 3, nullptr, nullptr);
-    GError* err = nullptr;
-    const bool ok = gdk_pixbuf_save(pb, path.c_str(), "bmp", &err, nullptr);
-    if (!ok)
+    out.push_back(uint8_t(v));
+    out.push_back(uint8_t(v >> 8));
+}
+void put32(std::vector<uint8_t>& out, uint32_t v)
+{
+    put16(out, v & 0xffff);
+    put16(out, v >> 16);
+}
+
+const Encoder& bmp_encoder();
+
+// BMP in the pixel formats games and tools still read: 32-bit with alpha,
+// 24-bit, the 16-bit bitfield layouts and 8-bit with a palette.
+bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
+{
+    const Encoder& self = bmp_encoder();
+    int format = self.value(options, "format");  // Auto, 32, 24, 565, 1555, 4444, indexed
+    if (format == 0)
+        format = image.has_alpha ? 1 : 2;
+    const bool dither = self.value(options, "dither") != 0;
+    const bool srgb = self.value(options, "srgb") != 0;
+    const bool top_down = self.value(options, "topdown") != 0;
+    const int w = image.width, h = image.height;
+    std::vector<uint8_t> px = to_rgba8(image);
+    int bpp = 24;
+    uint32_t mask[4] = {0, 0, 0, 0};  // R, G, B, A
+    Palettised pal;
+    switch (format)
     {
-        error = err ? err->message : "BMP write failed";
-        if (err)
-            g_error_free(err);
+        case 1: bpp = 32, mask[0] = 0x00ff0000, mask[1] = 0x0000ff00, mask[2] = 0x000000ff, mask[3] = 0xff000000; break;
+        case 3: bpp = 16, mask[0] = 0xf800, mask[1] = 0x07e0, mask[2] = 0x001f, reduce_channels(px, w, h, 5, 6, 5, 0, dither); break;
+        case 4:
+            bpp = 16, mask[0] = 0x7c00, mask[1] = 0x03e0, mask[2] = 0x001f, mask[3] = 0x8000;
+            reduce_channels(px, w, h, 5, 5, 5, 1, dither);
+            break;
+        case 5:
+            bpp = 16, mask[0] = 0x0f00, mask[1] = 0x00f0, mask[2] = 0x000f, mask[3] = 0xf000;
+            reduce_channels(px, w, h, 4, 4, 4, 4, dither);
+            break;
+        case 6: bpp = 8, pal = palettise(px, w, h, dither); break;
+        default: break;
     }
-    g_object_unref(pb);
-    return ok;
+    const bool bitfields = mask[0] != 0;
+    const bool v5 = srgb || bitfields;  // the classic header can't tag a colour space or carry an alpha mask
+    const uint32_t header = v5 ? 124 : 40, palette = bpp == 8 ? 256 * 4 : 0;
+    const uint32_t stride = uint32_t((w * bpp + 31) / 32 * 4), offset = 14 + header + palette;
+    std::vector<uint8_t> out;
+    out.reserve(offset + size_t(stride) * h);
+    out.push_back('B');
+    out.push_back('M');
+    put32(out, offset + stride * uint32_t(h));
+    put32(out, 0);
+    put32(out, offset);
+    put32(out, header);
+    put32(out, uint32_t(w));
+    put32(out, uint32_t(top_down ? -h : h));
+    put16(out, 1);
+    put16(out, uint16_t(bpp));
+    put32(out, bitfields ? 3 /* BI_BITFIELDS */ : 0 /* BI_RGB */);
+    put32(out, stride * uint32_t(h));
+    put32(out, 2835);  // 72 dpi
+    put32(out, 2835);
+    put32(out, bpp == 8 ? 256 : 0);
+    put32(out, 0);
+    if (v5)
+    {
+        for (uint32_t m : mask)
+            put32(out, m);
+        put32(out, srgb ? 0x73524742 /* 'sRGB' */ : 0x57696e20 /* 'Win ': the system's */);
+        out.insert(out.end(), 36 + 12, 0);  // endpoints, gamma
+        put32(out, 4);                      // LCS_GM_IMAGES
+        out.insert(out.end(), 12, 0);       // profile data, size, reserved
+    }
+    for (int i = 0; i < 256 && bpp == 8; ++i)
+    {
+        const bool used = size_t(i) * 3 < pal.palette.size();
+        out.push_back(used ? pal.palette[size_t(i) * 3 + 2] : 0);
+        out.push_back(used ? pal.palette[size_t(i) * 3 + 1] : 0);
+        out.push_back(used ? pal.palette[size_t(i) * 3] : 0);
+        out.push_back(0);
+    }
+    for (int row = 0; row < h; ++row)
+    {
+        const int y = top_down ? row : h - 1 - row;
+        const size_t start = out.size();
+        for (int x = 0; x < w; ++x)
+        {
+            const uint8_t* p = &px[(size_t(y) * w + x) * 4];
+            const uint32_t r = p[0], g = p[1], b = p[2], a = p[3];
+            switch (bpp)
+            {
+                case 32: out.insert(out.end(), {uint8_t(b), uint8_t(g), uint8_t(r), uint8_t(a)}); break;
+                case 24: out.insert(out.end(), {uint8_t(b), uint8_t(g), uint8_t(r)}); break;
+                case 16:
+                {
+                    uint32_t v = 0;
+                    if (format == 3)
+                        v = (r >> 3) << 11 | (g >> 2) << 5 | b >> 3;
+                    else if (format == 4)
+                        v = (a >= 128 ? 0x8000u : 0) | (r >> 3) << 10 | (g >> 3) << 5 | b >> 3;
+                    else
+                        v = (a >> 4) << 12 | (r >> 4) << 8 | (g >> 4) << 4 | b >> 4;
+                    put16(out, v);
+                    break;
+                }
+                default: out.push_back(pal.indices[size_t(y) * w + x]); break;
+            }
+        }
+        out.resize(start + stride, 0);
+    }
+    return write_file(path, out.data(), out.size(), error);
+}
+
+const Encoder& tga_encoder();
+
+// Targa: 32, 24 and 16-bit (ARGB 1555) true colour, or 8-bit with a colour
+// map, optionally run-length encoded.
+bool encode_tga(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)
+{
+    const Encoder& self = tga_encoder();
+    int format = self.value(options, "format");  // Auto, 32, 24, 1555, indexed
+    if (format == 0)
+        format = image.has_alpha ? 1 : 2;
+    const bool dither = self.value(options, "dither") != 0;
+    const bool rle = self.value(options, "rle") != 0;
+    const bool top_left = self.value(options, "topleft") != 0;
+    const int w = image.width, h = image.height;
+    std::vector<uint8_t> px = to_rgba8(image);
+    const int bpp = format == 1 ? 32 : format == 2 ? 24 : format == 3 ? 16 : 8;
+    Palettised pal;
+    if (format == 3)
+        reduce_channels(px, w, h, 5, 5, 5, 1, dither);
+    else if (format == 4)
+        pal = palettise(px, w, h, dither);
+    const bool indexed = bpp == 8;
+    std::vector<uint8_t> out;
+    out.push_back(0);                  // no image id
+    out.push_back(indexed ? 1 : 0);    // colour map
+    out.push_back(uint8_t(indexed ? (rle ? 9 : 1) : (rle ? 10 : 2)));
+    put16(out, 0);
+    put16(out, indexed ? 256 : 0);
+    out.push_back(indexed ? 24 : 0);
+    put16(out, 0);
+    put16(out, 0);
+    put16(out, uint16_t(w));
+    put16(out, uint16_t(h));
+    out.push_back(uint8_t(bpp));
+    out.push_back(uint8_t((bpp == 32 ? 8 : bpp == 16 ? 1 : 0) | (top_left ? 0x20 : 0)));
+    for (int i = 0; i < 256 && indexed; ++i)
+    {
+        const bool used = size_t(i) * 3 < pal.palette.size();
+        out.push_back(used ? pal.palette[size_t(i) * 3 + 2] : 0);
+        out.push_back(used ? pal.palette[size_t(i) * 3 + 1] : 0);
+        out.push_back(used ? pal.palette[size_t(i) * 3] : 0);
+    }
+    const int bytes = bpp / 8;
+    std::vector<uint8_t> line(size_t(w) * bytes);
+    for (int row = 0; row < h; ++row)
+    {
+        const int y = top_left ? row : h - 1 - row;
+        for (int x = 0; x < w; ++x)
+        {
+            const uint8_t* p = &px[(size_t(y) * w + x) * 4];
+            uint8_t* o = &line[size_t(x) * bytes];
+            if (bpp == 8)
+                o[0] = pal.indices[size_t(y) * w + x];
+            else if (bpp == 16)
+            {
+                const uint32_t v = (p[3] >= 128 ? 0x8000u : 0) | uint32_t(p[0] >> 3) << 10 | uint32_t(p[1] >> 3) << 5 | uint32_t(p[2] >> 3);
+                o[0] = uint8_t(v), o[1] = uint8_t(v >> 8);
+            }
+            else
+            {
+                o[0] = p[2], o[1] = p[1], o[2] = p[0];
+                if (bpp == 32)
+                    o[3] = p[3];
+            }
+        }
+        if (!rle)
+        {
+            out.insert(out.end(), line.begin(), line.end());
+            continue;
+        }
+        // Run-length packets, each within its row (some readers insist).
+        int x = 0;
+        while (x < w)
+        {
+            const auto same = [&](int a, int b) { return std::memcmp(&line[size_t(a) * bytes], &line[size_t(b) * bytes], size_t(bytes)) == 0; };
+            int run = 1;
+            while (x + run < w && run < 128 && same(x, x + run))
+                ++run;
+            if (run > 1)
+            {
+                out.push_back(uint8_t(0x80 | (run - 1)));
+                out.insert(out.end(), line.begin() + std::ptrdiff_t(x) * bytes, line.begin() + std::ptrdiff_t(x + 1) * bytes);
+                x += run;
+                continue;
+            }
+            int raw = 1;
+            while (x + raw < w && raw < 128 && !(x + raw + 1 < w && same(x + raw, x + raw + 1)))
+                ++raw;
+            out.push_back(uint8_t(raw - 1));
+            out.insert(out.end(), line.begin() + std::ptrdiff_t(x) * bytes, line.begin() + std::ptrdiff_t(x + raw) * bytes);
+            x += raw;
+        }
+    }
+    return write_file(path, out.data(), out.size(), error);
 }
 
 
@@ -407,13 +605,13 @@ bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions
 using Kind = EncodeSetting::Kind;
 
 const EncodeSetting kQuality{"quality", "Quality", Kind::Range, 1, 100, 90, {}, nullptr, "lossless"};
-const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "Every pixel kept exactly; larger files."};
+const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "exact; larger"};
 
 #ifdef HAVE_PNG
 const Encoder& png_encoder()
 {
     static const Encoder e{"PNG", "png",
-                           {{"interlaced", "Interlaced (Adam7)", Kind::Toggle, 0, 1, 0, {}, "Shows coarse-to-fine while loading; a little larger."}},
+                           {{"interlaced", "Interlaced", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine; a little larger"}},
                            encode_png};
     return e;
 }
@@ -425,8 +623,7 @@ const Encoder& jpeg_encoder()
                            {{"quality", "Quality", Kind::Range, 1, 100, 90},
                             {"subsampling", "Colour detail", Kind::Choice, 0, 3, 0,
                              {"Automatic (full at quality 90 and above)", "Full (4:4:4)", "Half across (4:2:2)", "Quarter (4:2:0, smallest)"}},
-                            {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "Shows coarse-to-fine while loading; often a little smaller."},
-                            {"optimise", "Optimise coding", Kind::Toggle, 0, 1, 1, {}, "A few percent smaller, at no cost in quality."}},
+                            {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine"}},
                            encode_jpeg};
     return e;
 }
@@ -434,21 +631,41 @@ const Encoder& jpeg_encoder()
 #ifdef HAVE_TIFF
 const Encoder& tiff_encoder()
 {
-    static const Encoder e{"TIFF", "tif", {{"compression", "Compression", Kind::Choice, 0, 2, 0, {"Deflate (ZIP)", "LZW", "None"}, "All lossless."}},
+    static const Encoder e{"TIFF", "tif", {{"compression", "Compression", Kind::Choice, 0, 2, 0, {"Deflate (ZIP)", "LZW", "None"}}},
                            encode_tiff};
     return e;
 }
 #endif
 const Encoder& bmp_encoder()
 {
-    static const Encoder e{"BMP", "bmp", {}, encode_bmp};
+    static const Encoder e{"BMP", "bmp",
+                           {{"format", "Pixel format", Kind::Choice, 0, 6, 0,
+                             {"Automatic (32-bit with alpha, else 24-bit)", "32-bit BGRA", "24-bit BGR", "16-bit RGB 565", "16-bit ARGB 1555",
+                              "16-bit ARGB 4444", "8-bit indexed (256 colours)"}},
+                            {"dither", "Dither", Kind::Toggle, 0, 1, 1, {}, "16-bit and indexed"},
+                            {"srgb", "sRGB colour space tag", Kind::Toggle, 0, 1, 1},
+                            {"topdown", "Top-down rows", Kind::Toggle, 0, 1, 0}},
+                           encode_bmp,
+                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }};
+    return e;
+}
+const Encoder& tga_encoder()
+{
+    static const Encoder e{"Targa", "tga",
+                           {{"format", "Pixel format", Kind::Choice, 0, 4, 0,
+                             {"Automatic (32-bit with alpha, else 24-bit)", "32-bit BGRA", "24-bit BGR", "16-bit ARGB 1555", "8-bit indexed (256 colours)"}},
+                            {"dither", "Dither", Kind::Toggle, 0, 1, 1, {}, "16-bit and indexed"},
+                            {"rle", "RLE compression", Kind::Toggle, 0, 1, 0},
+                            {"topleft", "Top-left origin", Kind::Toggle, 0, 1, 0}},
+                           encode_tga,
+                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }};
     return e;
 }
 #ifdef HAVE_WEBP
 const Encoder& webp_encoder()
 {
     static const Encoder e{"WebP", "webp",
-                           {kLossless, kQuality, {"effort", "Effort", Kind::Range, 0, 6, 4, {}, "Higher is smaller and slower to save."}},
+                           {kLossless, kQuality},
                            encode_webp};
     return e;
 }
@@ -457,7 +674,7 @@ const Encoder& webp_encoder()
 const Encoder& jxl_encoder()
 {
     static const Encoder e{"JPEG XL", "jxl",
-                           {kLossless, kQuality, {"effort", "Effort", Kind::Range, 1, 9, 7, {}, "Higher is smaller and slower to save."}},
+                           {kLossless, kQuality},
                            encode_jxl};
     return e;
 }
@@ -487,6 +704,7 @@ const std::vector<const Encoder*>& encoders()
         v.push_back(&tiff_encoder());
 #endif
         v.push_back(&bmp_encoder());
+        v.push_back(&tga_encoder());
 #ifdef HAVE_WEBP
         v.push_back(&webp_encoder());
 #endif

@@ -20,12 +20,16 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
         if (own_extension == e->extension)
             initial = int(d->pages_.size());
         names.push_back(e->name);
-        d->pages_.push_back({e, nullptr, std::vector<Control>(e->settings.size())});
+        d->pages_.push_back({e, nullptr, nullptr, std::vector<Control>(e->settings.size())});
     }
     if (d->pages_.empty())
         return nullptr;
 
-    // Every format's settings are built, and the chosen one's shown.
+    // Every format's settings are built, and the chosen one's shown. The
+    // dialog doesn't resize, so it's tall enough for the format with most.
+    size_t most = 1;
+    for (const Page& p : d->pages_)
+        most = std::max(most, p.encoder->settings.size());
     anyui::Nodes pages;
     for (Page& p : d->pages_)
         pages.push_back(d->page_node(p));
@@ -36,11 +40,11 @@ std::shared_ptr<SaveDialog> SaveDialog::open(anyui::Ui& ui, anyui::Window* paren
                                          L::Separator{},
                                          anyui::Node{anyui::spec::Box{anyui::Orientation::Vertical, pages}, {}},
                                          L::Spacer{},
-                                         L::Label{""}.bind(s->info_),
                                          L::Buttons{L::Ok("_Save…"), L::Cancel},
                                      }}}
-                               .size(Extent{60, Extent::Unit::Chars}, Extent{17, Extent::Unit::Lines})
-                               .modeless(),
+                               .size(Extent{62, Extent::Unit::Chars}, Extent{float(5 + 2.2 * double(most)), Extent::Unit::Lines})
+                               .modeless()
+                               .resizable(false),
                            parent);
     for (Page& p : d->pages_)
         d->update_enabled(p);
@@ -62,35 +66,39 @@ anyui::Node SaveDialog::page_node(Page& page)
         const EncodeSetting& set = e.settings[i];
         const int value = known.get(set.key, set.initial);
         Control& c = page.controls[i];
+        // Beside the control: its note, or for the quality, the preview's file size.
+        const bool quality = std::string(set.key) == "quality";
+        anyui::Node beside = quality ? anyui::Node(L::Label{""}.bind(page.info).width(Extent{9, Extent::Unit::Chars}))
+                                     : anyui::Node(L::Label{set.note ? set.note : ""});
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
-                rows.push_back({set.label, L::Slider{double(set.min), double(set.max), double(value)}
-                                               .step(1, std::max(1, (set.max - set.min) / 10))
-                                               .showValue(0)
-                                               .onChanged([s](double) { s->report(); })
-                                               .bind(c.range)
-                                               .width(Extent{32, Extent::Unit::Chars})});
+                rows.push_back({set.label, L::HBox{L::Slider{double(set.min), double(set.max), double(value)}
+                                                       .step(1, std::max(1, (set.max - set.min) / 10))
+                                                       .showValue(0)
+                                                       .onChanged([s](double) { s->report(); })
+                                                       .bind(c.range)
+                                                       .width(Extent{26, Extent::Unit::Chars}),
+                                                   beside}});
                 break;
             case EncodeSetting::Kind::Toggle:
-                rows.push_back({"", L::Check{set.label, value != 0}
-                                        .onToggled(
-                                            [s, p](bool)
-                                            {
-                                                s->update_enabled(*p);
-                                                s->report();
-                                            })
-                                        .bind(c.toggle)});
+                rows.push_back({"", L::HBox{L::Check{set.label, value != 0}
+                                                .onToggled(
+                                                    [s, p](bool)
+                                                    {
+                                                        s->update_enabled(*p);
+                                                        s->report();
+                                                    })
+                                                .bind(c.toggle),
+                                            beside}});
                 break;
             case EncodeSetting::Kind::Choice:
             {
                 std::vector<std::string> choices(set.choices.begin(), set.choices.end());
-                rows.push_back({set.label, L::Select{choices, value}.onChanged([s](int) { s->report(); }).bind(c.choice)});
+                rows.push_back({set.label, L::HBox{L::Select{choices, value}.onChanged([s](int) { s->report(); }).bind(c.choice), beside}});
                 break;
             }
         }
-        if (set.note)
-            rows.push_back({"", L::Label{set.note}});
     }
     if (rows.empty())
         rows.push_back({"", L::Label{std::string(e.name) + " has no settings."}});
@@ -185,8 +193,9 @@ void SaveDialog::report()
 
 void SaveDialog::set_info(const std::string& text)
 {
-    if (info_)
-        info_->setText(text);
+    const int i = format_ ? format_->current() : -1;
+    if (i >= 0 && pages_[size_t(i)].info)
+        pages_[size_t(i)].info->setText(text);
 }
 
 void SaveDialog::close()

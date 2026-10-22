@@ -117,6 +117,11 @@ App::~App()
 {
     stop_video();
     outgoing_video_.stop();
+    // A save preview still encoding uses the encoders' and decoders' statics,
+    // which go when the process does: let it finish (or give up) first.
+    ++preview_->generation;
+    for (int i = 0; i < 600 && preview_->running.load(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
 Node App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
@@ -1129,7 +1134,7 @@ void App::save_as()
     };
     cb.closed = [this]
     {
-        ++preview_generation_;
+        ++preview_->generation;
         view_->end_preview();
         save_dialog_.reset();
         status_message_.clear();
@@ -1142,23 +1147,29 @@ void App::save_as()
 // view, with the file size, a moment after the settings stop changing.
 void App::preview_save(const Encoder& e, const EncodeOptions& o)
 {
-    const uint64_t generation = ++preview_generation_;
+    const uint64_t generation = ++preview_->generation;
     if (!image_ || !e.lossy(o))
     {
         view_->end_preview();
         if (save_dialog_)
-            save_dialog_->set_info(e.setting("quality") ? "Lossless: the image is kept exactly." : "");
+            save_dialog_->set_info("");
         return;
     }
     if (save_dialog_)
-        save_dialog_->set_info("Previewing…");
+        save_dialog_->set_info("…");
     std::shared_ptr<Image> source = image_;
     const Encoder* encoder = &e;
+    ++preview_->running;
     std::thread(
-        [this, generation, source, encoder, o, gen = &preview_generation_]
+        [this, generation, source, encoder, o, state = preview_]
         {
+            struct Done
+            {
+                PreviewState& s;
+                ~Done() { --s.running; }
+            } done{*state};
             std::this_thread::sleep_for(std::chrono::milliseconds(120));  // let a dragged slider settle
-            if (gen->load() != generation)
+            if (state->generation.load() != generation)
                 return;
             platform::lower_thread_priority();
             const std::string path = (std::filesystem::temp_directory_path() /
@@ -1176,18 +1187,22 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
             }
             std::error_code ec;
             std::filesystem::remove(path, ec);
+            if (state->generation.load() != generation)
+                return;
             platform::post_main(
-                [this, generation, result, ok, size, error]
+                [this, generation, result, ok, size, error, state]
                 {
-                    if (preview_generation_.load() != generation || !save_dialog_)
+                    if (state->generation.load() != generation || !save_dialog_)
                         return;
                     if (!ok)
                     {
-                        save_dialog_->set_info("Preview failed: " + error);
+                        save_dialog_->set_info("failed");
+                        status_message_ = "Preview failed: " + error;
+                        update_status();
                         return;
                     }
                     view_->show_preview(result);
-                    save_dialog_->set_info("Shown as it would save: " + human_bytes(size) + ".");
+                    save_dialog_->set_info(human_bytes(size));
                 });
         })
         .detach();
