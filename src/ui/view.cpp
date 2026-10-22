@@ -524,8 +524,7 @@ void View::zoom_fit()
     zoom_changed();
 }
 
-// ------------------------------------------------------------- pixels
-
+// -- pixels -------------------------------------------------------------------
 rap::image* View::base_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
@@ -580,8 +579,7 @@ rap::image* View::checker_image(int w, int h)
     return checker_.get();
 }
 
-// ------------------------------------------------------------- drawing
-
+// -- drawing ------------------------------------------------------------------
 void View::paint(rap::painter& p, rap::size_f)
 {
     const double scale = p.device_scale();
@@ -765,8 +763,7 @@ void View::draw_overlay(rap::painter& p)
     }
 }
 
-// ------------------------------------------------------------- video controls
-
+// -- video controls -----------------------------------------------------------
 void View::set_video(bool on, bool audio)
 {
     video_ = on;
@@ -915,8 +912,7 @@ void View::draw_video_controls(rap::painter& p)
     }
 }
 
-// ------------------------------------------------------------- input
-
+// -- input --------------------------------------------------------------------
 void View::to_image(double x, double y, double& ix, double& iy) const
 {
     const int scale = scale_factor();

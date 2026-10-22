@@ -373,8 +373,7 @@ void App::toggle_xmp()
     }
 }
 
-// ------------------------------------------------------------ slideshow
-
+// -- slideshow ----------------------------------------------------------------
 void App::toggle_slideshow()
 {
     if (slideshow_)
@@ -505,8 +504,7 @@ void App::slideshow_advance()
     }
 }
 
-// --------------------------------------------------------------- video
-
+// -- video --------------------------------------------------------------------
 void App::play_video()
 {
     if (!image_ || !image_->is_video)
@@ -581,8 +579,7 @@ void App::stop_video()
     video_timer_.reset();
 }
 
-// ----------------------------------------------------------- animation
-
+// -- animation ----------------------------------------------------------------
 // Frames are swapped into the image's pixel buffer in place, so everything
 // else (zoom, selection, save, copy) sees the current frame.
 void App::show_animation_frame(size_t index)
@@ -647,8 +644,7 @@ void App::toggle_animation()
     update_status();
 }
 
-// ------------------------------------------------------------ metadata
-
+// -- metadata -----------------------------------------------------------------
 void App::toggle_metadata()
 {
     const rap::size_f before = window_->size();
@@ -866,8 +862,7 @@ void App::quit()
     ui_.quit();
 }
 
-// ------------------------------------------------------------ navigation
-
+// -- navigation ---------------------------------------------------------------
 void App::open_path(const std::string& path)
 {
     gchar* canonical = g_canonicalize_filename(path.c_str(), nullptr);
@@ -1382,8 +1377,7 @@ void App::apply_xmp(bool fresh)
     status_message_ = "XMP edits applied";
 }
 
-// --------------------------------------------------------------- window
-
+// -- window -------------------------------------------------------------------
 // Size the window so the image shows 1:1 when it fits on the monitor,
 // but never smaller than the configured minimum and never larger than
 // the work area. Where the platform lets us, keep it on screen.
@@ -1537,8 +1531,7 @@ void App::open_settings_page(int page)
         page);
 }
 
-// --------------------------------------------------------------- status
-
+// -- status -------------------------------------------------------------------
 void App::update_title()
 {
     // In fullscreen the title is invisible, and under some compositors a

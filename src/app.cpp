@@ -23,8 +23,7 @@
 #include <filesystem>
 #include <thread>
 
-// ------------------------------------------------------------------- App
-
+// -- App ----------------------------------------------------------------------
 namespace
 {
 
@@ -486,8 +485,7 @@ void App::transform(int exif_orientation)
     refresh_metadata();
 }
 
-// ------------------------------------------------------------ slideshow
-
+// -- slideshow ----------------------------------------------------------------
 void App::toggle_slideshow()
 {
     if (slideshow_)
@@ -654,8 +652,7 @@ GSourceFunc App::animation_timer_callback()
     };
 }
 
-// --------------------------------------------------------------- video
-
+// -- video --------------------------------------------------------------------
 void App::play_video()
 {
     if (!image_ || !image_->is_video)
@@ -985,8 +982,7 @@ void App::quit()
     gtk_widget_destroy(window_);
 }
 
-// ------------------------------------------------------------ navigation
-
+// -- navigation ---------------------------------------------------------------
 void App::open_path(const std::string& path)
 {
     gchar* canonical = g_canonicalize_filename(path.c_str(), nullptr);
@@ -1505,8 +1501,7 @@ void App::on_smooth_toggled()
     view_->config_changed();
 }
 
-// --------------------------------------------------------------- window
-
+// -- window -------------------------------------------------------------------
 // Size the window so the image shows 1:1 when it fits on the monitor,
 // but never smaller than the configured minimum and never larger than
 // the work area.
@@ -1728,8 +1723,7 @@ void App::on_drop(GtkSelectionData* data, guint time, GdkDragContext* ctx)
     gtk_drag_finish(ctx, ok, FALSE, time);
 }
 
-// --------------------------------------------------------------- status
-
+// -- status -------------------------------------------------------------------
 void App::update_title()
 {
     // In fullscreen the title is invisible, and under some compositors a

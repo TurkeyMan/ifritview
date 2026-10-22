@@ -1053,8 +1053,7 @@ void ImageView::zoom_to_selection()
     zoom_changed();
 }
 
-// ------------------------------------------------------------- bindings
-
+// -- bindings -----------------------------------------------------------------
 void ImageView::run_click(Action a, double x, double y)
 {
     switch (a)

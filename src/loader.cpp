@@ -6,8 +6,7 @@
 
 #include <algorithm>
 
-// ---------------------------------------------------------------- Loader
-
+// -- Loader -------------------------------------------------------------------
 Loader::Loader(Callback callback, Dispatch dispatch) : callback_(std::move(callback)), dispatch_(std::move(dispatch))
 {
     foreground_ = std::thread([this] { run_foreground(); });
