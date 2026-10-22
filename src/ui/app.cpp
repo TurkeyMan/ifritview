@@ -264,10 +264,8 @@ void App::build_ui()
     view_->on_presented = [this] { image_presented(); };
     view_->on_resized = [this]
     {
-        if (!refit_after_layout_)
-            return;
-        refit_after_layout_ = false;
-        fit_window_to_image();
+        if (refit_after_layout_)
+            refit_after_pane_toggle();
     };
     view_->on_video_toggle = [this] { toggle_video(); };
     view_->on_video_mute = [this] { toggle_mute(); };
@@ -645,27 +643,56 @@ void App::toggle_animation()
 
 void App::toggle_metadata()
 {
+    const SizeF before = window_->size();
     metadata_visible_ = !metadata_visible_;
     metadata_pane_->setVisible(metadata_visible_);
     if (metadata_visible_)
     {
-        const SizeF s = window_->size();
-        splitter_->setSizes({std::max(100.f, s.w - float(cfg_.metadata_pane_width)), float(cfg_.metadata_pane_width)});
+        splitter_->setSizes({std::max(100.f, before.w), float(cfg_.metadata_pane_width)});
         refresh_metadata();
     }
-    // Grow to make room for the pane, or shrink back: measured once the
-    // toolkit has laid the pane in or out (it does that later, not here),
-    // or shortly if the view's size didn't change.
+    // The window takes (or gives back) what the pane adds in the same step,
+    // so the first frame is laid out at the final width: laying the pane into
+    // the old width first would show its divider mid-image for a frame.
+    pane_toggled_from_ = 0;
+    if (pane_extra_ <= 0)
+        pane_extra_ = float(cfg_.metadata_pane_width) + 6;  // until measured: the pane and a divider
+    if (image_ && !fullscreen_ && cfg_.fit_window_to_image)
+    {
+        float w = before.w + (metadata_visible_ ? pane_extra_ : -pane_extra_);
+        const RectF work = window_->workArea();
+        if (work.w > 0)
+            w = std::min(w, work.w - 24);
+        window_->resize({std::max(w, float(cfg_.min_window_width)), before.h});
+        pane_toggled_from_ = before.w;
+    }
+    // Then the exact fit, measured once the toolkit has laid the pane in or
+    // out (it does that later, not here), or shortly if the view's size
+    // didn't change.
     refit_after_layout_ = true;
     refit_timer_ = ui_.timer(150, false,
                              [this]
                              {
                                  if (refit_after_layout_)
-                                 {
-                                     refit_after_layout_ = false;
-                                     fit_window_to_image();
-                                 }
+                                     refit_after_pane_toggle();
                              });
+}
+
+void App::refit_after_pane_toggle()
+{
+    refit_after_layout_ = false;
+    fit_window_to_image();
+    // Learn exactly what the pane adds (its width and the divider), for next time.
+    const float now = window_->size().w;
+    const RectF work = window_->workArea();
+    const bool limited = work.w > 0 && now >= work.w - 25;
+    if (pane_toggled_from_ > 0 && !limited)
+    {
+        const float extra = metadata_visible_ ? now - pane_toggled_from_ : pane_toggled_from_ - now;
+        if (extra > 0)
+            pane_extra_ = extra;
+    }
+    pane_toggled_from_ = 0;
 }
 
 std::vector<MetadataGroup> App::collect_metadata() const
