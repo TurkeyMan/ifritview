@@ -2,131 +2,63 @@
 
 IrfanView clone, but portable, and kinda better!
 
-A light, no-frills, HiDPI-aware image viewer for Linux in the spirit of
-IrfanView. GTK3, C++20, and the system's own format libraries.
+IfritView is a fast, light image viewer in the spirit of IrfanView: open a
+picture, flick through its folder, and get on with your day. It runs natively
+on Linux and Windows, and opens almost anything a camera, a phone, the web or
+an old game ever produced.
 
-## Behaviour
+## Principles
 
-- The window resizes to show each image at 1:1, but never smaller than a
-  configurable minimum (640×480 by default) and never larger than the work
-  area; images that don't fit are scaled down to fit.
-- The toolbar, footer and dialogs follow the desktop scale factor. The image
-  panel does not: 100% is always one image pixel per screen pixel.
-- Double-click or Enter toggles fullscreen; Esc leaves fullscreen (or quits).
-- Mouse wheel steps through the folder, Ctrl+wheel zooms around the cursor,
-  drag pans.
-- Images decode on a worker thread; flicking through a folder only decodes
-  what ends up on screen.
+- **Speed is the feature.** The image you asked for comes before everything
+  else. Prefetching, raw development and metadata happen around it, never in
+  its way, and flicking through a folder shows every image, not just the
+  last one.
+- **Pixels are honest.** The window fits the image at 1:1 whenever it can,
+  and 100% always means one image pixel per screen pixel, whatever the
+  desktop's scale. Anything that changes how an image looks, such as its
+  orientation or an edit recorded in its metadata, is applied before it is
+  first shown.
+- **Native everywhere.** The interface is built from each platform's own
+  controls through [rapport](https://github.com/TurkeyMan/rapport), and
+  images are decoded by the platform's own format libraries.
+- **Nothing is required that isn't needed.** Every format library is
+  optional. Build without one and its formats are simply left out.
+- **Your photos stay yours.** The only thing IfritView sends anywhere is a
+  photo's GPS position, to turn it into a place name, and you choose the
+  service or switch it off in Settings.
 
-| Key | Action |
-|---|---|
-| Left / PageUp / Backspace | previous image |
-| Right / PageDown / Space | next image |
-| Home / End | first / last image |
-| Enter / F11 / double-click | toggle fullscreen |
-| Esc | leave fullscreen, else quit |
-| + / - / Ctrl+wheel | zoom in / out |
-| 1 | actual pixels |
-| F | fit to window |
-| L / R | rotate left / right |
-| H / V | mirror horizontally / vertically |
-| F5 | rescan folder and reload |
-| I | metadata window (windowed) / info overlay on–off (fullscreen) |
-| A | pause / resume an animation |
-| S | slideshow: fullscreen, timed, gentle pan/zoom |
-| Space (on a video) | play / pause |
-| M (on a video) | mute / unmute |
-| Ctrl+O | open file |
-| Ctrl+P | settings |
-| Ctrl+Q | quit |
+## What it does
 
-Settings live in `~/.config/ifritview/ifritview.conf` (a GKeyFile), including
-the list of extensions considered when cycling through a folder.
-
-In fullscreen a small info overlay can show categories of metadata (file,
-format, shot, location, view); Settings → Viewing picks the categories,
-colour and size, and whether it also shows in the window.
-
-## Formats
-
-| Format | Library |
-|---|---|
-| JPEG (incl. CMYK, EXIF orientation) | libjpeg-turbo, libexif |
-| PNG | libpng |
-| WebP (incl. animation) | libwebp |
-| HEIF / HEIC / AVIF | libheif |
-| JPEG XL | libjxl |
-| TIFF | libtiff |
-| Camera RAW: Canon CR2/CR3/CRW, Nikon NEF, Fuji RAF, Sony ARW, DNG, Olympus, Panasonic, Pentax, … | LibRaw |
-| PSD (flattened), TGA, PNM, HDR, PIC | vendored stb_image |
-| PDF (first page) | poppler-glib |
-| Video: MP4/MOV (phones), MTS/M2TS (cameras), MKV, WebM, AVI, 3GP | GStreamer (+ gst-libav for H.264/HEVC/AV1) |
-| PlayStation TIM (4/8-bit CLUT, 16/24-bit) | hand-written |
-| Amiga IFF ILBM/PBM (palette, EHB, HAM6/8, 24/32-bit, masks) | hand-written |
-| PCX (mono, EGA, 256-colour, 24-bit) | hand-written |
-| GIF (incl. animation), BMP, ICO, XPM, SVG and anything else with a loader | gdk-pixbuf |
-
-Metadata shown in the Metadata window (`I`): EXIF/GPS/maker notes (libexif),
-IPTC-IIM (libiptcdata), XMP embedded or from a `.xmp` sidecar (exempi),
-PNG text chunks, TIFF tags, LibRaw camera data and PDF document info.
-
-GPS positions become a map link (provider configurable) and, if enabled, a
-place name looked up by reverse geocoding (OpenStreetMap's Nominatim by
-default; Photon, BigDataCloud or a custom URL template; or off). Lookups run
-ahead of time for prefetched images, at most one per second, and are cached in
-`~/.cache/ifritview/places.tsv`. Note that this sends photo coordinates to the
-chosen service; turn it off in Settings → General if that matters to you.
-
-Each backend is optional: a missing library is reported at configure time and
-that decoder is left out.
+- **Opens nearly everything:** camera raw from every major maker, phone
+  photos and modern formats, the web's formats, layered and print formats,
+  phone and camera video, and the formats of old consoles and home computers.
+  Raw files show their embedded preview at once and are developed in the
+  background.
+- **Shows what's inside:** EXIF, maker notes, IPTC and XMP (sidecars
+  included), with GPS positions as map links and place names.
+- **Gets out of the way:** fullscreen with an optional info overlay,
+  slideshows, zoom and pan by mouse or keyboard, and mouse controls you can
+  rebind for windowed and fullscreen use.
+- **Saves to other formats,** with each format's own settings and a live
+  preview of lossy encoding before anything is written.
 
 ## Building
 
-    sudo apt install cmake ninja-build libgtk-3-dev libjpeg-dev libexif-dev \
-        libpng-dev libwebp-dev libheif-dev libjxl-dev libtiff-dev libraw-dev \
-        libpoppler-glib-dev libiptcdata0-dev libexempi-dev libjson-glib-dev \
-        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-libav
+    git clone --recursive https://github.com/TurkeyMan/ifritview
+    cd ifritview
     ./build.sh
-    ./build/ifritview some/picture.jpg
 
-`build.sh` also knows about a local sysroot at `~/.local/ifrit-sysroot` for
-machines where the `-dev` packages can't be installed system-wide.
+Install your platform's development packages for the toolkit and the format
+libraries you want first. The configure step reports what it found and what it
+left out.
 
-## Development aids
+## Development
 
-- `ifritview --probe files...` decodes files and prints what each backend
-  made of them, without opening a window.
-- `IFRIT_SCRIPT="next;fullscreen;shot:out.png;quit" ifritview dir/` drives the
-  UI from a list of actions and renders windows to PNG, so behaviour can be
-  checked headlessly (and on Wayland, where screen capture is otherwise
-  unavailable to the app).
-- `cmake --build build --target mkimages && ./build/mkimages out/` plus
-  `tools/mkimages.py out/` generate a folder of test images in every format
-  that can be encoded with the linked libraries.
+IfritView can be driven without a person at the keyboard. `--probe` reports how
+each file decodes, `--convert` re-encodes from the command line, `IFRIT_SCRIPT`
+runs a scripted session, and `IFRIT_TRACE` times every step from keypress to
+pixels. Where it's heading is in [docs/roadmap.md](docs/roadmap.md).
 
-## Roadmap
+## Licence
 
-- Decoder backends as plugin `.so`s loaded with `g_module_open`, so a package
-  can *Recommend* the format libraries instead of requiring them. (Startup is
-  not the motivation: the dynamic loader is ~4 ms of the ~140 ms warm start;
-  the rest is GTK's own window setup.)
-- **Raw develop pipeline** (the big one; needed before light editing + save
-  is worth anything). Today: LibRaw to scene-linear sRGB, a tone curve
-  histogram-matched to the embedded JPEG, exposure as a gain. The camera JPEG
-  still differs in colour (white balance rendering, film simulation / picture
-  style), tone, and geometry (in-camera lens corrections). Plan:
-  - take camera-space linear from LibRaw (no matrix, unit multipliers) and own
-    white balance + colour matrix + tone in our pass; WB slider with D50/D65
-    ticks and an as-shot estimate;
-  - lens corrections from embedded parameters (Fuji/Sony/Panasonic maker
-    notes, DNG WarpRectilinear) with lensfun as the fallback (Canon);
-  - a tone/colour model that gets closer to the camera look (per-make picture
-    styles are a long tail; start with a filmic base and the matched curve);
-  - threaded CPU demosaic first, then the whole thing on the GPU (demosaic,
-    WB, matrix, warp, tone in shaders) shared with the HDR presenter.
-  - edits (exposure, WB, crop, rotation) kept as parameters and saved to an
-    XMP sidecar; export applies them to the developed image.
-- Honour `crs:CropAngle`, `crs:Tint`.
-- Hand-written decoder for XCF.
-- Re-render toolbar icons when the icon theme changes at runtime (currently
-  cached per theme/scale/colour and picked up on the next start).
+GPL-3.0. See [LICENSE](LICENSE).
