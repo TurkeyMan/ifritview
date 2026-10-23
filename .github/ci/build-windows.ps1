@@ -12,9 +12,21 @@ $build = 'build-win'
 $version = ''
 if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') -replace '-', '~' }
 
+# A failing command's error lines (or its last lines) become an annotation on
+# the run, readable on its summary page and through the API.
 function Run([string] $exe, [string[]] $arguments) {
-    & $exe @arguments
-    if ($LASTEXITCODE) { throw "$exe failed ($LASTEXITCODE)" }
+    $log = New-TemporaryFile
+    & $exe @arguments 2>&1 | Tee-Object -FilePath $log
+    if ($LASTEXITCODE) {
+        $lines = Get-Content $log | Where-Object { $_ -match 'error|fatal|failed|not found' } | Select-Object -Last 15
+        if (-not $lines) { $lines = Get-Content $log | Select-Object -Last 15 }
+        Write-Output ("::error title=$(Split-Path -Leaf $exe) failed ($LASTEXITCODE)::" + ($lines -join '%0A'))
+        throw "$exe failed ($LASTEXITCODE)"
+    }
+}
+trap {
+    Write-Output "::error title=build-windows.ps1 $Step::$($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
+    break
 }
 
 if ($Step -eq 'configure') {
