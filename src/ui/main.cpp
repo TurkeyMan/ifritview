@@ -7,6 +7,13 @@
 
 #include <glib.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -113,6 +120,15 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
 int main(int argc, char** argv)
 {
     const auto t_start = std::chrono::steady_clock::now();
+#ifdef _WIN32
+    // A GUI program has no console of its own; run from one (--probe,
+    // --help, IFRIT_TRACE), it writes there.
+    if (AttachConsole(ATTACH_PARENT_PROCESS))
+    {
+        std::freopen("CONOUT$", "w", stdout);
+        std::freopen("CONOUT$", "w", stderr);
+    }
+#endif
     g_set_prgname("ifritview");
     g_set_application_name("IfritView");
     if (argc > 1 && (std::strcmp(argv[1], "-h") == 0 || std::strcmp(argv[1], "--help") == 0))

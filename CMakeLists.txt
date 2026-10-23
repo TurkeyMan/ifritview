@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25)
 project(IfritView VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,6 +11,25 @@ endif()
 # Release builds pass the tag's version (CI: v1.2 -> 1.2).
 set(IFRIT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version stamped into the binary and packages")
 
+# Windows builds use MSVC with the format libraries from vcpkg (vcpkg.json),
+# all linked statically, the C runtime too: one exe, no runtime DLLs.
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options(/utf-8 /Zc:__cplusplus /EHsc)
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+  set(IFRIT_WARNINGS /W3)
+  if(DEFINED VCPKG_INSTALLED_DIR)
+    # vcpkg's pkgconf over its .pc files, which describe static builds.
+    find_program(PKG_CONFIG_EXECUTABLE pkgconf
+      HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/pkgconf" REQUIRED)
+    set(ENV{PKG_CONFIG_PATH} "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/pkgconfig;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/pkgconfig")
+  endif()
+else()
+  set(IFRIT_WARNINGS -Wall -Wextra)
+endif()
+if(VCPKG_TARGET_TRIPLET MATCHES "static")
+  set(PKG_CONFIG_ARGN --static)  # the private libraries too, for static linking
+endif()
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
 # The core needs GLib/GIO and gdk-pixbuf; the toolkits come with rapport.
@@ -43,11 +62,11 @@ add_library(ifrit_core STATIC
   src/decoders/pcx.cpp
   src/decoders/pixbuf.cpp
 )
-target_compile_options(ifrit_core PRIVATE -Wall -Wextra)
+target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
 target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
 target_include_directories(ifrit_core PUBLIC src ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE ${CMAKE_DL_LIBS})
-set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "-w")
+set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
   target_link_libraries(ifrit_core PUBLIC shell32 advapi32)
@@ -106,13 +125,19 @@ add_executable(ifritview
   src/ui/save.cpp
 )
 set_target_properties(ifritview PROPERTIES CXX_STANDARD 23)
-target_compile_options(ifritview PRIVATE -Wall -Wextra)
+target_compile_options(ifritview PRIVATE ${IFRIT_WARNINGS})
 target_include_directories(ifritview PRIVATE src/ui)
 target_link_libraries(ifritview PRIVATE ifrit_core rapport::rapport)
 if(WIN32)
   # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
   enable_language(RC)
   target_sources(ifritview PRIVATE data/windows/ifritview.rc)
+  # A GUI program, so no console window opens beside it; main() stays the
+  # entry point. The manifest is the .rc's own.
+  set_target_properties(ifritview PROPERTIES WIN32_EXECUTABLE ON)
+  if(MSVC)
+    target_link_options(ifritview PRIVATE /ENTRY:mainCRTStartup /MANIFEST:NO)
+  endif()
 endif()
 if(IFRIT_RAPPORT_PLUGINS)
   target_compile_definitions(ifritview PRIVATE IFRIT_PLUGIN_DIR="${IFRIT_PLUGIN_DIR}")
