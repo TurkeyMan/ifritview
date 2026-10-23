@@ -304,12 +304,16 @@ if(TARGET ifritview)
   install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES data/ifritview.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+# The icon at each size, from data/ifritview.png (1024 px).
+install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
-file(READ data/ifritview.svg IFRIT_ICON_SVG)
+# The 256 px icon as C bytes, for a bare executable's own desktop entry.
+file(READ data/icons/hicolor/256x256/apps/ifritview.png IFRIT_ICON_HEX HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," IFRIT_ICON_PNG "${IFRIT_ICON_HEX}")
 file(READ data/ifritview.desktop IFRIT_DESKTOP_ENTRY)
 configure_file(src/embedded.h.in ${CMAKE_BINARY_DIR}/generated/embedded.h @ONLY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/ifritview.svg data/ifritview.desktop)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/icons/hicolor/256x256/apps/ifritview.png
+  data/ifritview.desktop)
 
 # Refresh the desktop/MIME/icon caches on `cmake --install` so file managers
 # pick the app up immediately (packages do this in their own postinst).

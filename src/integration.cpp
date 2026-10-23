@@ -27,11 +27,11 @@ bool ensure_desktop_entry(std::string& error)
     // Not installed: write a per-user entry that launches this very binary,
     // with the icon beside it so the entry shows properly in menus.
     gchar* apps_dir = g_build_filename(g_get_user_data_dir(), "applications", nullptr);
-    gchar* icon_dir = g_build_filename(g_get_user_data_dir(), "icons", "hicolor", "scalable", "apps", nullptr);
+    gchar* icon_dir = g_build_filename(g_get_user_data_dir(), "icons", "hicolor", "256x256", "apps", nullptr);
     g_mkdir_with_parents(apps_dir, 0755);
     g_mkdir_with_parents(icon_dir, 0755);
-    gchar* icon_path = g_build_filename(icon_dir, "ifritview.svg", nullptr);
-    g_file_set_contents(icon_path, kIconSvg, -1, nullptr);
+    gchar* icon_path = g_build_filename(icon_dir, "ifritview.png", nullptr);
+    g_file_set_contents(icon_path, reinterpret_cast<const gchar*>(kIconPng), sizeof kIconPng, nullptr);
 
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_data(kf, kDesktopEntry, -1, G_KEY_FILE_NONE, nullptr);
