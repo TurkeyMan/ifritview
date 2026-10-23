@@ -62,13 +62,33 @@ set(IFRIT_RAPPORT_DIR "${CMAKE_SOURCE_DIR}/third_party/rapport" CACHE PATH "rapp
 if(NOT EXISTS "${IFRIT_RAPPORT_DIR}/CMakeLists.txt")
   message(FATAL_ERROR "rapport not found in ${IFRIT_RAPPORT_DIR}: run 'git submodule update --init'")
 endif()
-set(RAPPORT_STATIC ON CACHE BOOL "" FORCE)
+# Linux packages ship every toolkit backend as a plugin, loaded at runtime
+# for the desktop in use (one whose toolkit isn't installed is skipped), so
+# installing pulls in no toolkit; rapport's core goes with them, privately,
+# in lib/ifritview. Otherwise the backends are linked in.
+option(IFRIT_RAPPORT_PLUGINS "rapport's toolkit backends as plugins in lib/ifritview" OFF)
+if(WIN32)
+  set(IFRIT_RAPPORT_PLUGINS OFF CACHE BOOL "" FORCE)
+endif()
+set(IFRIT_PLUGIN_DIR "${CMAKE_INSTALL_LIBDIR}/ifritview")
 set(RAPPORT_EXAMPLES OFF CACHE BOOL "" FORCE)
-# One GTK per program: 3 (the default) or 4. Windows uses neither.
-set(IFRIT_GTK 3 CACHE STRING "GTK major version (3 or 4)")
+# One GTK per program when linked in: 3 (the default) or 4. As plugins,
+# both (only one is ever loaded). Windows uses neither.
+set(IFRIT_GTK 3 CACHE STRING "GTK major version when linked in (3 or 4)")
+if(IFRIT_RAPPORT_PLUGINS)
+  set(RAPPORT_STATIC OFF CACHE BOOL "" FORCE)
+  set(RAPPORT_BACKEND_GTK3 ON CACHE BOOL "" FORCE)
+  set(RAPPORT_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
+  # In the build tree as installed: the exe, and the libraries beside it in
+  # lib/ifritview (relative to the build directory).
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/ifritview)
+else()
+  set(RAPPORT_STATIC ON CACHE BOOL "" FORCE)
+endif()
 if(WIN32)
   set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
   set(RAPPORT_BACKEND_GTK4 OFF CACHE BOOL "" FORCE)
+elseif(IFRIT_RAPPORT_PLUGINS)
 elseif(IFRIT_GTK STREQUAL "4")
   set(RAPPORT_BACKEND_GTK3 OFF CACHE BOOL "" FORCE)
   set(RAPPORT_BACKEND_GTK4 ON CACHE BOOL "" FORCE)
@@ -93,13 +113,29 @@ if(WIN32)
   enable_language(RC)
   target_sources(ifritview PRIVATE data/windows/ifritview.rc)
 endif()
-# Qt 6 alongside GTK when it's installed; RAPPORT_BACKEND / --ui choose.
-foreach(backend gtk3 gtk4 qt6 null win32)
-  if(TARGET rapport::backend_${backend})
-    target_link_libraries(ifritview PRIVATE rapport::backend_${backend})
-    target_compile_definitions(ifritview PRIVATE IFRIT_BACKEND_${backend})
-  endif()
-endforeach()
+if(IFRIT_RAPPORT_PLUGINS)
+  target_compile_definitions(ifritview PRIVATE IFRIT_PLUGIN_DIR="${IFRIT_PLUGIN_DIR}")
+  set_target_properties(ifritview PROPERTIES INSTALL_RPATH "$ORIGIN/../${IFRIT_PLUGIN_DIR}")
+  install(TARGETS rapport LIBRARY DESTINATION ${IFRIT_PLUGIN_DIR})
+  set(IFRIT_PLUGINS "")
+  foreach(backend gtk3 gtk4 qt6)
+    if(TARGET rapport_${backend})
+      set_target_properties(rapport_${backend} PROPERTIES INSTALL_RPATH "$ORIGIN")
+      add_dependencies(ifritview rapport_${backend})
+      install(TARGETS rapport_${backend} LIBRARY DESTINATION ${IFRIT_PLUGIN_DIR})
+      list(APPEND IFRIT_PLUGINS ${backend})
+    endif()
+  endforeach()
+  message(STATUS "rapport plugins: ${IFRIT_PLUGINS}")
+else()
+  # Qt 6 alongside GTK when it's installed; RAPPORT_BACKEND / --ui choose.
+  foreach(backend gtk3 gtk4 qt6 null win32)
+    if(TARGET rapport::backend_${backend})
+      target_link_libraries(ifritview PRIVATE rapport::backend_${backend})
+      target_compile_definitions(ifritview PRIVATE IFRIT_BACKEND_${backend})
+    endif()
+  endforeach()
+endif()
 
 # Optional format backends. Each is on by default and simply left out, with a
 # notice, when its library isn't installed.
@@ -164,12 +200,15 @@ else()
 endif()
 
 # PDF through poppler, which, like GStreamer, is optional at runtime: built
-# against its headers, dlopened by src/decoders/pdf.cpp, never linked.
+# against its headers, dlopened by src/decoders/pdf.cpp, never linked. The
+# page is drawn with cairo, which is linked.
 pkg_check_modules(PDF poppler-glib)
-if(PDF_FOUND)
+pkg_check_modules(PDF_CAIRO IMPORTED_TARGET cairo)
+if(PDF_FOUND AND PDF_CAIRO_FOUND)
   target_sources(ifrit_core PRIVATE src/decoders/pdf.cpp)
   target_compile_definitions(ifrit_core PUBLIC HAVE_PDF)
   target_include_directories(ifrit_core PUBLIC ${PDF_INCLUDE_DIRS})
+  target_link_libraries(ifrit_core PUBLIC PkgConfig::PDF_CAIRO)
   message(STATUS "pdf: enabled (poppler loaded at runtime)")
 else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
@@ -243,7 +282,13 @@ set(CPACK_STRIP_FILES ON)
 
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "graphics")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+if(IFRIT_RAPPORT_PLUGINS)
+  # Not from every file: the toolkit plugins would make each toolkit a
+  # dependency. .github/ci/build.sh works them out from the exe and the core.
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+else()
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+endif()
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
     "glib-networking, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
 
@@ -253,6 +298,14 @@ set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
 # `rpm --suggests`, fails there), so the line rides in after the URL instead.
 set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: glib-networking, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+if(IFRIT_RAPPORT_PLUGINS)
+  # The toolkit plugins require nothing (a toolkit missing at runtime is
+  # skipped), and the private core is no one else's to depend on.
+  set(plugins "${CMAKE_INSTALL_PREFIX}/${IFRIT_PLUGIN_DIR}")
+  set(CPACK_RPM_SPEC_MORE_DEFINE "%global __requires_exclude_from ^${plugins}/rapport_
+%global __provides_exclude_from ^${plugins}/
+%global __requires_exclude ^librapport[.]so")
+endif()
 # Directories the base system owns; the package must not claim them.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /usr/share/applications /usr/share/icons /usr/share/icons/hicolor /usr/share/icons/hicolor/scalable

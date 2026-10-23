@@ -3,6 +3,7 @@
 #include "probe.h"
 
 #include <rapport/rapport.h>
+#include <rapport/sys.h>
 
 #include <glib.h>
 
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -132,7 +134,15 @@ int main(int argc, char** argv)
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
 
-    auto ui = rap::ui::load(argc, argv);
+    rap::load_options options;
+#ifdef IFRIT_PLUGIN_DIR
+    // The toolkit plugins: beside the exe in a build tree, and in
+    // ../lib/.../ifritview once installed.
+    const std::filesystem::path exe_dir = rap::sys::executable_path().parent_path();
+    options.search_paths = {rap::sys::path_to_utf8(exe_dir / "lib" / "ifritview"),
+                            rap::sys::path_to_utf8(exe_dir / ".." / IFRIT_PLUGIN_DIR)};
+#endif
+    auto ui = rap::ui::load(argc, argv, options);
     if (!ui)
     {
         std::fprintf(stderr, "%s\n", ui.error().c_str());
