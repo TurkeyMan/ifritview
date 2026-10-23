@@ -43,9 +43,7 @@ Run cmake @('--build', $build, '--config', 'Release', '--target', 'ifritview', '
 if ($LASTEXITCODE) { throw 'ifritview --version failed' }
 
 # Nothing but Windows: no runtime or library DLL may be needed beside it.
-# (DNSAPI and IPHLPAPI are Windows' own, for GLib's networking.)
-Run python @('third_party/rapport/ci/check-imports.py', '--allow', 'DNSAPI.dll', '--allow', 'IPHLPAPI.DLL',
-    "$build\Release\ifritview.exe")
+Run python @('third_party/rapport/ci/check-imports.py', "$build\Release\ifritview.exe")
 
 $stage = 'dist\IfritView'
 Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
