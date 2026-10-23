@@ -18,7 +18,11 @@ SetCompressor /SOLID lzma
 
 !define MUI_ICON "${__FILEDIR__}\ifritview.ico"
 !define MUI_UNICON "${__FILEDIR__}\ifritview.ico"
-!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\ifritview.exe"
+; "Run IfritView" starts it as the user, through Explorer: started from the
+; elevated installer it would be elevated too, and Windows would refuse it
+; drag and drop from Explorer.
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION RunAsUser
 !insertmacro MUI_PAGE_LICENSE "${STAGE}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -33,6 +37,10 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "IfritView installer"
 VIAddVersionKey "LegalCopyright" "Manu Evans, GPL-3.0"
+
+Function RunAsUser
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\bin\ifritview.exe"'
+FunctionEnd
 
 Section "IfritView"
   SetShellVarContext all
