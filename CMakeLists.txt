@@ -134,6 +134,9 @@ if(WIN32)
   # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
   enable_language(RC)
   target_sources(ifritview PRIVATE data/windows/ifritview.rc)
+  # The resource compiler's own inputs, which CMake doesn't see in the .rc.
+  set_source_files_properties(data/windows/ifritview.rc PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_SOURCE_DIR}/data/windows/ifritview.ico;${CMAKE_SOURCE_DIR}/data/windows/ifritview.manifest")
   # A GUI program, so no console window opens beside it; main() stays the
   # entry point. The manifest is the .rc's own.
   set_target_properties(ifritview PROPERTIES WIN32_EXECUTABLE ON)
