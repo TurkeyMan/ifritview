@@ -49,7 +49,7 @@ struct VideoPlayer::Impl
     };
 
     // The engine's event callback (any thread): ends and errors go to the main thread.
-    class Notify : public IMFMediaEngineNotify
+    class Notify final : public IMFMediaEngineNotify  // final: Release()'s delete this is of the whole object
     {
     public:
         explicit Notify(std::weak_ptr<State> state) : state_(std::move(state)) {}
