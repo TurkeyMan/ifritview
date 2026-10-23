@@ -48,6 +48,10 @@ $appVersion = if ($version) { $version -replace '~.*', '' } else {
 Compress-Archive -Path $stage -DestinationPath "dist\ifritview$suffix-windows-x86_64.zip"
 $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
 if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+if (-not (Test-Path $makensis)) {
+    # Not on the runner image any more: from Chocolatey, which is.
+    Run choco @('install', 'nsis', '--no-progress', '-y')
+}
 Run $makensis @('/V2', "/DVERSION=$appVersion", "/DSTAGE=$PWD\$stage",
     "/DOUT=$PWD\dist\ifritview$suffix-windows-x86_64-setup.exe", "$PWD\data\windows\ifritview.nsi")
 Remove-Item -Recurse -Force $stage
