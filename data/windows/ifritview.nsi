@@ -1,5 +1,6 @@
 ; IfritView's Windows installer. Built by .github/ci/build-windows.sh:
 ;   makensis -DVERSION=1.2 -DSTAGE=<install tree> -DOUT=<setup.exe> ifritview.nsi
+; Windows paths (Windows' makensis doesn't expand File /r with '/').
 ; STAGE holds the app as installed: bin\ifritview.exe (everything linked in)
 ; and the README and licence. Making it the default viewer is in its Settings.
 
@@ -15,10 +16,10 @@ SetCompressor /SOLID lzma
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\IfritView"
 
-!define MUI_ICON "${__FILEDIR__}/ifritview.ico"
-!define MUI_UNICON "${__FILEDIR__}/ifritview.ico"
+!define MUI_ICON "${__FILEDIR__}\ifritview.ico"
+!define MUI_UNICON "${__FILEDIR__}\ifritview.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\bin\ifritview.exe"
-!insertmacro MUI_PAGE_LICENSE "${STAGE}/LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${STAGE}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -39,7 +40,7 @@ Section "IfritView"
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
   SetOutPath "$INSTDIR"
-  File /r "${STAGE}/*"
+  File /r "${STAGE}\*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   CreateShortcut "$SMPROGRAMS\IfritView.lnk" "$INSTDIR\bin\ifritview.exe"
 
