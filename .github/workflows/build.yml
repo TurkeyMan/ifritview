@@ -57,12 +57,41 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # Cross-built with MinGW in Fedora: a portable zip and an NSIS installer,
+  # each carrying the DLLs the exe needs.
+  windows:
+    name: windows x86_64
+    runs-on: ubuntu-24.04
+    container: 'fedora:42'
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y git
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the MinGW toolchain and libraries
+        run: .github/ci/deps-windows.sh
+
+      - name: Build and package
+        run: .github/ci/build-windows.sh
+
+      - name: Upload installer and zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ifritview-windows-x86_64
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
   # A pushed tag (v1.2, v1.3-beta, ...) becomes a GitHub release carrying the
   # binaries and packages from the builds above.
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: linux
+    needs: [linux, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
