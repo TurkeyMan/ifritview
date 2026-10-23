@@ -1,0 +1,22 @@
+{
+  "name": "ifritview",
+  "version-string": "0.1",
+  "description": "The format libraries for Windows builds (MSVC, linked statically).",
+  "builtin-baseline": "40a678a192636131f04b3af79ba118d869effade",
+  "supports": "windows",
+  "dependencies": [
+    "glib",
+    { "name": "gdk-pixbuf", "features": ["others"] },
+    "json-glib",
+    "libjpeg-turbo",
+    "libpng",
+    "libwebp",
+    "tiff",
+    { "name": "libraw", "features": ["dng-lossy"] },
+    "lcms",
+    { "name": "libheif", "features": ["hevc", "libde265", "aom"] },
+    "libjxl",
+    "libexif",
+    { "name": "pkgconf", "host": true }
+  ]
+}

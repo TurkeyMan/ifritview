@@ -121,12 +121,20 @@ int main(int argc, char** argv)
 {
     const auto t_start = std::chrono::steady_clock::now();
 #ifdef _WIN32
-    // A GUI program has no console of its own; run from one (--probe,
-    // --help, IFRIT_TRACE), it writes there.
-    if (AttachConsole(ATTACH_PARENT_PROCESS))
+    // A GUI program has no console of its own: output already redirected
+    // (to a file or pipe) stays there, and otherwise, run from a console
+    // (--probe, --help, IFRIT_TRACE), it writes to that.
+    const auto unset = [](DWORD which)
     {
-        std::freopen("CONOUT$", "w", stdout);
-        std::freopen("CONOUT$", "w", stderr);
+        const HANDLE h = GetStdHandle(which);
+        return h == nullptr || h == INVALID_HANDLE_VALUE;
+    };
+    if ((unset(STD_OUTPUT_HANDLE) || unset(STD_ERROR_HANDLE)) && AttachConsole(ATTACH_PARENT_PROCESS))
+    {
+        if (unset(STD_OUTPUT_HANDLE))
+            std::freopen("CONOUT$", "w", stdout);
+        if (unset(STD_ERROR_HANDLE))
+            std::freopen("CONOUT$", "w", stderr);
     }
 #endif
     g_set_prgname("ifritview");

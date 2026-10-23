@@ -19,9 +19,10 @@ if(MSVC)
   add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
   set(IFRIT_WARNINGS /W3)
   if(DEFINED VCPKG_INSTALLED_DIR)
-    # vcpkg's pkgconf over its .pc files, which describe static builds.
-    find_program(PKG_CONFIG_EXECUTABLE pkgconf
-      HINTS "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/pkgconf" REQUIRED)
+    # vcpkg's pkgconf (a host tool, under the host triplet) over its .pc
+    # files, which describe static builds.
+    file(GLOB IFRIT_PKGCONF_DIRS "${VCPKG_INSTALLED_DIR}/*/tools/pkgconf")
+    find_program(PKG_CONFIG_EXECUTABLE pkgconf HINTS ${IFRIT_PKGCONF_DIRS} REQUIRED)
     set(ENV{PKG_CONFIG_PATH} "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/pkgconfig;${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/pkgconfig")
   endif()
 else()
@@ -29,6 +30,7 @@ else()
 endif()
 if(VCPKG_TARGET_TRIPLET MATCHES "static")
   set(PKG_CONFIG_ARGN --static)  # the private libraries too, for static linking
+  add_compile_definitions(JSON_STATIC_BUILD)  # json-glib's .pc doesn't say so
 endif()
 find_package(PkgConfig REQUIRED)
 include(GNUInstallDirs)
@@ -259,6 +261,33 @@ if(IFRIT_HAVE_JXL)
     target_compile_definitions(ifrit_core PUBLIC HAVE_JXL_THREADS)
     target_link_libraries(ifrit_core PUBLIC PkgConfig::JXL_THREADS)
   endif()
+endif()
+
+# vcpkg's .pc files on MSVC: Unix link names (libm, pthread...) that are in
+# the C runtime, and names that miss the file vcpkg installed (-lde265 for
+# libde265.lib, -lx265 for x265-static.lib, -lz for zs.lib).
+if(MSVC)
+  set(vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+  foreach(pkg CORE EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW GEOCODE PDF_CAIRO)
+    if(NOT TARGET PkgConfig::${pkg})
+      continue()
+    endif()
+    get_target_property(libs PkgConfig::${pkg} INTERFACE_LINK_LIBRARIES)
+    list(REMOVE_ITEM libs m pthread dl stdc++ c++ atomic)
+    set(fixed "")
+    foreach(lib IN LISTS libs)
+      if(NOT IS_ABSOLUTE "${lib}" AND NOT lib MATCHES "^-" AND NOT EXISTS "${vcpkg_lib}/${lib}.lib")
+        unset(found CACHE)
+        find_library(found NAMES lib${lib} ${lib}-static ${lib}_static ${lib}s PATHS "${vcpkg_lib}" NO_DEFAULT_PATH)
+        if(found)
+          set(lib "${found}")
+        endif()
+        unset(found CACHE)
+      endif()
+      list(APPEND fixed "${lib}")
+    endforeach()
+    set_target_properties(PkgConfig::${pkg} PROPERTIES INTERFACE_LINK_LIBRARIES "${fixed}")
+  endforeach()
 endif()
 
 # Developer tool: generates a folder of test images. Needs the encoders too,

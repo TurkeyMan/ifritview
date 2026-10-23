@@ -57,25 +57,42 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  # Cross-built with MinGW in Fedora: a portable zip and an NSIS installer,
-  # each carrying the DLLs the exe needs.
+  # MSVC with everything static (the C runtime, and vcpkg's libraries, whose
+  # builds are cached between runs): one exe needing nothing but Windows, as a
+  # portable zip and an NSIS installer.
   windows:
     name: windows x86_64
-    runs-on: ubuntu-24.04
-    container: 'fedora:42'
+    runs-on: windows-2022
     steps:
-      - name: Install build dependencies
-        run: dnf install -y git
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install the MinGW toolchain and libraries
-        run: .github/ci/deps-windows.sh
+      - name: vcpkg at the manifest's baseline
+        id: vcpkg
+        uses: ./third_party/rapport/.github/actions/vcpkg
+        with:
+          manifest-dir: .
+          triplet: x64-windows-static-release
+
+      # The first run (or a changed vcpkg.json) builds the libraries here.
+      - name: Configure
+        shell: pwsh
+        env:
+          VCPKG_TOOLCHAIN: ${{ steps.vcpkg.outputs.toolchain }}
+        run: .github/ci/build-windows.ps1 configure
+
+      # Kept even if a later step fails, so the libraries aren't rebuilt.
+      - name: Save the vcpkg cache
+        if: always() && steps.vcpkg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.cache }}
+          key: ${{ steps.vcpkg.outputs.cache-key }}
 
       - name: Build and package
-        run: .github/ci/build-windows.sh
+        shell: pwsh
+        run: .github/ci/build-windows.ps1 package
 
       - name: Upload installer and zip
         uses: actions/upload-artifact@v4

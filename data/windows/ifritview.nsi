@@ -1,7 +1,7 @@
 ; IfritView's Windows installer. Built by .github/ci/build-windows.sh:
 ;   makensis -DVERSION=1.2 -DSTAGE=<install tree> -DOUT=<setup.exe> ifritview.nsi
-; STAGE holds the app as installed: bin\ (the exe and its DLLs), lib\ and
-; the README and licence. Making it the default viewer is in its Settings.
+; STAGE holds the app as installed: bin\ifritview.exe (everything linked in)
+; and the README and licence. Making it the default viewer is in its Settings.
 
 Unicode true
 !include "MUI2.nsh"
@@ -29,6 +29,7 @@ SetCompressor /SOLID lzma
 VIProductVersion "${VERSION}.0.0"
 VIAddVersionKey "ProductName" "IfritView"
 VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "IfritView installer"
 VIAddVersionKey "LegalCopyright" "Manu Evans, GPL-3.0"
 

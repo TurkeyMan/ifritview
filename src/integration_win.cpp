@@ -8,8 +8,9 @@
 #include "platform.h"
 
 #include <glib.h>
-#include <shlobj.h>
 #include <windows.h>
+#include <shellapi.h>  // ShellExecuteW (not in windows.h when it's lean)
+#include <shlobj.h>
 
 #include <set>
 

@@ -6,6 +6,7 @@
 #include "../video.h"
 #include "decoder.h"
 
+#include <mmsystem.h>  // MAKEFOURCC (not in windows.h when it's lean)
 #include <propvarutil.h>
 
 #include <cstdio>
