@@ -72,6 +72,7 @@ if(WIN32)
 endif()
 set(IFRIT_PLUGIN_DIR "${CMAKE_INSTALL_LIBDIR}/ifritview")
 set(RAPPORT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(RAPPORT_SHELL OFF CACHE BOOL "" FORCE)  # no file-manager extension (yet)
 # One GTK per program when linked in: 3 (the default) or 4. As plugins,
 # both (only one is ever loaded). Windows uses neither.
 set(IFRIT_GTK 3 CACHE STRING "GTK major version when linked in (3 or 4)")
