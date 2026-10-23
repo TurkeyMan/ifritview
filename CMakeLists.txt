@@ -265,7 +265,8 @@ endif()
 
 # vcpkg's .pc files on MSVC: Unix link names (libm, pthread...) that are in
 # the C runtime, and names that miss the file vcpkg installed (-lde265 for
-# libde265.lib, -lx265 for x265-static.lib, -lz for zs.lib).
+# libde265.lib, -lx265 for x265-static.lib, -lz for zs.lib, -ljxl-static
+# for jxl.lib).
 if(MSVC)
   set(vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
   foreach(pkg CORE EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW GEOCODE PDF_CAIRO)
@@ -278,7 +279,9 @@ if(MSVC)
     foreach(lib IN LISTS libs)
       if(NOT IS_ABSOLUTE "${lib}" AND NOT lib MATCHES "^-" AND NOT EXISTS "${vcpkg_lib}/${lib}.lib")
         unset(found CACHE)
-        find_library(found NAMES lib${lib} ${lib}-static ${lib}_static ${lib}s PATHS "${vcpkg_lib}" NO_DEFAULT_PATH)
+        string(REGEX REPLACE "[-_]static$" "" base "${lib}")
+        find_library(found NAMES lib${lib} ${lib}-static ${lib}_static ${lib}s ${base} lib${base}
+          PATHS "${vcpkg_lib}" NO_DEFAULT_PATH)
         if(found)
           set(lib "${found}")
         endif()
