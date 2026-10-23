@@ -6,9 +6,8 @@
 #include <utility>
 #include <vector>
 
-// A minimal HTTP(S) GET over GIO sockets: one request, `Connection: close`,
-// no redirects or compression. TLS comes from GIO's backend (glib-networking,
-// present on desktop systems); without it, https requests just fail.
+// An HTTP(S) GET on a worker thread, answered on the main loop: rapport's
+// rap::sys::http_get (WinHTTP on Windows, libcurl elsewhere).
 struct HttpResponse
 {
     int status = 0;  // 0: no response (connection, TLS or parse failure)

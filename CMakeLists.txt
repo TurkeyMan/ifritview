@@ -240,11 +240,12 @@ else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
 endif()
 
-# Reverse geocoding of GPS positions (optional): a plain HTTPS request over
-# GIO (src/http.cpp), with json-glib to read the answer.
+# Reverse geocoding of GPS positions (optional): an HTTPS request through
+# rapport (src/http.cpp), with json-glib to read the answer.
 pkg_check_modules(GEOCODE IMPORTED_TARGET json-glib-1.0)
 if(GEOCODE_FOUND)
   target_sources(ifrit_core PRIVATE src/http.cpp)
+  target_link_libraries(ifrit_core PUBLIC rapport::rapport)
   target_compile_definitions(ifrit_core PUBLIC HAVE_GEOCODE)
   target_link_libraries(ifrit_core PUBLIC PkgConfig::GEOCODE)
   message(STATUS "geocode: enabled")
@@ -296,7 +297,7 @@ install(CODE "
 # Packages: `cpack -G DEB` or `cpack -G RPM` in the build directory. Library
 # dependencies are worked out from the binary, so they're the image
 # libraries; GStreamer and poppler aren't linked, so they're only recommended,
-# as is glib-networking (TLS for place-name lookups).
+# as is libcurl (rapport loads it for place-name lookups).
 set(CPACK_PACKAGE_NAME "ifritview")
 set(CPACK_PACKAGE_VERSION "${IFRIT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "Manu Evans <turkeyman@gmail.com>")
@@ -316,14 +317,14 @@ else()
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 endif()
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "glib-networking, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
+    "libcurl4t64 | libcurl4, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
 # `rpm --suggests`, fails there), so the line rides in after the URL instead.
-set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: glib-networking, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: libcurl, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
 if(IFRIT_RAPPORT_PLUGINS)
   # The toolkit plugins require nothing (a toolkit missing at runtime is
   # skipped), and the private core is no one else's to depend on.
