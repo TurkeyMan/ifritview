@@ -503,7 +503,7 @@ void App::show_window()
 void App::open_url(const std::string& url)
 {
     if (!url.empty())
-        g_app_info_launch_default_for_uri(url.c_str(), nullptr, nullptr);
+        platform::open_uri(url);
 }
 
 // Ctrl+C: the selection if there is one, otherwise the whole image. The
@@ -673,8 +673,11 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         using K = rap::sys::file_event::kind;
         switch (e.what)
         {
-            case K::added: listed |= folder_.add(name, cfg_); break;
             case K::removed: listed |= folder_.remove(name); break;
+            // Added under the shown file's name: a fresh temporary renamed
+            // over it within the settle time comes as that, the watch not
+            // knowing the name was there.
+            case K::added:
             case K::modified:
                 listed |= folder_.add(name, cfg_);  // one that wasn't readable before, say
                 reload_shown |= name == folder_.current_name();
@@ -1345,7 +1348,9 @@ void App::update_status()
         if (const ImageDifference* d = view_->compare_difference())
         {
             char buf[160];
-            if (d->max_error == 0)
+            if (!d->summary.empty())
+                std::snprintf(buf, sizeof buf, "%s", d->summary.c_str());
+            else if (d->max_error == 0)
                 std::snprintf(buf, sizeof buf, "identical");
             else
                 std::snprintf(buf, sizeof buf, "PSNR %.1f dB  ·  largest error %d  ·  %.1f%% changed", d->psnr,

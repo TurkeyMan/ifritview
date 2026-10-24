@@ -88,7 +88,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
                                                                             })
                                                                         .bind(s->preview_)}}},
                                          L::separator{},
-                                         rap::node{rap::spec::box{rap::orientation::vertical, pages}, {}},
+                                         rap::node{rap::spec::box{rap::orientation::vertical, pages, false, {}}, {}},
                                          L::spacer{},
                                          L::separator{},
                                          d->metadata_node(metadata),
@@ -123,7 +123,7 @@ rap::node SaveDialog::page_node(Page& page)
         if (auto it = own_settings_.find(set.key); it != own_settings_.end() && own_extension_ == e.extension)
             value = std::clamp(it->second, set.min, set.max);
         Control& c = page.controls[i];
-        rap::node beside = L::label{set.note ? set.note : ""};  // a few words
+        rap::node beside = L::label{set.note ? set.note : ""}.bind(c.note);  // a few words
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
@@ -192,7 +192,7 @@ rap::node SaveDialog::metadata_node(const MetadataChoice& initial)
         columns[i % 2].push_back(L::check{kGroups[i].label, initial.*kGroups[i].flag}.on_toggled([s](bool) { s->group_toggled(); }).bind(groups_[i]));
     return L::vbox{
         L::form{{"Metadata", L::drop_down{presets, preset_index(initial)}.on_changed([s](int i) { s->preset_chosen(i); }).bind(preset_)}},
-        L::hbox{rap::node{rap::spec::box{rap::orientation::vertical, columns[0]}, {}}, rap::node{rap::spec::box{rap::orientation::vertical, columns[1]}, {}}},
+        L::hbox{rap::node{rap::spec::box{rap::orientation::vertical, columns[0], false, {}}, {}}, rap::node{rap::spec::box{rap::orientation::vertical, columns[1], false, {}}, {}}},
         L::label{""}.bind(metadata_note_),
     };
 }
@@ -316,6 +316,8 @@ void SaveDialog::update_enabled(Page& page)
             c.choice->set_enabled(enabled);
         if (c.toggle)
             c.toggle->set_enabled(enabled);
+        if (c.note)
+            c.note->set_enabled(enabled);
     }
 }
 
@@ -337,7 +339,7 @@ void SaveDialog::report()
     const Page& p = pages_[size_t(i)];
     const EncodeOptions o = options(p);
     if (preview_)
-        preview_->set_enabled(p.encoder->lossy(o) && !o.lossless_transform);  // nothing to preview when it's kept exactly
+        preview_->set_enabled(p.encoder->lossy(o));  // nothing to preview when it's kept exactly (Lossless shows what it drops)
     callbacks_.changed(*p.encoder, o);
 }
 

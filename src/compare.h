@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 struct ImageDifference
@@ -17,6 +18,7 @@ struct ImageDifference
     double psnr = 0;              // dB over the colour channels; infinite when identical
     double changed = 0;           // the share of pixels differing by more than 2 levels
     std::vector<uint8_t> errors;  // per pixel, its largest channel difference
+    std::string summary;          // said in place of the numbers, where they'd mislead
 };
 
 // `a` and `b` must be the same size (an empty result otherwise). The

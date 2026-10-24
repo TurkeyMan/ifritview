@@ -5,6 +5,7 @@
 #include "decoders/decoder.h"
 #include "geocode.h"
 #include "integration.h"
+#include "platform.h"
 #include "plugins.h"
 
 #include <gio/gio.h>
@@ -507,19 +508,14 @@ std::string notices_path()
     return {};
 }
 
-void open_uri(const std::string& uri)
-{
-    g_app_info_launch_default_for_uri(uri.c_str(), nullptr, nullptr);
-}
-
 rap::node about_page()
 {
     rap::nodes items = {
         L::label{std::string("IfritView ") + IFRIT_VERSION},
         L::label{"A fast image viewer, for photos and camera raws, and the texture formats of games."},
         L::label{"Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later."},
-        L::label{"Project page and source"}.link([] { open_uri("https://github.com/TurkeyMan/ifritview"); }),
-        L::label{"The licence (GPL 3.0)"}.link([] { open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
+        L::label{"Project page and source"}.link([] { platform::open_uri("https://github.com/TurkeyMan/ifritview"); }),
+        L::label{"The licence (GPL 3.0)"}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };
     // The code it carries from elsewhere, and the licences that come with it.
     if (const std::string notices = notices_path(); !notices.empty())
@@ -528,7 +524,7 @@ rap::node about_page()
             {
                 if (gchar* uri = g_filename_to_uri(notices.c_str(), nullptr, nullptr))
                 {
-                    open_uri(uri);
+                    platform::open_uri(uri);
                     g_free(uri);
                 }
             }));

@@ -1,5 +1,6 @@
 #include "platform.h"
 
+#include <gio/gio.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 
@@ -374,6 +375,16 @@ void trace(const char* format, ...)
     std::vsnprintf(line, sizeof line, format, args);
     va_end(args);
     std::fprintf(stderr, "[%7.1f ms] %s\n", ms, line);
+}
+
+bool open_uri(const std::string& uri)
+{
+    GError* error = nullptr;
+    if (g_app_info_launch_default_for_uri(uri.c_str(), nullptr, &error))
+        return true;
+    std::fprintf(stderr, "ifritview: can't open %s: %s\n", uri.c_str(), error ? error->message : "no program for it");
+    g_clear_error(&error);
+    return false;
 }
 
 }  // namespace platform

@@ -286,7 +286,7 @@ int process(int argc, char** argv)
             // How it was saved, as save settings for its format.
             if (!img.encoded_as.empty() && !img.encoding.empty())
             {
-                std::printf("saved as %s:", img.encoded_as.c_str());
+                std::printf("the file's %s settings:", img.encoded_as.c_str());
                 for (const auto& [key, value] : img.encoding)
                     std::printf(" %s=%d", key.c_str(), value);
                 std::printf("\n");
@@ -362,8 +362,9 @@ it is at that step, after earlier turns and crops)
   crop:X,Y,W,H       keep the W x H rectangle whose top-left corner is X,Y
   exposure:EV        raw and HDR images only: brighter (+) or darker (-), in stops
   info               print the image's size and format at this point, and how the
-                     input was saved as its format's save settings ("saved as
-                     jpg: progressive=1 quality=85 subsampling=3"; quality estimated)
+                     input was saved as its format's save settings ("the file's jpg
+                     settings: progressive=1 quality=85 subsampling=3"; quality
+                     estimated)
   save:OUT[,KEY=VALUE...]
                      write the image as it is at this point; the format comes from
                      OUT's extension. Several saves may appear, e.g. one per size.

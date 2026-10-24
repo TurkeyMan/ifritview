@@ -1014,10 +1014,8 @@ void View::paint(rap::painter& p, rap::size_f)
                         p.rect({L(hx - hs), L(hy - hs), L(2 * hs), L(2 * hs)}, 0, rap::color{255, 255, 255}, rap::color{0, 0, 0});
         }
         // Where it is and its size, in image pixels, while it's drawn or adjusted.
-        if (drag_active_)
+        if (int sx, sy, sw, sh; drag_active_ && selection(sx, sy, sw, sh))
         {
-            int sx, sy, sw, sh;
-            selection(sx, sy, sw, sh);
             const std::string text = std::to_string(sx) + ", " + std::to_string(sy) + "   " + std::to_string(sw) + " × " + std::to_string(sh);
             rap::text_style style;
             style.fg = rap::paint{rap::color{255, 255, 255}};

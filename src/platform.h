@@ -70,6 +70,10 @@ void trace(const char* format, ...)
 #endif
     ;
 
+// A web link or file URI in the desktop's default program, without
+// waiting; why it couldn't be, on stderr (no handler for it, say).
+bool open_uri(const std::string& uri);
+
 // Large pixel buffers: aligned for huge pages where the system offers them.
 void* allocate_pixels(size_t bytes);
 void free_pixels(void* p);

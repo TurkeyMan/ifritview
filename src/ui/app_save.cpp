@@ -171,6 +171,8 @@ void App::preview_lossless()
             platform::lower_thread_priority();
             std::shared_ptr<Image> saved = lossless_preview(*image, *plan);
             const auto difference = std::make_shared<ImageDifference>(compare_images(*image, *saved));
+            // Every difference is the strips dropped: say that, not a PSNR.
+            difference->summary = "lossless, " + plan->differs;
             platform::post_main(
                 [this, generation, saved, difference, state]
                 {
@@ -194,14 +196,18 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
         return;
     }
     const uint64_t generation = ++preview_->generation;
-    if (!save_source_ || !e.lossy(o))
+    // Kept exactly (PNG, WebP's Lossless): nothing to show, but its size is
+    // still worth knowing, so it's encoded all the same.
+    const bool lossy = e.lossy(o);
+    if (!save_source_ || !lossy)
     {
         preview_image_.reset();
         preview_difference_.reset();
         show_save_preview(false);
         if (save_dialog_)
             save_dialog_->set_info("");
-        return;
+        if (!save_source_)
+            return;
     }
     if (save_dialog_)
         save_dialog_->set_info("…");
@@ -209,7 +215,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
     const Encoder* encoder = &e;
     ++preview_->running;
     std::thread(
-        [this, generation, source, encoder, o, state = preview_]
+        [this, generation, source, encoder, o, lossy, state = preview_]
         {
             struct Done
             {
@@ -231,17 +237,17 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
             {
                 std::error_code ec;
                 size = std::filesystem::file_size(path, ec);
-                ok = decode_image(path, *result, error);
+                ok = !lossy || decode_image(path, *result, error);
             }
             std::error_code ec;
             std::filesystem::remove(path, ec);
             if (state->generation.load() != generation)
                 return;
             std::shared_ptr<const ImageDifference> difference;
-            if (ok)
+            if (ok && lossy)
                 difference = std::make_shared<ImageDifference>(compare_images(*source, *result));
             platform::post_main(
-                [this, generation, result, difference, ok, size, error, state]
+                [this, generation, result, difference, ok, lossy, size, error, state]
                 {
                     if (state->generation.load() != generation || !save_dialog_)
                         return;
@@ -252,11 +258,13 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
                         update_status();
                         return;
                     }
+                    save_dialog_->set_info(human_size(size));
+                    if (!lossy)
+                        return;
                     preview_image_ = result;
                     preview_difference_ = difference;
                     if (save_dialog_->preview_shown())
                         show_save_preview(true);
-                    save_dialog_->set_info(human_size(size));
                 });
         })
         .detach();

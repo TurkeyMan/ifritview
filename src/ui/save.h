@@ -60,6 +60,7 @@ private:
         rap::slider* range = nullptr;
         rap::check* toggle = nullptr;
         rap::drop_down* choice = nullptr;
+        rap::label* note = nullptr;  // greyed with it
     };
     struct Page
     {
