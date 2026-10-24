@@ -12,10 +12,13 @@
 // PowerVR SDK textures (iOS and Android): the 52-byte v2 header with "PVR!"
 // at offset 44, and v3 with "PVR\x03" magic. Uncompressed formats (8-bit
 // channels byte by byte, 16-bit ones packed first channel highest) and BC1-
-// BC7 through bcn.cpp are shown; PVRTC, ETC and ASTC aren't decoded here.
+// BC7 through bcn.cpp, ETC/EAC through etc.cpp and 2D ASTC through astc.cpp
+// are shown; PVRTC isn't decoded.
 // The first surface and face, largest mipmap, is shown.
+#include "astc.h"
 #include "bcn.h"
 #include "decoder.h"
+#include "etc.h"
 #include "platform.h"
 
 #include <algorithm>
@@ -600,6 +603,24 @@ std::optional<Channels> v2_channels(int type)
     return std::nullopt;
 }
 
+// A block-compressed SDK format: BCn, ETC/EAC or ASTC (one of them set).
+struct Blocks
+{
+    std::optional<Bcn> bcn;
+    std::optional<Etc> etc;
+    int astc_w = 0, astc_h = 0;
+    AstcProfile profile = AstcProfile::Auto;
+    bool any() const { return bcn || etc || astc_w; }
+    std::string name() const
+    {
+        if (bcn)
+            return bcn_name(*bcn);
+        if (etc)
+            return etc_name(*etc);
+        return "ASTC " + std::to_string(astc_w) + "x" + std::to_string(astc_h);
+    }
+};
+
 std::optional<Bcn> v2_bcn(int type, bool& premultiplied)
 {
     switch (type)
@@ -643,6 +664,31 @@ const char* v3_compressed_name(uint32_t f)
     return f < sizeof(names) / sizeof(names[0]) ? names[f] : nullptr;
 }
 
+// v3's ETC/EAC and 2D ASTC formats, by number.
+Blocks v3_mobile(uint32_t f, uint32_t channel_type, uint32_t colour_space)
+{
+    const bool is_signed = channel_type == 1 || channel_type == 3 || channel_type == 5 || channel_type == 12;
+    Blocks b;
+    switch (f)
+    {
+        case 6: b.etc = Etc::ETC1; break;
+        case 22: b.etc = Etc::ETC2_RGB; break;
+        case 23: b.etc = Etc::ETC2_RGBA; break;
+        case 24: b.etc = Etc::ETC2_RGBA1; break;
+        case 25: b.etc = is_signed ? Etc::EAC_R11S : Etc::EAC_R11; break;
+        case 26: b.etc = is_signed ? Etc::EAC_RG11S : Etc::EAC_RG11; break;
+    }
+    static const int footprints[][2] = {{4, 4}, {5, 4}, {5, 5}, {6, 5}, {6, 6}, {8, 5}, {8, 6}, {8, 8}, {10, 5}, {10, 6}, {10, 8}, {10, 10}, {12, 10}, {12, 12}};
+    if (f >= 27 && f < 27 + std::size(footprints))
+    {
+        b.astc_w = footprints[f - 27][0];
+        b.astc_h = footprints[f - 27][1];
+        // Float channels mean HDR; sRGB colour space, sRGB endpoints.
+        b.profile = channel_type >= 12 ? AstcProfile::HDR : colour_space == 1 ? AstcProfile::sRGB : AstcProfile::LDR;
+    }
+    return b;
+}
+
 std::optional<Bcn> v3_bcn(uint32_t f, uint32_t channel_type, bool& premultiplied)
 {
     const bool is_signed = channel_type == 1 || channel_type == 12;  // signed byte normalised, signed float
@@ -672,12 +718,23 @@ std::string channels_name(const Channels& c)
     return s.empty() ? "?" : s;
 }
 
-void describe_sdk(Image& out, const std::optional<Bcn>& bcn, const std::optional<Channels>& channels)
+void describe_sdk(Image& out, const Blocks& blocks, const std::optional<Channels>& channels)
 {
     out.format = "PVR";
     out.bits_per_sample = 8;
     using M = PixelFormat::Model;
-    if (bcn)
+    if (blocks.etc)
+    {
+        out.pixel_format = etc_pixel_format(*blocks.etc);
+        return;
+    }
+    if (blocks.astc_w)
+    {
+        const bool hdr = out.bits_per_sample == 16;
+        out.pixel_format = astc_pixel_format(blocks.astc_w, blocks.astc_h, hdr);
+        return;
+    }
+    if (const std::optional<Bcn>& bcn = blocks.bcn)
     {
         out.pixel_format.model = *bcn == Bcn::BC4 || *bcn == Bcn::BC4S ? M::Gray : M::RGB;
         out.pixel_format.notes.push_back(std::string(bcn_name(*bcn)) + " block compression");
@@ -698,17 +755,33 @@ void describe_sdk(Image& out, const std::optional<Bcn>& bcn, const std::optional
 }
 
 // Shared by v2 and v3 once the format is known.
-bool decode_sdk_surface(const std::optional<Bcn>& bcn, const std::optional<Channels>& channels, bool premultiplied,
-                        const uint8_t* d, size_t size, int w, int h, Image& out, std::string& error)
+bool decode_sdk_surface(const Blocks& blocks, const std::optional<Channels>& channels, bool premultiplied, const uint8_t* d, size_t size, int w,
+                        int h, Image& out, std::string& error)
 {
-    if (bcn)
+    if (blocks.bcn)
     {
-        if (!decode_bcn(*bcn, d, size, w, h, out, error, premultiplied))
+        if (!decode_bcn(*blocks.bcn, d, size, w, h, out, error, premultiplied))
+            return false;
+    }
+    else if (blocks.etc)
+    {
+        if (!decode_etc(*blocks.etc, d, size, w, h, out, error, premultiplied))
+            return false;
+    }
+    else if (blocks.astc_w)
+    {
+        if (!decode_astc(d, size, blocks.astc_w, blocks.astc_h, w, h, blocks.profile, out, error, premultiplied))
             return false;
     }
     else if (!decode_channels(*channels, d, size, w, h, premultiplied, out, error))
         return false;
-    describe_sdk(out, bcn, channels);
+    const int bits = out.bits_per_sample;  // ASTC HDR set 16
+    describe_sdk(out, blocks, channels);
+    if (blocks.astc_w && bits == 16)
+    {
+        out.bits_per_sample = 16;
+        out.pixel_format = astc_pixel_format(blocks.astc_w, blocks.astc_h, true);
+    }
     return true;
 }
 
@@ -723,26 +796,28 @@ bool v2_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         return false;
     }
     bool premultiplied = false;
-    const std::optional<Bcn> bcn = v2_bcn(type, premultiplied);
+    Blocks blocks;
+    blocks.bcn = v2_bcn(type, premultiplied);
+    if (type == 0x36)
+        blocks.etc = Etc::ETC1;
     const std::optional<Channels> channels = v2_channels(type);
-    if (!bcn && !channels)
+    if (!blocks.any() && !channels)
     {
-        // PVRTC and ETC (and ASTC in v3) would hook in here.
         const char* name = v2_compressed_name(type);
         error = name ? std::string("PVR format ") + name + " isn't supported" : "PVR pixel type " + std::to_string(type) + " isn't supported";
         return false;
     }
-    if (flags & 0x200 && !bcn)
+    if (flags & 0x200 && !blocks.any())
     {
         error = "twiddled PowerVR SDK texture isn't supported";
         return false;
     }
-    if (!decode_sdk_surface(bcn, channels, premultiplied, d + 52, size - 52, w, h, out, error))
+    if (!decode_sdk_surface(blocks, channels, premultiplied, d + 52, size - 52, w, h, out, error))
         return false;
     if (flags & 0x10000)  // stored bottom up
         flip_rows(out);
     out.add("PVR", "Version", "PowerVR SDK v2");
-    out.add("PVR", "Format", bcn ? bcn_name(*bcn) : channels_name(*channels));
+    out.add("PVR", "Format", blocks.any() ? blocks.name() : channels_name(*channels));
     if (flags & 0x100 && mips > 0)
         out.add("PVR", "Mipmaps", std::to_string(mips + 1) + ", the largest shown");
     if (flags & 0x1000)
@@ -775,14 +850,14 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         return false;
     }
     bool premultiplied = (flags & 2) != 0;
-    std::optional<Bcn> bcn;
+    Blocks blocks;
     std::optional<Channels> channels;
     if (hi == 0)
     {
-        bcn = v3_bcn(lo, channel_type, premultiplied);
-        if (!bcn)
+        blocks = v3_mobile(lo, channel_type, colour_space);
+        blocks.bcn = v3_bcn(lo, channel_type, premultiplied);
+        if (!blocks.any())
         {
-            // PVRTC, ETC and ASTC would hook in here.
             const char* name = v3_compressed_name(lo);
             error = name ? std::string("PVR format ") + name + " isn't supported" : "PVR format " + std::to_string(lo) + " isn't supported";
             return false;
@@ -822,14 +897,14 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         p += 12 + n;
     }
     const size_t offset = 52 + size_t(meta);
-    if (!decode_sdk_surface(bcn, channels, premultiplied, d + offset, size - offset, w, h, out, error))
+    if (!decode_sdk_surface(blocks, channels, premultiplied, d + offset, size - offset, w, h, out, error))
         return false;
     if (flip_y)
         flip_rows(out);
     if (flip_x)
         flip_columns(out);
     out.add("PVR", "Version", "PowerVR SDK v3");
-    out.add("PVR", "Format", bcn ? bcn_name(*bcn) : channels_name(*channels));
+    out.add("PVR", "Format", blocks.any() ? blocks.name() : channels_name(*channels));
     if (colour_space == 1)
         out.add("PVR", "Colour space", "sRGB");
     if (premultiplied)
