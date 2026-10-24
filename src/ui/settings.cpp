@@ -508,13 +508,69 @@ std::string notices_path()
     return {};
 }
 
+const char* const kProjectUrl = "https://github.com/TurkeyMan/ifritview";
+
+// GitHub's mark, from Octicons (mark-github-16, MIT): its outline on a 16 px
+// grid, flattened to points (it's one shape, the cat its negative space).
+rap::icon github_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            static const rap::point_f outline[] = {
+        {6.77f, 11.33f}, {6.02f, 11.18f}, {5.35f, 10.92f}, {4.75f, 10.57f}, {4.23f, 10.13f}, {3.82f, 9.61f},
+        {3.51f, 9.02f}, {3.32f, 8.37f}, {3.25f, 7.67f}, {3.26f, 7.38f}, {3.30f, 7.08f}, {3.36f, 6.78f},
+        {3.45f, 6.50f}, {3.56f, 6.22f}, {3.68f, 5.95f}, {3.83f, 5.71f}, {4.00f, 5.48f}, {3.93f, 5.27f},
+        {3.89f, 5.01f}, {3.87f, 4.72f}, {3.87f, 4.43f}, {3.89f, 4.14f}, {3.93f, 3.86f}, {3.98f, 3.62f},
+        {4.06f, 3.42f}, {4.31f, 3.41f}, {4.56f, 3.44f}, {4.83f, 3.49f}, {5.09f, 3.57f}, {5.35f, 3.68f},
+        {5.60f, 3.81f}, {5.83f, 3.96f}, {6.03f, 4.12f}, {6.26f, 4.06f}, {6.48f, 4.00f}, {6.72f, 3.95f},
+        {6.96f, 3.91f}, {7.21f, 3.88f}, {7.47f, 3.86f}, {7.74f, 3.85f}, {8.02f, 3.84f}, {8.30f, 3.85f},
+        {8.56f, 3.86f}, {8.82f, 3.88f}, {9.07f, 3.91f}, {9.31f, 3.95f}, {9.53f, 4.00f}, {9.75f, 4.05f},
+        {9.97f, 4.11f}, {10.17f, 3.95f}, {10.39f, 3.81f}, {10.64f, 3.68f}, {10.90f, 3.57f}, {11.17f, 3.49f},
+        {11.43f, 3.43f}, {11.69f, 3.41f}, {11.94f, 3.42f}, {12.01f, 3.61f}, {12.07f, 3.85f}, {12.10f, 4.11f},
+        {12.12f, 4.40f}, {12.12f, 4.70f}, {12.09f, 4.98f}, {12.05f, 5.25f}, {11.98f, 5.47f}, {12.16f, 5.70f},
+        {12.31f, 5.95f}, {12.45f, 6.21f}, {12.55f, 6.49f}, {12.64f, 6.77f}, {12.70f, 7.07f}, {12.74f, 7.37f},
+        {12.75f, 7.67f}, {12.68f, 8.37f}, {12.49f, 9.01f}, {12.18f, 9.60f}, {11.76f, 10.11f}, {11.25f, 10.55f},
+        {10.64f, 10.90f}, {9.96f, 11.16f}, {9.20f, 11.31f}, {9.39f, 11.46f}, {9.57f, 11.64f}, {9.72f, 11.85f},
+        {9.85f, 12.10f}, {9.95f, 12.36f}, {10.03f, 12.65f}, {10.08f, 12.95f}, {10.09f, 13.27f}, {10.09f, 14.89f},
+        {10.11f, 15.06f}, {10.16f, 15.20f}, {10.24f, 15.32f}, {10.35f, 15.41f}, {10.47f, 15.47f}, {10.62f, 15.50f},
+        {10.78f, 15.49f}, {10.95f, 15.44f}, {11.98f, 14.95f}, {12.93f, 14.32f}, {13.79f, 13.54f}, {14.54f, 12.64f},
+        {15.15f, 11.63f}, {15.61f, 10.51f}, {15.90f, 9.31f}, {16.00f, 8.03f}, {15.84f, 6.42f}, {15.37f, 4.91f},
+        {14.63f, 3.55f}, {13.65f, 2.36f}, {12.46f, 1.38f}, {11.10f, 0.63f}, {9.60f, 0.16f}, {7.98f, 0.00f},
+        {6.37f, 0.16f}, {4.87f, 0.63f}, {3.51f, 1.38f}, {2.33f, 2.36f}, {1.36f, 3.55f}, {0.63f, 4.91f},
+        {0.16f, 6.42f}, {0.00f, 8.03f}, {0.02f, 8.63f}, {0.09f, 9.23f}, {0.20f, 9.82f}, {0.36f, 10.40f},
+        {0.56f, 10.97f}, {0.80f, 11.52f}, {1.09f, 12.05f}, {1.41f, 12.56f}, {1.78f, 13.04f}, {2.18f, 13.49f},
+        {2.61f, 13.91f}, {3.07f, 14.29f}, {3.56f, 14.64f}, {4.08f, 14.95f}, {4.61f, 15.22f}, {5.17f, 15.45f},
+        {5.33f, 15.49f}, {5.48f, 15.49f}, {5.62f, 15.46f}, {5.74f, 15.40f}, {5.85f, 15.31f}, {5.93f, 15.19f},
+        {5.98f, 15.06f}, {6.00f, 14.91f}, {6.00f, 13.66f}, {5.92f, 13.69f}, {5.83f, 13.72f}, {5.73f, 13.75f},
+        {5.64f, 13.77f}, {5.54f, 13.79f}, {5.44f, 13.80f}, {5.35f, 13.81f}, {5.25f, 13.81f}, {4.88f, 13.79f},
+        {4.55f, 13.71f}, {4.25f, 13.58f}, {3.99f, 13.40f}, {3.75f, 13.17f}, {3.54f, 12.90f}, {3.34f, 12.57f},
+        {3.17f, 12.20f}, {3.11f, 12.05f}, {3.04f, 11.92f}, {2.96f, 11.80f}, {2.88f, 11.70f}, {2.79f, 11.62f},
+        {2.69f, 11.56f}, {2.58f, 11.51f}, {2.45f, 11.48f}, {2.34f, 11.46f}, {2.26f, 11.42f}, {2.21f, 11.33f},
+        {2.22f, 11.23f}, {2.32f, 11.11f}, {2.40f, 11.06f}, {2.49f, 11.02f}, {2.60f, 10.99f}, {2.71f, 10.98f},
+        {2.83f, 10.97f}, {3.00f, 10.98f}, {3.16f, 11.02f}, {3.32f, 11.09f}, {3.47f, 11.18f}, {3.62f, 11.30f},
+        {3.78f, 11.45f}, {3.93f, 11.63f}, {4.08f, 11.83f}, {4.20f, 11.99f}, {4.32f, 12.12f}, {4.44f, 12.23f},
+        {4.56f, 12.33f}, {4.69f, 12.40f}, {4.83f, 12.45f}, {4.97f, 12.47f}, {5.11f, 12.48f}, {5.25f, 12.48f},
+        {5.38f, 12.46f}, {5.50f, 12.42f}, {5.62f, 12.37f}, {5.74f, 12.30f}, {5.86f, 12.21f}, {5.98f, 12.11f},
+        {6.11f, 11.98f}, {6.21f, 11.89f}, {6.30f, 11.79f}, {6.38f, 11.70f}, {6.47f, 11.62f}, {6.55f, 11.53f},
+        {6.62f, 11.46f}, {6.69f, 11.39f}, {6.77f, 11.33f}
+            };
+            const float u = s.w / 16;
+            std::vector<rap::point_f> points;
+            for (const rap::point_f& o : outline)
+                points.push_back({o.x * u, o.y * u});
+            p.polygon(points, rap::paint{rap::theme_color::window_text}, std::nullopt);
+        });
+}
+
 rap::node about_page()
 {
     rap::nodes items = {
         L::label{std::string("IfritView ") + IFRIT_VERSION},
         L::label{"A fast image viewer, for photos and camera raws, and the texture formats of games."},
         L::label{"Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later."},
-        L::label{"Project page and source"}.link([] { platform::open_uri("https://github.com/TurkeyMan/ifritview"); }),
+        L::hbox{L::button{"GitHub"}.icon(github_icon()).icon_only().flat().on_click([] { platform::open_uri(kProjectUrl); }),
+                L::label{"Project page and source"}.link([] { platform::open_uri(kProjectUrl); })},
         L::label{"The licence (GPL 3.0)"}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };
     // The code it carries from elsewhere, and the licences that come with it.

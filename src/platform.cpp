@@ -14,6 +14,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #else
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -379,12 +380,22 @@ void trace(const char* format, ...)
 
 bool open_uri(const std::string& uri)
 {
+#ifdef _WIN32
+    // GIO's launcher finds no handlers on Windows: the shell's, as Explorer
+    // opens a link.
+    const auto result = reinterpret_cast<intptr_t>(ShellExecuteW(nullptr, L"open", widen(uri).c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+    if (result > 32)
+        return true;
+    std::fprintf(stderr, "ifritview: can't open %s: %s\n", uri.c_str(), last_error_text().c_str());
+    return false;
+#else
     GError* error = nullptr;
     if (g_app_info_launch_default_for_uri(uri.c_str(), nullptr, &error))
         return true;
     std::fprintf(stderr, "ifritview: can't open %s: %s\n", uri.c_str(), error ? error->message : "no program for it");
     g_clear_error(&error);
     return false;
+#endif
 }
 
 }  // namespace platform

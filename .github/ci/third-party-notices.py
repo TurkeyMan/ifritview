@@ -68,6 +68,7 @@ def bundled():
         ("stb_image, by Sean Barrett", header_licence(third / "stb_image.h", "This software is available under 2 licenses")),
         ("bcdec, by Sergii Kudlai", header_licence(third / "bcdec/bcdec.h", "This software is available under 2 licenses")),
         ("etcdec, by Sergii Kudlai", header_licence(third / "etcdec/etcdec.h", "This software is available under 2 licenses")),
+        ("Octicons, by GitHub (the GitHub mark in About)", (third / "licenses/octicons-LICENSE").read_text()),
     ]
 
 
