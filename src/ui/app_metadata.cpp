@@ -222,6 +222,11 @@ View::OverlaySections App::overlay_sections() const
     {
         const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
+        if (image_->page_count > 1)
+            line += "  ·  " + rap::i18n::format(_("page {0} / {1}"), image_->part.page + 1, image_->page_count) +
+                    (image_->page_label.empty() ? "" : " " + image_->page_label);
+        if (image_->level_count > 1)
+            line += "  ·  " + rap::i18n::format(_("mip {0} / {1}"), image_->part.level, image_->level_count - 1);
         if (image_->is_preview())
             line += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
         else if (image_->tonable())

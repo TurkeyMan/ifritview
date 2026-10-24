@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: IfritView\n"
 "Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
-"POT-Creation-Date: 2026-10-24 17:29+0000\n"
+"POT-Creation-Date: 2026-10-24 19:18+0000\n"
 "PO-Revision-Date: 2026-10-25 12:00+0000\n"
 "Language-Team: German\n"
 "Language: de\n"
@@ -121,70 +121,87 @@ msgstr "Vergrößern / verkleinern"
 msgid "Scroll the image"
 msgstr "Bild scrollen"
 
-#: src/decoders/astc_file.cpp:49 src/decoders/astc_file.cpp:50
-#: src/decoders/astc_file.cpp:52
+#: src/decoders/astc_file.cpp:66 src/decoders/astc_file.cpp:67
+#: src/decoders/astc_file.cpp:69
 msgid "ASTC"
 msgstr "ASTC"
 
-#: src/decoders/astc_file.cpp:49
+#: src/decoders/astc_file.cpp:66
 msgid "Block size"
 msgstr "Blockgröße"
 
-#: src/decoders/astc_file.cpp:50
+#: src/decoders/astc_file.cpp:67
 msgid "Profile"
 msgstr "Profil"
 
-#: src/decoders/astc_file.cpp:52 src/decoders/dds.cpp:349
-#: src/decoders/vtf.cpp:314
+#: src/decoders/astc_file.cpp:69 src/decoders/dds.cpp:385
+#: src/decoders/ktx.cpp:525 src/decoders/vtf.cpp:334
 msgid "Volume"
 msgstr "Volumen"
 
-#: src/decoders/blp.cpp:245 src/decoders/blp.cpp:246 src/decoders/blp.cpp:247
-#: src/decoders/blp.cpp:249
+#: src/decoders/astc_file.cpp:69 src/decoders/dds.cpp:385
+#: src/decoders/ktx.cpp:525 src/decoders/pvr.cpp:962
+#, c++-format
+msgid "{0} slices"
+msgstr "{0} Schichten"
+
+#: src/decoders/blp.cpp:256 src/decoders/blp.cpp:257 src/decoders/blp.cpp:258
+#: src/decoders/blp.cpp:260
 msgid "BLP"
 msgstr "BLP"
 
-#: src/decoders/blp.cpp:245 src/decoders/pcx.cpp:142
-#: src/decoders/pixbuf.cpp:151 src/decoders/pkm.cpp:75 src/decoders/pvr.cpp:793
-#: src/decoders/pvr.cpp:880 src/decoders/tim2.cpp:204 src/decoders/vtf.cpp:305
+#: src/decoders/blp.cpp:256 src/decoders/pcx.cpp:142
+#: src/decoders/pixbuf.cpp:151 src/decoders/pkm.cpp:75 src/decoders/pvr.cpp:839
+#: src/decoders/pvr.cpp:949 src/decoders/tim2.cpp:239 src/decoders/vtf.cpp:325
 msgid "Version"
 msgstr "Version"
 
-#: src/decoders/blp.cpp:246 src/decoders/exr.cpp:1589 src/decoders/tiff.cpp:232
-#: src/encoders/encoder.cpp:757
+#: src/decoders/blp.cpp:257 src/decoders/exr.cpp:1589 src/decoders/tiff.cpp:240
+#: src/encoders/encoder.cpp:769
 msgid "Compression"
 msgstr "Komprimierung"
 
-#: src/decoders/blp.cpp:247 src/decoders/ktx.cpp:721 src/decoders/pvr.cpp:885
-#: src/decoders/tim2.cpp:219 src/ui/app_metadata.cpp:115
+#: src/decoders/blp.cpp:258 src/decoders/ktx.cpp:794 src/decoders/pvr.cpp:954
+#: src/decoders/tim2.cpp:254 src/ui/app_metadata.cpp:115
 msgid "Alpha"
 msgstr "Alpha"
 
-#: src/decoders/blp.cpp:249 src/decoders/dds.cpp:345 src/decoders/gim.cpp:386
-#: src/decoders/pvr.cpp:464 src/decoders/pvr.cpp:796 src/decoders/pvr.cpp:887
-#: src/decoders/tim2.cpp:223 src/decoders/vtf.cpp:308 src/encoders/dds.cpp:536
+#: src/decoders/blp.cpp:260 src/decoders/dds.cpp:381 src/decoders/gim.cpp:450
+#: src/decoders/ktx.cpp:519 src/decoders/pvr.cpp:479 src/decoders/pvr.cpp:842
+#: src/decoders/pvr.cpp:956 src/decoders/tim2.cpp:258 src/decoders/vtf.cpp:328
+#: src/encoders/dds.cpp:536
 msgid "Mipmaps"
 msgstr "Mipmaps"
 
-#: src/decoders/dds.cpp:332 src/decoders/dds.cpp:345 src/decoders/dds.cpp:347
-#: src/decoders/dds.cpp:349 src/decoders/dds.cpp:351
+#: src/decoders/dds.cpp:368 src/decoders/dds.cpp:381 src/decoders/dds.cpp:383
+#: src/decoders/dds.cpp:385 src/decoders/dds.cpp:387
 msgid "DDS"
 msgstr "DDS"
 
-#: src/decoders/dds.cpp:332 src/decoders/gim.cpp:379 src/decoders/ktx.cpp:586
-#: src/decoders/ktx.cpp:717 src/decoders/pkm.cpp:74 src/decoders/pvr.cpp:451
-#: src/decoders/pvr.cpp:794 src/decoders/pvr.cpp:881 src/decoders/vtf.cpp:306
+#: src/decoders/dds.cpp:368 src/decoders/gim.cpp:443 src/decoders/ktx.cpp:646
+#: src/decoders/ktx.cpp:790 src/decoders/pkm.cpp:74 src/decoders/pvr.cpp:466
+#: src/decoders/pvr.cpp:840 src/decoders/pvr.cpp:950 src/decoders/vtf.cpp:326
 #: src/encoders/dds.cpp:533 src/ui/app_metadata.cpp:109 src/ui/save.cpp:81
 msgid "Format"
 msgstr "Format"
 
-#: src/decoders/dds.cpp:347 src/decoders/pvr.cpp:798 src/decoders/vtf.cpp:312
+#: src/decoders/dds.cpp:383 src/decoders/ktx.cpp:521 src/decoders/pvr.cpp:844
+msgid "6 faces"
+msgstr "6 Flächen"
+
+#: src/decoders/dds.cpp:383 src/decoders/ktx.cpp:521 src/decoders/pvr.cpp:844
+#: src/decoders/vtf.cpp:332
 msgid "Cube map"
 msgstr "Cube-Map"
 
-#: src/decoders/dds.cpp:351
+#: src/decoders/dds.cpp:387 src/decoders/ktx.cpp:523
 msgid "Array"
 msgstr "Array"
+
+#: src/decoders/dds.cpp:387 src/decoders/ktx.cpp:523
+#, c++-format
+msgid "{0} textures"
+msgstr "{0} Texturen"
 
 #: src/decoders/exr.cpp:1589 src/decoders/exr.cpp:1603
 #: src/decoders/exr.cpp:1604 src/decoders/exr.cpp:1611
@@ -248,42 +265,61 @@ msgstr "Angezeigter Teil"
 msgid "Chromaticities"
 msgstr "Chromatizitäten"
 
-#: src/decoders/gim.cpp:367 src/decoders/gim.cpp:379 src/decoders/gim.cpp:380
-#: src/decoders/gim.cpp:382 src/decoders/gim.cpp:384 src/decoders/gim.cpp:386
-#: src/decoders/gim.cpp:388
+#: src/decoders/gim.cpp:348
+#, c++-format
+msgid "picture {0} frame {1}"
+msgstr "Bild {0}, Einzelbild {1}"
+
+#: src/decoders/gim.cpp:350
+#, c++-format
+msgid "picture {0}"
+msgstr "Bild {0}"
+
+#: src/decoders/gim.cpp:352 src/decoders/vtf.cpp:264
+#, c++-format
+msgid "frame {0}"
+msgstr "Einzelbild {0}"
+
+#: src/decoders/gim.cpp:431 src/decoders/gim.cpp:443 src/decoders/gim.cpp:444
+#: src/decoders/gim.cpp:446 src/decoders/gim.cpp:448 src/decoders/gim.cpp:450
+#: src/decoders/gim.cpp:452
 msgid "GIM"
 msgstr "GIM"
 
-#: src/decoders/gim.cpp:367 src/decoders/ilbm.cpp:226 src/decoders/pvr.cpp:457
+#: src/decoders/gim.cpp:431 src/decoders/ilbm.cpp:226 src/decoders/pvr.cpp:472
 msgid "Palette"
 msgstr "Palette"
 
-#: src/decoders/gim.cpp:380
+#: src/decoders/gim.cpp:444
 msgid "Pixel order"
 msgstr "Pixelreihenfolge"
 
-#: src/decoders/gim.cpp:382
+#: src/decoders/gim.cpp:446
 msgid "Platform"
 msgstr "Plattform"
 
-#: src/decoders/gim.cpp:384 src/decoders/tim2.cpp:221
+#: src/decoders/gim.cpp:448 src/decoders/tim2.cpp:256
 msgid "Pictures"
 msgstr "Bilder"
 
-#: src/decoders/gim.cpp:388 src/decoders/pixbuf.cpp:152
-#: src/decoders/vtf.cpp:310 src/decoders/webp.cpp:111
+#: src/decoders/gim.cpp:452 src/decoders/pixbuf.cpp:152
+#: src/decoders/vtf.cpp:330 src/decoders/webp.cpp:111
 msgid "Frames"
 msgstr "Einzelbilder"
 
-#: src/decoders/heif.cpp:119
+#: src/decoders/heif.cpp:60
+msgid "(primary)"
+msgstr "(Hauptbild)"
+
+#: src/decoders/heif.cpp:138
 msgid "Bits per pixel"
 msgstr "Bits pro Pixel"
 
-#: src/decoders/heif.cpp:119 src/decoders/heif.cpp:120
+#: src/decoders/heif.cpp:138 src/decoders/heif.cpp:139
 msgid "HEIF"
 msgstr "HEIF"
 
-#: src/decoders/heif.cpp:120
+#: src/decoders/heif.cpp:139
 msgid "Alpha channel"
 msgstr "Alphakanal"
 
@@ -339,19 +375,19 @@ msgstr "JFIF"
 msgid "Adobe transform"
 msgstr "Adobe-Transformation"
 
-#: src/decoders/ktx.cpp:586 src/decoders/ktx.cpp:588
+#: src/decoders/ktx.cpp:646 src/decoders/ktx.cpp:648
 msgid "KTX"
 msgstr "KTX"
 
-#: src/decoders/ktx.cpp:588
+#: src/decoders/ktx.cpp:648
 msgid "Byte order"
 msgstr "Bytereihenfolge"
 
-#: src/decoders/ktx.cpp:717 src/decoders/ktx.cpp:719 src/decoders/ktx.cpp:721
+#: src/decoders/ktx.cpp:790 src/decoders/ktx.cpp:792 src/decoders/ktx.cpp:794
 msgid "KTX2"
 msgstr "KTX2"
 
-#: src/decoders/ktx.cpp:719
+#: src/decoders/ktx.cpp:792
 msgid "Supercompression"
 msgstr "Superkompression"
 
@@ -375,23 +411,23 @@ msgstr "PCX"
 msgid "Planes × bits"
 msgstr "Ebenen × Bits"
 
-#: src/decoders/pcx.cpp:146 src/decoders/png.cpp:130 src/decoders/tiff.cpp:238
+#: src/decoders/pcx.cpp:146 src/decoders/png.cpp:130 src/decoders/tiff.cpp:246
 msgid "Resolution"
 msgstr "Auflösung"
 
-#: src/decoders/pdf.cpp:203 src/decoders/pdf.cpp:206 src/decoders/pdf.cpp:207
+#: src/decoders/pdf.cpp:211 src/decoders/pdf.cpp:214 src/decoders/pdf.cpp:215
 msgid "Document"
 msgstr "Dokument"
 
-#: src/decoders/pdf.cpp:203 src/decoders/tiff.cpp:241
+#: src/decoders/pdf.cpp:211 src/decoders/tiff.cpp:249
 msgid "Pages"
 msgstr "Seiten"
 
-#: src/decoders/pdf.cpp:206
+#: src/decoders/pdf.cpp:214
 msgid "Page size"
 msgstr "Seitengröße"
 
-#: src/decoders/pdf.cpp:207
+#: src/decoders/pdf.cpp:215
 msgid "Rendered at"
 msgstr "Gerendert mit"
 
@@ -420,7 +456,7 @@ msgstr "Farbtyp"
 msgid "Gamma"
 msgstr "Gamma"
 
-#: src/decoders/png.cpp:136 src/decoders/vtf.cpp:318
+#: src/decoders/png.cpp:136 src/decoders/vtf.cpp:338
 msgid "sRGB"
 msgstr "sRGB"
 
@@ -428,67 +464,67 @@ msgstr "sRGB"
 msgid "ICC profile"
 msgstr "ICC-Profil"
 
-#: src/decoders/pvr.cpp:451 src/decoders/pvr.cpp:453 src/decoders/pvr.cpp:455
-#: src/decoders/pvr.cpp:457 src/decoders/pvr.cpp:464 src/decoders/pvr.cpp:793
-#: src/decoders/pvr.cpp:794 src/decoders/pvr.cpp:796 src/decoders/pvr.cpp:798
-#: src/decoders/pvr.cpp:800 src/decoders/pvr.cpp:880 src/decoders/pvr.cpp:881
-#: src/decoders/pvr.cpp:883 src/decoders/pvr.cpp:885 src/decoders/pvr.cpp:887
-#: src/decoders/pvr.cpp:889 src/decoders/pvr.cpp:891 src/decoders/pvr.cpp:893
+#: src/decoders/pvr.cpp:466 src/decoders/pvr.cpp:468 src/decoders/pvr.cpp:470
+#: src/decoders/pvr.cpp:472 src/decoders/pvr.cpp:479 src/decoders/pvr.cpp:839
+#: src/decoders/pvr.cpp:840 src/decoders/pvr.cpp:842 src/decoders/pvr.cpp:844
+#: src/decoders/pvr.cpp:846 src/decoders/pvr.cpp:949 src/decoders/pvr.cpp:950
+#: src/decoders/pvr.cpp:952 src/decoders/pvr.cpp:954 src/decoders/pvr.cpp:956
+#: src/decoders/pvr.cpp:958 src/decoders/pvr.cpp:960 src/decoders/pvr.cpp:962
 msgid "PVR"
 msgstr "PVR"
 
-#: src/decoders/pvr.cpp:453
+#: src/decoders/pvr.cpp:468
 msgid "Global index"
 msgstr "Globaler Index"
 
-#: src/decoders/pvr.cpp:455
+#: src/decoders/pvr.cpp:470
 msgid "Codebook"
 msgstr "Codebuch"
 
-#: src/decoders/pvr.cpp:800 src/decoders/pvr.cpp:891
+#: src/decoders/pvr.cpp:846 src/decoders/pvr.cpp:960
 msgid "Surfaces"
 msgstr "Oberflächen"
 
-#: src/decoders/pvr.cpp:883 src/ui/app_metadata.cpp:113
+#: src/decoders/pvr.cpp:952 src/ui/app_metadata.cpp:113
 msgid "Colour space"
 msgstr "Farbraum"
 
-#: src/decoders/pvr.cpp:889
+#: src/decoders/pvr.cpp:958
 msgid "Faces"
 msgstr "Flächen"
 
-#: src/decoders/pvr.cpp:893
+#: src/decoders/pvr.cpp:962
 msgid "Depth"
 msgstr "Tiefe"
 
-#: src/decoders/quake.cpp:162 src/ui/app_metadata.cpp:100
+#: src/decoders/quake.cpp:172 src/ui/app_metadata.cpp:100
 msgid "Name"
 msgstr "Name"
 
-#: src/decoders/quake.cpp:162 src/decoders/quake.cpp:165
-#: src/decoders/quake.cpp:174 src/decoders/quake.cpp:179
-#: src/decoders/quake.cpp:182
+#: src/decoders/quake.cpp:172 src/decoders/quake.cpp:175
+#: src/decoders/quake.cpp:184 src/decoders/quake.cpp:189
+#: src/decoders/quake.cpp:192
 msgid "WAL"
 msgstr "WAL"
 
-#: src/decoders/quake.cpp:165
+#: src/decoders/quake.cpp:175
 msgid "Next frame"
 msgstr "Nächstes Einzelbild"
 
-#: src/decoders/quake.cpp:174
+#: src/decoders/quake.cpp:184
 msgid "Surface flags"
 msgstr "Oberflächen-Flags"
 
-#: src/decoders/quake.cpp:179 src/decoders/quake.cpp:220
-#: src/decoders/quake.cpp:232
+#: src/decoders/quake.cpp:189 src/decoders/quake.cpp:230
+#: src/decoders/quake.cpp:242
 msgid "Contents"
 msgstr "Inhalt"
 
-#: src/decoders/quake.cpp:182
+#: src/decoders/quake.cpp:192
 msgid "Light value"
 msgstr "Lichtwert"
 
-#: src/decoders/quake.cpp:220 src/decoders/quake.cpp:232
+#: src/decoders/quake.cpp:230 src/decoders/quake.cpp:242
 msgid "LMP"
 msgstr "LMP"
 
@@ -523,7 +559,7 @@ msgstr "Modell"
 msgid "Firmware"
 msgstr "Firmware"
 
-#: src/decoders/raw.cpp:369 src/decoders/tiff.cpp:287
+#: src/decoders/raw.cpp:369 src/decoders/tiff.cpp:295
 msgid "Lens"
 msgstr "Objektiv"
 
@@ -531,7 +567,7 @@ msgstr "Objektiv"
 msgid "Lens make"
 msgstr "Objektivhersteller"
 
-#: src/decoders/raw.cpp:373 src/decoders/tiff.cpp:285
+#: src/decoders/raw.cpp:373 src/decoders/tiff.cpp:293
 msgid "ISO"
 msgstr "ISO"
 
@@ -543,7 +579,7 @@ msgstr "Verschlusszeit"
 msgid "Aperture"
 msgstr "Blende"
 
-#: src/decoders/raw.cpp:379 src/decoders/tiff.cpp:281
+#: src/decoders/raw.cpp:379 src/decoders/tiff.cpp:289
 msgid "Focal length"
 msgstr "Brennweite"
 
@@ -575,7 +611,7 @@ msgstr "Sensorgröße"
 msgid "Output size"
 msgstr "Ausgabegröße"
 
-#: src/decoders/raw.cpp:398 src/decoders/tiff.cpp:230
+#: src/decoders/raw.cpp:398 src/decoders/tiff.cpp:238
 msgid "Bits per sample"
 msgstr "Bits pro Sample"
 
@@ -599,35 +635,44 @@ msgstr "Kamera-Weißabgleich"
 msgid "Auto exposure gain"
 msgstr "Automatische Belichtungsverstärkung"
 
-#: src/decoders/tiff.cpp:230 src/decoders/tiff.cpp:231
-#: src/decoders/tiff.cpp:232 src/decoders/tiff.cpp:238
-#: src/decoders/tiff.cpp:241
+#: src/decoders/texel.cpp:112
+#, c++-format
+msgid "cube {0}"
+msgstr "Würfel {0}"
+
+#: src/decoders/tiff.cpp:102
+msgid "(a smaller copy)"
+msgstr "(verkleinerte Kopie)"
+
+#: src/decoders/tiff.cpp:238 src/decoders/tiff.cpp:239
+#: src/decoders/tiff.cpp:240 src/decoders/tiff.cpp:246
+#: src/decoders/tiff.cpp:249
 msgid "TIFF"
 msgstr "TIFF"
 
-#: src/decoders/tiff.cpp:231
+#: src/decoders/tiff.cpp:239
 msgid "Samples per pixel"
 msgstr "Samples pro Pixel"
 
-#: src/decoders/tiff.cpp:275
+#: src/decoders/tiff.cpp:283
 msgid "Date/time original"
 msgstr "Aufnahmezeitpunkt"
 
-#: src/decoders/tiff.cpp:275 src/decoders/tiff.cpp:277
-#: src/decoders/tiff.cpp:279 src/decoders/tiff.cpp:281
-#: src/decoders/tiff.cpp:285 src/decoders/tiff.cpp:287
+#: src/decoders/tiff.cpp:283 src/decoders/tiff.cpp:285
+#: src/decoders/tiff.cpp:287 src/decoders/tiff.cpp:289
+#: src/decoders/tiff.cpp:293 src/decoders/tiff.cpp:295
 msgid "EXIF"
 msgstr "EXIF"
 
-#: src/decoders/tiff.cpp:277
+#: src/decoders/tiff.cpp:285
 msgid "Exposure time"
 msgstr "Belichtungszeit"
 
-#: src/decoders/tiff.cpp:279
+#: src/decoders/tiff.cpp:287
 msgid "F-number"
 msgstr "Blendenzahl"
 
-#: src/decoders/tim.cpp:79 src/decoders/tim2.cpp:211 src/decoders/tim2.cpp:216
+#: src/decoders/tim.cpp:79 src/decoders/tim2.cpp:246 src/decoders/tim2.cpp:251
 msgid "CLUT"
 msgstr "CLUT"
 
@@ -648,22 +693,22 @@ msgstr "VRAM-Position"
 msgid "Semi-transparent pixels"
 msgstr "Halbtransparente Pixel"
 
-#: src/decoders/tim2.cpp:204 src/decoders/tim2.cpp:205
-#: src/decoders/tim2.cpp:211 src/decoders/tim2.cpp:216
-#: src/decoders/tim2.cpp:219 src/decoders/tim2.cpp:221
-#: src/decoders/tim2.cpp:223
+#: src/decoders/tim2.cpp:239 src/decoders/tim2.cpp:240
+#: src/decoders/tim2.cpp:246 src/decoders/tim2.cpp:251
+#: src/decoders/tim2.cpp:254 src/decoders/tim2.cpp:256
+#: src/decoders/tim2.cpp:258
 msgid "TIM2"
 msgstr "TIM2"
 
-#: src/decoders/tim2.cpp:205
+#: src/decoders/tim2.cpp:240
 msgid "Image type"
 msgstr "Bildtyp"
 
-#: src/decoders/tpl.cpp:372 src/ui/app.cpp:1247
+#: src/decoders/tpl.cpp:408 src/ui/app.cpp:1295
 msgid "Images"
 msgstr "Bilder"
 
-#: src/decoders/tpl.cpp:372
+#: src/decoders/tpl.cpp:408
 msgid "TPL"
 msgstr "TPL"
 
@@ -701,13 +746,22 @@ msgstr "Audio"
 msgid "Container"
 msgstr "Container"
 
-#: src/decoders/vtf.cpp:305 src/decoders/vtf.cpp:306 src/decoders/vtf.cpp:308
-#: src/decoders/vtf.cpp:310 src/decoders/vtf.cpp:312 src/decoders/vtf.cpp:314
-#: src/decoders/vtf.cpp:316 src/decoders/vtf.cpp:318
+#: src/decoders/vtf.cpp:262
+msgid "sphere map"
+msgstr "Kugelkarte"
+
+#: src/decoders/vtf.cpp:325 src/decoders/vtf.cpp:326 src/decoders/vtf.cpp:328
+#: src/decoders/vtf.cpp:330 src/decoders/vtf.cpp:332 src/decoders/vtf.cpp:334
+#: src/decoders/vtf.cpp:336 src/decoders/vtf.cpp:338
 msgid "VTF"
 msgstr "VTF"
 
-#: src/decoders/vtf.cpp:316
+#: src/decoders/vtf.cpp:332
+#, c++-format
+msgid "{0} faces"
+msgstr "{0} Flächen"
+
+#: src/decoders/vtf.cpp:336
 msgid "Normal map"
 msgstr "Normal-Map"
 
@@ -823,8 +877,8 @@ msgstr "sRGB-Farbe"
 msgid "16-bit formats"
 msgstr "16-Bit-Formate"
 
-#: src/encoders/dds.cpp:541 src/encoders/encoder.cpp:768
-#: src/encoders/encoder.cpp:782
+#: src/encoders/dds.cpp:541 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:794
 msgid "Dither"
 msgstr "Dithering"
 
@@ -836,120 +890,120 @@ msgstr "Header im alten Stil"
 msgid "for tools before DirectX 10"
 msgstr "für Programme vor DirectX 10"
 
-#: src/encoders/encoder.cpp:725 src/encoders/encoder.cpp:743
+#: src/encoders/encoder.cpp:737 src/encoders/encoder.cpp:755
 msgid "Quality"
 msgstr "Qualität"
 
-#: src/encoders/encoder.cpp:726
+#: src/encoders/encoder.cpp:738
 msgid "Lossless"
 msgstr "Verlustfrei"
 
-#: src/encoders/encoder.cpp:726
+#: src/encoders/encoder.cpp:738
 msgid "exact"
 msgstr "exakt"
 
-#: src/encoders/encoder.cpp:732
+#: src/encoders/encoder.cpp:744
 msgid "Interlaced"
 msgstr "Interlacing"
 
-#: src/encoders/encoder.cpp:732
+#: src/encoders/encoder.cpp:744
 msgid "loads coarse to fine; a little larger"
 msgstr "lädt von grob nach fein; etwas größer"
 
-#: src/encoders/encoder.cpp:744
+#: src/encoders/encoder.cpp:756
 msgid "Colour detail"
 msgstr "Farbdetails"
 
-#: src/encoders/encoder.cpp:745
+#: src/encoders/encoder.cpp:757
 msgid "Automatic (full at quality 90 and above)"
 msgstr "Automatisch (voll ab Qualität 90)"
 
-#: src/encoders/encoder.cpp:745
+#: src/encoders/encoder.cpp:757
 msgid "Full (4:4:4)"
 msgstr "Voll (4:4:4)"
 
-#: src/encoders/encoder.cpp:745
+#: src/encoders/encoder.cpp:757
 msgid "Half across (4:2:2)"
 msgstr "Horizontal halbiert (4:2:2)"
 
-#: src/encoders/encoder.cpp:745
+#: src/encoders/encoder.cpp:757
 msgid "Quarter (4:2:0, smallest)"
 msgstr "Geviertelt (4:2:0, am kleinsten)"
 
-#: src/encoders/encoder.cpp:746
+#: src/encoders/encoder.cpp:758
 msgid "Progressive"
 msgstr "Progressiv"
 
-#: src/encoders/encoder.cpp:746
+#: src/encoders/encoder.cpp:758
 msgid "loads coarse to fine"
 msgstr "lädt von grob nach fein"
 
-#: src/encoders/encoder.cpp:757
+#: src/encoders/encoder.cpp:769
 msgid "Deflate (ZIP)"
 msgstr "Deflate (ZIP)"
 
-#: src/encoders/encoder.cpp:757
+#: src/encoders/encoder.cpp:769
 msgid "LZW"
 msgstr "LZW"
 
-#: src/encoders/encoder.cpp:757 src/ui/save.cpp:15
+#: src/encoders/encoder.cpp:769 src/ui/save.cpp:15
 msgid "None"
 msgstr "Keine"
 
-#: src/encoders/encoder.cpp:765 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:777 src/encoders/encoder.cpp:792
 #: src/ui/app_metadata.cpp:111
 msgid "Pixel format"
 msgstr "Pixelformat"
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:778 src/encoders/encoder.cpp:793
 msgid "16-bit ARGB 1555"
 msgstr "16-Bit ARGB 1555"
 
-#: src/encoders/encoder.cpp:766
+#: src/encoders/encoder.cpp:778
 msgid "16-bit RGB 565"
 msgstr "16-Bit RGB 565"
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:778 src/encoders/encoder.cpp:793
 msgid "24-bit BGR"
 msgstr "24-Bit BGR"
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:778 src/encoders/encoder.cpp:793
 msgid "32-bit BGRA"
 msgstr "32-Bit BGRA"
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:778 src/encoders/encoder.cpp:793
 msgid "Automatic (32-bit with alpha, else 24-bit)"
 msgstr "Automatisch (32-Bit mit Alpha, sonst 24-Bit)"
 
-#: src/encoders/encoder.cpp:767
+#: src/encoders/encoder.cpp:779
 msgid "16-bit ARGB 4444"
 msgstr "16-Bit ARGB 4444"
 
-#: src/encoders/encoder.cpp:767 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:779 src/encoders/encoder.cpp:793
 msgid "8-bit indexed (256 colours)"
 msgstr "8-Bit indiziert (256 Farben)"
 
-#: src/encoders/encoder.cpp:768 src/encoders/encoder.cpp:782
+#: src/encoders/encoder.cpp:780 src/encoders/encoder.cpp:794
 msgid "16-bit and indexed"
 msgstr "16-Bit und indiziert"
 
-#: src/encoders/encoder.cpp:770
+#: src/encoders/encoder.cpp:782
 msgid "sRGB colour space tag"
 msgstr "sRGB-Farbraum-Tag"
 
-#: src/encoders/encoder.cpp:771
+#: src/encoders/encoder.cpp:783
 msgid "Top-down rows"
 msgstr "Zeilen von oben nach unten"
 
-#: src/encoders/encoder.cpp:784
+#: src/encoders/encoder.cpp:796
 msgid "RLE compression"
 msgstr "RLE-Komprimierung"
 
-#: src/encoders/encoder.cpp:785
+#: src/encoders/encoder.cpp:797
 msgid "Top-left origin"
 msgstr "Ursprung oben links"
 
-#: src/image.cpp:206 src/ui/app.cpp:1094
+#: src/image.cpp:206 src/ui/app.cpp:1141
 msgid "the exposure was changed"
 msgstr "die Belichtung wurde geändert"
 
@@ -1182,77 +1236,87 @@ msgstr "Wert"
 msgid "Open in maps"
 msgstr "In Karten öffnen"
 
-#: src/ui/app.cpp:521
+#: src/ui/app.cpp:529
 #, c++-format
 msgid "Copied {0} × {1} to clipboard"
 msgstr "{0} × {1} in die Zwischenablage kopiert"
 
-#: src/ui/app.cpp:729
+#: src/ui/app.cpp:743
 msgid "No image open"
 msgstr "Kein Bild geöffnet"
 
-#: src/ui/app.cpp:729
+#: src/ui/app.cpp:743
 #, c++-format
 msgid "No images in {0}"
 msgstr "Keine Bilder in {0}"
 
-#: src/ui/app.cpp:744
+#: src/ui/app.cpp:758
 #, c++-format
 msgid "Loading {0}…"
 msgstr "{0} wird geladen…"
 
-#: src/ui/app.cpp:894
+#: src/ui/app.cpp:933
 #, c++-format
 msgid "Cannot load {0}: {1}"
 msgstr "{0} kann nicht geladen werden: {1}"
 
-#: src/ui/app.cpp:907 src/ui/app.cpp:1056
+#: src/ui/app.cpp:950 src/ui/app.cpp:1103
 msgid "Developing…"
 msgstr "Wird entwickelt…"
 
-#: src/ui/app.cpp:988
+#: src/ui/app.cpp:1031
 msgid "cropped"
 msgstr "zugeschnitten"
 
-#: src/ui/app.cpp:1242
+#: src/ui/app.cpp:1290
 msgid "Open Image"
 msgstr "Bild öffnen"
 
-#: src/ui/app.cpp:1247
+#: src/ui/app.cpp:1295
 msgid "All files"
 msgstr "Alle Dateien"
 
-#: src/ui/app.cpp:1333 src/ui/app_metadata.cpp:226
+#: src/ui/app.cpp:1383 src/ui/app_metadata.cpp:226
+#, c++-format
+msgid "page {0} / {1}"
+msgstr "Seite {0} / {1}"
+
+#: src/ui/app.cpp:1388 src/ui/app_metadata.cpp:229
+#, c++-format
+msgid "mip {0} / {1}"
+msgstr "Mip {0} / {1}"
+
+#: src/ui/app.cpp:1390 src/ui/app_metadata.cpp:231
 msgid "embedded preview"
 msgstr "eingebettete Vorschau"
 
-#: src/ui/app.cpp:1333 src/ui/app_metadata.cpp:226
+#: src/ui/app.cpp:1390 src/ui/app_metadata.cpp:231
 msgid "preview"
 msgstr "Vorschau"
 
-#: src/ui/app.cpp:1346
+#: src/ui/app.cpp:1403
 msgid "muted"
 msgstr "stumm"
 
-#: src/ui/app.cpp:1349
+#: src/ui/app.cpp:1406
 msgid "(fit)"
 msgstr "(eingepasst)"
 
-#: src/ui/app.cpp:1351
+#: src/ui/app.cpp:1408
 #, c++-format
 msgid "selection {0} × {1} at {2}, {3}"
 msgstr "Auswahl {0} × {1} bei {2}, {3}"
 
-#: src/ui/app.cpp:1353
+#: src/ui/app.cpp:1410
 #, c++-format
 msgid "B {0} × {1}, scaled to match"
 msgstr "B {0} × {1}, passend skaliert"
 
-#: src/ui/app.cpp:1360
+#: src/ui/app.cpp:1417
 msgid "identical"
 msgstr "identisch"
 
-#: src/ui/app.cpp:1367
+#: src/ui/app.cpp:1424
 #, no-c-format, c++-format
 msgid "PSNR {0} dB  ·  largest error {1}  ·  {2}% changed"
 msgstr "PSNR {0} dB  ·  größter Fehler {1}  ·  {2} % geändert"
@@ -1321,7 +1385,7 @@ msgstr "Ort"
 msgid "compression {0}"
 msgstr "Komprimierung {0}"
 
-#: src/ui/app_metadata.cpp:231
+#: src/ui/app_metadata.cpp:236
 msgid "developed"
 msgstr "entwickelt"
 
