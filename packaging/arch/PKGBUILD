@@ -1,0 +1,67 @@
+# Builds the checkout this file sits in (with its submodules), not a
+# download: `makepkg` here, or .github/ci/build-arch.sh in CI, which builds
+# a copy elsewhere and names the checkout in IFRIT_SOURCE.
+# A tag build passes IFRIT_VERSION (1.2, 1.3beta...) for pkgver.
+pkgname=ifritview
+pkgver=0.1
+pkgrel=1
+pkgdesc='Fast, no-frills image viewer'
+arch=('x86_64' 'aarch64')
+url='https://github.com/TurkeyMan/ifritview'
+license=('GPL-3.0-or-later')
+# What the exe and its private core link; the toolkit comes as a plugin
+# chosen for the desktop (GTK 4 on GNOME, Qt 6 on KDE), falling back to
+# GTK 3, which every order includes.
+depends=('cairo' 'exempi' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'json-glib' 'lcms2' 'libexif'
+         'libgcc' 'libgomp' 'libheif' 'libiptcdata' 'libjpeg-turbo' 'libjxl' 'libpng' 'libraw'
+         'libstdc++' 'libtiff' 'libwebp' 'zlib' 'zstd')
+makedepends=('cmake' 'git' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs')
+# Loaded at runtime when present.
+optdepends=('gtk4: the GTK 4 interface, preferred on GNOME'
+            'qt6-base: the Qt 6 interface, preferred on KDE Plasma'
+            'gstreamer: video playback'
+            'gst-plugins-base: video playback'
+            'gst-plugins-good: video playback (common formats)'
+            'gst-libav: video playback (more formats)'
+            'poppler-glib: PDF pages'
+            'curl: place names for photo locations')
+
+_root=${IFRIT_SOURCE:-$(realpath "$startdir/../..")}
+
+pkgver() {
+  if [ -n "${IFRIT_VERSION:-}" ]; then
+    echo "$IFRIT_VERSION"
+    return
+  fi
+  local base
+  base=$(sed -n 's/^project(IfritView VERSION \([0-9.]*\).*/\1/p' "$_root/CMakeLists.txt")
+  printf '%s.r%s.g%s' "$base" \
+    "$(git -C "$_root" rev-list --count HEAD)" "$(git -C "$_root" rev-parse --short=7 HEAD)"
+}
+
+build() {
+  cmake -S "$_root" -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_DOCDIR=share/doc/$pkgname \
+    -DIFRIT_RAPPORT_PLUGINS=ON \
+    ${IFRIT_VERSION:+-DIFRIT_VERSION=$IFRIT_VERSION}
+  cmake --build build
+}
+
+check() {
+  # Decode without a display, then the version and the example format plugin.
+  mkdir -p smoke
+  printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > smoke/rgb.ppm
+  build/ifritview --probe smoke/rgb.ppm
+  build/ifritview --version
+  printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > smoke/red.ff
+  build/ifritview --probe smoke/red.ff
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # The install refreshes the desktop database for `cmake --install`; on
+  # Arch pacman's hooks keep that cache, and no package may own it.
+  rm -f "$pkgdir/usr/share/applications/mimeinfo.cache"
+}
