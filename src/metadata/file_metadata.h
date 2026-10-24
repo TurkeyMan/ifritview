@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct FileMetadata
@@ -60,6 +61,11 @@ struct SaveTarget
 // size, no stale thumbnail, and only the chosen groups. The ICC profile is
 // passed through whatever the choice.
 FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& choice, const SaveTarget& target);
+
+// The descriptive text fields of an EXIF block's main directory (TIFF tag
+// number and text: description, make, model, software, date, artist,
+// copyright), for formats that keep them as plain tags.
+std::vector<std::pair<uint16_t, std::string>> exif_strings(const std::vector<uint8_t>& tiff);
 
 // The editors behind prepare_metadata, exposed for tests.
 std::vector<uint8_t> edit_exif(const std::vector<uint8_t>& tiff, const MetadataChoice& choice, const SaveTarget& target);

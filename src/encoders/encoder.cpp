@@ -24,6 +24,7 @@
 #endif
 #ifdef HAVE_WEBP
 #include <webp/encode.h>
+#include <webp/mux.h>
 #endif
 #ifdef HAVE_JXL
 #include <jxl/encode.h>
@@ -110,6 +111,26 @@ bool encode_png(const Image& image, const std::string& path, const EncodeOptions
     const bool interlaced = png_encoder().value(options, "interlaced") != 0;
     png_set_IHDR(png, info, image.width, image.height, 8, image.has_alpha ? PNG_COLOR_TYPE_RGBA : PNG_COLOR_TYPE_RGB,
                  interlaced ? PNG_INTERLACE_ADAM7 : PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    // The profile in iCCP, EXIF in eXIf, XMP in iTXt. PNG has no place of its
+    // own for IPTC (XMP usually carries the same fields).
+    png_text xmp{};
+    std::string xmp_text;
+    if (const FileMetadata* m = options.metadata.get())
+    {
+        if (!m->icc.empty())
+            png_set_iCCP(png, info, "ICC profile", PNG_COMPRESSION_TYPE_BASE, m->icc.data(), png_uint_32(m->icc.size()));
+        if (!m->exif.empty())
+            png_set_eXIf_1(png, info, png_uint_32(m->exif.size()), const_cast<png_bytep>(m->exif.data()));
+        if (!m->xmp.empty())
+        {
+            xmp_text.assign(m->xmp.begin(), m->xmp.end());
+            xmp.compression = PNG_ITXT_COMPRESSION_NONE;
+            xmp.key = const_cast<char*>("XML:com.adobe.xmp");
+            xmp.text = xmp_text.data();
+            xmp.itxt_length = xmp_text.size();
+            png_set_text(png, info, &xmp, 1);
+        }
+    }
     png_write_info(png, info);
     if (interlaced)
         png_set_interlace_handling(png);
@@ -258,6 +279,26 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
         const uint16_t extra[1] = {EXTRASAMPLE_UNASSALPHA};
         TIFFSetField(tif, TIFFTAG_EXTRASAMPLES, 1, extra);
     }
+    // The profile, XMP and IPTC as tags; EXIF's descriptive fields as the
+    // baseline tags that hold them (its Exif directory isn't carried yet).
+    if (const FileMetadata* m = options.metadata.get())
+    {
+        if (!m->icc.empty())
+            TIFFSetField(tif, TIFFTAG_ICCPROFILE, uint32_t(m->icc.size()), m->icc.data());
+        if (!m->xmp.empty())
+            TIFFSetField(tif, TIFFTAG_XMLPACKET, uint32_t(m->xmp.size()), m->xmp.data());
+        if (!m->iptc.empty())
+        {
+            // Some libtiffs keep this tag as LONGs: padded to whole ones then.
+            std::vector<uint8_t> iptc = m->iptc;
+            const bool longs = TIFFFieldDataType(TIFFFieldWithTag(tif, TIFFTAG_RICHTIFFIPTC)) == TIFF_LONG;
+            if (longs)
+                iptc.resize((iptc.size() + 3) / 4 * 4);
+            TIFFSetField(tif, TIFFTAG_RICHTIFFIPTC, uint32_t(longs ? iptc.size() / 4 : iptc.size()), iptc.data());
+        }
+        for (const auto& [tag, text] : exif_strings(m->exif))
+            TIFFSetField(tif, tag, text.c_str());
+    }
     bool ok = true;
     for (int y = 0; y < image.height && ok; ++y)
         ok = TIFFWriteScanline(tif, pixels.data() + size_t(y) * image.width * spp, y, 0) >= 0;
@@ -309,10 +350,32 @@ bool encode_webp(const Image& image, const std::string& path, const EncodeOption
     pic.writer = WebPMemoryWrite;
     pic.custom_ptr = &writer;
     bool ok = WebPPictureImportRGBA(&pic, pixels.data(), image.width * 4) && WebPEncode(&config, &pic);
+    const FileMetadata* m = options.metadata.get();
     if (!ok)
         error = "WebP encode failed";
-    else
+    else if (!m || (m->icc.empty() && m->exif.empty() && m->xmp.empty()))
         ok = write_file(path, writer.mem, writer.size, error);
+    else
+    {
+        // The profile, EXIF and XMP as chunks of the extended format.
+        const WebPData image_data{writer.mem, writer.size};
+        WebPMux* mux = WebPMuxCreate(&image_data, 1);
+        const auto chunk = [mux](const char* fourcc, const std::vector<uint8_t>& bytes)
+        {
+            if (bytes.empty())
+                return true;
+            const WebPData d{bytes.data(), bytes.size()};
+            return WebPMuxSetChunk(mux, fourcc, &d, 1) == WEBP_MUX_OK;
+        };
+        WebPData assembled{};
+        ok = mux && chunk("ICCP", m->icc) && chunk("EXIF", m->exif) && chunk("XMP ", m->xmp) && WebPMuxAssemble(mux, &assembled) == WEBP_MUX_OK;
+        if (ok)
+            ok = write_file(path, assembled.bytes, assembled.size, error);
+        else
+            error = "WebP metadata could not be added";
+        WebPDataClear(&assembled);
+        WebPMuxDelete(mux);
+    }
     WebPPictureFree(&pic);
     WebPMemoryWriterClear(&writer);
     return ok;
@@ -338,9 +401,27 @@ bool encode_jxl(const Image& image, const std::string& path, const EncodeOptions
     info.bits_per_sample = 8;
     info.uses_original_profile = lossless ? JXL_TRUE : JXL_FALSE;
     JxlEncoderSetBasicInfo(enc.get(), &info);
-    JxlColorEncoding color;
-    JxlColorEncodingSetToSRGB(&color, JXL_FALSE);
-    JxlEncoderSetColorEncoding(enc.get(), &color);
+    const FileMetadata* m = options.metadata.get();
+    if (!m || m->icc.empty() || JxlEncoderSetICCProfile(enc.get(), m->icc.data(), m->icc.size()) != JXL_ENC_SUCCESS)
+    {
+        JxlColorEncoding color;
+        JxlColorEncodingSetToSRGB(&color, JXL_FALSE);
+        JxlEncoderSetColorEncoding(enc.get(), &color);
+    }
+    if (m && (!m->exif.empty() || !m->xmp.empty()))
+    {
+        // Boxes: "Exif" starts with the offset to the TIFF header (0 here).
+        JxlEncoderUseBoxes(enc.get());
+        if (!m->exif.empty())
+        {
+            std::vector<uint8_t> box(4, 0);
+            box.insert(box.end(), m->exif.begin(), m->exif.end());
+            JxlEncoderAddBox(enc.get(), "Exif", box.data(), box.size(), JXL_FALSE);
+        }
+        if (!m->xmp.empty())
+            JxlEncoderAddBox(enc.get(), "xml ", m->xmp.data(), m->xmp.size(), JXL_FALSE);
+        JxlEncoderCloseBoxes(enc.get());
+    }
     JxlEncoderFrameSettings* fs = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
     if (lossless)
         JxlEncoderSetFrameLossless(fs, JXL_TRUE);
@@ -404,6 +485,9 @@ bool encode_avif(const Image& image, const std::string& path, const EncodeOption
     const int bpp = image.has_alpha ? 4 : 3;
     for (int y = 0; y < image.height; ++y)
         std::memcpy(plane + size_t(y) * stride, pixels.data() + size_t(y) * image.width * bpp, size_t(image.width) * bpp);
+    const FileMetadata* m = options.metadata.get();
+    if (m && !m->icc.empty())
+        heif_image_set_raw_color_profile(img, "prof", m->icc.data(), m->icc.size());
     heif_image_handle* handle = nullptr;
     e = heif_context_encode_image(ctx, img, enc, nullptr, &handle);
     bool ok = e.code == heif_error_Ok;
@@ -411,6 +495,10 @@ bool encode_avif(const Image& image, const std::string& path, const EncodeOption
         error = e.message;
     else
     {
+        if (m && !m->exif.empty())
+            heif_context_add_exif_metadata(ctx, handle, m->exif.data(), int(m->exif.size()));
+        if (m && !m->xmp.empty())
+            heif_context_add_XMP_metadata(ctx, handle, m->xmp.data(), int(m->xmp.size()));
         e = heif_context_write_to_file(ctx, path.c_str());
         ok = e.code == heif_error_Ok;
         if (!ok)

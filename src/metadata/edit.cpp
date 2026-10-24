@@ -841,6 +841,30 @@ std::string metadata_preset(const MetadataChoice& c)
     return "";
 }
 
+std::vector<std::pair<uint16_t, std::string>> exif_strings(const std::vector<uint8_t>& tiff)
+{
+    std::vector<std::pair<uint16_t, std::string>> out;
+    TiffEditor t(tiff);
+    if (!t.valid())
+        return out;
+    const uint32_t ifd0 = t.ifd0();
+    for (uint16_t tag : {0x010E, 0x010F, 0x0110, 0x0131, 0x0132, 0x013B, 0x8298})
+    {
+        const size_t e = t.find(ifd0, tag);
+        if (!e || t.u16(e + 2) != 2)  // ASCII only
+            continue;
+        const size_t n = t.u32(e + 4);
+        size_t offset = e + 8, length = n;
+        if (n > 4 && !t.external(e, offset, length))
+            continue;
+        std::string s(reinterpret_cast<const char*>(tiff.data() + offset), length);
+        s.erase(std::find(s.begin(), s.end(), '\0'), s.end());
+        if (!s.empty())
+            out.emplace_back(tag, std::move(s));
+    }
+    return out;
+}
+
 FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& choice, const SaveTarget& target)
 {
     FileMetadata m;
