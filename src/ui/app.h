@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <memory>
 #include <optional>
@@ -27,7 +28,11 @@
 class App
 {
 public:
-    explicit App(rap::ui& ui);
+    // `settings`: from read_settings, started as early as can be.
+    App(rap::ui& ui, std::shared_future<Config> settings);
+    // The settings, read on a thread of their own, which also sets the
+    // decoders' options from them: the first image waits for that, not the UI.
+    static std::shared_future<Config> read_settings();
     ~App();
     // The file (and its folder) or folder to show. `first`, when given, is
     // the file already being decoded (from main), to open the window with.

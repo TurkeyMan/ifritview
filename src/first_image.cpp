@@ -3,13 +3,14 @@
 #include "decoders/decoder.h"
 #include "platform.h"
 
-FirstImage::FirstImage(std::string path)
+FirstImage::FirstImage(std::string path, std::shared_future<Config> settings)
     : path_(std::move(path))
 {
-    platform::trace("first image: decoding starts");
     thread_ = std::thread(
-        [this]
+        [this, settings]
         {
+            settings.wait();
+            platform::trace("first image: decoding starts");
             auto image = std::make_shared<Image>();
             std::string error;
             bool preview = false;

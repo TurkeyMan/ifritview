@@ -86,14 +86,26 @@ double random01()
 // after it's gone (both sides on the main thread).
 static App* s_app = nullptr;
 
-App::App(rap::ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
+std::shared_future<Config> App::read_settings()
+{
+    return std::async(std::launch::async,
+                      []
+                      {
+                          Config cfg;
+                          cfg.load();
+                          set_decode_options(decode_options_for(cfg));
+                          platform::trace("settings read");
+                          return cfg;
+                      })
+        .share();
+}
+
+App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
 {
     platform::trace("app starting");
-    cfg_.load();
-    platform::trace("settings read");
+    cfg_ = settings.get();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
-    set_decode_options(decode_options_for(cfg_));
     build_ui();
     // Format plugins load on a thread of their own, the first image never
     // waiting for them; once they're in, their formats join the folder.

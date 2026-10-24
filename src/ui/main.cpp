@@ -120,7 +120,8 @@ void run_step(App& app, const std::string& step)
 
 }  // namespace
 
-int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first);
+int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first,
+            std::shared_future<Config> settings);
 
 int main(int argc, char** argv)
 {
@@ -174,11 +175,12 @@ int main(int argc, char** argv)
     options.search_paths = {rap::sys::path_to_utf8(exe_dir / "lib" / "ifritview"),
                             rap::sys::path_to_utf8(exe_dir / ".." / IFRIT_PLUGIN_DIR)};
 #endif
-    // The image named on the command line starts decoding now, while the
-    // toolkit loads and the window is built.
+    // The settings are read, and the image named on the command line
+    // decoded, while the toolkit loads and the window is built.
+    std::shared_future<Config> settings = App::read_settings();
     std::unique_ptr<FirstImage> first;
     if (argc == 2 && argv[1][0] != '-' && g_file_test(argv[1], G_FILE_TEST_IS_REGULAR))
-        first = std::make_unique<FirstImage>(argv[1]);
+        first = std::make_unique<FirstImage>(argv[1], settings);
     platform::trace("loading the toolkit");
     auto ui = rap::ui::load(argc, argv, options);
     platform::trace("toolkit loaded (%s)", ui ? std::string((*ui)->backend_name()).c_str() : "none");
@@ -191,14 +193,15 @@ int main(int argc, char** argv)
     // the toolkit's loop; with Win32 there is no GLib loop to carry them.
     rap::ui& toolkit = **ui;
     platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
-    const int rc = run_app(**ui, argc, argv, t_start, first.get());
+    const int rc = run_app(**ui, argc, argv, t_start, first.get(), settings);
     platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
     return rc;
 }
 
-int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first)
+int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first,
+            std::shared_future<Config> settings)
 {
-    App app(ui);
+    App app(ui, std::move(settings));
     platform::trace("window built");
     if (argc > 3 && std::strcmp(argv[1], "--diff") == 0)
         app.open_diff(argv[2], argv[3]);

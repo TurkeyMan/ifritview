@@ -4,11 +4,13 @@
 // with it already in. Decoded as the loader would: a raw's embedded preview
 // first (its develop follows through the loader), anything else in full.
 
+#include "config.h"
 #include "image.h"
 
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -17,8 +19,9 @@
 class FirstImage
 {
 public:
-    // Starts decoding `path` on a thread of its own.
-    explicit FirstImage(std::string path);
+    // Starts decoding `path` on a thread of its own, once `settings` are
+    // in (they set the decoders' options: App::read_settings).
+    FirstImage(std::string path, std::shared_future<Config> settings);
     ~FirstImage();  // waits for the thread
     FirstImage(const FirstImage&) = delete;
     FirstImage& operator=(const FirstImage&) = delete;
