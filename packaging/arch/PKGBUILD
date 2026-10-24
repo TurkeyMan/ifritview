@@ -43,7 +43,6 @@ build() {
   cmake -S "$_root" -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_DOCDIR=share/doc/$pkgname \
     -DIFRIT_RAPPORT_PLUGINS=ON \
     ${IFRIT_VERSION:+-DIFRIT_VERSION=$IFRIT_VERSION}
   cmake --build build
@@ -61,7 +60,4 @@ check() {
 
 package() {
   DESTDIR="$pkgdir" cmake --install build
-  # The install refreshes the desktop database for `cmake --install`; on
-  # Arch pacman's hooks keep that cache, and no package may own it.
-  rm -f "$pkgdir/usr/share/applications/mimeinfo.cache"
 }
