@@ -148,6 +148,19 @@ rap::node SaveDialog::page_node(Page& page)
             }
         }
     }
+    // JPEG to JPEG: the original's compressed data turned and cropped, not
+    // re-encoded. Greyed until the app has worked out whether it can be done.
+    if (std::string(e.extension) == "jpg")
+        rows.insert(rows.begin(), {"", L::vbox{L::check{"Lossless: turn and crop the original, no re-encoding"}
+                                                   .on_toggled(
+                                                       [s, p](bool)
+                                                       {
+                                                           s->update_enabled(*p);
+                                                           s->report();
+                                                       })
+                                                   .enabled(false)
+                                                   .bind(page.lossless),
+                                               L::label{"Checking…"}.ellipsize().bind(lossless_note_)}});
     if (rows.empty())
         rows.push_back({"", L::label{std::string(e.name) + " has no settings."}});
     rap::spec::form form;
@@ -271,6 +284,8 @@ EncodeOptions SaveDialog::options(const Page& page) const
             v = std::max(0, c.choice->current());
         o.values[e.settings[i].key] = v;
     }
+    if (page.lossless && page.lossless->checked())
+        o.values["lossless"] = 1;
     return o;
 }
 
@@ -280,10 +295,11 @@ void SaveDialog::update_enabled(Page& page)
 {
     const Encoder& e = *page.encoder;
     const EncodeOptions o = options(page);
+    const bool lossless = o.get("lossless", 0) != 0;  // nothing is encoded: no settings apply
     for (size_t i = 0; i < e.settings.size(); ++i)
-        if (const char* off = e.settings[i].off_when)
+        if (const char* off = e.settings[i].off_when; off || lossless)
         {
-            const bool enabled = o.get(off, 0) == 0;
+            const bool enabled = !lossless && (!off || o.get(off, 0) == 0);
             const Control& c = page.controls[i];
             if (c.range)
                 c.range->set_enabled(enabled);
@@ -312,8 +328,22 @@ void SaveDialog::report()
     const Page& p = pages_[size_t(i)];
     const EncodeOptions o = options(p);
     if (preview_)
-        preview_->set_enabled(p.encoder->lossy(o));  // nothing to preview when it's kept exactly
+        preview_->set_enabled(p.encoder->lossy(o) && !o.get("lossless", 0));  // nothing to preview when it's kept exactly
     callbacks_.changed(*p.encoder, o);
+}
+
+void SaveDialog::set_lossless(bool available, bool exact, const std::string& note)
+{
+    for (Page& p : pages_)
+        if (p.lossless)
+        {
+            p.lossless->set_enabled(available);
+            p.lossless->set_checked(available && exact);
+            update_enabled(p);
+        }
+    if (lossless_note_)
+        lossless_note_->set_text(note);
+    report();
 }
 
 void SaveDialog::set_info(const std::string& text)

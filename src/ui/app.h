@@ -55,7 +55,8 @@ public:
     void crop_to_selection();
     void save_as();
     void preview_save(const Encoder& e, const EncodeOptions& o);
-    void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source);
+    void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source, std::shared_ptr<const struct LosslessJpeg> lossless);
+    void plan_lossless();
     void toggle_metadata();
     void toggle_xmp();
     void copy_to_clipboard();
@@ -165,7 +166,9 @@ private:
     bool syncing_framing_ = false;
     bool diff_session_ = false;  // comparing two files, not previewing a save
     std::string diff_name_;      // "a ↔ b"
-    std::shared_ptr<Image> save_source_;  // what Save As saves: the image, or the difference shown
+    std::shared_ptr<Image> save_source_;
+    std::shared_ptr<const struct LosslessJpeg> lossless_plan_;  // for JPEG's Lossless, once worked out
+    uint64_t lossless_generation_ = 0;  // what Save As saves: the image, or the difference shown
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;

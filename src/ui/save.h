@@ -41,6 +41,10 @@ public:
     MetadataChoice metadata() const;  // as chosen
 
     void set_info(const std::string& text);  // beside the format: the preview's file size
+    // JPEG's Lossless choice: available or not, and a few words (how the
+    // result differs from the image, or why it can't be done). Checked to
+    // start with when `exact`. The choice reaches `chosen` as "lossless"=1.
+    void set_lossless(bool available, bool exact, const std::string& note);
     bool preview_shown() const { return !preview_ || preview_->checked(); }
     void close();                            // as Cancel
 
@@ -57,6 +61,7 @@ private:
         const Encoder* encoder;
         rap::widget* box = nullptr;
         std::vector<Control> controls;  // per setting, sized before building
+        rap::check* lossless = nullptr;  // JPEG only
     };
 
     rap::node page_node(Page& page);
@@ -81,6 +86,7 @@ private:
     bool finished_ = false;
     rap::label* info_ = nullptr;
     rap::check* preview_ = nullptr;
+    rap::label* lossless_note_ = nullptr;
     // Metadata: a preset, and the groups it stands for (which can be set one by one).
     rap::drop_down* preset_ = nullptr;
     std::vector<rap::check*> groups_;

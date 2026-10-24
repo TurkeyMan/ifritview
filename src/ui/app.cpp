@@ -5,6 +5,7 @@
 #include "settings.h"
 
 #include "decoders/decoder.h"
+#include "jpeg_lossless.h"
 #include "encoders/encoder.h"
 
 #include <gio/gio.h>
@@ -1547,8 +1548,22 @@ void App::save_as()
             target.drop_develop = image_->is_raw || (cfg_.apply_xmp_edits && image_->xmp.present);
             o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
         }
+        // Lossless: the planned transform, with the metadata made for its size.
+        std::shared_ptr<const LosslessJpeg> lossless;
+        if (o.get("lossless", 0) && lossless_plan_ && lossless_plan_->why_not.empty())
+        {
+            lossless = lossless_plan_;
+            if (o.metadata && image_->stored)
+            {
+                SaveTarget target;
+                target.width = lossless->width;
+                target.height = lossless->height;
+                target.pixels_changed = image_->edited;
+                o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
+            }
+        }
         // After the dialog has gone, so the file dialog has the main window as parent.
-        ui_.post([this, e = &e, o, source = save_source_] { choose_save_path(*e, o, source); });
+        ui_.post([this, e = &e, o, source = save_source_, lossless] { choose_save_path(*e, o, source, lossless); });
     };
     cb.closed = [this]
     {
@@ -1568,12 +1583,13 @@ void App::save_as()
     MetadataChoice metadata;
     std::string ignored;
     parse_metadata_choice(cfg_.save_metadata, metadata, ignored);  // an unreadable setting keeps everything
-    MetadataChoice present;
-    present.keep = false;  // nothing, unless the image's own
+    MetadataChoice present;  // nothing, unless the image's own
+    present.keep = present.location = present.personal = present.author = present.description = present.capture = present.history = false;
     if (save_source_ == image_ && image_->stored)
         present = metadata_present(*image_->stored);
     save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, metadata,
                                     present, std::move(cb));
+    plan_lossless();
     update_toolbar();
 }
 
@@ -1611,7 +1627,7 @@ void App::show_save_preview(bool on)
 void App::preview_save(const Encoder& e, const EncodeOptions& o)
 {
     const uint64_t generation = ++preview_->generation;
-    if (!save_source_ || !e.lossy(o))
+    if (!save_source_ || !e.lossy(o) || o.get("lossless", 0))  // lossless: nothing re-encoded to preview
     {
         preview_image_.reset();
         preview_difference_.reset();
@@ -1679,7 +1695,42 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
         .detach();
 }
 
-void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source)
+// Whether JPEG's Lossless can be offered: worked out on a thread (it reads
+// the original and does the transform, a fraction of a second for a large
+// one), then told to the dialog.
+void App::plan_lossless()
+{
+    lossless_plan_.reset();
+    if (!save_dialog_)
+        return;
+    if (save_source_ != image_)
+    {
+        save_dialog_->set_lossless(false, false, "Lossless: only the original image can be saved this way");
+        return;
+    }
+    const uint64_t generation = ++lossless_generation_;
+    std::thread(
+        [this, generation, image = image_, path = image_path_]
+        {
+            auto plan = std::make_shared<const LosslessJpeg>(plan_lossless_jpeg(*image, path));
+            platform::post_main(
+                [this, generation, plan]
+                {
+                    if (generation != lossless_generation_ || !save_dialog_)
+                        return;
+                    lossless_plan_ = plan;
+                    if (!plan->why_not.empty())
+                        save_dialog_->set_lossless(false, false, "Not possible: " + plan->why_not);
+                    else if (plan->differs.empty())
+                        save_dialog_->set_lossless(true, true, "Exactly the image as shown, not one pixel re-encoded");
+                    else
+                        save_dialog_->set_lossless(true, false, "With JPEG's blocks: " + plan->differs + " than shown");
+                });
+        })
+        .detach();
+}
+
+void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source, std::shared_ptr<const LosslessJpeg> lossless)
 {
     if (!source)
         return;
@@ -1694,7 +1745,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
     spec.initial_path = dir.empty() ? name : dir + "/" + name;
     spec.filters = {{e.name, std::string("*.") + e.extension}};
     ui_.choose_files(window_.get(), spec,
-                    [this, enc = &e, o, source](std::vector<std::string> files)
+                    [this, enc = &e, o, source, lossless](std::vector<std::string> files)
                     {
                         if (files.empty())
                             return;
@@ -1702,7 +1753,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                         if (lower_extension(path) != enc->extension)
                             path += std::string(".") + enc->extension;  // not every toolkit's dialog adds it
                         std::string error;
-                        const bool ok = enc->encode(*source, path, o, error);
+                        const bool ok = lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), path, error) : enc->encode(*source, path, o, error);
                         status_message_ = ok ? "Saved " + std::filesystem::path(path).filename().string() : "Save failed: " + error;
                         if (ok)
                             folder_.rescan(cfg_);  // the new file may now be part of the folder
