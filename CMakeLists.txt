@@ -66,6 +66,7 @@ add_library(ifrit_core STATIC
   src/decoders/netpbm.cpp
   src/decoders/bcn.cpp
   src/decoders/dds.cpp
+  src/decoders/vtf.cpp
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
