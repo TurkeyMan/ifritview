@@ -104,6 +104,8 @@ const Decoder& pkm_decoder();
 const Decoder& astc_decoder();
 const Decoder& ktx_decoder();
 const Decoder& ktx2_decoder();
+const Decoder& tpl_decoder();
+const Decoder& bti_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.

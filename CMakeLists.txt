@@ -78,6 +78,7 @@ add_library(ifrit_core STATIC
   src/decoders/astc.cpp
   src/decoders/astc_file.cpp
   src/decoders/ktx.cpp
+  src/decoders/tpl.cpp
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
