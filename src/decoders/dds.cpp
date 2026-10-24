@@ -318,12 +318,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
     if (volume)  // the slice at this level nearest the page's depth
         at += surface(lw, lh) * size_t(part.page * slices(part.level) / int(depth));
     if (cube)
-    {
-        static const char* const kFaces[] = {"+X", "\u2212X", "+Y", "\u2212Y", "+Z", "\u2212Z"};
-        out.page_label = kFaces[part.page % 6];
-        if (array_size > 1)
-            out.page_label = rap::i18n::format(_("cube {0}"), part.page / 6 + 1) + " " + out.page_label;
-    }
+        out.page_label = cube_face_label(part.page, int(array_size));
     if (at > size)
     {
         error = "DDS data is cut short";

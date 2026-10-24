@@ -67,6 +67,12 @@ inline float linear_to_srgb(float linear)
     return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1 / 2.4f) - 0.055f;
 }
 
+// -- texture layouts ----------------------------------------------------------
+
+// A cube map's page, named: its face (+X, −X, +Y, −Y, +Z, −Z), and which
+// cube it's in when there are several (an array of them).
+std::string cube_face_label(int page, int cubes);
+
 // -- wider texels -------------------------------------------------------------
 
 // More than 8 bits a channel: kept as the image's source data, so 16-bit

@@ -1,5 +1,7 @@
 #include "texel.h"
 
+#include "../i18n.h"
+
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -101,4 +103,11 @@ bool decode_wide(const WideTexels& f, const uint8_t* d, size_t size, int w, int 
     }
     out.set_source(std::move(deep));
     return true;
+}
+
+std::string cube_face_label(int page, int cubes)
+{
+    static const char* const kFaces[] = {"+X", "\u2212X", "+Y", "\u2212Y", "+Z", "\u2212Z"};
+    const std::string face = kFaces[page % 6];
+    return cubes > 1 ? rap::i18n::format(_("cube {0}"), page / 6 + 1) + " " + face : face;
 }

@@ -1,7 +1,7 @@
 // Khronos textures, KTX 1 and KTX 2: a header naming the pixel format (GL
 // enums for KTX 1, a VkFormat for KTX 2), key/value metadata, then the
-// mipmap levels, largest first. The first image is shown: level 0, its
-// first array layer, cube face or volume slice. Block-compressed data goes
+// mipmap levels, largest first. Each array layer, cube face or volume slice
+// is a page, and each mipmap a level. Block-compressed data goes
 // through bcn.cpp (BC1-BC7), etc.cpp (ETC1/ETC2/EAC) and astc.cpp (ASTC);
 // uncompressed data in the common 8-bit and packed 16-bit layouts is read
 // here. KTX 1 comes in either byte order. KTX 2 levels may be supercompressed
@@ -516,14 +516,48 @@ void add_metadata(Image& out, const char* group, const std::vector<std::pair<std
 void add_layout(Image& out, const char* group, uint32_t levels, uint32_t layers, uint32_t faces, uint32_t depth)
 {
     if (levels > 1)
-        out.add(group, "Mipmaps", std::to_string(levels));
+        out.add(group, N_("Mipmaps"), std::to_string(levels));
     if (faces == 6)
-        out.add(group, "Cube map", "first face shown");
+        out.add(group, N_("Cube map"), _("6 faces"));
     if (layers > 1)
-        out.add(group, "Array", std::to_string(layers) + " textures, the first shown");
+        out.add(group, N_("Array"), rap::i18n::format(_("{0} textures"), layers));
     if (depth > 1)
-        out.add(group, "Volume", std::to_string(depth) + " slices, the first shown");
+        out.add(group, N_("Volume"), rap::i18n::format(_("{0} slices"), depth));
 }
+
+// The file's images, as pages: each array layer's faces' slices, in that
+// order (a volume's slices at level 0; a smaller level has fewer, and the
+// page shows the one at its depth). `place` is where page `page` is among
+// the images of level `level`, and its name for a cube.
+struct Layout
+{
+    uint32_t layers, faces, depth;  // each at least 1
+    int pages, levels;
+    bool set(Image& out, ImagePart part, uint32_t layers_, uint32_t faces_, uint32_t depth_, uint32_t levels_, std::string& error)
+    {
+        layers = std::max(1u, layers_), faces = std::max(1u, faces_), depth = std::max(1u, depth_);
+        levels = int(std::clamp(levels_, 1u, 32u));
+        pages = int(std::min<uint64_t>(uint64_t(layers) * faces * depth, 1u << 16));
+        out.page_count = pages;
+        out.level_count = levels;
+        if (part.page >= pages || part.level >= levels)
+        {
+            error = "the texture has no such page or level";
+            return false;
+        }
+        if (faces == 6)
+            out.page_label = cube_face_label(part.page, int(layers));
+        return true;
+    }
+    // Of the level's images (each layer's faces' slices at that level).
+    size_t place(ImagePart part) const
+    {
+        const uint32_t level_depth = std::max(1u, depth >> part.level);
+        const uint32_t page = uint32_t(part.page), layer = page / (faces * depth), face = page / depth % faces;
+        const uint32_t z = page % depth * level_depth / depth;
+        return (size_t(layer) * faces + face) * level_depth + z;
+    }
+};
 
 bool check_size(uint32_t w, uint32_t h, const char* what, std::string& error)
 {
@@ -535,7 +569,7 @@ bool check_size(uint32_t w, uint32_t h, const char* what, std::string& error)
     return true;
 }
 
-bool decode1(const std::string& path, Image& out, std::string& error)
+bool decode1(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -574,12 +608,38 @@ bool decode1(const std::string& path, Image& out, std::string& error)
         error = "KTX data is cut short";
         return false;
     }
-    // Each level: its size, then its images (the first is all that's read).
-    const size_t offset = 64 + size_t(kvd) + 4;
-    const size_t image_size = u32(64 + kvd);
+    Layout layout;
+    if (!layout.set(out, part, layers, faces, depth, levels, error))
+        return false;
+    // Each level: its size, then its images, padded to four bytes. A cube
+    // that isn't an array gives one face's size, each face padded.
+    const bool face_sized = layout.faces == 6 && layers == 0;
+    size_t at = 64 + size_t(kvd);
+    for (int m = 0; m <= part.level; ++m)
+    {
+        if (at + 4 > size)
+        {
+            error = "KTX data is cut short";
+            return false;
+        }
+        const size_t image_size = u32(at);
+        if (m == part.level)
+            break;
+        at += 4 + (face_sized ? 6 * ((image_size + 3) & ~size_t(3)) : image_size);
+        at = (at + 3) & ~size_t(3);
+    }
+    const size_t image_size = u32(at);
+    const int lw = std::max(1, int(w) >> part.level), lh = std::max(1, int(h) >> part.level);
+    const size_t slice = image_bytes(*t, lw, lh, 4);
+    at += 4 + (face_sized ? size_t(part.page % 6) * ((image_size + 3) & ~size_t(3)) : layout.place(part) * slice);
+    if (at > size)
+    {
+        error = "KTX data is cut short";
+        return false;
+    }
     // Byte order matters to samples wider than a byte (glTypeSize).
     const bool swap = be && type_size > 1;
-    if (!decode_texture(*t, d + offset, std::min(image_size, size - offset), int(w), int(h), 4, swap, false, out, error))
+    if (!decode_texture(*t, d + at, std::min(slice, size - at), lw, lh, 4, swap, false, out, error))
         return false;
 
     out.format = "KTX";
@@ -631,7 +691,7 @@ bool unzstd(const uint8_t* src, size_t n, size_t want, std::vector<uint8_t>& dst
 }
 #endif
 
-bool decode2(const std::string& path, Image& out, std::string& error)
+bool decode2(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -676,8 +736,16 @@ bool decode2(const std::string& path, Image& out, std::string& error)
     }
     const bool premultiplied = (flags & 1) != 0;  // KHR_DF_FLAG_ALPHA_PREMULTIPLIED
 
-    // Level 0 is the first in the index, whatever its place in the file.
-    const uint64_t level_offset = le64(d + 80), level_length = le64(d + 88);
+    Layout layout;
+    if (!layout.set(out, part, layers, faces, depth, levels, error))
+        return false;
+    // The level's place in the file from the index (level 0 first there,
+    // whatever its place in the file), then the image's in the level.
+    const size_t entry = 80 + size_t(part.level) * 24;
+    const uint64_t level_offset = le64(d + entry), level_length = le64(d + entry + 8);
+    const int lw = std::max(1, int(w) >> part.level), lh = std::max(1, int(h) >> part.level);
+    const size_t slice = image_bytes(*t, lw, lh, 1);
+    const size_t within = layout.place(part) * slice;
     if (level_offset > size || level_length > size - level_offset)
     {
         error = "KTX2 data is cut short";
@@ -690,7 +758,7 @@ bool decode2(const std::string& path, Image& out, std::string& error)
     if (scheme == 2)
     {
 #ifdef HAVE_ZSTD
-        if (!unzstd(data, data_size, image_bytes(*t, int(w), int(h), 1), inflated, error))
+        if (!unzstd(data, data_size, within + slice, inflated, error))  // as far as the image
             return false;
         data = inflated.data();
         data_size = inflated.size();
@@ -710,7 +778,12 @@ bool decode2(const std::string& path, Image& out, std::string& error)
         error = "KTX2 supercompression scheme " + std::to_string(scheme) + " isn't supported";
         return false;
     }
-    if (!decode_texture(*t, data, data_size, int(w), int(h), 1, false, premultiplied, out, error))
+    if (within > data_size)
+    {
+        error = "KTX2 data is cut short";
+        return false;
+    }
+    if (!decode_texture(*t, data + within, data_size - within, lw, lh, 1, false, premultiplied, out, error))
         return false;
 
     out.format = "KTX2";
@@ -729,12 +802,14 @@ bool decode2(const std::string& path, Image& out, std::string& error)
 
 const Decoder& ktx_decoder()
 {
-    static const Decoder d{"KTX", {"ktx"}, sniff1, decode1};
+    static const Decoder d{"KTX", {"ktx"}, sniff1, [](const std::string& path, Image& out, std::string& error)
+                           { return decode1(path, {}, out, error); }, nullptr, false, decode1};
     return d;
 }
 
 const Decoder& ktx2_decoder()
 {
-    static const Decoder d{"KTX2", {"ktx2"}, sniff2, decode2};
+    static const Decoder d{"KTX2", {"ktx2"}, sniff2, [](const std::string& path, Image& out, std::string& error)
+                           { return decode2(path, {}, out, error); }, nullptr, false, decode2};
     return d;
 }
