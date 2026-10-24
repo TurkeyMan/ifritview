@@ -8,6 +8,7 @@
 // pixels, 16-bit integer or half-float and 32-bit float (clipped to 0..1).
 #include "bcn.h"
 #include "decoder.h"
+#include "texel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -124,24 +125,6 @@ uint32_t extract(uint32_t v, uint32_t mask)
     return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
 }
 
-float half_to_float(uint16_t h)
-{
-    const uint32_t sign = (h >> 15) & 1, exp = (h >> 10) & 0x1F, mant = h & 0x3FF;
-    float v;
-    if (exp == 0)
-        v = std::ldexp(float(mant), -24);
-    else if (exp == 31)
-        v = mant ? 0.0f : 65504.0f;  // NaN shown black; infinity clipped
-    else
-        v = std::ldexp(float(mant | 0x400), int(exp) - 25);
-    return sign ? -v : v;
-}
-
-uint32_t clip(float v)
-{
-    return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
-
 void put(uint32_t* px, uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool& opaque)
 {
     if (a < 255)
@@ -184,28 +167,7 @@ void decode_pixels(const Format& f, const uint8_t* d, int w, int h, Image& out)
                     put(px + x, extract(v, f.r), extract(v, f.g), extract(v, f.b), f.a ? extract(v, f.a) : 255, opaque);
                     break;
                 }
-                default:
-                {
-                    float c[4] = {0, 0, 0, 1};
-                    const int sample = f.kind == Kind::Float ? 4 : 2;
-                    for (uint32_t i = 0; i < f.r; ++i)
-                    {
-                        const uint8_t* p = s + i * sample;
-                        if (f.kind == Kind::Unorm16)
-                            c[i] = float(le16(p)) / 65535.0f;
-                        else if (f.kind == Kind::Half)
-                            c[i] = half_to_float(le16(p));
-                        else
-                        {
-                            const uint32_t bits = le32(p);
-                            std::memcpy(&c[i], &bits, 4);
-                        }
-                    }
-                    if (f.r == 1)
-                        c[1] = c[2] = c[0];
-                    put(px + x, clip(c[0]), clip(c[1]), clip(c[2]), clip(c[3]), opaque);
-                    break;
-                }
+                default: break;  // wider kinds: decode_wide
             }
         }
     }
@@ -338,6 +300,15 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (f->kind == Kind::Block)
     {
         if (!decode_bcn(f->bcn, data, size_t(need), w, h, out, error))
+            return false;
+    }
+    else if (f->kind == Kind::Unorm16 || f->kind == Kind::Half || f->kind == Kind::Float)
+    {
+        // More than 8 bits: the image's source, as DDS and KTX keep theirs.
+        const WideTexels::Kind kind = f->kind == Kind::Unorm16 ? WideTexels::Kind::Unorm16
+                                      : f->kind == Kind::Half  ? WideTexels::Kind::Half
+                                                               : WideTexels::Kind::Float;
+        if (!decode_wide(WideTexels{kind, int(f->r)}, data, size_t(need), w, h, 1, false, false, out, error))
             return false;
     }
     else

@@ -4,6 +4,7 @@
 // described by bit masks (legacy) or a DXGI format, or is 16/32-bit float.
 // A cube map, array or volume shows its first face or slice.
 #include "bcn.h"
+#include "texel.h"
 #include "decoder.h"
 
 
@@ -44,19 +45,6 @@ struct Masks
     bool alpha_only = false;  // a alone, shown grey
 };
 
-// Unpacked by kind of sample, for the formats masks can't describe.
-enum class Wide
-{
-    Unorm16,  // per channel, little-endian
-    Snorm16,
-    Half,
-    Float
-};
-struct WideFormat
-{
-    Wide kind;
-    int channels;  // R, RG or RGBA
-};
 
 uint32_t extract(uint32_t v, uint32_t mask)
 {
@@ -118,27 +106,13 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, I
 // Kept as they're stored, as the image's source, which renders the pixels:
 // floats as linear light (with an exposure when they go past 1), 16-bit
 // integers as they're encoded.
-bool decode_wide(const WideFormat& f, const uint8_t* d, size_t size, int w, int h, Image& out, std::string& error)
-{
-    using S = SourceData::Sample;
-    const S sample = f.kind == Wide::Float ? S::F32 : f.kind == Wide::Half ? S::F16 : f.kind == Wide::Snorm16 ? S::I16 : S::U16;
-    auto deep = std::make_shared<SourceData>(sample, f.channels, w, h, sample == S::F16 || sample == S::F32);
-    if (size < deep->data.size())
-    {
-        error = "DDS data is cut short";
-        return false;
-    }
-    std::memcpy(deep->data.data(), d, deep->data.size());  // little-endian, as the machine is
-    out.set_source(std::move(deep));
-    return true;
-}
 
 // What a DXGI format (from the DX10 header) holds, if it's one shown here.
 struct Dxgi
 {
     std::optional<Bcn> bcn;
     std::optional<Masks> masks;
-    std::optional<WideFormat> wide;
+    std::optional<WideTexels> wide;
     const char* name;
 };
 
@@ -166,14 +140,14 @@ std::optional<Dxgi> dxgi(uint32_t f)
         case 60: case 61: return Dxgi{{}, Masks{1, 0xFF, 0, 0, 0, true}, {}, "R8"};
         case 65: return Dxgi{{}, Masks{1, 0, 0, 0, 0xFF, false, true}, {}, "A8"};
         case 48: case 49: return Dxgi{{}, Masks{2, 0xFF, 0xFF00, 0, 0}, {}, "R8G8"};
-        case 11: return Dxgi{{}, {}, WideFormat{Wide::Unorm16, 4}, "R16G16B16A16"};
-        case 10: return Dxgi{{}, {}, WideFormat{Wide::Half, 4}, "R16G16B16A16 float"};
-        case 2: return Dxgi{{}, {}, WideFormat{Wide::Float, 4}, "R32G32B32A32 float"};
-        case 13: return Dxgi{{}, {}, WideFormat{Wide::Snorm16, 4}, "R16G16B16A16 signed"};
-        case 56: return Dxgi{{}, {}, WideFormat{Wide::Unorm16, 1}, "R16"};
-        case 58: return Dxgi{{}, {}, WideFormat{Wide::Snorm16, 1}, "R16 signed"};
-        case 54: return Dxgi{{}, {}, WideFormat{Wide::Half, 1}, "R16 float"};
-        case 41: return Dxgi{{}, {}, WideFormat{Wide::Float, 1}, "R32 float"};
+        case 11: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Unorm16, 4}, "R16G16B16A16"};
+        case 10: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Half, 4}, "R16G16B16A16 float"};
+        case 2: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Float, 4}, "R32G32B32A32 float"};
+        case 13: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Snorm16, 4}, "R16G16B16A16 signed"};
+        case 56: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Unorm16, 1}, "R16"};
+        case 58: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Snorm16, 1}, "R16 signed"};
+        case 54: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Half, 1}, "R16 float"};
+        case 41: return Dxgi{{}, {}, WideTexels{WideTexels::Kind::Float, 1}, "R32 float"};
     }
     return std::nullopt;
 }
@@ -200,7 +174,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     size_t offset = 128;
     std::optional<Bcn> bcn;
     std::optional<Masks> masks;
-    std::optional<WideFormat> wide;
+    std::optional<WideTexels> wide;
     bool premultiplied = false, rxgb = false;
     std::string format;
     uint32_t array_size = 1;
@@ -242,11 +216,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
             case fourcc("BC5U"): bcn = Bcn::BC5; break;
             case fourcc("BC5S"): bcn = Bcn::BC5S; break;
             // Direct3D 9 format numbers in place of a code.
-            case 36: wide = WideFormat{Wide::Unorm16, 4}; break;
-            case 111: wide = WideFormat{Wide::Half, 1}; break;
-            case 113: wide = WideFormat{Wide::Half, 4}; break;
-            case 114: wide = WideFormat{Wide::Float, 1}; break;
-            case 116: wide = WideFormat{Wide::Float, 4}; break;
+            case 36: wide = WideTexels{WideTexels::Kind::Unorm16, 4}; break;
+            case 111: wide = WideTexels{WideTexels::Kind::Half, 1}; break;
+            case 113: wide = WideTexels{WideTexels::Kind::Half, 4}; break;
+            case 114: wide = WideTexels{WideTexels::Kind::Float, 1}; break;
+            case 116: wide = WideTexels{WideTexels::Kind::Float, 4}; break;
             default:
             {
                 std::string code;
@@ -327,7 +301,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     else if (masks)
         ok = decode_masks(*masks, d + offset, size - offset, w, h, out, error);
     else
-        ok = decode_wide(*wide, d + offset, size - offset, w, h, out, error);
+        ok = decode_wide(*wide, d + offset, size - offset, w, h, 1, false, false, out, error);
     if (!ok)
         return false;
     if (rxgb)
@@ -349,11 +323,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     else if (wide)
     {
-        out.bits_per_sample = wide->kind == Wide::Float ? 32 : 16;
+        out.bits_per_sample = wide->kind == WideTexels::Kind::Float ? 32 : 16;
         out.pixel_format = PixelFormat::packed(wide->channels == 1 ? M::L : M::RGB, wide->channels == 1 ? "R" : "RGBA", out.bits_per_sample);
-        if (wide->kind == Wide::Half || wide->kind == Wide::Float)
+        if (wide->kind == WideTexels::Kind::Half || wide->kind == WideTexels::Kind::Float)
             out.pixel_format.sample = PixelFormat::Sample::Float;
-        else if (wide->kind == Wide::Snorm16)
+        else if (wide->kind == WideTexels::Kind::Snorm16)
             out.pixel_format.sample = PixelFormat::Sample::Signed;
     }
     else

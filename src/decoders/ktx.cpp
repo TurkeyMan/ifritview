@@ -11,6 +11,7 @@
 #include "astc.h"
 #include "bcn.h"
 #include "decoder.h"
+#include "texel.h"
 #include "etc.h"
 
 #ifdef HAVE_ZSTD
@@ -66,22 +67,8 @@ struct Masks
     bool alpha_only = false;  // a alone, shown grey
 };
 
-// Wider samples, one to four channels of the same kind, or the two packed
-// float layouts.
-struct Wide
-{
-    enum Kind
-    {
-        Unorm16,
-        Half,
-        Float,
-        B10G11R11,  // unsigned 11/11/10-bit floats in a 32-bit word
-        E5B9G9R9,   // shared exponent
-    } kind;
-    int channels;  // R, RG, RGB or RGBA; 3 for the packed ones
-    int bytes() const { return kind == Unorm16 || kind == Half ? 2 * channels : kind == Float ? 4 * channels : 4; }
-    int sample_bytes() const { return kind == Unorm16 || kind == Half ? 2 : 4; }  // what a big-endian file swaps
-};
+// Wider samples (texel.h).
+using Wide = WideTexels;
 
 // What a file's format is, for the decoders here.
 struct Texture
@@ -135,7 +122,7 @@ Texture masks_texture(Masks m, const char* name)
     return t;
 }
 
-Texture wide_texture(Wide::Kind kind, int channels, const char* name)
+Texture wide_texture(WideTexels::Kind kind, int channels, const char* name)
 {
     Texture t;
     t.wide = Wide{kind, channels};
@@ -210,12 +197,13 @@ std::optional<Texture> gl_texture(uint32_t internal, uint32_t format, uint32_t t
                                                  {"R16F", "RG16F", "RGB16F", "RGBA16F"},
                                                  {"R32F", "RG32F", "RGB32F", "RGBA32F"}};
         const int kind = type == UNSIGNED_SHORT ? 0 : type == HALF_FLOAT ? 1 : 2;
-        return wide_texture(Wide::Kind(kind), channels, names[kind][channels - 1]);
+        static const WideTexels::Kind kinds[3] = {WideTexels::Kind::Unorm16, WideTexels::Kind::Half, WideTexels::Kind::Float};
+        return wide_texture(kinds[kind], channels, names[kind][channels - 1]);
     }
     if (type == UNSIGNED_INT_10F_11F_11F_REV && format == RGB)
-        return wide_texture(Wide::B10G11R11, 3, "R11F G11F B10F");
+        return wide_texture(WideTexels::Kind::B10G11R11, 3, "R11F G11F B10F");
     if (type == UNSIGNED_INT_5_9_9_9_REV && format == RGB)
-        return wide_texture(Wide::E5B9G9R9, 3, "RGB9 E5");
+        return wide_texture(WideTexels::Kind::E5B9G9R9, 3, "RGB9 E5");
     if (type == UNSIGNED_SHORT_5_6_5 && format == RGB)
         return masks_texture({2, 0xF800, 0x07E0, 0x001F, 0}, "RGB565");
     if (type == UNSIGNED_SHORT_4_4_4_4 && format == RGBA)
@@ -275,20 +263,20 @@ std::optional<Texture> vk_texture(uint32_t f)
         case 6: return masks_texture({2, 0xF800, 0x07C0, 0x003E, 0x0001}, "R5G5B5A1");
         case 7: return masks_texture({2, 0x003E, 0x07C0, 0xF800, 0x0001}, "B5G5R5A1");
         case 8: return masks_texture({2, 0x7C00, 0x03E0, 0x001F, 0x8000}, "A1R5G5B5");
-        case 70: return wide_texture(Wide::Unorm16, 1, "R16");  // VK_FORMAT_R16_UNORM
-        case 77: return wide_texture(Wide::Unorm16, 2, "R16G16");
-        case 84: return wide_texture(Wide::Unorm16, 3, "R16G16B16");
-        case 91: return wide_texture(Wide::Unorm16, 4, "R16G16B16A16");
-        case 76: return wide_texture(Wide::Half, 1, "R16 float");  // VK_FORMAT_R16_SFLOAT
-        case 83: return wide_texture(Wide::Half, 2, "R16G16 float");
-        case 90: return wide_texture(Wide::Half, 3, "R16G16B16 float");
-        case 97: return wide_texture(Wide::Half, 4, "R16G16B16A16 float");
-        case 100: return wide_texture(Wide::Float, 1, "R32 float");  // VK_FORMAT_R32_SFLOAT
-        case 103: return wide_texture(Wide::Float, 2, "R32G32 float");
-        case 106: return wide_texture(Wide::Float, 3, "R32G32B32 float");
-        case 109: return wide_texture(Wide::Float, 4, "R32G32B32A32 float");
-        case 122: return wide_texture(Wide::B10G11R11, 3, "B10G11R11 float");
-        case 123: return wide_texture(Wide::E5B9G9R9, 3, "E5B9G9R9 float");
+        case 70: return wide_texture(WideTexels::Kind::Unorm16, 1, "R16");  // VK_FORMAT_R16_UNORM
+        case 77: return wide_texture(WideTexels::Kind::Unorm16, 2, "R16G16");
+        case 84: return wide_texture(WideTexels::Kind::Unorm16, 3, "R16G16B16");
+        case 91: return wide_texture(WideTexels::Kind::Unorm16, 4, "R16G16B16A16");
+        case 76: return wide_texture(WideTexels::Kind::Half, 1, "R16 float");  // VK_FORMAT_R16_SFLOAT
+        case 83: return wide_texture(WideTexels::Kind::Half, 2, "R16G16 float");
+        case 90: return wide_texture(WideTexels::Kind::Half, 3, "R16G16B16 float");
+        case 97: return wide_texture(WideTexels::Kind::Half, 4, "R16G16B16A16 float");
+        case 100: return wide_texture(WideTexels::Kind::Float, 1, "R32 float");  // VK_FORMAT_R32_SFLOAT
+        case 103: return wide_texture(WideTexels::Kind::Float, 2, "R32G32 float");
+        case 106: return wide_texture(WideTexels::Kind::Float, 3, "R32G32B32 float");
+        case 109: return wide_texture(WideTexels::Kind::Float, 4, "R32G32B32A32 float");
+        case 122: return wide_texture(WideTexels::Kind::B10G11R11, 3, "B10G11R11 float");
+        case 123: return wide_texture(WideTexels::Kind::E5B9G9R9, 3, "E5B9G9R9 float");
     }
     // VK_FORMAT_ASTC_4x4_UNORM_BLOCK..., alternating with the _SRGB_BLOCKs,
     // then VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK... for HDR.
@@ -309,7 +297,7 @@ size_t image_bytes(const Texture& t, int w, int h, size_t row_align)
         return etc_size(*t.etc, w, h);
     if (t.astc_w)
         return astc_size(t.astc_w, t.astc_h, w, h);
-    const size_t row = (size_t(w) * (t.masks ? t.masks->bytes : t.wide->bytes()) + row_align - 1) / row_align * row_align;
+    const size_t row = (size_t(w) * (t.masks ? t.masks->bytes : t.wide->pixel_bytes()) + row_align - 1) / row_align * row_align;
     return row * h;
 }
 
@@ -360,116 +348,6 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, s
             if (premultiplied)
             {
                 r = std::min(r, a);  // a stored colour can't outshine its alpha
-                g = std::min(g, a);
-                b = std::min(b, a);
-            }
-            else if (a < 255)
-            {
-                r = (r * a + 127) / 255;
-                g = (g * a + 127) / 255;
-                b = (b * a + 127) / 255;
-            }
-            opaque = opaque && a == 255;
-            px[x] = a << 24 | r << 16 | g << 8 | b;
-        }
-    }
-    out.has_alpha = !opaque;
-    return true;
-}
-
-float half_to_float(uint16_t h)
-{
-    const uint32_t sign = (h >> 15) & 1, exp = (h >> 10) & 0x1F, mant = h & 0x3FF;
-    float v;
-    if (exp == 0)
-        v = std::ldexp(float(mant), -24);
-    else if (exp == 31)
-        v = mant ? 0.0f : 65504.0f;  // NaN shown black; infinity clipped
-    else
-        v = std::ldexp(float(mant | 0x400), int(exp) - 25);
-    return sign ? -v : v;
-}
-
-// The unsigned small floats of B10G11R11: 5-bit exponent, `bits`-bit mantissa.
-float small_float(uint32_t v, int bits)
-{
-    const uint32_t exp = v >> bits, mant = v & ((1u << bits) - 1);
-    if (exp == 0)
-        return std::ldexp(float(mant), -14 - bits);
-    if (exp == 31)
-        return mant ? 0.0f : 65024.0f;
-    return std::ldexp(float(mant | 1u << bits), int(exp) - 15 - bits);
-}
-
-uint32_t clip(float v)
-{
-    return std::isnan(v) ? 0 : uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
-
-float srgb(float linear)
-{
-    if (std::isnan(linear))
-        return 0;
-    linear = std::clamp(linear, 0.0f, 1.0f);
-    return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1 / 2.4f) - 0.055f;
-}
-
-// 16-bit unorm is shown as stored; floats are linear, so are shown through
-// the sRGB curve, clipped, as BC6H and HDR ASTC are.
-bool decode_wide(const Wide& f, const uint8_t* d, size_t size, int w, int h, size_t row_align, bool big_endian, bool premultiplied,
-                 Image& out, std::string& error)
-{
-    const size_t row = (size_t(w) * f.bytes() + row_align - 1) / row_align * row_align;
-    if (size < row * h)
-    {
-        error = "KTX data is cut short";
-        return false;
-    }
-    out.allocate(w, h);
-    const int sample = f.sample_bytes();
-    bool opaque = true;
-    for (int y = 0; y < h; ++y)
-    {
-        uint32_t* px = out.row(y);
-        const uint8_t* s = d + size_t(y) * row;
-        for (int x = 0; x < w; ++x)
-        {
-            float c[4] = {0, 0, 0, 1};
-            const int n = f.kind == Wide::B10G11R11 || f.kind == Wide::E5B9G9R9 ? 1 : f.channels;
-            uint32_t v = 0;
-            for (int i = 0; i < n; ++i, s += sample)
-            {
-                v = 0;
-                for (int k = 0; k < sample; ++k)
-                    v |= uint32_t(s[big_endian ? sample - 1 - k : k]) << (8 * k);
-                if (f.kind == Wide::Unorm16)
-                    c[i] = float(v) / 65535.0f;
-                else if (f.kind == Wide::Half)
-                    c[i] = half_to_float(uint16_t(v));
-                else if (f.kind == Wide::Float)
-                    std::memcpy(&c[i], &v, 4);
-            }
-            if (f.kind == Wide::B10G11R11)
-            {
-                c[0] = small_float(v & 0x7FF, 6);
-                c[1] = small_float(v >> 11 & 0x7FF, 6);
-                c[2] = small_float(v >> 22, 5);
-            }
-            else if (f.kind == Wide::E5B9G9R9)
-            {
-                const int exp = int(v >> 27) - 15 - 9;
-                c[0] = std::ldexp(float(v & 0x1FF), exp);
-                c[1] = std::ldexp(float(v >> 9 & 0x1FF), exp);
-                c[2] = std::ldexp(float(v >> 18 & 0x1FF), exp);
-            }
-            if (f.channels == 1)
-                c[1] = c[2] = c[0];
-            const bool linear = f.kind != Wide::Unorm16;
-            uint32_t r = clip(linear ? srgb(c[0]) : c[0]), g = clip(linear ? srgb(c[1]) : c[1]), b = clip(linear ? srgb(c[2]) : c[2]);
-            const uint32_t a = clip(c[3]);
-            if (premultiplied)
-            {
-                r = std::min(r, a);
                 g = std::min(g, a);
                 b = std::min(b, a);
             }
@@ -570,15 +448,15 @@ bool decode_texture(const Texture& t, const uint8_t* d, size_t size, int w, int 
     {
         const Wide& f = *t.wide;
         static const char* const names[4] = {"R", "RG", "RGB", "RGBA"};
-        if (f.kind == Wide::B10G11R11)
+        if (f.kind == WideTexels::Kind::B10G11R11)
             out.pixel_format = PixelFormat::widths(M::RGB, "RGB", {11, 11, 10});
-        else if (f.kind == Wide::E5B9G9R9)
+        else if (f.kind == WideTexels::Kind::E5B9G9R9)
             out.pixel_format = PixelFormat::widths(M::RGB, "RGBX", {9, 9, 9, 5});
         else
-            out.pixel_format = PixelFormat::packed(f.channels == 1 ? M::L : M::RGB, names[f.channels - 1], f.kind == Wide::Float ? 32 : 16);
-        if (f.kind != Wide::Unorm16)
+            out.pixel_format = PixelFormat::packed(f.channels == 1 ? M::L : M::RGB, names[f.channels - 1], f.kind == WideTexels::Kind::Float ? 32 : 16);
+        if (f.kind != WideTexels::Kind::Unorm16)
             out.pixel_format.sample = PixelFormat::Sample::Float;
-        out.bits_per_sample = f.kind == Wide::Float ? 32 : 16;
+        out.bits_per_sample = f.kind == WideTexels::Kind::Float ? 32 : 16;
     }
     else
     {
