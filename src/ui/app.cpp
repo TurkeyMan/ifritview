@@ -506,6 +506,8 @@ void App::build_ui()
             return true;
         });
     window_->set_icon(rap::icon::named("ifritview"));
+    // Where the user drags it, as where the window fits an image: never below the minimum.
+    window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
     metadata_pane_->set_visible(false);
     exposure_box_->set_visible(false);
     crop_button_->set_enabled(false);
@@ -1959,6 +1961,7 @@ void App::open_settings_page(int page)
             folder_.rescan(cfg_);
             smooth_toggle_->set_checked(cfg_.smooth_upscale);
             xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
+            window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
             view_->config_changed();
             refresh_metadata();
             const bool reload =
