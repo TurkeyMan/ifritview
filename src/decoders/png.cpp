@@ -3,6 +3,8 @@
 
 #include <png.h>
 
+#include <cmath>
+
 #include <cstdio>
 #include <cstring>
 
@@ -145,6 +147,29 @@ bool decode(const std::string& path, Image& out, std::string& error)
     else if (png_get_valid(png, info, PNG_INFO_sRGB))
     {
         out.color_space = "sRGB";
+    }
+    else if (png_get_valid(png, info, PNG_INFO_cHRM) || png_get_valid(png, info, PNG_INFO_gAMA))
+    {
+        // Primaries and gamma said in chunks, no profile: a profile made for
+        // them travels with the image. gAMA alone at 1/2.2 is what most tools
+        // write for sRGB, so that stays untagged.
+        ColorSpace s = ColorSpace::srgb();
+        double wx, wy, rx, ry, gx, gy, bx, by;
+        const bool chrm = png_get_cHRM(png, info, &wx, &wy, &rx, &ry, &gx, &gy, &bx, &by) != 0;
+        double file_gamma = 0;
+        const bool gama = png_get_gAMA(png, info, &file_gamma) != 0 && file_gamma > 0;
+        const ColorSpace::Transfer transfer = gama ? ColorSpace::Transfer::Gamma : ColorSpace::Transfer::SRGB;
+        const double gamma = gama ? 1.0 / file_gamma : 2.2;
+        if (chrm)
+            s = ColorSpace::from_primaries({rx, ry}, {gx, gy}, {bx, by}, {wx, wy}, transfer, gamma, "PNG chromaticities");
+        else
+            s = s.with_transfer(transfer, gamma);
+        const bool srgb_intent = std::fabs(gamma - 2.2) < 0.01 && (!chrm || ColorSpace::from_primaries({rx, ry}, {gx, gy}, {bx, by}, {wx, wy}, ColorSpace::Transfer::SRGB, 2.2, "").is_srgb());
+        if (!srgb_intent)
+        {
+            out.declared_space = s;
+            out.color_space = s.name;
+        }
     }
     png_textp text = nullptr;
     int n_text = 0;

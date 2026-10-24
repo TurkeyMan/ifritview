@@ -1605,7 +1605,14 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (part.tiled)
         pf.notes.push_back("tiled");
     if (part.has_chromaticities)
+    {
         out.color_space = colour_space(part.chromaticities);
+        // The 8-bit rendering, which is what's saved, has these primaries and
+        // sRGB's curve: a profile made for that travels with the image.
+        const float* c = part.chromaticities;
+        out.declared_space = ColorSpace::from_primaries({c[0], c[1]}, {c[2], c[3]}, {c[4], c[5]}, {c[6], c[7]}, ColorSpace::Transfer::SRGB, 2.2,
+                                                        out.color_space.empty() ? "EXR chromaticities" : out.color_space);
+    }
 
     out.add("EXR", "Compression", compression_name(part.compression));
     {

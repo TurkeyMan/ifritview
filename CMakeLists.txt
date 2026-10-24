@@ -44,6 +44,7 @@ endif()
 # Everything that isn't UI: decoders, the image model, loader, cache, config,
 # folders, video, geocoding.
 add_library(ifrit_core STATIC
+  src/color_space.cpp
   src/config.cpp
   src/folder.cpp
   src/image.cpp

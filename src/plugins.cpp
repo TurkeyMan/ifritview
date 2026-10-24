@@ -35,6 +35,7 @@
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -224,6 +225,7 @@ struct DecodeCall
     PixelBuffer narrow;                // RGB8: converted from after the call
     FileMetadata stored;
     std::string format_text, info, color_space;
+    std::optional<ColorSpace> space;  // named by the plugin, for a profile made for it
     std::string format_name;  // the info pane group when the plugin names none
     explicit DecodeCall(Image& image) : out(image) {}
 };
@@ -324,6 +326,31 @@ void IFRIT_CALL host_blob(void* context, ifrit_blob_kind kind, const void* data,
     into->assign(p, p + size);
 }
 
+void IFRIT_CALL host_color_space(void* context, ifrit_color_space space, const ifrit_chromaticities* custom)
+{
+    auto* call = static_cast<DecodeCall*>(context);
+    switch (space)
+    {
+        case IFRIT_SPACE_SRGB: call->space = ColorSpace::srgb(); break;
+        case IFRIT_SPACE_DISPLAY_P3: call->space = ColorSpace::display_p3(); break;
+        case IFRIT_SPACE_ADOBE_RGB: call->space = ColorSpace::adobe_rgb(); break;
+        case IFRIT_SPACE_REC2020: call->space = ColorSpace::rec2020(); break;
+        case IFRIT_SPACE_PROPHOTO: call->space = ColorSpace::prophoto(); break;
+        case IFRIT_SPACE_CUSTOM:
+            if (custom && custom->red_y > 0 && custom->green_y > 0 && custom->blue_y > 0 && custom->white_y > 0)
+            {
+                const auto t = custom->gamma <= 0 ? ColorSpace::Transfer::SRGB
+                               : custom->gamma == 1 ? ColorSpace::Transfer::Linear
+                                                    : ColorSpace::Transfer::Gamma;
+                call->space = ColorSpace::from_primaries({custom->red_x, custom->red_y}, {custom->green_x, custom->green_y},
+                                                         {custom->blue_x, custom->blue_y}, {custom->white_x, custom->white_y}, t,
+                                                         custom->gamma, "Custom RGB");
+            }
+            break;
+        default: break;
+    }
+}
+
 void IFRIT_CALL host_describe(void* context, ifrit_text_kind kind, const char* text)
 {
     auto* call = static_cast<DecodeCall*>(context);
@@ -412,6 +439,14 @@ void finish_metadata(DecodeCall& call)
 {
     Image& out = call.out;
     FileMetadata& m = call.stored;
+    if (call.space)
+    {
+        // Floats are linear whatever the space; their 8-bit rendering, which
+        // is what's saved, has its primaries and sRGB's curve.
+        const bool floating = call.layout && layout_info(call.layout).floating;
+        out.declared_space = floating ? call.space->with_transfer(ColorSpace::Transfer::SRGB) : *call.space;
+        out.color_space = out.declared_space->name;
+    }
     if (!call.color_space.empty())
         out.color_space = call.color_space;
     if (!m.icc.empty())
@@ -461,6 +496,7 @@ bool run_decode(const Format& f, decode_fn fn, const std::string& path, Image& o
     host.metadata = host_metadata;
     host.blob = host_blob;
     host.describe = host_describe;
+    host.color_space = host_color_space;
     const ifrit_result r = fn(f.index, data, size, &host);
     if (r == IFRIT_OK && !call.layout)
         call.error = "the plugin returned no image";
@@ -635,7 +671,7 @@ bool run_encode(const Format& f, const Image& image, const std::string& path, co
     in.stride = stride;
     in.pixels = pixels.data();
     in.has_alpha = image.has_alpha;
-    if (f.summary.metadata && options.metadata)
+    if (options.metadata)
     {
         const FileMetadata& m = *options.metadata;
         const auto put = [](const std::vector<uint8_t>& v, const uint8_t*& p, size_t& n)
@@ -643,10 +679,15 @@ bool run_encode(const Format& f, const Image& image, const std::string& path, co
             p = v.empty() ? nullptr : v.data();
             n = v.size();
         };
-        put(m.exif, in.exif, in.exif_size);
-        put(m.xmp, in.xmp, in.xmp_size);
-        put(m.iptc, in.iptc, in.iptc_size);
+        // The colour profile goes to every format, as it's part of what the
+        // pixels mean; the rest only to formats that keep metadata.
         put(m.icc, in.icc, in.icc_size);
+        if (f.summary.metadata)
+        {
+            put(m.exif, in.exif, in.exif_size);
+            put(m.xmp, in.xmp, in.xmp_size);
+            put(m.iptc, in.iptc, in.iptc_size);
+        }
     }
     std::vector<int32_t> values;
     for (const EncodeSetting& s : f.encoder.settings)

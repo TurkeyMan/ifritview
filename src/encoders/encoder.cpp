@@ -560,14 +560,19 @@ bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions
         default: break;
     }
     const bool bitfields = mask[0] != 0;
-    const bool v5 = srgb || bitfields;  // the classic header can't tag a colour space or carry an alpha mask
+    // The image's colour profile, embedded after the pixels; it says more
+    // than the sRGB tag.
+    static const std::vector<uint8_t> none;
+    const std::vector<uint8_t>& icc = options.metadata ? options.metadata->icc : none;
+    const bool v5 = srgb || bitfields || !icc.empty();  // the classic header can't tag a colour space or carry an alpha mask
     const uint32_t header = v5 ? 124 : 40, palette = bpp == 8 ? 256 * 4 : 0;
     const uint32_t stride = uint32_t((w * bpp + 31) / 32 * 4), offset = 14 + header + palette;
+    const uint32_t pixels_size = stride * uint32_t(h);
     std::vector<uint8_t> out;
-    out.reserve(offset + size_t(stride) * h);
+    out.reserve(offset + size_t(pixels_size) + icc.size());
     out.push_back('B');
     out.push_back('M');
-    put32(out, offset + stride * uint32_t(h));
+    put32(out, offset + pixels_size + uint32_t(icc.size()));
     put32(out, 0);
     put32(out, offset);
     put32(out, header);
@@ -585,10 +590,13 @@ bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions
     {
         for (uint32_t m : mask)
             put32(out, m);
-        put32(out, srgb ? 0x73524742 /* 'sRGB' */ : 0x57696e20 /* 'Win ': the system's */);
+        put32(out, !icc.empty() ? 0x4D424544 /* 'MBED': the profile below */ : srgb ? 0x73524742 /* 'sRGB' */ : 0x57696e20 /* 'Win ': the system's */);
         out.insert(out.end(), 36 + 12, 0);  // endpoints, gamma
         put32(out, 4);                      // LCS_GM_IMAGES
-        out.insert(out.end(), 12, 0);       // profile data, size, reserved
+        // The profile, from the start of this header: after the pixels.
+        put32(out, icc.empty() ? 0 : header + palette + pixels_size);
+        put32(out, uint32_t(icc.size()));
+        put32(out, 0);  // reserved
     }
     for (int i = 0; i < 256 && bpp == 8; ++i)
     {
@@ -627,6 +635,7 @@ bool encode_bmp(const Image& image, const std::string& path, const EncodeOptions
         }
         out.resize(start + stride, 0);
     }
+    out.insert(out.end(), icc.begin(), icc.end());
     return write_file(path, out.data(), out.size(), error);
 }
 

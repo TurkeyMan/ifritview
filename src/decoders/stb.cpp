@@ -3,6 +3,7 @@
 // and on Windows, where gdk-pixbuf's loaders aren't there), Softimage PIC,
 // Radiance HDR and the PNM family, all via the vendored stb_image.
 #include "decoder.h"
+#include "icc.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PSD
@@ -72,6 +73,26 @@ void bmp_encoding(FILE* f, Image& out)
                                   : 0;
     if (format)
         out.encoding["format"] = format;
+    // A V5 header's embedded colour profile ('MBED'), placed by its offset
+    // from the header's start.
+    if (u32(14) >= 124)
+    {
+        uint8_t v5[124 - 40];
+        if (std::fseek(f, 14 + 40, SEEK_SET) == 0 && std::fread(v5, 1, sizeof v5, f) == sizeof v5)
+        {
+            auto at = [&](size_t o) { return uint32_t(v5[o] | v5[o + 1] << 8 | v5[o + 2] << 16 | uint32_t(v5[o + 3]) << 24); };
+            const uint32_t type = at(56 - 40), where = at(112 - 40), size = at(116 - 40);
+            std::vector<uint8_t> icc(size);
+            if (type == 0x4D424544 && size > 128 && size < (64u << 20) && std::fseek(f, long(14 + where), SEEK_SET) == 0 &&
+                std::fread(icc.data(), 1, size, f) == size)
+            {
+                FileMetadata m;
+                m.icc = std::move(icc);
+                out.color_space = icc_profile_description(m.icc.data(), m.icc.size());
+                out.stored = std::make_shared<const FileMetadata>(std::move(m));
+            }
+        }
+    }
 }
 
 bool decode(const std::string& path, Image& out, std::string& error)

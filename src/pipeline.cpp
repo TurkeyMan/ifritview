@@ -310,6 +310,9 @@ int process(int argc, char** argv)
         else if (st.name == "info")
         {
             std::printf("%d x %d, %s%s\n", img.width, img.height, img.format.c_str(), img.has_alpha ? ", alpha" : "");
+            if (!img.color_space.empty())
+                std::printf("colour space: %s%s\n", img.color_space.c_str(),
+                            img.stored && !img.stored->icc.empty() ? " (with an ICC profile, kept on saving)" : "");
             // How it was saved, as save settings for its format.
             if (!img.encoded_as.empty() && !img.encoding.empty())
             {

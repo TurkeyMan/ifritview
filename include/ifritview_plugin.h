@@ -242,13 +242,20 @@ typedef int32_t ifrit_result;
  * premultiplied); 0 is transparent.
  *
  *   8 and 16-bit integer samples are display-encoded, as image files
- *   usually are: 0 is black, the maximum (255, 65535) full intensity, and
- *   the values are treated as sRGB. IfritView keeps 16-bit samples as they
- *   are, beside the 8-bit rendering it draws, so nothing is lost on saving.
+ *   usually are: 0 is black and the maximum (255, 65535) full intensity.
+ *   IfritView keeps 16-bit samples as they are, beside the 8-bit rendering
+ *   it draws, so nothing is lost on saving.
  *
  *   Float samples (32-bit and half) are linear light, 0 black and 1 the
  *   brightest the display shows; values above 1 (HDR) are kept, and the
  *   viewer gives such images an exposure control. Alpha is 0..1.
+ *
+ *   Pixels are in sRGB unless the plugin says otherwise: with the file's
+ *   ICC profile (IFRIT_BLOB_ICC), or by naming the space when the file has
+ *   no profile (ifrit_decode_host.color_space, see "Colour spaces"). Either
+ *   way the profile travels with the image: it's kept when the image is
+ *   saved, in any format that can hold one, even with its other metadata
+ *   stripped. (The viewer doesn't colour-manage its display yet.)
  *
  * L layouts are grey: one luminance value, for R, G and B alike.
  * ------------------------------------------------------------------------- */
@@ -285,6 +292,35 @@ typedef int32_t ifrit_blob_kind;
 #define IFRIT_BLOB_ICC 4  /* an ICC colour profile */
 
 /* -------------------------------------------------------------------------
+ * Colour spaces
+ *
+ * A file that says what space its pixels are in, but has no ICC profile for
+ * it, names it through ifrit_decode_host.color_space; IfritView makes a
+ * profile for it, which is shown, and saved with the image to formats that
+ * hold one, as an embedded profile would be. A file with a profile hands it
+ * over as IFRIT_BLOB_ICC instead, and that's what counts.
+ *
+ * For integer layouts the space's transfer curve applies as named. Float
+ * layouts are linear light whatever the space: only its primaries and white
+ * count.
+ * ------------------------------------------------------------------------- */
+typedef int32_t ifrit_color_space;
+#define IFRIT_SPACE_SRGB 1        /* sRGB: what untagged pixels are taken to be anyway */
+#define IFRIT_SPACE_DISPLAY_P3 2  /* P3 primaries, D65 white, sRGB's curve */
+#define IFRIT_SPACE_ADOBE_RGB 3   /* Adobe RGB (1998): gamma 563/256 */
+#define IFRIT_SPACE_REC2020 4     /* BT.2020 primaries, D65 white, BT.709's curve */
+#define IFRIT_SPACE_PROPHOTO 5    /* ProPhoto (ROMM) RGB: D50 white, 1.8 with a linear toe */
+#define IFRIT_SPACE_CUSTOM 6      /* the primaries, white and gamma in ifrit_chromaticities */
+
+/* CIE 1931 xy chromaticities of the primaries and white, and the transfer:
+   a power `gamma` (2.2, or 1 for linear), or sRGB's curve when 0. */
+typedef struct ifrit_chromaticities
+{
+    float red_x, red_y, green_x, green_y, blue_x, blue_y, white_x, white_y;
+    float gamma;
+} ifrit_chromaticities;
+
+/* -------------------------------------------------------------------------
  * Describing a plugin
  * ------------------------------------------------------------------------- */
 
@@ -319,8 +355,8 @@ typedef struct ifrit_setting
 /* What a format can do (ifrit_format.flags). */
 #define IFRIT_FORMAT_DECODE 0x1 /* ifrit_decode reads it */
 #define IFRIT_FORMAT_ENCODE 0x2 /* ifrit_encode writes it (needs the export) */
-#define IFRIT_FORMAT_METADATA 0x4 /* ifrit_encode can store metadata blocks: it receives them in
-                                     ifrit_encode_image; without the flag it gets none */
+#define IFRIT_FORMAT_METADATA 0x4 /* ifrit_encode can store EXIF, XMP and IPTC: it receives them in
+                                     ifrit_encode_image; without the flag only the colour profile */
 
 /* One format a plugin provides. */
 typedef struct ifrit_format
@@ -403,6 +439,12 @@ typedef struct ifrit_decode_host
 
     /* Text about the image (IFRIT_TEXT_*), UTF-8, copied. */
     void (IFRIT_CALL *describe)(void* context, ifrit_text_kind kind, const char* text);
+
+    /* The colour space the file names, when it has no ICC profile (see
+       "Colour spaces"). `custom` is read for IFRIT_SPACE_CUSTOM only, and
+       copied. Added after the first release: check
+       IFRIT_HAS_FIELD(host, ifrit_decode_host, color_space) before calling. */
+    void (IFRIT_CALL *color_space)(void* context, ifrit_color_space space, const ifrit_chromaticities* custom);
 } ifrit_decode_host;
 
 /* -------------------------------------------------------------------------
@@ -419,9 +461,11 @@ typedef struct ifrit_encode_image
     const void* pixels;    /* the first row */
     int32_t has_alpha;     /* whether any pixel is less than opaque; when 0 alpha may be left out */
     /* Metadata to store, already made to fit the new file (orientation 1, the
-       new size, only what the user chose to keep). Only for formats with
-       IFRIT_FORMAT_METADATA; otherwise, and for blocks there are none of,
-       NULL and 0. Formats are as described for ifrit_blob_kind. */
+       new size, only what the user chose to keep). EXIF, XMP and IPTC only
+       for formats with IFRIT_FORMAT_METADATA; the colour profile for every
+       format, as it's part of what the pixels mean (write it if the format
+       can hold one). NULL and 0 for blocks there are none of. Formats are as
+       described for ifrit_blob_kind. */
     const uint8_t* exif; size_t exif_size;
     const uint8_t* xmp;  size_t xmp_size;
     const uint8_t* iptc; size_t iptc_size;

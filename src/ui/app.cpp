@@ -1684,6 +1684,13 @@ void App::save_as()
             target.drop_develop = image_->is_raw || (cfg_.apply_xmp_edits && image_->xmp.present);
             o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
         }
+        else if (save_source_ == image_ && image_->stored && !image_->stored->icc.empty())
+        {
+            // A format without metadata still takes the colour profile.
+            FileMetadata icc_only;
+            icc_only.icc = image_->stored->icc;
+            o.metadata = std::make_shared<const FileMetadata>(std::move(icc_only));
+        }
         // Lossless: the planned transform, with the metadata made for its size.
         std::shared_ptr<const LosslessJpeg> lossless;
         if (o.get("lossless", 0) && lossless_plan_ && lossless_plan_->why_not.empty())

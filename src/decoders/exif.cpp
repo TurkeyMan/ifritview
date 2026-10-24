@@ -60,6 +60,10 @@ ExifSummary read(ExifData* ed, Image& out)
         if (e->size >= 3 && std::memcmp(e->data, "R03", 3) == 0)
             summary.color_space = "Adobe RGB (1998)";
     }
+    // Said only here, no profile: one is made for it (decoder.cpp), unless
+    // the file embeds its own.
+    if (summary.color_space == "Adobe RGB (1998)")
+        out.declared_space = ColorSpace::adobe_rgb();
     if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_MODEL))
     {
         char buf[128];

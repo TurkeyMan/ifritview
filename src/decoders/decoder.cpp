@@ -66,6 +66,20 @@ void enrich_metadata(const std::string& path, const uint8_t* data, size_t size, 
 #endif
 }
 
+// A space the file named but didn't embed a profile for: one made for it
+// joins what's stored, unless the file has its own (or it's sRGB, which an
+// untagged image means anyway).
+void carry_declared_space(Image& out)
+{
+    if (!out.declared_space || out.declared_space->is_srgb() || (out.stored && !out.stored->icc.empty()))
+        return;
+    FileMetadata m = out.stored ? *out.stored : FileMetadata{};
+    m.icc = icc_profile(*out.declared_space);
+    out.stored = std::make_shared<const FileMetadata>(std::move(m));
+    if (out.color_space.empty())
+        out.color_space = out.declared_space->name;
+}
+
 void merge_metadata(Image& out, Image&& extra)
 {
     for (MetadataGroup& g : extra.metadata)
@@ -94,6 +108,7 @@ struct MetadataPass
     {
         thread.join();
         merge_metadata(out, std::move(extra));
+        carry_declared_space(out);
     }
     ~MetadataPass()
     {

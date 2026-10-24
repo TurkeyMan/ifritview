@@ -116,6 +116,27 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 }
                 else if (primaries)
                     out.color_space = primaries;
+                // A profile for it, to save with: the pixels come as encoded
+                // (PQ and HLG wait for HDR display).
+                using T = ColorSpace::Transfer;
+                const auto curve = nclx->transfer_characteristics;
+                const std::optional<T> t = curve == heif_transfer_characteristic_IEC_61966_2_1 ? std::optional(T::SRGB)
+                                           : curve == heif_transfer_characteristic_ITU_R_BT_709_5 ||
+                                                     curve == heif_transfer_characteristic_ITU_R_BT_2020_2_10bit ||
+                                                     curve == heif_transfer_characteristic_ITU_R_BT_2020_2_12bit
+                                               ? std::optional(T::BT709)
+                                           : curve == heif_transfer_characteristic_linear ? std::optional(T::Linear)
+                                                                                          : std::nullopt;
+                const auto p = nclx->color_primaries;
+                const std::optional<ColorSpace> base =
+                    p == heif_color_primaries_ITU_R_BT_709_5               ? std::optional(ColorSpace::srgb())
+                    : p == heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ? std::optional(ColorSpace::rec2020())
+                    : p == heif_color_primaries_SMPTE_EG_432_1             ? std::optional(ColorSpace::display_p3())
+                    : p == heif_color_primaries_SMPTE_RP_431_2
+                        ? std::optional(ColorSpace::from_primaries({0.680, 0.320}, {0.265, 0.690}, {0.150, 0.060}, {0.314, 0.351}, T::Gamma, 2.6, "DCI-P3"))
+                        : std::nullopt;
+                if (base && t)
+                    out.declared_space = base->with_transfer(*t);
                 heif_nclx_color_profile_free(nclx);
             }
         }

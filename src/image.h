@@ -1,5 +1,6 @@
 #pragma once
 
+#include "color_space.h"
 #include "pixel_buffer.h"
 #include "metadata/file_metadata.h"
 #include "pixel_format.h"
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,6 +110,10 @@ struct Image
     std::string format;                  // "JPEG", "Canon RAW", ...
     PixelFormat pixel_format;            // how the file stores its pixels
     std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
+    // A standard space the file names without embedding a profile (an EXIF
+    // flag, PNG's cHRM, HEIF's nclx): one is made for it once decoded, so
+    // saving carries it as it would an embedded one.
+    std::optional<ColorSpace> declared_space;
     std::string info;                    // extra detail for the status bar, may be empty
     // How the file was saved, in the terms of its format's save settings
     // (encoders/encoder.h keys, "quality" and so on), for saving it again
