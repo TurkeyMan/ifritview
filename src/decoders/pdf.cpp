@@ -16,13 +16,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <poppler.h>
-
-#include <cmath>
-#include <cstdio>
-#include <cstring>
 
 #define IFRIT_POPPLER_FUNCTIONS(X)             \
     X(poppler_document_new_from_bytes)         \
@@ -112,31 +112,80 @@ void render_page(PopplerPage* page, double scale, double x, double y, int w, int
     cairo_surface_destroy(surface);
 }
 
-// The open page, for renderings at other sizes. Poppler's objects aren't
-// for two threads at once.
+// One open document per file, shared by its pages: a page shown or cached
+// keeps it open, and the next page decoded finds it rather than reading
+// the file (and holding a copy of it) again. Poppler's objects aren't for
+// two threads at once; the document's mutex is held for any use of it.
+struct PdfDocument
+{
+    PopplerDocument* doc = nullptr;
+    std::mutex mutex;
+    ~PdfDocument()
+    {
+        if (doc)
+            g_object_unref(doc);
+    }
+};
+
+std::shared_ptr<PdfDocument> open_document(const std::string& path, std::string& error)
+{
+    // By path, size and modification time: a file changed since opens anew.
+    std::error_code ec;
+    const auto when = std::filesystem::last_write_time(path, ec);
+    const std::string key = path + '\n' + std::to_string(std::filesystem::file_size(path, ec)) + '\n' +
+                            std::to_string(when.time_since_epoch().count());
+    static std::mutex registry_mutex;
+    static std::map<std::string, std::weak_ptr<PdfDocument>> registry;
+    std::lock_guard<std::mutex> lock(registry_mutex);
+    if (auto open = registry[key].lock())
+        return open;
+    std::erase_if(registry, [](const auto& entry) { return entry.second.expired(); });
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!file_bytes(path, bytes, size))
+    {
+        error = "cannot read file";
+        return nullptr;
+    }
+    GBytes* gbytes = g_bytes_new(bytes, size);  // a copy: the document outlives the file's bytes
+    GError* err = nullptr;
+    auto document = std::make_shared<PdfDocument>();
+    document->doc = poppler_document_new_from_bytes(gbytes, nullptr, &err);
+    g_bytes_unref(gbytes);
+    if (!document->doc)
+    {
+        error = err ? err->message : "cannot open PDF";
+        if (err)
+            g_error_free(err);
+        return nullptr;
+    }
+    registry[key] = document;
+    return document;
+}
+
+// A page, for renderings at other sizes.
 class PdfPage : public VectorSource
 {
 public:
-    PdfPage(PopplerDocument* doc, PopplerPage* page, double page_dpi) : doc_(doc), page_(page) { dpi = page_dpi; }
+    PdfPage(std::shared_ptr<PdfDocument> document, PopplerPage* page, double page_dpi) : document_(std::move(document)), page_(page) { dpi = page_dpi; }
     ~PdfPage() override
     {
+        std::lock_guard<std::mutex> lock(document_->mutex);
         g_object_unref(page_);
-        g_object_unref(doc_);
     }
     bool render(double scale, double x, double y, int out_w, int out_h, PixelBuffer& out) const override
     {
         if (out_w <= 0 || out_h <= 0)
             return false;
         out = PixelBuffer(size_t(out_w) * out_h * 4);
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(document_->mutex);
         render_page(page_, scale * dpi / 72.0, x * scale, y * scale, out_w, out_h, out.data(), out_w * 4);
         return true;
     }
 
 private:
-    PopplerDocument* doc_;
+    std::shared_ptr<PdfDocument> document_;
     PopplerPage* page_;
-    mutable std::mutex mutex_;
 };
 
 bool sniff(const uint8_t* h, size_t n)
@@ -158,30 +207,16 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
         error = "poppler could not be loaded";
         return false;
     }
-    const uint8_t* bytes = nullptr;
-    size_t size = 0;
-    if (!file_bytes(path, bytes, size))
-    {
-        error = "cannot read file";
+    const std::shared_ptr<PdfDocument> document = open_document(path, error);
+    if (!document)
         return false;
-    }
-    GBytes* gbytes = g_bytes_new(bytes, size);  // a copy: the document outlives the file's bytes
-    GError* err = nullptr;
-    PopplerDocument* doc = poppler_document_new_from_bytes(gbytes, nullptr, &err);
-    g_bytes_unref(gbytes);
-    if (!doc)
-    {
-        error = err ? err->message : "cannot open PDF";
-        if (err)
-            g_error_free(err);
-        return false;
-    }
+    std::lock_guard<std::mutex> lock(document->mutex);
+    PopplerDocument* doc = document->doc;
     const int pages = poppler_document_get_n_pages(doc);
     PopplerPage* page = part.page < pages ? poppler_document_get_page(doc, part.page) : nullptr;
     if (!page)
     {
         error = pages > 0 ? "the PDF has no such page" : "PDF has no pages";
-        g_object_unref(doc);
         return false;
     }
     double pw = 0, ph = 0;
@@ -213,7 +248,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
     std::snprintf(buf, sizeof buf, "%.1f × %.1f mm", pw * 25.4 / 72, ph * 25.4 / 72);
     out.add(N_("Document"), N_("Page size"), buf);
     out.add(N_("Document"), N_("Rendered at"), std::to_string(int(std::lround(dpi))) + " dpi");
-    out.vector = std::make_shared<PdfPage>(doc, page, dpi);  // keeps them
+    out.vector = std::make_shared<PdfPage>(document, page, dpi);  // keeps the page, and the document
     return true;
 }
 

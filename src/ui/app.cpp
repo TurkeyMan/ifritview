@@ -880,7 +880,7 @@ void App::on_loaded(Loader::Result& r)
     {
         image_->adopt(std::move(*r.image));
         if (tracing())
-            std::fprintf(stderr, "developed %s %dx%d\n", r.path.c_str(), image_->width, image_->height);
+            std::fprintf(stderr, "developed %s %dx%d\n", key_text(r.path).c_str(), image_->width, image_->height);
         if (r.generation == load_generation_)
         {
             status_message_.clear();
@@ -919,7 +919,7 @@ void App::on_loaded(Loader::Result& r)
     else
         platform::trace("UI has the image (%s)", r.cached ? "from the cache" : "decoded ahead");
     if (tracing() && r.image)
-        std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.image->is_preview()),
+        std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", key_text(r.path).c_str(), r.image->width, r.image->height, int(r.image->is_preview()),
                      cache_.bytes() >> 20);
     if (!r.image)
     {

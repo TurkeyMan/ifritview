@@ -303,8 +303,8 @@ int process(int argc, char** argv)
         {
             std::printf("%d x %d, %s%s\n", img.width, img.height, img.format.c_str(), img.has_alpha ? ", alpha" : "");
             if (img.page_count > 1 || img.level_count > 1)
-                std::printf("page %d of %d%s%s, level %d of %d\n", img.part.page, img.page_count, img.page_label.empty() ? "" : " ",
-                            img.page_label.c_str(), img.part.level, img.level_count);
+                std::printf("page:%d of 0-%d%s%s, level:%d of 0-%d\n", img.part.page, img.page_count - 1, img.page_label.empty() ? "" : " ",
+                            img.page_label.c_str(), img.part.level, img.level_count - 1);  // as the steps number them
             if (!img.color_space.empty())
                 std::printf("colour space: %s%s\n", img.color_space.c_str(),
                             img.stored && !img.stored->icc.empty() ? " (with an ICC profile, kept on saving)" : "");

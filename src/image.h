@@ -127,6 +127,8 @@ struct ImagePart
 std::string part_key(const std::string& path, ImagePart part);
 std::string key_file(const std::string& key);
 ImagePart key_part(const std::string& key);
+// For people (traces): "file.pdf [2.0]", the page and level as the key has them.
+std::string key_text(const std::string& key);
 
 struct Image
 {

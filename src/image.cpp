@@ -380,6 +380,14 @@ ImagePart key_part(const std::string& key)
     return part;
 }
 
+std::string key_text(const std::string& key)
+{
+    if (key.find(kPartMark) == std::string::npos)
+        return key;
+    const ImagePart part = key_part(key);
+    return key_file(key) + " [" + std::to_string(part.page) + "." + std::to_string(part.level) + "]";
+}
+
 std::string Image::location_text() const
 {
     char buf[64];
