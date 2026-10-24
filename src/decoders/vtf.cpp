@@ -218,15 +218,15 @@ PixelFormat describe(const Format& f)
 {
     std::string letters, digits;
     for (const char* c = f.name; *c && *c != ' '; ++c)
-        (*c >= '0' && *c <= '9' ? digits : letters) += *c == 'I' ? 'Y' : *c;
+        (*c >= '0' && *c <= '9' ? digits : letters) += *c == 'I' ? 'L' : *c;
     if (!letters.empty() && letters.back() == 'F')
         letters.pop_back();  // the float suffix
     const size_t each = letters.empty() ? 0 : digits.size() / letters.size();
     std::vector<int> bits;
     for (size_t i = 0; each && i + each <= digits.size(); i += each)
         bits.push_back(std::stoi(digits.substr(i, each)));
-    const bool grey = letters == "Y" || letters == "YA" || letters == "A";
-    return PixelFormat::widths(grey ? PixelFormat::Model::Gray : PixelFormat::Model::RGB, letters.c_str(), bits);
+    const bool grey = letters == "L" || letters == "LA" || letters == "A";
+    return PixelFormat::widths(grey ? PixelFormat::Model::L : PixelFormat::Model::RGB, letters.c_str(), bits);
 }
 
 // Header flags shown in the metadata.
@@ -350,7 +350,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (f->kind == Kind::Block)
     {
         out.bits_per_sample = 8;
-        out.pixel_format = PixelFormat::packed(f->bcn == Bcn::BC4 ? M::Gray : M::RGB, f->bcn == Bcn::BC4 ? "R" : f->bcn == Bcn::BC5 ? "RG" : "RGBA", 8);
+        out.pixel_format = PixelFormat::packed(f->bcn == Bcn::BC4 ? M::L : M::RGB, f->bcn == Bcn::BC4 ? "R" : f->bcn == Bcn::BC5 ? "RG" : "RGBA", 8);
         out.pixel_format.bits_per_pixel = 0;
         out.pixel_format.notes.push_back(std::string(bcn_name(f->bcn)) + " block compression");
     }

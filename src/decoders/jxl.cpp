@@ -132,8 +132,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.bits_per_sample = int(info.bits_per_sample);
     out.format = "JPEG XL";
     out.pixel_format =
-        PixelFormat::packed(info.num_color_channels == 1 ? PixelFormat::Model::Gray : PixelFormat::Model::RGB,
-                            info.num_color_channels == 1 ? (info.alpha_bits ? "YA" : "Y") : (info.alpha_bits ? "RGBA" : "RGB"), int(info.bits_per_sample));
+        PixelFormat::packed(info.num_color_channels == 1 ? PixelFormat::Model::L : PixelFormat::Model::RGB,
+                            info.num_color_channels == 1 ? (info.alpha_bits ? "LA" : "L") : (info.alpha_bits ? "RGBA" : "RGB"), int(info.bits_per_sample));
     if (info.exponent_bits_per_sample)
         out.pixel_format.sample = PixelFormat::Sample::Float;
     if (info.alpha_premultiplied)

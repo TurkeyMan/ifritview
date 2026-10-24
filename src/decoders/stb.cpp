@@ -121,8 +121,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.bits_per_sample = deep ? 16 : 8;
     {
         using M = PixelFormat::Model;
-        const char* names = channels == 1 ? "Y" : channels == 2 ? "YA" : channels == 4 ? "RGBA" : "RGB";
-        out.pixel_format = PixelFormat::packed(channels <= 2 ? M::Gray : M::RGB, names, out.bits_per_sample);
+        const char* names = channels == 1 ? "L" : channels == 2 ? "LA" : channels == 4 ? "RGBA" : "RGB";
+        out.pixel_format = PixelFormat::packed(channels <= 2 ? M::L : M::RGB, names, out.bits_per_sample);
         if (FILE* f = open_file(path))
         {  // TGA: the header knows the packed depth stb expands
             uint8_t h[18];

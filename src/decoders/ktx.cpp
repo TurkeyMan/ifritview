@@ -499,9 +499,9 @@ PixelFormat masks_pixel_format(const Masks& m)
     };
     using M = PixelFormat::Model;
     if (m.alpha_only)
-        return PixelFormat::widths(M::Gray, "A", {bits(m.a)}, m.bytes * 8);
+        return PixelFormat::widths(M::L, "A", {bits(m.a)}, m.bytes * 8);
     if (m.luminance)
-        return m.a ? PixelFormat::widths(M::Gray, "LA", {bits(m.r), bits(m.a)}, m.bytes * 8) : PixelFormat::widths(M::Gray, "L", {bits(m.r)}, m.bytes * 8);
+        return m.a ? PixelFormat::widths(M::L, "LA", {bits(m.r), bits(m.a)}, m.bytes * 8) : PixelFormat::widths(M::L, "L", {bits(m.r)}, m.bytes * 8);
     std::string names;
     std::vector<int> widths;
     for (const auto& [name, mask] : {std::pair{'R', m.r}, std::pair{'G', m.g}, std::pair{'B', m.b}, std::pair{'A', m.a}})
@@ -547,7 +547,7 @@ bool decode_texture(const Texture& t, const uint8_t* d, size_t size, int w, int 
         const Bcn f = *t.bcn;
         const bool hdr = f == Bcn::BC6H || f == Bcn::BC6HS;
         out.bits_per_sample = hdr ? 16 : 8;
-        out.pixel_format = f == Bcn::BC4 || f == Bcn::BC4S   ? PixelFormat::packed(M::Gray, "R", 8)
+        out.pixel_format = f == Bcn::BC4 || f == Bcn::BC4S   ? PixelFormat::packed(M::L, "R", 8)
                            : f == Bcn::BC5 || f == Bcn::BC5S ? PixelFormat::packed(M::RGB, "RG", 8)
                            : hdr                             ? PixelFormat::packed(M::RGB, "RGB", 16)
                            : t.opaque_bc1                    ? PixelFormat::packed(M::RGB, "RGB", 8)
@@ -575,7 +575,7 @@ bool decode_texture(const Texture& t, const uint8_t* d, size_t size, int w, int 
         else if (f.kind == Wide::E5B9G9R9)
             out.pixel_format = PixelFormat::widths(M::RGB, "RGBX", {9, 9, 9, 5});
         else
-            out.pixel_format = PixelFormat::packed(f.channels == 1 ? M::Gray : M::RGB, names[f.channels - 1], f.kind == Wide::Float ? 32 : 16);
+            out.pixel_format = PixelFormat::packed(f.channels == 1 ? M::L : M::RGB, names[f.channels - 1], f.kind == Wide::Float ? 32 : 16);
         if (f.kind != Wide::Unorm16)
             out.pixel_format.sample = PixelFormat::Sample::Float;
         out.bits_per_sample = f.kind == Wide::Float ? 32 : 16;

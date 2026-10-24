@@ -186,15 +186,15 @@ LayoutInfo layout_info(int layout)
     {
         case IFRIT_RGBA8: return {4, 1, true, false, false};
         case IFRIT_RGB8: return {3, 1, false, false, false};
-        case IFRIT_GRAY8: return {1, 1, false, true, false};
-        case IFRIT_GRAYA8: return {2, 1, true, true, false};
+        case IFRIT_L8: return {1, 1, false, true, false};
+        case IFRIT_LA8: return {2, 1, true, true, false};
         case IFRIT_RGBA16: return {4, 2, true, false, false};
         case IFRIT_RGB16: return {3, 2, false, false, false};
-        case IFRIT_GRAY16: return {1, 2, false, true, false};
-        case IFRIT_GRAYA16: return {2, 2, true, true, false};
+        case IFRIT_L16: return {1, 2, false, true, false};
+        case IFRIT_LA16: return {2, 2, true, true, false};
         case IFRIT_RGBA32F: return {4, 4, true, false, true};
         case IFRIT_RGB32F: return {3, 4, false, false, true};
-        case IFRIT_GRAY32F: return {1, 4, false, true, true};
+        case IFRIT_L32F: return {1, 4, false, true, true};
         case IFRIT_RGBA16F: return {4, 2, true, false, true};
         default: return {0, 0, false, false, false};
     }
@@ -388,8 +388,8 @@ void finish_pixels(DecodeCall& call)
         out.has_alpha = !opaque;
     }
     out.bits_per_sample = li.bytes * 8;
-    static const char* const names[] = {"", "Y", "YA", "RGB", "RGBA"};
-    out.pixel_format = PixelFormat::packed(li.grey ? PixelFormat::Model::Gray : PixelFormat::Model::RGB, names[li.channels], li.bytes * 8);
+    static const char* const names[] = {"", "L", "LA", "RGB", "RGBA"};
+    out.pixel_format = PixelFormat::packed(li.grey ? PixelFormat::Model::L : PixelFormat::Model::RGB, names[li.channels], li.bytes * 8);
     if (li.floating)
         out.pixel_format.sample = PixelFormat::Sample::Float;
 }

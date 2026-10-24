@@ -11,7 +11,7 @@ struct PixelFormat
     enum class Model
     {
         Unknown,
-        Gray,
+        L,  // grey: luminance (with or without alpha)
         RGB,
         YCbCr,
         CMYK,
@@ -29,7 +29,7 @@ struct PixelFormat
 
     struct Channel
     {
-        char name;  // 'R','G','B','A','Y','U','V','C','M','K','L','a','b','I' (index), 'X' (padding)
+        char name;  // 'R','G','B','A','L' (grey, or Lab's lightness),'Y','U','V','C','M','K','a','b','I' (index), 'X' (padding)
         int bits;
     };
 

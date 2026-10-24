@@ -101,7 +101,7 @@ PixelFormat etc_pixel_format(Etc format)
         case Etc::ETC2_RGBA1: f = PixelFormat::widths(M::RGB, "RGBA", {8, 8, 8, 1}); break;
         case Etc::ETC2_RGBA: f = PixelFormat::packed(M::RGB, "RGBA", 8); break;
         case Etc::EAC_R11:
-        case Etc::EAC_R11S: f = PixelFormat::packed(M::Gray, "R", 11); break;
+        case Etc::EAC_R11S: f = PixelFormat::packed(M::L, "R", 11); break;
         case Etc::EAC_RG11:
         case Etc::EAC_RG11S: f = PixelFormat::packed(M::RGB, "RG", 11); break;
     }

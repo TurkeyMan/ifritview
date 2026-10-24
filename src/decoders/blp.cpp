@@ -119,7 +119,7 @@ bool decode_jpeg(const uint8_t* d, size_t size, const uint8_t* mip, size_t mip_s
         }
     }
     out.has_alpha = !opaque;
-    out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, n == 4 ? "BGRA" : n == 3 ? "BGR" : "Y", 8);
+    out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, n == 4 ? "BGRA" : n == 3 ? "BGR" : "L", 8);
     out.pixel_format.notes.push_back("JPEG");
     return true;
 #else

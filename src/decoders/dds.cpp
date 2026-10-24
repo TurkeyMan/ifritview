@@ -344,13 +344,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (bcn)
     {
         out.bits_per_sample = *bcn == Bcn::BC6H || *bcn == Bcn::BC6HS ? 16 : 8;
-        out.pixel_format.model = *bcn == Bcn::BC4 || *bcn == Bcn::BC4S ? M::Gray : M::RGB;
+        out.pixel_format.model = *bcn == Bcn::BC4 || *bcn == Bcn::BC4S ? M::L : M::RGB;
         out.pixel_format.notes.push_back(std::string(bcn_name(*bcn)) + " block compression");
     }
     else if (wide)
     {
         out.bits_per_sample = wide->kind == Wide::Float ? 32 : 16;
-        out.pixel_format = PixelFormat::packed(wide->channels == 1 ? M::Gray : M::RGB, wide->channels == 1 ? "R" : "RGBA", out.bits_per_sample);
+        out.pixel_format = PixelFormat::packed(wide->channels == 1 ? M::L : M::RGB, wide->channels == 1 ? "R" : "RGBA", out.bits_per_sample);
         if (wide->kind == Wide::Half || wide->kind == Wide::Float)
             out.pixel_format.sample = PixelFormat::Sample::Float;
         else if (wide->kind == Wide::Snorm16)
@@ -359,7 +359,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     else
     {
         out.bits_per_sample = 8;
-        out.pixel_format.model = masks->luminance || masks->alpha_only ? M::Gray : M::RGB;
+        out.pixel_format.model = masks->luminance || masks->alpha_only ? M::L : M::RGB;
         out.pixel_format.bits_per_pixel = masks->bytes * 8;
     }
     out.add("DDS", "Format", format);

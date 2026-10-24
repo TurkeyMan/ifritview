@@ -1587,9 +1587,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.bits_per_sample = all_half ? 16 : 32;
     using M = PixelFormat::Model;
     PixelFormat& pf = out.pixel_format;
-    pf.model = sel.channels >= 3 ? M::RGB : M::Gray;
+    pf.model = sel.channels >= 3 ? M::RGB : M::L;
     {
-        const char* names = sel.channels == 1 ? "Y" : sel.channels == 2 ? "YA" : sel.channels == 3 ? "RGB" : "RGBA";
+        const char* names = sel.channels == 1 ? "L" : sel.channels == 2 ? "LA" : sel.channels == 3 ? "RGB" : "RGBA";
         std::vector<int> bits(size_t(sel.channels), all_half ? 16 : 32);
         for (size_t i = 0; i < part.channels.size(); ++i)
             if (sel.dest[i] >= 0)

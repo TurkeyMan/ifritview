@@ -133,7 +133,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.pixel_format.planar = true;
     }
     else if (bits == 1)
-        out.pixel_format = PixelFormat::packed(M::Gray, "Y", 1);
+        out.pixel_format = PixelFormat::packed(M::L, "L", 1);
     else
     {
         out.pixel_format = PixelFormat::palette(bits, int(palette.size()));

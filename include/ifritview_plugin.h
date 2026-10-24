@@ -176,7 +176,7 @@
  *           return IFRIT_ERROR;
  *       }
  *       size_t stride;
- *       uint8_t* px = (uint8_t*)host->pixels(host->context, (int32_t)w, (int32_t)h, IFRIT_GRAY8, &stride);
+ *       uint8_t* px = (uint8_t*)host->pixels(host->context, (int32_t)w, (int32_t)h, IFRIT_L8, &stride);
  *       if (!px)
  *           return IFRIT_ERROR;  // out of memory; IfritView has said so
  *       for (uint32_t y = 0; y < h; ++y)
@@ -249,20 +249,20 @@ typedef int32_t ifrit_result;
  *   brightest the display shows; values above 1 (HDR) are kept, and the
  *   viewer gives such images an exposure control. Alpha is 0..1.
  *
- * Grey layouts carry one value for R, G and B alike.
+ * L layouts are grey: one luminance value, for R, G and B alike.
  * ------------------------------------------------------------------------- */
 typedef int32_t ifrit_layout;
 #define IFRIT_RGBA8 1    /* uint8_t  R, G, B, A */
 #define IFRIT_RGB8 2     /* uint8_t  R, G, B */
-#define IFRIT_GRAY8 3    /* uint8_t  Y */
-#define IFRIT_GRAYA8 4   /* uint8_t  Y, A */
+#define IFRIT_L8 3       /* uint8_t  L */
+#define IFRIT_LA8 4      /* uint8_t  L, A */
 #define IFRIT_RGBA16 5   /* uint16_t R, G, B, A */
 #define IFRIT_RGB16 6    /* uint16_t R, G, B */
-#define IFRIT_GRAY16 7   /* uint16_t Y */
-#define IFRIT_GRAYA16 8  /* uint16_t Y, A */
+#define IFRIT_L16 7      /* uint16_t L */
+#define IFRIT_LA16 8     /* uint16_t L, A */
 #define IFRIT_RGBA32F 9  /* float    R, G, B, A (linear) */
 #define IFRIT_RGB32F 10  /* float    R, G, B (linear) */
-#define IFRIT_GRAY32F 11 /* float    Y (linear) */
+#define IFRIT_L32F 11    /* float    L (linear) */
 #define IFRIT_RGBA16F 12 /* IEEE 754 half-precision R, G, B, A, each a uint16_t (linear) */
 #define IFRIT_LAYOUT_COUNT 13
 
@@ -316,8 +316,8 @@ typedef struct ifrit_setting
 } ifrit_setting;
 
 /* What a format can do (ifrit_format.flags). */
-#define IFRIT_FORMAT_DECODE 0x1   /* ifrit_decode reads it */
-#define IFRIT_FORMAT_ENCODE 0x2   /* ifrit_encode writes it (needs the export) */
+#define IFRIT_FORMAT_DECODE 0x1 /* ifrit_decode reads it */
+#define IFRIT_FORMAT_ENCODE 0x2 /* ifrit_encode writes it (needs the export) */
 #define IFRIT_FORMAT_METADATA 0x4 /* ifrit_encode can store metadata blocks: it receives them in
                                      ifrit_encode_image; without the flag it gets none */
 
@@ -468,7 +468,7 @@ typedef const ifrit_plugin* (IFRIT_CALL *ifrit_plugin_info_fn)(uint32_t host_api
    A file with several images (pages, frames, mipmaps, faces) shows its first,
    or main, one. */
 typedef ifrit_result (IFRIT_CALL *ifrit_decode_fn)(uint32_t format, const uint8_t* data, size_t size,
-                                                    const ifrit_decode_host* host);
+                                                   const ifrit_decode_host* host);
 #define IFRIT_DECODE_SYMBOL "ifrit_decode"
 
 /* OPTIONAL. Whether a file is in `format`, from its first `size` bytes:
@@ -487,7 +487,7 @@ typedef int32_t (IFRIT_CALL *ifrit_sniff_fn)(uint32_t format, const uint8_t* hea
    has nothing quicker to offer. The stand-in may be smaller than the image;
    it is shown scaled to the image's size. */
 typedef ifrit_result (IFRIT_CALL *ifrit_decode_preview_fn)(uint32_t format, const uint8_t* data, size_t size,
-                                                            const ifrit_decode_host* host);
+                                                           const ifrit_decode_host* host);
 #define IFRIT_DECODE_PREVIEW_SYMBOL "ifrit_decode_preview"
 
 /* OPTIONAL. Writes `image` in `format` through host->write. `settings` holds
@@ -495,7 +495,7 @@ typedef ifrit_result (IFRIT_CALL *ifrit_decode_preview_fn)(uint32_t format, cons
    (`setting_count` of them; each within its setting's range). Called only for
    formats with IFRIT_FORMAT_ENCODE. */
 typedef ifrit_result (IFRIT_CALL *ifrit_encode_fn)(uint32_t format, const ifrit_encode_image* image, const int32_t* settings,
-                                                    uint32_t setting_count, const ifrit_encode_host* host);
+                                                   uint32_t setting_count, const ifrit_encode_host* host);
 #define IFRIT_ENCODE_SYMBOL "ifrit_encode"
 
 #ifdef __cplusplus

@@ -736,7 +736,7 @@ void describe_sdk(Image& out, const Blocks& blocks, const std::optional<Channels
     }
     if (const std::optional<Bcn>& bcn = blocks.bcn)
     {
-        out.pixel_format.model = *bcn == Bcn::BC4 || *bcn == Bcn::BC4S ? M::Gray : M::RGB;
+        out.pixel_format.model = *bcn == Bcn::BC4 || *bcn == Bcn::BC4S ? M::L : M::RGB;
         out.pixel_format.notes.push_back(std::string(bcn_name(*bcn)) + " block compression");
         if (*bcn == Bcn::BC6H || *bcn == Bcn::BC6HS)
             out.bits_per_sample = 16;
@@ -748,10 +748,10 @@ void describe_sdk(Image& out, const Blocks& blocks, const std::optional<Channels
     for (int i = 0; i < channels->count; ++i)
     {
         const char n = channels->name[i];
-        names += n == 'l' || n == 'i' ? 'Y' : char(n - 'a' + 'A');
+        names += n == 'l' || n == 'i' ? 'L' : char(n - 'a' + 'A');
         grey = grey && !std::strchr("rgb", n);
     }
-    out.pixel_format = PixelFormat::widths(grey ? M::Gray : M::RGB, names.c_str(), bits);
+    out.pixel_format = PixelFormat::widths(grey ? M::L : M::RGB, names.c_str(), bits);
 }
 
 // Shared by v2 and v3 once the format is known.

@@ -103,11 +103,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
         }
         else
         {
-            const char* names = color == PNG_COLOR_TYPE_GRAY         ? "Y"
-                                : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "YA"
+            const char* names = color == PNG_COLOR_TYPE_GRAY         ? "L"
+                                : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "LA"
                                 : color == PNG_COLOR_TYPE_RGB_ALPHA  ? "RGBA"
                                                                      : "RGB";
-            out.pixel_format = PixelFormat::packed(color & PNG_COLOR_MASK_COLOR ? M::RGB : M::Gray, names, depth);
+            out.pixel_format = PixelFormat::packed(color & PNG_COLOR_MASK_COLOR ? M::RGB : M::L, names, depth);
         }
         if (trns && !(color & PNG_COLOR_MASK_ALPHA))
             out.pixel_format.notes.push_back("transparency key");

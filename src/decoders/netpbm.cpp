@@ -221,7 +221,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     static const char* const names[] = {"", "PBM", "PGM", "PPM", "PBM", "PGM", "PPM", "PAM"};
     out.format = names[kind];
     using M = PixelFormat::Model;
-    out.pixel_format = PixelFormat::packed(colour ? M::RGB : M::Gray, colour ? (alpha ? "RGBA" : "RGB") : (alpha ? "YA" : "Y"), bits);
+    out.pixel_format = PixelFormat::packed(colour ? M::RGB : M::L, colour ? (alpha ? "RGBA" : "RGB") : (alpha ? "LA" : "L"), bits);
     out.pixel_format.notes.push_back(raw ? "binary" : "plain text");
     if (!bitmap && maxval != 255 && maxval != 65535)
         out.add("Netpbm", "Maximum value", std::to_string(maxval));

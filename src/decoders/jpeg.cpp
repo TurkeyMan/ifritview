@@ -134,7 +134,7 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         if (cmyk)
             out.pixel_format = PixelFormat::packed(M::CMYK, "CMYK", cinfo.data_precision);
         else if (cinfo.num_components == 1)
-            out.pixel_format = PixelFormat::packed(M::Gray, "Y", cinfo.data_precision);
+            out.pixel_format = PixelFormat::packed(M::L, "L", cinfo.data_precision);
         else if (cinfo.jpeg_color_space == JCS_RGB)
             out.pixel_format = PixelFormat::packed(M::RGB, "RGB", cinfo.data_precision);
         else

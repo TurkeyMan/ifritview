@@ -80,7 +80,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         if (cs == heif_colorspace_RGB)
             out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, alpha ? "RGBA" : "RGB", bits);
         else if (cs == heif_colorspace_monochrome || ch == heif_chroma_monochrome)
-            out.pixel_format = PixelFormat::packed(PixelFormat::Model::Gray, alpha ? "YA" : "Y", bits);
+            out.pixel_format = PixelFormat::packed(PixelFormat::Model::L, alpha ? "LA" : "L", bits);
         else
         {
             out.pixel_format = PixelFormat::ycbcr(bits, ch == heif_chroma_444 ? 1 : 2, ch == heif_chroma_420 ? 2 : 1);

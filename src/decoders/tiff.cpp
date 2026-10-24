@@ -198,8 +198,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 names = "RGB";
                 break;
             default:
-                model = M::Gray;
-                names = "Y";
+                model = M::L;
+                names = "L";
                 break;
         }
         if (model == M::Palette)

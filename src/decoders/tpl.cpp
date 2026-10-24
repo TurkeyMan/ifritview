@@ -294,10 +294,10 @@ void describe(Image& out, const char* group, uint32_t format, int palette_format
     using M = PixelFormat::Model;
     switch (format)
     {
-        case I4: out.pixel_format = PixelFormat::packed(M::Gray, "I", 4); break;
-        case I8: out.pixel_format = PixelFormat::packed(M::Gray, "I", 8); break;
-        case IA4: out.pixel_format = PixelFormat::packed(M::Gray, "AI", 4); break;
-        case IA8: out.pixel_format = PixelFormat::packed(M::Gray, "AI", 8); break;
+        case I4: out.pixel_format = PixelFormat::packed(M::L, "L", 4); break;  // GameCube calls grey "intensity"
+        case I8: out.pixel_format = PixelFormat::packed(M::L, "L", 8); break;
+        case IA4: out.pixel_format = PixelFormat::packed(M::L, "AL", 4); break;
+        case IA8: out.pixel_format = PixelFormat::packed(M::L, "AL", 8); break;
         case RGB565: out.pixel_format = PixelFormat::widths(M::RGB, "RGB", {5, 6, 5}); break;
         case RGB5A3:
             out.pixel_format = PixelFormat::widths(M::RGB, "RGB", {5, 5, 5}, 16);
