@@ -111,6 +111,8 @@ void run_step(App& app, const std::string& step)
             e.modifiers |= rap::mod_ctrl;
         app.script_pointer(e);
     }
+    else if (step == "lossless")
+        app.script_toggle_lossless();
     else if (step == "crop")
         app.crop_to_selection();
     else if (step == "close-dialog")

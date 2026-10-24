@@ -81,7 +81,8 @@ public:
     void remember_pane_width();
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
-    void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }  // a, b, swipe, diff, swap, side or gain:N
+    void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
+    void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 
 private:
     void plugins_loaded();  // their extensions join the list; the folder is listed again

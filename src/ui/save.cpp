@@ -303,17 +303,18 @@ void SaveDialog::update_enabled(Page& page)
     const EncodeOptions o = options(page);
     const bool lossless = o.get("lossless", 0) != 0;  // nothing is encoded: no settings apply
     for (size_t i = 0; i < e.settings.size(); ++i)
-        if (const char* off = e.settings[i].off_when; off || lossless)
-        {
-            const bool enabled = !lossless && (!off || o.get(off, 0) == 0);
-            const Control& c = page.controls[i];
-            if (c.range)
-                c.range->set_enabled(enabled);
-            if (c.choice)
-                c.choice->set_enabled(enabled);
-            if (c.toggle)
-                c.toggle->set_enabled(enabled);
-        }
+    {
+        // Every one, every time: lossless unchecked gives them all back.
+        const char* off = e.settings[i].off_when;
+        const bool enabled = !lossless && (!off || o.get(off, 0) == 0);
+        const Control& c = page.controls[i];
+        if (c.range)
+            c.range->set_enabled(enabled);
+        if (c.choice)
+            c.choice->set_enabled(enabled);
+        if (c.toggle)
+            c.toggle->set_enabled(enabled);
+    }
 }
 
 void SaveDialog::show_format(int index)
@@ -356,6 +357,17 @@ void SaveDialog::set_info(const std::string& text)
 {
     if (info_)
         info_->set_text(text);
+}
+
+void SaveDialog::toggle_lossless()
+{
+    for (Page& p : pages_)
+        if (p.lossless)
+        {
+            p.lossless->set_checked(!p.lossless->checked());  // set from code: no callback
+            update_enabled(p);
+            report();
+        }
 }
 
 void SaveDialog::close()

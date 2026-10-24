@@ -50,6 +50,7 @@ public:
     void set_lossless(bool available, const std::string& note);
     bool preview_shown() const { return !preview_ || preview_->checked(); }
     void close();                            // as Cancel
+    void toggle_lossless();                  // as clicking JPEG's Lossless (IFRIT_SCRIPT)
 
 private:
     // The control for one setting; one of these is set.
