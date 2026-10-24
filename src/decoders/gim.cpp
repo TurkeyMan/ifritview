@@ -7,7 +7,7 @@
 // laid out differently from DirectX's). The "faster" pixel order is the
 // PSP's swizzle: 16-byte by 8-row tiles, left to right, top to bottom.
 // Big-endian files (PS3) are read the same way with their words swapped.
-// The first picture's first frame and level is shown.
+// Every picture's frames are pages, the image's levels the levels.
 #include "bcn.h"
 #include "../i18n.h"
 #include "../bytes.h"
@@ -100,37 +100,52 @@ bool block_at(const File& f, size_t pos, size_t limit, int& type, Found& b)
     return true;
 }
 
-// The first picture's image and palette, and the file info if any.
-struct Tree
+// A picture's image and palette.
+struct Picture
 {
-    Found image, palette, info;
-    int pictures = 0;
+    Found image, palette;
 };
 
-void walk(const File& f, size_t pos, size_t limit, int depth, Tree& t)
+// Every picture, and the file info if any.
+struct Tree
+{
+    std::vector<Picture> pictures;
+    Found info;
+};
+
+// `picture` is the index of the picture block being walked, -1 outside one.
+void walk(const File& f, size_t pos, size_t limit, int depth, int picture, Tree& t)
 {
     int type;
     Found b;
     while (depth < 8 && block_at(f, pos, limit, type, b))
     {
         if (type == kRoot)
-            walk(f, b.data, b.end, depth + 1, t);
+            walk(f, b.data, b.end, depth + 1, picture, t);
         else if (type == kPicture)
         {
-            if (t.pictures++ == 0)
-                walk(f, b.data, b.end, depth + 1, t);
+            t.pictures.emplace_back();
+            walk(f, b.data, b.end, depth + 1, int(t.pictures.size()) - 1, t);
         }
-        else if (type == kImage && !t.image.ok)
-            t.image = b;
-        else if (type == kPalette && !t.palette.ok)
-            t.palette = b;
+        else if (type == kImage || type == kPalette)
+        {
+            // An image outside any picture block makes a picture of its own.
+            if (picture < 0)
+            {
+                t.pictures.emplace_back();
+                picture = int(t.pictures.size()) - 1;
+            }
+            Found& slot = type == kImage ? t.pictures[size_t(picture)].image : t.pictures[size_t(picture)].palette;
+            if (!slot.ok)
+                slot = b;
+        }
         else if (type == kFileInfo && !t.info.ok)
             t.info = b;
         pos = b.end;
     }
 }
 
-// An image or palette block's header, and where its first level is.
+// An image or palette block's header, and where one of its frames' levels is.
 struct Level
 {
     int format = 0, order = 0, w = 0, h = 0, pitch_align = 0, levels = 0, frames = 0;
@@ -138,7 +153,15 @@ struct Level
     size_t bytes = 0;  // available from `pixels` to the end of the block's data
 };
 
-bool read_level(const File& f, const Found& b, Level& l, std::string& error)
+// The frame count from an image header, without reading the rest.
+int frame_count(const File& f, const Found& b)
+{
+    return b.data + 0x30 <= b.end ? std::max(1, int(f.u16(b.data + 0x2E))) : 1;
+}
+
+// The frame and level wanted are clamped to those the block has (a
+// palette may hold fewer frames than its image); `l` has the counts.
+bool read_level(const File& f, const Found& b, int frame, int level, Level& l, std::string& error)
 {
     const size_t hp = b.data;
     if (hp + 0x30 > b.end || f.u16(hp) < 0x30)
@@ -152,15 +175,18 @@ bool read_level(const File& f, const Found& b, Level& l, std::string& error)
     l.h = int(f.u16(hp + 10));
     l.pitch_align = int(f.u16(hp + 14));
     const uint32_t index = f.u32(hp + 0x18), end = f.u32(hp + 0x20);
-    l.levels = int(f.u16(hp + 0x2A));
-    l.frames = int(f.u16(hp + 0x2E));
-    if (index > b.end - hp || b.end - hp - index < 4)
+    l.levels = std::max(1, int(f.u16(hp + 0x2A)));
+    l.frames = std::max(1, int(f.u16(hp + 0x2E)));
+    frame = std::min(frame, l.frames - 1);
+    level = std::min(level, l.levels - 1);
+    // Offsets of every frame's levels, frame by frame, from the header.
+    const size_t entry = (size_t(frame) * size_t(l.levels) + size_t(level)) * 4;
+    if (index > b.end - hp || b.end - hp - index < entry + 4)
     {
         error = "GIM level table is out of bounds";
         return false;
     }
-    // Offsets of the first frame's levels, from the header.
-    const uint32_t first = f.u32(hp + index);
+    const uint32_t first = f.u32(hp + index + entry);
     const size_t limit = std::min(b.end, hp + std::max<size_t>(end, first));
     if (first < 0x30 || first > limit - hp)
     {
@@ -174,6 +200,9 @@ bool read_level(const File& f, const Found& b, Level& l, std::string& error)
         error = "bad GIM size";
         return false;
     }
+    // Each level halves the one before.
+    l.w = std::max(1, l.w >> level);
+    l.h = std::max(1, l.h >> level);
     return true;
 }
 
@@ -267,7 +296,7 @@ std::vector<uint8_t> dxt_to_directx(int format, const uint8_t* s, size_t blocks)
     return out;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -278,15 +307,49 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     File f{d, size, d[0] == '.'};
     Tree t;
-    walk(f, 16, size, 0, t);
-    if (!t.image.ok)
+    walk(f, 16, size, 0, -1, t);
+    t.pictures.erase(std::remove_if(t.pictures.begin(), t.pictures.end(), [](const Picture& p) { return !p.image.ok; }), t.pictures.end());
+    if (t.pictures.empty())
     {
         error = "GIM file holds no image";
         return false;
     }
-    Level img;
-    if (!read_level(f, t.image, img, error))
+    // Pages: each picture's frames in turn.
+    int picture = -1, frame = 0, pages = 0;
+    bool several_frames = false;
+    for (size_t i = 0; i < t.pictures.size(); ++i)
+    {
+        const int n = frame_count(f, t.pictures[i].image);
+        several_frames |= n > 1;
+        if (picture < 0 && part.page < pages + n)
+        {
+            picture = int(i);
+            frame = part.page - pages;
+        }
+        pages = std::min(pages + n, 1 << 16);
+    }
+    out.page_count = pages;
+    if (picture < 0 || part.page >= pages)
+    {
+        error = "the GIM has no such page or level";
         return false;
+    }
+    const Picture& pic = t.pictures[size_t(picture)];
+    Level img;
+    if (!read_level(f, pic.image, frame, part.level, img, error))
+        return false;
+    out.level_count = img.levels;
+    if (part.level >= img.levels)
+    {
+        error = "the GIM has no such page or level";
+        return false;
+    }
+    if (t.pictures.size() > 1 && several_frames)
+        out.page_label = rap::i18n::format(_("picture {0} frame {1}"), picture + 1, frame + 1);
+    else if (t.pictures.size() > 1)
+        out.page_label = rap::i18n::format(_("picture {0}"), picture + 1);
+    else if (img.frames > 1)
+        out.page_label = rap::i18n::format(_("frame {0}"), frame + 1);
     const int fmt = img.format;
     if (fmt < 0 || fmt > kDXT5)
     {
@@ -315,11 +378,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
             return false;
         std::vector<uint32_t> palette;
         int palette_format = -1;
-        if (indexed && t.palette.ok)
+        if (indexed && pic.palette.ok)
         {
+            // The frame's palette (or the last there is), always its first level.
             Level pal;
             std::vector<uint32_t> entries;
-            if (!read_level(f, t.palette, pal, error))
+            if (!read_level(f, pic.palette, frame, 0, pal, error))
                 return false;
             if (pal.format < kRGBA5650 || pal.format > kRGBA8888)
             {
@@ -380,12 +444,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.add(N_("GIM"), N_("Pixel order"), img.order == 1 ? "faster (swizzled)" : "normal");
     const bool ps3 = std::memcmp(d + 8, "PS3", 3) == 0 || std::memcmp(d + 9, "PS3", 3) == 0;
     out.add(N_("GIM"), N_("Platform"), std::string(ps3 ? "PS3" : "PSP") + (f.big ? ", big-endian" : ""));
-    if (t.pictures > 1)
-        out.add(N_("GIM"), N_("Pictures"), std::to_string(t.pictures) + ", the first shown");
+    if (t.pictures.size() > 1)
+        out.add(N_("GIM"), N_("Pictures"), std::to_string(t.pictures.size()));
     if (img.levels > 1)
         out.add(N_("GIM"), N_("Mipmaps"), std::to_string(img.levels));
     if (img.frames > 1)
-        out.add(N_("GIM"), N_("Frames"), std::to_string(img.frames) + ", the first shown");
+        out.add(N_("GIM"), N_("Frames"), std::to_string(img.frames));
     if (t.info.ok)
     {
         // Four NUL-terminated strings: project, user, date saved, the tool.
@@ -413,6 +477,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& gim_decoder()
 {
-    static const Decoder d{"GIM", {"gim"}, sniff, decode};
+    static const Decoder d{"GIM", {"gim"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }

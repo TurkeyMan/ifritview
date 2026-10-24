@@ -11,12 +11,14 @@
 //   and 5/8 rather than DXT1's thirds, and its index bits run MSB first).
 // Intensity formats are shown opaque grey: the GPU also feeds I to alpha
 // when sampling, but that is a use of the texel, not stored transparency.
-// The first image of a TPL and the largest mipmap are shown.
+// Each image of a TPL is a page; the mipmaps (a TPL image's or a BTI's),
+// stored after the largest, are the levels.
 #include "decoder.h"
 #include "../i18n.h"
 #include "texel.h"
 #include "../bytes.h"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -246,6 +248,26 @@ bool decode_surface(uint32_t format, const uint8_t* data, size_t size, int w, in
     return true;
 }
 
+// Mipmap `level` of a w × h surface: the levels are packed one after
+// another, each a surface of its own with its partial tiles padded out.
+bool decode_level(uint32_t format, const uint8_t* data, size_t size, int w, int h, int level, const std::vector<uint32_t>& palette, Image& out,
+                  std::string& error)
+{
+    const Layout l = layout(format);
+    for (int i = 0; i < level; ++i)
+    {
+        const size_t skip = surface_size(l, std::max(1, w >> i), std::max(1, h >> i));
+        if (skip > size)
+        {
+            error = "texture data is cut short";
+            return false;
+        }
+        data += skip;
+        size -= skip;
+    }
+    return decode_surface(format, data, size, std::max(1, w >> level), std::max(1, h >> level), palette, out, error);
+}
+
 // The palette's entries, decoded; false if they run past the file.
 bool read_palette(const uint8_t* d, size_t size, size_t offset, uint32_t count, uint32_t format, std::vector<uint32_t>& palette,
                   std::string& error)
@@ -297,7 +319,7 @@ void describe(Image& out, const char* group, uint32_t format, int palette_format
     if (palette_format >= 0)
         out.add(group, "Palette", std::string(palette_name(uint32_t(palette_format))) + ", " + std::to_string(palette_entries) + " entries");
     if (mips > 1)
-        out.add(group, "Mipmaps", std::to_string(mips) + ", the largest shown");
+        out.add(group, "Mipmaps", std::to_string(mips));
 }
 
 // TPL: magic, image count, offset of the table of (image header, palette
@@ -309,7 +331,7 @@ bool tpl_sniff(const uint8_t* h, size_t n)
     return n >= 12 && be32(h) == kTplMagic && be32(h + 4) > 0;
 }
 
-bool tpl_decode(const std::string& path, Image& out, std::string& error)
+bool tpl_decode(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -319,12 +341,19 @@ bool tpl_decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
     const uint32_t count = be32(d + 4), table = be32(d + 8);
-    if (table > size || size - table < 8)
+    out.page_count = int(std::min<uint32_t>(count, 1 << 16));
+    if (part.page >= out.page_count)
+    {
+        error = "the TPL has no such page or level";
+        return false;
+    }
+    const size_t entry = table + size_t(part.page) * 8;
+    if (table > size || size - table < size_t(part.page) * 8 + 8)
     {
         error = "TPL image table is cut short";
         return false;
     }
-    const uint32_t image = be32(d + table), pal = be32(d + table + 4);
+    const uint32_t image = be32(d + entry), pal = be32(d + entry + 4);
     // Image header: height, width, format, data offset, wrap S/T, filters,
     // LOD bias, edge LOD, min LOD, max LOD, unpacked.
     if (image > size || size - image < 36)
@@ -346,6 +375,13 @@ bool tpl_decode(const std::string& path, Image& out, std::string& error)
         error = "bad TPL size";
         return false;
     }
+    const int mips = max_lod > min_lod ? max_lod - min_lod + 1 : 1;
+    out.level_count = mips;
+    if (part.level >= mips)
+    {
+        error = "the TPL has no such page or level";
+        return false;
+    }
     std::vector<uint32_t> palette;
     int palette_format = -1;
     if (is_paletted(format))
@@ -365,11 +401,11 @@ bool tpl_decode(const std::string& path, Image& out, std::string& error)
         error = "texture data is cut short";
         return false;
     }
-    if (!decode_surface(format, d + data, size - data, w, h, palette, out, error))
+    if (!decode_level(format, d + data, size - data, w, h, part.level, palette, out, error))
         return false;
-    describe(out, "TPL", format, palette_format, palette.size(), max_lod > min_lod ? max_lod - min_lod + 1 : 1);
+    describe(out, "TPL", format, palette_format, palette.size(), mips);
     if (count > 1)
-        out.add(N_("TPL"), N_("Images"), std::to_string(count) + ", the first shown");
+        out.add(N_("TPL"), N_("Images"), std::to_string(count));
     return true;
 }
 
@@ -377,7 +413,7 @@ bool tpl_decode(const std::string& path, Image& out, std::string& error)
 // palettes enabled, palette format, palette entries, palette offset, ...,
 // filters, LOD range, mipmap count, LOD bias, image data offset. Offsets
 // count from the header, at the start of a standalone file.
-bool bti_decode(const std::string& path, Image& out, std::string& error)
+bool bti_decode(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -390,7 +426,7 @@ bool bti_decode(const std::string& path, Image& out, std::string& error)
     const int w = be16(d + 2), h = be16(d + 4);
     const int palette_format = d[9];
     const uint32_t entries = be16(d + 10), palette_offset = be32(d + 12);
-    const int mips = d[0x18];
+    const int mips = std::max(1, int(d[0x18]));
     const uint32_t data = be32(d + 0x1C);
     // No magic, so the header has to make sense: a GX format, a size the
     // GPU can sample (1024 at most), sane wrap modes and data after it.
@@ -398,6 +434,12 @@ bool bti_decode(const std::string& path, Image& out, std::string& error)
     if (!l.name || w == 0 || h == 0 || w > 1024 || h > 1024 || d[6] > 2 || d[7] > 2 || d[8] > 1 || data < 32)
     {
         error = "not a BTI file";
+        return false;
+    }
+    out.level_count = mips;
+    if (part.page > 0 || part.level >= mips)
+    {
+        error = "the BTI has no such page or level";
         return false;
     }
     std::vector<uint32_t> palette;
@@ -411,7 +453,7 @@ bool bti_decode(const std::string& path, Image& out, std::string& error)
         error = "texture data is cut short";
         return false;
     }
-    if (!decode_surface(format, d + data, size - data, w, h, palette, out, error))
+    if (!decode_level(format, d + data, size - data, w, h, part.level, palette, out, error))
         return false;
     describe(out, "BTI", format, is_paletted(format) ? palette_format : -1, palette.size(), mips);
     return true;
@@ -421,12 +463,14 @@ bool bti_decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& tpl_decoder()
 {
-    static const Decoder d{"TPL", {"tpl"}, tpl_sniff, tpl_decode};
+    static const Decoder d{"TPL", {"tpl"}, tpl_sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return tpl_decode(path, {}, out, error); }, nullptr, false, tpl_decode};
     return d;
 }
 
 const Decoder& bti_decoder()
 {
-    static const Decoder d{"BTI", {"bti"}, nullptr, bti_decode};
+    static const Decoder d{"BTI", {"bti"}, nullptr, [](const std::string& path, Image& out, std::string& error)
+                           { return bti_decode(path, {}, out, error); }, nullptr, false, bti_decode};
     return d;
 }

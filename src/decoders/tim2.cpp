@@ -4,8 +4,8 @@
 // Images are 4 or 8-bit indexed, or direct 16-bit (A1B5G5R5), 24-bit or
 // 32-bit; CLUT entries are 16, 24 or 32-bit. A 256-colour CLUT stored as
 // CSM1 has entries 8-15 and 16-23 of every 32 swapped (the GS reads it in
-// that order); CSM2 is linear. PS2 alpha runs 0-128, 128 opaque. The first
-// picture's largest mipmap is shown.
+// that order); CSM2 is linear. PS2 alpha runs 0-128, 128 opaque. Each
+// picture is a page, its mipmaps the levels.
 #include "decoder.h"
 #include "../i18n.h"
 #include "texel.h"
@@ -66,7 +66,7 @@ const char* type_name(int t)
     return "unknown";
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -76,11 +76,29 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
     const int version = d[4], pictures = le16(d + 6);
-    const size_t pos = d[5] == 1 ? 128 : 16;  // pictures 128-byte aligned: the header is padded
+    size_t pos = d[5] == 1 ? 128 : 16;  // pictures 128-byte aligned: the header is padded
     if (pictures == 0)
     {
         error = "TIM2 file holds no pictures";
         return false;
+    }
+    out.page_count = pictures;
+    if (part.page >= pictures)
+    {
+        error = "the TIM2 has no such page or level";
+        return false;
+    }
+    // Each picture header starts with the picture's whole size, padding
+    // included, which steps to the next.
+    for (int i = 0; i < part.page; ++i)
+    {
+        const uint32_t total = pos + 48 <= size ? le32(d + pos) : 0;
+        if (total < 48 || total > size - pos)
+        {
+            error = "TIM2 picture is cut short";
+            return false;
+        }
+        pos += total;
     }
     if (pos + 48 > size)
     {
@@ -91,7 +109,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     const uint32_t clut_size = le32(ph + 4), image_size = le32(ph + 8);
     const int header_size = le16(ph + 12), clut_colours = le16(ph + 14);
     const int mipmaps = ph[17], clut_type = ph[18], image_type = ph[19];
-    const int w = le16(ph + 20), h = le16(ph + 22);
+    const int full_w = le16(ph + 20), full_h = le16(ph + 22);
     if (header_size < 48 || image_type < kRGB16 || image_type > kIndex8)
     {
         if (mipmaps == 0)
@@ -100,11 +118,19 @@ bool decode(const std::string& path, Image& out, std::string& error)
             error = "TIM2 image type " + std::to_string(image_type) + " isn't recognised";
         return false;
     }
-    if (w == 0 || h == 0)
+    if (full_w == 0 || full_h == 0)
     {
         error = "bad TIM2 size";
         return false;
     }
+    // The GS takes the base image and up to six more levels.
+    out.level_count = std::clamp(mipmaps, 1, 7);
+    if (part.level >= out.level_count)
+    {
+        error = "the TIM2 has no such page or level";
+        return false;
+    }
+    const int w = std::max(1, full_w >> part.level), h = std::max(1, full_h >> part.level);
     // Header (with the mipmap table and any user data), image, CLUT.
     const size_t image_pos = pos + header_size, clut_pos = image_pos + size_t(image_size);
     if (image_pos > size || image_size > size - image_pos || clut_size > size - clut_pos)
@@ -115,12 +141,21 @@ bool decode(const std::string& path, Image& out, std::string& error)
     static const int bits_for[] = {0, 16, 24, 32, 4, 8};
     const int bits = bits_for[image_type];
     const size_t row_bytes = (size_t(w) * bits + 7) / 8;
-    if (row_bytes * h > image_size)
+    // Where this level starts: past the larger ones, whose sizes (padding
+    // included) a mipmap header after the picture header lists, after the
+    // two GS MIPTBP registers. Without one, they're taken as packed.
+    size_t level_pos = 0;
+    for (int i = 0; i < part.level; ++i)
+    {
+        const size_t listed = header_size >= 64 + 4 * (i + 1) ? le32(ph + 64 + 4 * i) : 0;
+        level_pos += listed ? listed : (size_t(std::max(1, full_w >> i)) * bits + 7) / 8 * size_t(std::max(1, full_h >> i));
+    }
+    if (level_pos > image_size || row_bytes * h > image_size - level_pos)
     {
         error = "TIM2 image data is smaller than its size";
         return false;
     }
-    const uint8_t* img = d + image_pos;
+    const uint8_t* img = d + image_pos + level_pos;
     const bool indexed = image_type == kIndex4 || image_type == kIndex8;
 
     // The CLUT, put in index order. Missing (it can live in a separate
@@ -218,7 +253,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (has_alpha_channel && all_clear)
         out.add(N_("TIM2"), N_("Alpha"), "zero throughout, shown opaque");
     if (pictures > 1)
-        out.add(N_("TIM2"), N_("Pictures"), std::to_string(pictures) + ", the first shown");
+        out.add(N_("TIM2"), N_("Pictures"), std::to_string(pictures));
     if (mipmaps > 1)
         out.add(N_("TIM2"), N_("Mipmaps"), std::to_string(mipmaps));
     return true;
@@ -228,6 +263,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& tim2_decoder()
 {
-    static const Decoder d{"TIM2", {"tm2", "tim2"}, sniff, decode};
+    static const Decoder d{"TIM2", {"tm2", "tim2"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
