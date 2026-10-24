@@ -165,7 +165,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         plan.why_not = t.broken;
         return plan;
     }
-    if (image.format.rfind("JPEG", 0) != 0 || image.is_raw)
+    if (image.encoded_as != "jpg" || image.is_raw)  // as the decoder saw the file
     {
         plan.why_not = "the original isn't a JPEG";
         return plan;

@@ -156,7 +156,7 @@ rap::node SaveDialog::page_node(Page& page)
     }
     // JPEG to JPEG: the original's compressed data turned and cropped, not
     // re-encoded. Greyed until the app has worked out whether it can be done.
-    if (std::string(e.extension) == "jpg")
+    if (e.lossless_transform)
         rows.insert(rows.begin(), {"", L::vbox{L::check{"Lossless: turn and crop the original, no re-encoding"}
                                                    .on_toggled(
                                                        [s, p](bool)
@@ -290,8 +290,7 @@ EncodeOptions SaveDialog::options(const Page& page) const
             v = std::max(0, c.choice->current());
         o.values[e.settings[i].key] = v;
     }
-    if (page.lossless && page.lossless->checked())
-        o.values["lossless"] = 1;
+    o.lossless_transform = page.lossless && page.lossless->checked();
     return o;
 }
 
@@ -338,7 +337,7 @@ void SaveDialog::report()
     const Page& p = pages_[size_t(i)];
     const EncodeOptions o = options(p);
     if (preview_)
-        preview_->set_enabled(p.encoder->lossy(o) && !o.get("lossless", 0));  // nothing to preview when it's kept exactly
+        preview_->set_enabled(p.encoder->lossy(o) && !o.lossless_transform);  // nothing to preview when it's kept exactly
     callbacks_.changed(*p.encoder, o);
 }
 

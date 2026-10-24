@@ -125,7 +125,7 @@ bool parse_save(const std::string& arg, Save& s, std::string& error)
             if (!parse_metadata_choice(value, s.metadata, error))
                 return false;
         }
-        else if (key == "lossless" && std::string(s.encoder->extension) == "jpg")
+        else if (key == "lossless" && s.encoder->lossless_transform)
         {
             const std::string v = lower(value);
             s.lossless = v == "yes" ? Lossless::yes : v == "exact" ? Lossless::exact : v == "auto" ? Lossless::automatic : v == "no" ? Lossless::no : Lossless(-1);
@@ -364,7 +364,7 @@ int formats_report()
             std::string initial = s.kind == EncodeSetting::Kind::Toggle ? (s.initial ? "yes" : "no") : std::to_string(s.initial);
             std::printf("      %-12s %s: %s (default %s)\n", s.key, s.label, range.c_str(), initial.c_str());
         }
-        if (std::string(e->extension) == "jpg")
+        if (e->lossless_transform)
             std::printf("      %-12s Lossless: yes|exact|auto|no (default no); see --help\n", "lossless");
     }
     return 0;

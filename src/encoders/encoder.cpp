@@ -754,12 +754,17 @@ const Encoder& png_encoder()
 #ifdef HAVE_JPEG
 const Encoder& jpeg_encoder()
 {
-    static const Encoder e{"JPEG", "jpg",
-                           {{"quality", "Quality", Kind::Range, 1, 100, 90},
-                            {"subsampling", "Colour detail", Kind::Choice, 0, 3, 0,
-                             {"Automatic (full at quality 90 and above)", "Full (4:4:4)", "Half across (4:2:2)", "Quarter (4:2:0, smallest)"}},
-                            {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine"}},
-                           encode_jpeg};
+    static const Encoder e = []
+    {
+        Encoder j{"JPEG", "jpg",
+                  {{"quality", "Quality", Kind::Range, 1, 100, 90},
+                   {"subsampling", "Colour detail", Kind::Choice, 0, 3, 0,
+                    {"Automatic (full at quality 90 and above)", "Full (4:4:4)", "Half across (4:2:2)", "Quarter (4:2:0, smallest)"}},
+                   {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine"}},
+                  encode_jpeg};
+        j.lossless_transform = true;  // jpeg_lossless.h
+        return j;
+    }();
     return e;
 }
 #endif

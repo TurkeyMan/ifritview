@@ -46,7 +46,8 @@ public:
     void set_info(const std::string& text);  // beside the format: the preview's file size
     // JPEG's Lossless choice: available or not, and a few words (how the
     // result differs from the image, or why it can't be done). Checked to
-    // start with when available. The choice reaches `chosen` as "lossless"=1.
+    // start with when available. The choice reaches `chosen` as
+    // EncodeOptions::lossless_transform.
     void set_lossless(bool available, const std::string& note);
     bool preview_shown() const { return !preview_ || preview_->checked(); }
     void close();                            // as Cancel

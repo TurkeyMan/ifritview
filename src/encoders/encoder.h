@@ -34,6 +34,9 @@ struct EncodeOptions
     // Written into the file as it is, where the format can hold it: the
     // caller prepares it (prepare_metadata) for this file and choice.
     std::shared_ptr<const FileMetadata> metadata;
+    // Not encoding at all: the original's compressed data turned and cropped
+    // (an encoder with lossless_transform; not one of its settings).
+    bool lossless_transform = false;
     int get(const char* key, int fallback) const
     {
         auto it = values.find(key);
@@ -52,6 +55,10 @@ struct Encoder
     // isn't set lossless". The save dialog previews what loses detail.
     bool (*reduces)(const EncodeOptions& options) = nullptr;
     bool metadata = true;  // can hold EXIF, XMP and the rest
+    // Can save a file in its own format by transforming its compressed data
+    // instead of encoding (JPEG's lossless turns and crops): offered beside
+    // the settings, chosen as EncodeOptions::lossless_transform.
+    bool lossless_transform = false;
 
     const EncodeSetting* setting(const char* key) const
     {

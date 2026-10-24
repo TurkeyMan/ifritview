@@ -1774,7 +1774,7 @@ void App::save_as()
         }
         // Lossless: the planned transform, with the metadata made for its size.
         std::shared_ptr<const LosslessJpeg> lossless;
-        if (o.get("lossless", 0) && lossless_plan_ && lossless_plan_->why_not.empty())
+        if (o.lossless_transform && lossless_plan_ && lossless_plan_->why_not.empty())
         {
             lossless = lossless_plan_;
             if (o.metadata && image_->stored)
@@ -1915,9 +1915,8 @@ void App::preview_lossless()
 
 void App::preview_save(const Encoder& e, const EncodeOptions& o)
 {
-    // JPEG's Lossless is the original's own data, transformed; another
-    // format's lossless setting is an encode like any other.
-    if (std::string(e.extension) == "jpg" && o.get("lossless", 0))
+    // The original's own data, transformed: no encode to preview.
+    if (o.lossless_transform)
     {
         preview_lossless();
         return;
