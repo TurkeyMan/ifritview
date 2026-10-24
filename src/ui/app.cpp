@@ -254,40 +254,57 @@ void App::set_side_by_side(bool on)
     if (on == side_by_side_)
         return;
     int vw = 0, vh = 0;
-    (on ? view_ : side_view_)->view_size(vw, vh);
-    const float extra = float(vw / view_->scale_factor());
+    view_->view_size(vw, vh);
     const rap::size_f before = window_->size();
+    const bool sized = !fullscreen_ && !window_->maximized();
     side_by_side_ = on;
     side_pane_->set_visible(on);
+    side_settle_.reset();
     if (on)
     {
         if (view_->compare_mode() == View::Compare::B)
             view_->set_compare(View::Compare::A);  // B is beside it now
         show_side();
+        if (sized)
+        {
+            // Wider by a pane (and the gap, a guess until measured below), and
+            // back to exactly this width when it closes.
+            side_restore_w_ = before.w;
+            float w = before.w + float(vw / view_->scale_factor()) + 6;
+            const rap::rect_f work = window_->work_area();
+            if (work.w > 0)
+                w = std::min(w, work.w - 24);
+            window_->resize({w, before.h});
+            side_settle_ = SideSettle{vw, w};
+        }
     }
     else
     {
         side_view_->set_image(nullptr);
         side_view_->set_label({});
+        if (sized && side_restore_w_ > 0)
+            window_->resize({side_restore_w_, before.h});
+        side_restore_w_ = 0;
     }
-    if (!fullscreen_ && !window_->maximized())
-    {
-        float w = before.w + (on ? extra : -extra);
-        const rap::rect_f work = window_->work_area();
-        if (work.w > 0)
-            w = std::min(w, work.w - 24);
-        window_->resize({std::max(w, float(cfg_.min_window_width)), before.h});
-    }
-    pane_toggled_from_ = 0;  // not the info pane: nothing to learn from this one
-    refit_after_layout_ = true;
-    refit_timer_ = ui_.timer(150, false,
-                             [this]
-                             {
-                                 if (refit_after_layout_)
-                                     refit_after_pane_toggle();
-                             });
     update_toolbar();
     update_status();
+}
+
+// Once the side pane is laid out at the new width: each pane as wide as the
+// image area was, correcting the guessed gap between them.
+void App::settle_side_by_side()
+{
+    if (!side_settle_ || std::fabs(window_->size().w - side_settle_->window_w) >= 1)
+        return;  // not yet at the width asked for
+    const SideSettle settle = *side_settle_;
+    side_settle_.reset();
+    int vw = 0, vh = 0;
+    view_->view_size(vw, vh);
+    const float short_by = float((settle.view_w - vw) / view_->scale_factor());
+    const rap::rect_f work = window_->work_area();
+    const float w = settle.window_w + 2 * short_by;  // the panes share the width equally
+    if (std::fabs(short_by) >= 1 && (work.w <= 0 || w <= work.w - 24))
+        window_->resize({w, window_->size().h});
 }
 
 void App::update_toolbar()
@@ -529,6 +546,7 @@ void App::build_ui()
     {
         if (refit_after_layout_)
             refit_after_pane_toggle();
+        settle_side_by_side();
     };
     view_->on_video_toggle = [this] { toggle_video(); };
     view_->on_video_mute = [this] { toggle_mute(); };

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,7 @@ private:
     void end_comparing();
     void set_side_by_side(bool on);
     void show_side();  // B, its name and the main view's framing, in the side pane
+    void settle_side_by_side();
     // The toolbar for what the view is doing: browsing the folder, or
     // comparing two images (and no browsing while Save As is open).
     void update_toolbar();
@@ -151,6 +153,13 @@ private:
     rap::widget* side_pane_ = nullptr;
     rap::tool_button* side_button_ = nullptr;
     bool side_by_side_ = false;
+    float side_restore_w_ = 0;  // the window's width before side by side opened
+    struct SideSettle
+    {
+        int view_w;      // device px: the image area's width before, each pane's after
+        float window_w;  // the width asked for
+    };
+    std::optional<SideSettle> side_settle_;
     bool syncing_framing_ = false;
     bool diff_session_ = false;  // comparing two files, not previewing a save
     std::string diff_name_;      // "a ↔ b"
