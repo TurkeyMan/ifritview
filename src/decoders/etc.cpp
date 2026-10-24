@@ -5,12 +5,16 @@
 
 #define ETCDEC_IMPLEMENTATION
 #define ETCDEC_STATIC
-#if defined(__GNUC__)
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"  // the variants not used here
 #endif
 #include "../../third_party/etcdec/etcdec.h"
-#if defined(__GNUC__)
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
 
