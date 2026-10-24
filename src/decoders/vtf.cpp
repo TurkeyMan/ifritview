@@ -2,7 +2,7 @@
 // small DXT1 thumbnail (skipped), then the high-res image as every mipmap,
 // smallest first, each holding every frame, cube face and depth slice.
 // From 7.3 a resource directory says where the high-res data starts. The
-// largest mipmap of the first frame, face and slice is shown. Block-
+// frames, cube faces and volume slices are pages, the mipmaps levels. Block-
 // compressed data (DXT1/3/5, ATI1N/ATI2N) goes through bcn.cpp; the
 // uncompressed formats are 8-bit channels in various orders, packed 16-bit
 // pixels, 16-bit integer or half-float and 32-bit float (clipped to 0..1).
@@ -163,7 +163,7 @@ PixelFormat describe(const Format& f)
 // Header flags shown in the metadata.
 constexpr uint32_t kFlagSrgb = 0x40, kFlagNormal = 0x80, kFlagEnvmap = 0x4000;
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -248,10 +248,25 @@ bool decode(const std::string& path, Image& out, std::string& error)
         offset = uint64_t(header_size) + thumbnail;
     }
 
+    // Pages: each frame's faces' slices; levels: the mipmaps.
+    const int64_t pages = int64_t(frames) * faces * depth;
+    out.page_count = int(std::min<int64_t>(pages, 1 << 16));
+    out.level_count = mips;
+    if (part.page >= out.page_count || part.level >= mips)
+    {
+        error = "the VTF has no such page or level";
+        return false;
+    }
+    const int frame = part.page / (faces * depth), face = part.page / depth % faces;
+    if (faces > 1)
+        out.page_label = face == 6 ? _("sphere map") : cube_face_label(face, 1);
+    if (frames > 1)
+        out.page_label = rap::i18n::format(_("frame {0}"), frame + 1) + (out.page_label.empty() ? "" : " " + out.page_label);
+
     // Skip every smaller mipmap: they come first, each with all its frames,
     // faces and slices (volume slices halve with each mipmap, as the engine
     // and VTFLib lay them out).
-    for (int m = mips - 1; m >= 1 && offset <= size; --m)
+    for (int m = mips - 1; m > part.level && offset <= size; --m)
     {
         const auto halve = [m](int n) { return m < 16 ? std::max(1, n >> m) : 1; };  // sizes are 16-bit
         const int mw = halve(w), mh = halve(h), md = halve(depth);
@@ -259,7 +274,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
         const uint64_t level = image_size(*f, mw, mh) * uint64_t(frames) * faces;
         offset += level > size ? level : level * uint64_t(md);
     }
-    const uint64_t need = image_size(*f, w, h);
+    // Then this level's images before the page's.
+    const auto halve = [](int n, int m) { return m < 16 ? std::max(1, n >> m) : 1; };
+    const int lw = halve(w, part.level), lh = halve(h, part.level), ld = halve(depth, part.level);
+    const int z = part.page % depth * ld / depth;
+    const uint64_t need = image_size(*f, lw, lh);
+    offset += need * ((uint64_t(frame) * faces + uint64_t(face)) * uint64_t(ld) + uint64_t(z));
     if (offset > size || need > size - offset)
     {
         error = "VTF data is cut short";
@@ -268,7 +288,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     const uint8_t* data = d + offset;
     if (f->kind == Kind::Block)
     {
-        if (!decode_bcn(f->bcn, data, size_t(need), w, h, out, error))
+        if (!decode_bcn(f->bcn, data, size_t(need), lw, lh, out, error))
             return false;
     }
     else if (f->kind == Kind::Unorm16 || f->kind == Kind::Half || f->kind == Kind::Float)
@@ -277,12 +297,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
         const WideTexels::Kind kind = f->kind == Kind::Unorm16 ? WideTexels::Kind::Unorm16
                                       : f->kind == Kind::Half  ? WideTexels::Kind::Half
                                                                : WideTexels::Kind::Float;
-        if (!decode_wide(WideTexels{kind, int(f->r)}, data, size_t(need), w, h, 1, false, false, out, error))
+        if (!decode_wide(WideTexels{kind, int(f->r)}, data, size_t(need), lw, lh, 1, false, false, out, error))
             return false;
     }
     else
     {
-        decode_pixels(*f, data, w, h, out);
+        decode_pixels(*f, data, lw, lh, out);
     }
 
     out.format = "VTF";
@@ -307,9 +327,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (mips > 1)
         out.add(N_("VTF"), N_("Mipmaps"), std::to_string(mips));
     if (frames > 1)
-        out.add(N_("VTF"), N_("Frames"), std::to_string(frames) + ", the first shown");
+        out.add(N_("VTF"), N_("Frames"), std::to_string(frames));
     if (faces > 1)
-        out.add(N_("VTF"), N_("Cube map"), std::to_string(faces) + " faces, the first shown");
+        out.add(N_("VTF"), N_("Cube map"), rap::i18n::format(_("{0} faces"), faces));
     if (depth > 1)
         out.add(N_("VTF"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
     if (flags & kFlagNormal)
@@ -323,6 +343,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& vtf_decoder()
 {
-    static const Decoder d{"VTF", {"vtf"}, sniff, decode};
+    static const Decoder d{"VTF", {"vtf"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
