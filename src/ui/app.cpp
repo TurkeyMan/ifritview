@@ -1756,35 +1756,16 @@ void App::save_as()
         cfg_.save();
         // The file's metadata, made to describe what's being saved. A
         // difference image has none of its own.
-        if (save_source_ == image_ && image_->stored && e.metadata)
-        {
-            SaveTarget target;
-            target.width = image_->width;
-            target.height = image_->height;
-            target.pixels_changed = image_->edited || image_->exposure_edit != 0;
-            target.drop_develop = image_->is_raw || (cfg_.apply_xmp_edits && image_->xmp.present);
-            o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
-        }
-        else if (save_source_ == image_ && image_->stored && !image_->stored->icc.empty())
-        {
-            // A format without metadata still takes the colour profile.
-            FileMetadata icc_only;
-            icc_only.icc = image_->stored->icc;
-            o.metadata = std::make_shared<const FileMetadata>(std::move(icc_only));
-        }
+        // XMP's develop settings, once applied, no longer describe the pixels.
+        const bool developed = cfg_.apply_xmp_edits && image_->xmp.present;
+        if (save_source_ == image_)
+            o.metadata = metadata_for_save(*image_, metadata, e.metadata, developed);
         // Lossless: the planned transform, with the metadata made for its size.
         std::shared_ptr<const LosslessJpeg> lossless;
         if (o.lossless_transform && lossless_plan_ && lossless_plan_->why_not.empty())
         {
             lossless = lossless_plan_;
-            if (o.metadata && image_->stored)
-            {
-                SaveTarget target;
-                target.width = lossless->width;
-                target.height = lossless->height;
-                target.pixels_changed = image_->edited;
-                o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
-            }
+            o.metadata = metadata_for_save(*image_, metadata, e.metadata, developed, lossless->width, lossless->height);
         }
         // After the dialog has gone, so the file dialog has the main window as parent.
         ui_.post([this, e = &e, o, source = save_source_, lossless] { choose_save_path(*e, o, source, lossless); });

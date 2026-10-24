@@ -68,6 +68,15 @@ struct SaveTarget
 // passed through whatever the choice.
 FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& choice, const SaveTarget& target);
 
+struct Image;
+// What's saved with `image`: its file's metadata made to describe the file
+// written (`width` × `height`, or the image's own size when 0), keeping what
+// `choice` keeps, for a format that holds metadata; for one that doesn't,
+// the colour profile alone. Null when there's nothing. `develop_applied`:
+// raw or XMP develop settings were rendered into the pixels (a raw always).
+std::shared_ptr<const FileMetadata> metadata_for_save(const Image& image, const MetadataChoice& choice, bool format_holds_metadata,
+                                                      bool develop_applied, int width = 0, int height = 0);
+
 // The descriptive text fields of an EXIF block's main directory (TIFF tag
 // number and text: description, make, model, software, date, artist,
 // copyright), for formats that keep them as plain tags.

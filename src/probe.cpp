@@ -1,5 +1,7 @@
 #include "probe.h"
 
+#include "pipeline.h"
+
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
 
@@ -85,65 +87,13 @@ int convert(int argc, char** argv)
         std::fprintf(stderr, "usage: ifritview --convert in out [setting=value...] [metadata=CHOICE]\n");
         return 2;
     }
-    const std::string in = argv[0], out = argv[1];
-    std::string ext = out.substr(out.find_last_of('.') == std::string::npos ? out.size() : out.find_last_of('.') + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-    if (ext == "jpeg")
-        ext = "jpg";
-    const Encoder* encoder = nullptr;
-    for (const Encoder* e : encoders())
-        if (ext == e->extension)
-            encoder = e;
-    if (!encoder)
-    {
-        std::fprintf(stderr, "no encoder for .%s\n", ext.c_str());
-        return 2;
-    }
-    EncodeOptions options;
-    MetadataChoice metadata;
+    // --process in save:out,setting=value,...: the one way the command line saves.
+    std::string save = std::string("save:") + argv[1];
     for (int i = 2; i < argc; ++i)
-    {
-        const std::string kv = argv[i];
-        const auto eq = kv.find('=');
-        if (eq != std::string::npos && kv.compare(0, eq, "metadata") == 0)
-        {
-            std::string error;
-            if (!parse_metadata_choice(kv.substr(eq + 1), metadata, error))
-            {
-                std::fprintf(stderr, "%s\n", error.c_str());
-                return 2;
-            }
-            continue;
-        }
-        if (eq == std::string::npos || !encoder->setting(kv.substr(0, eq).c_str()))
-        {
-            std::fprintf(stderr, "%s has no setting \"%s\"; it has:", encoder->name, kv.substr(0, eq).c_str());
-            for (const EncodeSetting& s : encoder->settings)
-                std::fprintf(stderr, " %s", s.key);
-            std::fprintf(stderr, "\n");
-            return 2;
-        }
-        options.values[kv.substr(0, eq)] = std::atoi(kv.c_str() + eq + 1);
-    }
-    Image img;
-    std::string error;
-    if (!decode_image(in, img, error))
-    {
-        std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
-        return 1;
-    }
-    if (img.stored)
-    {
-        SaveTarget target;
-        target.width = img.width;
-        target.height = img.height;
-        target.drop_develop = img.is_raw;  // develop settings describe the raw, not this rendering
-        options.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*img.stored, metadata, target));
-    }
-    if (!encoder->encode(img, out, options, error))
-    {
-        std::fprintf(stderr, "%s: %s\n", out.c_str(), error.c_str());
-        return 1;
-    }
-    return 0;
+        save += std::string(",") + argv[i];
+    std::vector<std::string> args = {argv[0], save};
+    std::vector<char*> ptrs;
+    for (std::string& a : args)
+        ptrs.push_back(a.data());
+    return process(int(ptrs.size()), ptrs.data());
 }

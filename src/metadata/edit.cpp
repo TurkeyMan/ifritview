@@ -10,6 +10,8 @@
 // IPTC is a list of datasets, filtered.
 #include "file_metadata.h"
 
+#include "../image.h"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -979,4 +981,25 @@ FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& 
     if (!source.iptc.empty())
         m.iptc = edit_iptc(source.iptc, choice);
     return m;
+}
+
+std::shared_ptr<const FileMetadata> metadata_for_save(const Image& image, const MetadataChoice& choice, bool format_holds_metadata,
+                                                      bool develop_applied, int width, int height)
+{
+    if (!image.stored)
+        return nullptr;
+    if (!format_holds_metadata)
+    {
+        if (image.stored->icc.empty())
+            return nullptr;
+        FileMetadata icc_only;  // part of what the pixels mean, whatever the format
+        icc_only.icc = image.stored->icc;
+        return std::make_shared<const FileMetadata>(std::move(icc_only));
+    }
+    SaveTarget target;
+    target.width = width ? width : image.width;
+    target.height = height ? height : image.height;
+    target.pixels_changed = image.edited || image.exposure_edit != 0;
+    target.drop_develop = develop_applied || image.is_raw;  // a raw's develop settings describe the raw, not this rendering
+    return std::make_shared<const FileMetadata>(prepare_metadata(*image.stored, choice, target));
 }

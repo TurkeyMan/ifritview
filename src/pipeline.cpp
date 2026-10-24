@@ -153,22 +153,8 @@ bool parse_save(const std::string& arg, Save& s, std::string& error)
 
 bool do_save(const Image& img, const std::string& source_path, const Save& s, std::string& error)
 {
-    std::shared_ptr<const FileMetadata> metadata;
-    if (img.stored && s.encoder->metadata)
-    {
-        SaveTarget target;
-        target.width = img.width;
-        target.height = img.height;
-        target.pixels_changed = img.edited || img.exposure_edit != 0;
-        target.drop_develop = img.is_raw;  // develop settings describe the raw, not this rendering
-        metadata = std::make_shared<const FileMetadata>(prepare_metadata(*img.stored, s.metadata, target));
-    }
-    else if (img.stored && !img.stored->icc.empty())
-    {
-        FileMetadata icc_only;
-        icc_only.icc = img.stored->icc;
-        metadata = std::make_shared<const FileMetadata>(std::move(icc_only));
-    }
+    // XMP develop settings aren't applied here: they still describe the image.
+    const std::shared_ptr<const FileMetadata> metadata = metadata_for_save(img, s.metadata, s.encoder->metadata, false);
     if (s.lossless != Lossless::no)
     {
         const LosslessJpeg plan = plan_lossless_jpeg(img, source_path);
@@ -176,16 +162,8 @@ bool do_save(const Image& img, const std::string& source_path, const Save& s, st
                             (s.lossless != Lossless::automatic || plan.differs.empty());
         if (usable)
         {
-            std::shared_ptr<const FileMetadata> m = metadata;
-            if (m && (plan.width != img.width || plan.height != img.height) && img.stored)
-            {
-                // The metadata describes the file written, which is the plan's size.
-                SaveTarget target;
-                target.width = plan.width;
-                target.height = plan.height;
-                target.pixels_changed = img.edited;
-                m = std::make_shared<const FileMetadata>(prepare_metadata(*img.stored, s.metadata, target));
-            }
+            // The metadata describes the file written, which is the plan's size.
+            const std::shared_ptr<const FileMetadata> m = metadata_for_save(img, s.metadata, s.encoder->metadata, false, plan.width, plan.height);
             if (!plan.differs.empty())
                 std::fprintf(stderr, "%s: lossless, with %s than the image as shown (JPEG's blocks)\n", s.path.c_str(), plan.differs.c_str());
             return write_lossless_jpeg(plan, m.get(), s.path, error);
