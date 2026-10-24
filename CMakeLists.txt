@@ -99,14 +99,19 @@ else()
   target_sources(ifrit_core PRIVATE src/integration.cpp)
 endif()
 
-# Image format plugins (src/plugins.cpp, include/ifritview_plugin.h): the
-# installed system folder is lib/<multiarch>/ifritview/plugins on Linux,
-# beside the private libraries in lib/<multiarch>/ifritview.
-if(NOT WIN32)
+# Image format plugins (src/plugins.cpp, include/ifritview_plugin.h). The
+# header goes into the system plugin folder, for whoever writes one: Windows
+# bin\plugins beside the exe; Linux lib/<multiarch>/ifritview/plugins (beside
+# the private libraries in lib/<multiarch>/ifritview), and include/ifritview.
+if(WIN32)
+  install(FILES include/ifritview_plugin.h DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins)
+else()
   set(IFRIT_FORMAT_PLUGIN_DIR "${CMAKE_INSTALL_LIBDIR}/ifritview/plugins")
   set_property(SOURCE src/plugins.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     IFRIT_FORMAT_PLUGIN_DIR="${IFRIT_FORMAT_PLUGIN_DIR}"
     IFRIT_FORMAT_PLUGIN_DIR_FULL="${CMAKE_INSTALL_FULL_LIBDIR}/ifritview/plugins")
+  install(FILES include/ifritview_plugin.h DESTINATION ${IFRIT_FORMAT_PLUGIN_DIR})
+  install(FILES include/ifritview_plugin.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ifritview)
 endif()
 # The farbfeld example plugin, built into <build>/plugins (not installed).
 option(IFRIT_EXAMPLE_PLUGINS "Build the example format plugin (examples/plugins; not installed)" ON)

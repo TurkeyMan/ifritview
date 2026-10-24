@@ -1,8 +1,10 @@
 ; IfritView's Windows installer. Built by .github/ci/build-windows.sh:
 ;   makensis -DVERSION=1.2 -DSTAGE=<install tree> -DOUT=<setup.exe> ifritview.nsi
 ; Windows paths (Windows' makensis doesn't expand File /r with '/').
-; STAGE holds the app as installed: bin\ifritview.exe (everything linked in)
-; and the README and licence. Making it the default viewer is in its Settings.
+; STAGE holds the app as installed: bin\ifritview.exe (everything linked in),
+; bin\plugins\ifritview_plugin.h (the format plugin interface; plugin DLLs go
+; beside it), and the README and licence. Making it the default viewer is in
+; its Settings.
 
 Unicode true
 !include "MUI2.nsh"
@@ -44,9 +46,14 @@ FunctionEnd
 
 Section "IfritView"
   SetShellVarContext all
-  ; A reinstall replaces the old tree rather than mixing DLLs of two versions.
+  ; A reinstall replaces the old tree rather than mixing DLLs of two versions,
+  ; but keeps the format plugins people put in bin\plugins (the stage's copy
+  ; of ifritview_plugin.h, there for plugin authors, then replaces the old).
+  Rename "$INSTDIR\bin\plugins" "$INSTDIR\plugins.keep"
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
+  CreateDirectory "$INSTDIR\bin"
+  Rename "$INSTDIR\plugins.keep" "$INSTDIR\bin\plugins"
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*"
   WriteUninstaller "$INSTDIR\uninstall.exe"

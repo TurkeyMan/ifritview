@@ -47,8 +47,10 @@ Run python @('third_party/rapport/ci/check-imports.py', "$build\Release\ifritvie
 
 $stage = 'dist\IfritView'
 Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin\plugins" | Out-Null
 Copy-Item "$build\Release\ifritview.exe" "$stage\bin\"
+# Format plugins go in bin\plugins; the interface they're written to waits there.
+Copy-Item include\ifritview_plugin.h "$stage\bin\plugins\"
 Copy-Item README.md, LICENSE $stage
 
 $suffix = if ($version) { "-$version" } else { '' }
