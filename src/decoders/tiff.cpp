@@ -125,10 +125,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.format = "TIFF";
     uint16_t compression = COMPRESSION_NONE;
     TIFFGetFieldDefaulted(tif, TIFFTAG_COMPRESSION, &compression);
+    // As the save dialog's choices: deflate, LZW, none.
+    out.encoded_as = "tif";
     switch (compression)
     {
         case COMPRESSION_LZW:
             out.format += ", LZW";
+            out.encoding["compression"] = 1;
             break;
         case COMPRESSION_JPEG:
             out.format += ", JPEG";
@@ -136,6 +139,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
         case COMPRESSION_DEFLATE:
         case COMPRESSION_ADOBE_DEFLATE:
             out.format += ", deflate";
+            out.encoding["compression"] = 0;
+            break;
+        case COMPRESSION_NONE:
+            out.encoding["compression"] = 2;
             break;
         case COMPRESSION_PACKBITS:
             out.format += ", PackBits";

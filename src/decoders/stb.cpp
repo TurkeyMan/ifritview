@@ -53,6 +53,27 @@ std::string format_name(const std::string& path)
     return "stb_image";
 }
 
+// A BMP's header as the save dialog's BMP settings: its pixel format (the
+// 16-bit layouts by their red mask) and row order.
+void bmp_encoding(FILE* f, Image& out)
+{
+    uint8_t head[58];
+    const size_t n = std::fread(head, 1, sizeof head, f);
+    auto u16 = [&](size_t at) { return unsigned(head[at] | head[at + 1] << 8); };
+    auto u32 = [&](size_t at) { return uint32_t(u16(at)) | uint32_t(u16(at + 2)) << 16; };
+    if (n < 34 || head[0] != 'B' || head[1] != 'M' || u32(14) < 40)
+        return;  // an OS/2 header keeps none of this
+    out.encoded_as = "bmp";
+    out.encoding["topdown"] = int32_t(u32(22)) < 0;
+    const unsigned bits = u16(28);
+    const uint32_t red = u32(30) == 3 && n >= 58 ? u32(54) : 0;  // BI_BITFIELDS
+    const int format = bits == 32 ? 1 : bits == 24 ? 2 : bits == 8 ? 6
+                     : bits == 16 ? (red == 0xF800 ? 3 : red == 0x0F00 ? 5 : 4)  // 565, 4444, else 1555 (as BI_RGB's)
+                                  : 0;
+    if (format)
+        out.encoding["format"] = format;
+}
+
 bool decode(const std::string& path, Image& out, std::string& error)
 {
     int w = 0, h = 0, channels = 0;
@@ -120,7 +141,16 @@ bool decode(const std::string& path, Image& out, std::string& error)
                     out.pixel_format = PixelFormat::packed(M::RGB, "BGR", 8);
                 if (type >= 9)
                     out.pixel_format.notes.push_back("RLE");
+                // As the save dialog's Targa settings.
+                const int format = (type == 1 || type == 9) ? 4 : depth == 32 ? 1 : depth == 24 ? 2 : (depth == 16 || depth == 15) ? 3 : 0;
+                out.encoded_as = "tga";
+                if (format)
+                    out.encoding["format"] = format;
+                out.encoding["rle"] = type >= 9;
+                out.encoding["topleft"] = (h[17] & 0x20) != 0;
             }
+            else if (format_name(path) == "BMP")
+                bmp_encoding(f, out);
             std::fclose(f);
         }
         if (format_name(path) == "Radiance HDR")

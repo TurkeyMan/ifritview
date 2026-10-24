@@ -197,7 +197,12 @@ bool do_save(const Image& img, const std::string& source_path, const Save& s, st
             return false;
         }
     }
-    EncodeOptions options = s.options;
+    // Saved to its own format, what isn't given is as the file was saved.
+    EncodeOptions options;
+    if (img.encoded_as == s.encoder->extension)
+        options.values = img.encoding;
+    for (const auto& [key, value] : s.options.values)
+        options.values[key] = value;
     options.metadata = metadata;
     return s.encoder->encode(img, s.path, options, error);
 }
@@ -303,7 +308,17 @@ int process(int argc, char** argv)
             img.retone(img.exposure_edit);
         }
         else if (st.name == "info")
+        {
             std::printf("%d x %d, %s%s\n", img.width, img.height, img.format.c_str(), img.has_alpha ? ", alpha" : "");
+            // How it was saved, as save settings for its format.
+            if (!img.encoded_as.empty() && !img.encoding.empty())
+            {
+                std::printf("saved as %s:", img.encoded_as.c_str());
+                for (const auto& [key, value] : img.encoding)
+                    std::printf(" %s=%d", key.c_str(), value);
+                std::printf("\n");
+            }
+        }
         else if (st.name == "save")
         {
             if (!do_save(img, in, st.save, error))
@@ -373,7 +388,9 @@ it is at that step, after earlier turns and crops)
   flip:h | flip:v    mirror left-right (h) or top-bottom (v)
   crop:X,Y,W,H       keep the W x H rectangle whose top-left corner is X,Y
   exposure:EV        raw and HDR images only: brighter (+) or darker (-), in stops
-  info               print the image's size and format at this point
+  info               print the image's size and format at this point, and how the
+                     input was saved as its format's save settings ("saved as
+                     jpg: progressive=1 quality=85 subsampling=3"; quality estimated)
   save:OUT[,KEY=VALUE...]
                      write the image as it is at this point; the format comes from
                      OUT's extension. Several saves may appear, e.g. one per size.
@@ -382,7 +399,10 @@ it is at that step, after earlier turns and crops)
 
 SAVE SETTINGS (KEY=VALUE after save:OUT, comma separated)
   Each format's own settings: --formats lists them with their ranges and defaults
-  (e.g. quality=85, progressive=yes, compression=1). Toggles take yes/no; choices
+  (e.g. quality=85, progressive=yes, compression=1). Saving to the input's own
+  format, a setting not given is as the input was saved, where the file says
+  (a JPEG's quality is estimated from its tables); otherwise it's the default
+  --formats shows. Toggles take yes/no; choices
   take their number. Also, for every format:
   metadata=CHOICE    what of the file's metadata (EXIF, XMP, IPTC) to keep:
                        all           everything (the default)

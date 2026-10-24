@@ -31,11 +31,14 @@ public:
     };
 
     // `own_extension` (lower case, "jpg" for JPEG) is preselected when
-    // there's an encoder for it. `remembered` keeps each format's settings
-    // between saves; it must outlive the dialog.
+    // there's an encoder for it, its settings starting as `own_settings` (as
+    // the file was saved; Image::encoding) where it has them. `remembered`
+    // keeps each format's settings between saves, for the rest; it must
+    // outlive the dialog.
     // `metadata` is the choice to start from; `present` which groups the
     // image has anything in (metadata_present: the rest are greyed).
     static std::shared_ptr<SaveDialog> open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
+                                            const std::map<std::string, int>& own_settings,
                                             std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata,
                                             const MetadataChoice& present, Callbacks callbacks);
     MetadataChoice metadata() const;  // as chosen
@@ -43,8 +46,8 @@ public:
     void set_info(const std::string& text);  // beside the format: the preview's file size
     // JPEG's Lossless choice: available or not, and a few words (how the
     // result differs from the image, or why it can't be done). Checked to
-    // start with when `exact`. The choice reaches `chosen` as "lossless"=1.
-    void set_lossless(bool available, bool exact, const std::string& note);
+    // start with when available. The choice reaches `chosen` as "lossless"=1.
+    void set_lossless(bool available, const std::string& note);
     bool preview_shown() const { return !preview_ || preview_->checked(); }
     void close();                            // as Cancel
 
@@ -81,6 +84,8 @@ private:
     std::vector<Page> pages_;
     rap::drop_down* format_ = nullptr;
     std::map<std::string, EncodeOptions>* remembered_ = nullptr;
+    std::string own_extension_;
+    std::map<std::string, int> own_settings_;
     Callbacks callbacks_;
     std::weak_ptr<SaveDialog> self_;
     bool finished_ = false;

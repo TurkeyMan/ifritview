@@ -166,6 +166,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.format += ", grayscale";
     if (interlace != PNG_INTERLACE_NONE)
         out.format += ", interlaced";
+    out.encoded_as = "png";
+    out.encoding["interlaced"] = interlace != PNG_INTERLACE_NONE;
     return true;
 }
 

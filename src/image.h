@@ -5,6 +5,7 @@
 #include "pixel_format.h"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -108,6 +109,12 @@ struct Image
     PixelFormat pixel_format;            // how the file stores its pixels
     std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
     std::string info;                    // extra detail for the status bar, may be empty
+    // How the file was saved, in the terms of its format's save settings
+    // (encoders/encoder.h keys, "quality" and so on), for saving it again
+    // the same way. `encoded_as` is that encoder's extension ("jpg"); empty
+    // when there's no such encoder or nothing to say.
+    std::string encoded_as;
+    std::map<std::string, int> encoding;
     std::shared_ptr<LinearData> linear;  // only for raw files
     std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null
     // More than the display shows (a linear source past 1): exposure applies.

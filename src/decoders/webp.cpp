@@ -130,6 +130,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     if (features.format == 2)
         out.format += ", lossless";
+    out.encoded_as = "webp";
+    if (features.format != 0)
+        out.encoding["lossless"] = features.format == 2;
     if (features.has_animation)
         out.format += ", animated (" + std::to_string(info.frame_count) + " frames)";
     return true;

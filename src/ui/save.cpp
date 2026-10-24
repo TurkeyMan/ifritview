@@ -40,6 +40,7 @@ int preset_index(const MetadataChoice& c)
 }  // namespace
 
 std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
+                                             const std::map<std::string, int>& own_settings,
                                              std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata,
                                              const MetadataChoice& present, Callbacks callbacks)
 {
@@ -48,6 +49,8 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
     d->present_ = present;
     d->ui_ = &ui;
     d->remembered_ = &remembered;
+    d->own_extension_ = own_extension;
+    d->own_settings_ = own_settings;
     d->callbacks_ = std::move(callbacks);
     int initial = 0;
     std::vector<std::string> names;
@@ -115,7 +118,10 @@ rap::node SaveDialog::page_node(Page& page)
     for (size_t i = 0; i < e.settings.size(); ++i)
     {
         const EncodeSetting& set = e.settings[i];
-        const int value = known.get(set.key, set.initial);
+        // The file's own format: as it was saved, where that's known.
+        int value = known.get(set.key, set.initial);
+        if (auto it = own_settings_.find(set.key); it != own_settings_.end() && own_extension_ == e.extension)
+            value = std::clamp(it->second, set.min, set.max);
         Control& c = page.controls[i];
         rap::node beside = L::label{set.note ? set.note : ""};  // a few words
         switch (set.kind)
@@ -332,13 +338,13 @@ void SaveDialog::report()
     callbacks_.changed(*p.encoder, o);
 }
 
-void SaveDialog::set_lossless(bool available, bool exact, const std::string& note)
+void SaveDialog::set_lossless(bool available, const std::string& note)
 {
     for (Page& p : pages_)
         if (p.lossless)
         {
             p.lossless->set_enabled(available);
-            p.lossless->set_checked(available && exact);
+            p.lossless->set_checked(available);
             update_enabled(p);
         }
     if (lossless_note_)

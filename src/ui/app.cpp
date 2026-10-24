@@ -1687,7 +1687,11 @@ void App::save_as()
     present.keep = present.location = present.personal = present.author = present.description = present.capture = present.history = false;
     if (save_source_ == image_ && image_->stored)
         present = metadata_present(*image_->stored);
-    save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, metadata,
+    // The file's own format and settings, as decoded (a .jpeg is "jpg"); a
+    // difference image has none.
+    const bool own = !diff_session_ && !image_->encoded_as.empty();
+    const std::string format = diff_session_ ? std::string("png") : own ? image_->encoded_as : lower_extension(image_path_);
+    save_dialog_ = SaveDialog::open(ui_, window_.get(), format, own ? image_->encoding : std::map<std::string, int>{}, save_options_, metadata,
                                     present, std::move(cb));
     plan_lossless();
     update_toolbar();
@@ -1805,7 +1809,7 @@ void App::plan_lossless()
         return;
     if (save_source_ != image_)
     {
-        save_dialog_->set_lossless(false, false, "Lossless: only the original image can be saved this way");
+        save_dialog_->set_lossless(false, "Lossless: only the original image can be saved this way");
         return;
     }
     const uint64_t generation = ++lossless_generation_;
@@ -1820,11 +1824,11 @@ void App::plan_lossless()
                         return;
                     lossless_plan_ = plan;
                     if (!plan->why_not.empty())
-                        save_dialog_->set_lossless(false, false, "Not possible: " + plan->why_not);
+                        save_dialog_->set_lossless(false, "Not possible: " + plan->why_not);
                     else if (plan->differs.empty())
-                        save_dialog_->set_lossless(true, true, "Exactly the image as shown, not one pixel re-encoded");
+                        save_dialog_->set_lossless(true, "Exactly the image as shown, not one pixel re-encoded");
                     else
-                        save_dialog_->set_lossless(true, false, "With JPEG's blocks: " + plan->differs + " than shown");
+                        save_dialog_->set_lossless(true, "With JPEG's blocks: " + plan->differs + " than shown");
                 });
         })
         .detach();

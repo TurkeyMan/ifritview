@@ -4,6 +4,7 @@
 #include <jpeglib.h>
 
 #include <algorithm>
+#include <cmath>
 #include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
@@ -34,6 +35,29 @@ bool sniff(const uint8_t* h, size_t n)
     return n >= 3 && h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF;
 }
 
+// libjpeg's scaling of its standard luminance table by quality, undone: a
+// rough figure for files whose tables were made otherwise (cameras').
+int estimate_quality(const JQUANT_TBL& table)
+{
+    static const unsigned standard[64] = {16, 11, 10, 16, 24,  40,  51,  61,  12, 12, 14, 19, 26,  58,  60,  55,
+                                          14, 13, 16, 24, 40,  57,  69,  56,  14, 17, 22, 29, 51,  87,  80,  62,
+                                          18, 22, 37, 56, 68,  109, 103, 77,  24, 35, 55, 64, 81,  104, 113, 92,
+                                          49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99};
+    double sum = 0, std_sum = 0;
+    bool ones = true;
+    for (int i = 0; i < 64; ++i)
+    {
+        sum += table.quantval[i];
+        std_sum += standard[i];
+        ones = ones && table.quantval[i] == 1;
+    }
+    if (ones)
+        return 100;
+    const double scale = sum * 100 / std_sum;  // libjpeg's percentage of the standard table
+    const double q = scale <= 100 ? (200 - scale) / 2 : 5000 / scale;
+    return std::clamp(int(std::lround(q)), 1, 100);
+}
+
 // Shared body: the source is already attached to cinfo.
 bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, std::string& error)
 {
@@ -48,6 +72,12 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);  // keep the ICC profile
     jpeg_read_header(&cinfo, TRUE);
     progressive = cinfo.progressive_mode;
+    // As the save dialog's JPEG settings.
+    out.encoded_as = "jpg";
+    out.encoding["progressive"] = progressive;
+    int quality = 0;
+    if (const JQUANT_TBL* table = cinfo.quant_tbl_ptrs[cinfo.comp_info[0].quant_tbl_no])
+        out.encoding["quality"] = quality = estimate_quality(*table);
     {
         JOCTET* icc = nullptr;
         unsigned int icc_len = 0;
@@ -94,6 +124,10 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     {
         const int h = cinfo.comp_info[0].h_samp_factor, v = cinfo.comp_info[0].v_samp_factor;
         subsampling = (h == 2 && v == 2) ? "4:2:0" : (h == 2 && v == 1) ? "4:2:2" : (h == 1 && v == 2) ? "4:4:0" : "4:4:4";
+        // The settings' choices: full, half across, quarter (4:4:0 has none).
+        const int choice = (h == 1 && v == 1) ? 1 : (h == 2 && v == 1) ? 2 : (h == 2 && v == 2) ? 3 : 0;
+        if (choice)
+            out.encoding["subsampling"] = choice;
     }
     {
         using M = PixelFormat::Model;
@@ -109,6 +143,8 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     }
     out.add("JPEG", "Coding", progressive ? "progressive" : "baseline");
     out.add("JPEG", "Components", std::to_string(cinfo.num_components));
+    if (quality)
+        out.add("JPEG", "Quality (estimated)", std::to_string(quality));
     if (cinfo.num_components == 3)
         out.add("JPEG", "Chroma subsampling", subsampling);
     if (cinfo.saw_JFIF_marker)
