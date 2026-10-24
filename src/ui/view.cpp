@@ -1,6 +1,7 @@
 #include "view.h"
 
 #include "config.h"
+#include "platform.h"
 #include "controls.h"
 #include "scale.h"
 #include "selection.h"
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <numbers>
+#include <thread>
 
 using APixelFormat = rap::pixel_format;
 
@@ -638,7 +640,8 @@ double View::fit_zoom() const
     const double w = stand_in ? image_->final_width : image_->width;
     const double h = stand_in ? image_->final_height : image_->height;
     double z = std::min(vw / w, vh / h);
-    if (!(fullscreen_ && cfg_.fullscreen_upscale))
+    // Pixels stop at 1:1; an image that renders at any size fills the view.
+    if (!(fullscreen_ && cfg_.fullscreen_upscale) && !image_->vector)
         z = std::min(z, 1.0);
     if (std::fabs(z - 1.0) < 0.01)
         z = 1.0;
@@ -778,11 +781,17 @@ void View::zoom_step(int direction)
     zoom_step_at(direction, vw / 2.0, vh / 2.0);
 }
 
+double View::natural_zoom() const
+{
+    // An inch is 96 logical pixels, as desktops reckon it.
+    return image_ && image_->vector ? scale_factor() * 96.0 / image_->vector->dpi : 1.0;
+}
+
 void View::zoom_original()
 {
     int vw, vh;
     view_size(vw, vh);
-    set_zoom(1.0, vw / 2.0, vh / 2.0);
+    set_zoom(natural_zoom(), vw / 2.0, vh / 2.0);
 }
 
 void View::zoom_fit()
@@ -794,6 +803,66 @@ void View::zoom_fit()
 }
 
 // -- pixels -------------------------------------------------------------------
+
+void View::draw_native(rap::painter& p, float alpha)
+{
+    int vw, vh;
+    view_size(vw, vh);
+    const double scale = p.device_scale();
+    // The image's part of the view, on whole device pixels.
+    const double sw = image_->width * zoom_, sh = image_->height * zoom_;
+    const int dx0 = std::max(0, int(std::floor(pan_x_))), dy0 = std::max(0, int(std::floor(pan_y_)));
+    const int dx1 = std::min(vw, int(std::ceil(pan_x_ + sw))), dy1 = std::min(vh, int(std::ceil(pan_y_ + sh)));
+    if (dx1 <= dx0 || dy1 <= dy0)
+        return;
+    const auto& want = image_->vector;
+    Native& n = native_;
+    const bool current = n.image && n.of == want && n.zoom == zoom_;
+    if (current)
+    {
+        const double x = pan_x_ + n.x * zoom_, y = pan_y_ + n.y * zoom_;
+        p.image(*n.image, {0, 0, float(n.w), float(n.h)}, {float(x / scale), float(y / scale), float(n.w / scale), float(n.h / scale)}, rap::filter::nearest,
+                alpha);
+        // Covers the view's part: nothing more to make.
+        if (x <= dx0 + 0.5 && y <= dy0 + 0.5 && x + n.w >= dx1 - 0.5 && y + n.h >= dy1 - 0.5)
+            return;
+    }
+    // Rendered on a thread, one at a time; until then the stand-in (and any
+    // part of an earlier one) shows, and when it lands the paint it asks for
+    // sees whether the view has moved on meanwhile.
+    if (native_busy_)
+        return;
+    native_busy_ = true;
+    const double x = (dx0 - pan_x_) / zoom_, y = (dy0 - pan_y_) / zoom_, z = zoom_;
+    const int w = dx1 - dx0, h = dy1 - dy0;
+    std::weak_ptr<bool> alive = alive_;
+    std::thread(
+        [this, alive, want, z, x, y, w, h]
+        {
+            platform::lower_thread_priority();
+            auto px = std::make_shared<PixelBuffer>();
+            const bool ok = want->render(z, x, y, w, h, *px);
+            platform::post_main(
+                [this, alive, want, z, x, y, w, h, px, ok]
+                {
+                    if (alive.expired())
+                        return;
+                    native_busy_ = false;
+                    if (ok && image_ && image_->vector == want)
+                    {
+                        native_.of = want;
+                        native_.zoom = z;
+                        native_.x = x;
+                        native_.y = y;
+                        native_.w = w;
+                        native_.h = h;
+                        native_.image = ui_.create_image(w, h, APixelFormat::bgra8_premultiplied, px->data(), size_t(w) * 4);
+                    }
+                    invalidate();
+                });
+        })
+        .detach();
+}
 rap::image* View::base_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
@@ -930,7 +999,7 @@ void View::paint(rap::painter& p, rap::size_f)
         if (src)
             p.image(*src, {0, 0, float(src->width()), float(src->height())}, dst, rap::filter::linear, alpha);
     }
-    else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video)
+    else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video && !image_->vector)
     {
         rap::image* src = scaled_image(zoom_);
         if (src)
@@ -938,10 +1007,12 @@ void View::paint(rap::painter& p, rap::size_f)
     }
     else
     {
-        const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video);
+        const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video) || image_->vector;
         if (rap::image* base = base_image())  // the full-size upload, only when it's what gets drawn
             p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? rap::filter::linear : rap::filter::nearest, alpha);
     }
+    if (image_->vector && !compare_ && !motion_.active && std::fabs(zoom_ - 1.0) > 1e-6)  // at 1:1 the stand-in is it
+        draw_native(p, alpha);
     if (divided_)
         p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);
     if (!compare_ && !label_.empty())

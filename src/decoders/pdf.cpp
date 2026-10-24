@@ -1,5 +1,7 @@
-// PDF through poppler-glib: the first page rendered to pixels at a fixed
-// DPI, over white. Page navigation can come later.
+// PDF through poppler-glib: the first page rendered to pixels at 150 dpi,
+// over white, and kept open: the view renders it again at the size it's
+// shown, and this rendering stands in until that's ready (and is what
+// saving and thumbnails get). Page navigation can come later.
 //
 // Poppler is optional at runtime: built against its headers, but dlopened
 // rather than linked (it drags in a few dozen packages). Without it, PDFs
@@ -10,6 +12,11 @@
 
 #include <cairo.h>
 #include <glib.h>
+
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <mutex>
 #include <poppler.h>
 
 #include <cmath>
@@ -82,7 +89,52 @@ bool load_poppler()
 #define poppler_page_get_size g_poppler.poppler_page_get_size
 #define poppler_page_render g_poppler.poppler_page_render
 
+// Quick to make, for the moment before the view's own; a page larger than
+// A4 renders at less, its long side at most kMaxSide pixels.
 constexpr double kDpi = 150.0;
+constexpr double kMaxSide = 4096;
+
+// White, then the page: `scale` pixels to the point, from (x, y) in them.
+void render_page(PopplerPage* page, double scale, double x, double y, int w, int h, uint8_t* pixels, int stride)
+{
+    cairo_surface_t* surface = cairo_image_surface_create_for_data(pixels, CAIRO_FORMAT_ARGB32, w, h, stride);
+    cairo_t* cr = cairo_create(surface);
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_paint(cr);
+    cairo_translate(cr, -x, -y);
+    cairo_scale(cr, scale, scale);
+    poppler_page_render(page, cr);
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
+    cairo_surface_destroy(surface);
+}
+
+// The open page, for renderings at other sizes. Poppler's objects aren't
+// for two threads at once.
+class PdfPage : public VectorSource
+{
+public:
+    PdfPage(PopplerDocument* doc, PopplerPage* page, double page_dpi) : doc_(doc), page_(page) { dpi = page_dpi; }
+    ~PdfPage() override
+    {
+        g_object_unref(page_);
+        g_object_unref(doc_);
+    }
+    bool render(double scale, double x, double y, int out_w, int out_h, PixelBuffer& out) const override
+    {
+        if (out_w <= 0 || out_h <= 0)
+            return false;
+        out = PixelBuffer(size_t(out_w) * out_h * 4);
+        std::lock_guard<std::mutex> lock(mutex_);
+        render_page(page_, scale * dpi / 72.0, x * scale, y * scale, out_w, out_h, out.data(), out_w * 4);
+        return true;
+    }
+
+private:
+    PopplerDocument* doc_;
+    PopplerPage* page_;
+    mutable std::mutex mutex_;
+};
 
 bool sniff(const uint8_t* h, size_t n)
 {
@@ -110,7 +162,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "cannot read file";
         return false;
     }
-    GBytes* gbytes = g_bytes_new_static(bytes, size);
+    GBytes* gbytes = g_bytes_new(bytes, size);  // a copy: the document outlives the file's bytes
     GError* err = nullptr;
     PopplerDocument* doc = poppler_document_new_from_bytes(gbytes, nullptr, &err);
     g_bytes_unref(gbytes);
@@ -131,21 +183,14 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     double pw = 0, ph = 0;
     poppler_page_get_size(page, &pw, &ph);  // points
-    const double scale = kDpi / 72.0;
-    out.allocate(int(std::ceil(pw * scale)), int(std::ceil(ph * scale)));
-    cairo_surface_t* surface = cairo_image_surface_create_for_data(out.pixels.data(), CAIRO_FORMAT_ARGB32, out.width, out.height, out.stride);
-    cairo_t* cr = cairo_create(surface);
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-    cairo_scale(cr, scale, scale);
-    poppler_page_render(page, cr);
-    cairo_destroy(cr);
-    cairo_surface_flush(surface);
-    cairo_surface_destroy(surface);
+    const double dpi = std::min(kDpi, kMaxSide * 72.0 / std::max({pw, ph, 1.0}));
+    const double scale = dpi / 72.0;
+    out.allocate(std::max(1, int(std::ceil(pw * scale))), std::max(1, int(std::ceil(ph * scale))));
+    render_page(page, scale, 0, 0, out.width, out.height, out.pixels.data(), out.stride);
 
     out.format = "PDF";
     out.pixel_format.model = PixelFormat::Model::Vector;
-    out.pixel_format.notes.push_back("rendered at " + std::to_string(int(kDpi)) + " dpi");
+    out.pixel_format.notes.push_back("rendered at " + std::to_string(int(std::lround(dpi))) + " dpi");
     out.info = std::to_string(pages) + (pages == 1 ? " page" : " pages");
     add_info(out, "Title", poppler_document_get_title(doc));
     add_info(out, "Author", poppler_document_get_author(doc));
@@ -158,10 +203,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     char buf[64];
     std::snprintf(buf, sizeof buf, "%.1f × %.1f mm", pw * 25.4 / 72, ph * 25.4 / 72);
     out.add("Document", "Page size", buf);
-    out.add("Document", "Rendered at", std::to_string(int(kDpi)) + " dpi");
-
-    g_object_unref(page);
-    g_object_unref(doc);
+    out.add("Document", "Rendered at", std::to_string(int(std::lround(dpi))) + " dpi");
+    out.vector = std::make_shared<PdfPage>(doc, page, dpi);  // keeps them
     return true;
 }
 

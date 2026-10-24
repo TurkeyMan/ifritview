@@ -84,6 +84,19 @@ struct MetadataGroup
     std::vector<MetadataItem> items;
 };
 
+// An image that can be drawn again at any size (a PDF page): its pixels are
+// one rendering of it, `dpi` pixels to the inch, and the view asks for
+// sharper ones of the part it shows when it shows it larger.
+struct VectorSource
+{
+    virtual ~VectorSource() = default;
+    double dpi = 96;
+    // The part from (x, y) of the image (its pixels) at `scale` times their
+    // size, into `out` (out_w x out_h, premultiplied ARGB like
+    // Image::pixels). Any thread; calls may come from several.
+    virtual bool render(double scale, double x, double y, int out_w, int out_h, PixelBuffer& out) const = 0;
+};
+
 // Frames of an animated image, each a full composed canvas in the same
 // ARGB32 layout as Image::pixels, with its display time.
 struct Animation
@@ -123,6 +136,7 @@ struct Image
     std::map<std::string, int> encoding;
     std::shared_ptr<LinearData> linear;  // only for raw files
     std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null
+    std::shared_ptr<const VectorSource> vector;  // can be drawn sharper; dropped by turns, flips and crops
     // More than the display shows (a linear source past 1): exposure applies.
     bool hdr() const { return source && source->linear && source->peak > 1.0f; }
     // Re-rendered by retone(): a raw's linear data, or an HDR source.

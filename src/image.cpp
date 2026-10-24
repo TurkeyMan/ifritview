@@ -622,6 +622,7 @@ void Image::apply_orientation(int o)
     if (is_preview())
         pending_edits.push_back({o, 0, 0, 0, 0});
     mips.clear();
+    vector.reset();  // its renderings would be the right way up
     edited = true;
     // The crop turns with the image; the turn joins the one before.
     Transform& t = transform;

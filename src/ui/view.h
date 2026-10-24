@@ -93,6 +93,9 @@ public:
     double zoom() const { return zoom_; }
     void zoom_fit();
     void zoom_original();
+    // The zoom that is 1:1: one image pixel to a device pixel, or for an
+    // image that renders at any size (a PDF page), its actual size.
+    double natural_zoom() const;
     void zoom_step(int direction);  // around the view centre
 
     // Slideshow motion between two framings (centres in image coordinates).
@@ -208,6 +211,23 @@ private:
     std::unique_ptr<rap::image> scaled_;
     double scaled_zoom_ = 0;
     std::unique_ptr<rap::image> checker_;
+
+    // An image that renders at any size (Image::vector), rendered at the size
+    // it's shown, made on a thread: the device-pixel rectangle of it from
+    // (x, y) in image pixels, at `zoom`. Drawn over the stand-in while the
+    // zoom is the same and it covers what's in view; asked for again when not.
+    struct Native
+    {
+        std::shared_ptr<const VectorSource> of;
+        double zoom = 0, x = 0, y = 0;
+        int w = 0, h = 0;
+        std::unique_ptr<rap::image> image;
+    } native_;
+    bool native_busy_ = false;  // one rendering at a time; the next paint asks again if it's stale
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);  // for work finishing after the view
+    // The visible part of a vector image at this zoom; draws it if made,
+    // else asks for it.
+    void draw_native(rap::painter& p, float alpha);
 
     struct Motion
     {

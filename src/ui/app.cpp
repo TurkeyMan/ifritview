@@ -1159,7 +1159,10 @@ void App::fit_window_to_image()
     const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
     const double iw = (stand_in ? image_->final_width : image_->width) / scale;  // logical pixels at 1:1
     const double ih = (stand_in ? image_->final_height : image_->height) / scale;
-    const double s = std::min({1.0, (max_w - chrome_w - pane_w) / (images * iw), (max_h - chrome_h) / ih});
+    // A page that renders at any size fills the screen its way up; pixels
+    // stop at 1:1.
+    const double cap = image_->vector ? HUGE_VAL : 1.0;
+    const double s = std::min({cap, (max_w - chrome_w - pane_w) / (images * iw), (max_h - chrome_h) / ih});
     const float cw = images * float(std::ceil(iw * s)), ch = float(std::ceil(ih * s));
     const float w = std::clamp(cw + chrome_w + pane_w, float(cfg_.min_window_width), max_w);
     const float h = std::clamp(ch + chrome_h, float(cfg_.min_window_height), max_h);
@@ -1326,7 +1329,8 @@ void App::update_status()
             center += "  ·  " + image_->info;
         if (image_->is_preview() && status_message_.empty())
             center += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
-        const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
+        // Against 1:1, which for a page is its actual size.
+        const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
         right = std::to_string(int(std::lround(shown * 100.0))) + "%";
         if (image_->is_video && video_.active() && video_.duration() > 0)
         {
