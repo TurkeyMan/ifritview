@@ -196,6 +196,8 @@ void Image::retone(double ev)
 {
     if (!linear && !(source && source->linear))
         return;
+    if (ev != 0)
+        break_transform("the exposure was changed");
     pixels = retone_buffer(ev);
     mips.clear();
 }
@@ -376,6 +378,13 @@ Image Image::crop(int x, int y, int w, int h) const
     w = std::clamp(w, 0, width - x);
     h = std::clamp(h, 0, height - y);
     Image out;
+    out.transform = transform;
+    if (out.transform.width == 0)
+        out.transform = {width, height, 1, 0, 0, width, height, transform.broken};
+    out.transform.x += x;  // within the crop before
+    out.transform.y += y;
+    out.transform.w = w;
+    out.transform.h = h;
     out.allocate(w, h);
     out.has_alpha = has_alpha;
     out.bits_per_sample = bits_per_sample;
@@ -538,6 +547,66 @@ void Image::adopt(Image&& f)
         retone(exposure_edit);
 }
 
+namespace
+{
+
+// An orientation (EXIF 1..8) as the matrix it applies to pixel positions,
+// about the image's centre, with y down.
+struct Matrix
+{
+    int a, b, c, d;  // x' = a x + b y, y' = c x + d y
+    bool operator==(const Matrix&) const = default;
+};
+
+Matrix matrix_of(int o)
+{
+    switch (o)
+    {
+        case 2: return {-1, 0, 0, 1};   // mirror horizontal
+        case 3: return {-1, 0, 0, -1};  // rotate 180
+        case 4: return {1, 0, 0, -1};   // mirror vertical
+        case 5: return {0, 1, 1, 0};    // transpose
+        case 6: return {0, -1, 1, 0};   // rotate 90 clockwise
+        case 7: return {0, -1, -1, 0};  // transverse
+        case 8: return {0, 1, -1, 0};   // rotate 90 counter-clockwise
+        default: return {1, 0, 0, 1};
+    }
+}
+
+int orientation_of(const Matrix& m)
+{
+    for (int o = 1; o <= 8; ++o)
+        if (matrix_of(o) == m)
+            return o;
+    return 1;
+}
+
+}  // namespace
+
+// `after` done to an image already turned by `before`.
+int compose_orientation(int before, int after)
+{
+    const Matrix p = matrix_of(after), q = matrix_of(before);
+    return orientation_of({p.a * q.a + p.b * q.c, p.a * q.b + p.b * q.d, p.c * q.a + p.d * q.c, p.c * q.b + p.d * q.d});
+}
+
+// A rectangle in a W × H image, where it lands when the image is turned by `o`.
+void orient_rect(int o, int W, int H, int& x, int& y, int& w, int& h)
+{
+    const int x0 = x, y0 = y, w0 = w, h0 = h;
+    switch (o)
+    {
+        case 2: x = W - x0 - w0; break;
+        case 3: x = W - x0 - w0, y = H - y0 - h0; break;
+        case 4: y = H - y0 - h0; break;
+        case 5: x = y0, y = x0, w = h0, h = w0; break;
+        case 6: x = H - y0 - h0, y = x0, w = h0, h = w0; break;
+        case 7: x = H - y0 - h0, y = W - x0 - w0, w = h0, h = w0; break;
+        case 8: x = y0, y = W - x0 - w0, w = h0, h = w0; break;
+        default: break;
+    }
+}
+
 void Image::apply_orientation(int o)
 {
     if (o < 2 || o > 8)
@@ -546,6 +615,13 @@ void Image::apply_orientation(int o)
         pending_edits.push_back({o, 0, 0, 0, 0});
     mips.clear();
     edited = true;
+    // The crop turns with the image; the turn joins the one before.
+    Transform& t = transform;
+    if (t.width == 0)
+        t = {width, height, 1, 0, 0, width, height, t.broken};
+    const bool turned = matrix_of(t.orientation).a == 0;  // the turned image's size, before this
+    orient_rect(o, turned ? t.height : t.width, turned ? t.width : t.height, t.x, t.y, t.w, t.h);
+    t.orientation = compose_orientation(t.orientation, o);
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;

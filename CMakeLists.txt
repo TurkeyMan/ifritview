@@ -60,6 +60,8 @@ add_library(ifrit_core STATIC
   src/compare.cpp
   src/metadata/extract.cpp
   src/metadata/edit.cpp
+  src/jpeg_lossless.cpp
+  src/pipeline.cpp
   src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
@@ -219,6 +221,27 @@ ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
 ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
 ifrit_backend(xmp  HAVE_XMP  src/decoders/xmp.cpp  exempi-2.0)
 
+# TurboJPEG, libjpeg-turbo's other library: its lossless transform saves a
+# JPEG's turns, flips and crop without re-encoding (optional).
+option(IFRIT_WITH_TURBOJPEG "Lossless JPEG turns and crops" ON)
+if(IFRIT_WITH_TURBOJPEG)
+  pkg_check_modules(TURBOJPEG IMPORTED_TARGET libturbojpeg)
+endif()
+if(TURBOJPEG_FOUND)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_TURBOJPEG)
+  if(WIN32)
+    target_link_libraries(ifrit_core PUBLIC PkgConfig::TURBOJPEG)
+  else()
+    # Loaded when first wanted (a recommended package, not a dependency):
+    # only its header is needed to build.
+    target_compile_definitions(ifrit_core PRIVATE IFRIT_TURBOJPEG_DLOPEN)
+    target_include_directories(ifrit_core PRIVATE ${TURBOJPEG_INCLUDE_DIRS})
+  endif()
+  message(STATUS "turbojpeg: enabled")
+else()
+  message(STATUS "turbojpeg: not found (libturbojpeg), no lossless JPEG saving")
+endif()
+
 # Zstandard, for KTX2 levels supercompressed with it (optional: without it
 # such files are refused with a message).
 option(IFRIT_WITH_ZSTD "Read Zstandard-supercompressed KTX2" ON)
@@ -306,7 +329,7 @@ endif()
 # for jxl.lib).
 if(MSVC)
   set(vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
-  foreach(pkg CORE ZLIB_PC EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW ZSTD GEOCODE PDF_CAIRO)
+  foreach(pkg CORE ZLIB_PC EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW ZSTD TURBOJPEG GEOCODE PDF_CAIRO)
     if(NOT TARGET PkgConfig::${pkg})
       continue()
     endif()
@@ -390,14 +413,14 @@ else()
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 endif()
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS
-    "libcurl4t64 | libcurl4, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
+    "libcurl4t64 | libcurl4, libturbojpeg0, libpoppler-glib8t64 | libpoppler-glib8, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-good, gstreamer1.0-libav, libheif-plugin-libde265, libheif-plugin-dav1d")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 # CPack drops CPACK_RPM_PACKAGE_RECOMMENDS on current rpm (its support probe,
 # `rpm --suggests`, fails there), so the line rides in after the URL instead.
-set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: libcurl, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/TurkeyMan/ifritview\nRecommends: libcurl, turbojpeg, poppler-glib, gstreamer1, gstreamer1-plugins-base, gstreamer1-plugins-good")
 if(IFRIT_RAPPORT_PLUGINS)
   # The toolkit plugins require nothing (a toolkit missing at runtime is
   # skipped), and the private core is no one else's to depend on.

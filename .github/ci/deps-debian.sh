@@ -5,7 +5,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates git cmake g++ make pkg-config dpkg-dev file \
-  libgtk-3-dev libgtk-4-dev qt6-base-dev libexif-dev libjpeg-dev libpng-dev libwebp-dev libheif-dev \
+  libgtk-3-dev libgtk-4-dev qt6-base-dev libexif-dev libjpeg-dev libturbojpeg0-dev libpng-dev libwebp-dev libheif-dev \
   libjxl-dev libtiff-dev libpoppler-glib-dev libiptcdata0-dev libexempi-dev \
   libraw-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   libjson-glib-dev libzstd-dev

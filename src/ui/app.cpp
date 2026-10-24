@@ -1808,6 +1808,8 @@ void App::request_retone()
                     if (current)
                     {
                         image->pixels = std::move(*result);
+                        if (ev != 0)
+                            image->break_transform("the exposure was changed");
                         image->mips.clear();
                         if (image == image_)
                             view_->image_changed();

@@ -53,6 +53,11 @@ struct SourceData
     void measure_peak();
 };
 
+// Orientations (EXIF 1..8) as turns and flips: `after` done to an image
+// already turned by `before`; and where a rectangle of a W × H image lands.
+int compose_orientation(int before, int after);
+void orient_rect(int orientation, int W, int H, int& x, int& y, int& w, int& h);
+
 // Edits found in XMP (embedded or sidecar) that the viewer can honour.
 struct XmpDevelop
 {
@@ -133,6 +138,23 @@ struct Image
     bool is_preview() const { return stage == Stage::Preview; }
     bool is_raw = false;
     bool edited = false;  // cropped or turned since it was read: a stored thumbnail no longer matches
+    // How the pixels relate to the file's: a turn or flip of the decoded
+    // image (as an EXIF orientation, 1..8), then a crop of that. While only
+    // these have been done, a JPEG can be saved losslessly by redoing them on
+    // its compressed data; anything else that changes the pixels sets
+    // `transform.broken` (and says what).
+    struct Transform
+    {
+        int width = 0, height = 0;  // the decoded image, before any of it (0 until the first)
+        int orientation = 1;
+        int x = 0, y = 0, w = 0, h = 0;  // the crop, in the turned image
+        std::string broken;
+    } transform;
+    void break_transform(std::string why)
+    {
+        if (transform.broken.empty())
+            transform.broken = std::move(why);
+    }
     bool is_video = false;
     bool has_audio = false;  // videos: an audio stream exists  // the pixels are a frame (the first, until the player takes over)
     double duration = 0;     // seconds, for videos  // a camera raw (its preview is the embedded JPEG; it has an exposure control)

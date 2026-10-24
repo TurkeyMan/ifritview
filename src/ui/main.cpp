@@ -1,5 +1,6 @@
 #include "app.h"
 #include "platform.h"
+#include "pipeline.h"
 #include "probe.h"
 
 #include <rapport/rapport.h>
@@ -143,12 +144,7 @@ int main(int argc, char** argv)
     g_set_application_name("IfritView");
     if (argc > 1 && (std::strcmp(argv[1], "-h") == 0 || std::strcmp(argv[1], "--help") == 0))
     {
-        std::printf(
-            "usage: ifritview [image-file | directory]\n"
-            "       ifritview --diff a b        compare two images\n"
-            "       ifritview --probe file...   decode files and report, no window\n"
-            "       ifritview --convert in out [setting=value...]   save `in` as `out`, no window\n"
-            "       ifritview --version\n");
+        std::fputs(help_text(), stdout);
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--version") == 0)
@@ -160,6 +156,10 @@ int main(int argc, char** argv)
         return convert(argc - 2, argv + 2);
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--process") == 0)
+        return process(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--formats") == 0)
+        return formats_report();
 
     rap::load_options options;
 #ifdef IFRIT_PLUGIN_DIR
