@@ -57,6 +57,34 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # Arch: the .pkg.tar.zst from packaging/arch/PKGBUILD, installed and run.
+  # (Arch has no official arm64 image.)
+  arch:
+    name: arch x86_64
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      # Before checkout, so it has git.
+      - name: Install git
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install library dependencies
+        run: .github/ci/deps-arch.sh
+
+      - name: Build, check and package
+        run: .github/ci/build-arch.sh
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ifritview-arch-x86_64-pkg
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+
   # MSVC with everything static (the C runtime, and vcpkg's libraries, whose
   # builds are cached between runs): one exe needing nothing but Windows, as a
   # portable zip and an NSIS installer.
@@ -108,7 +136,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows]
+    needs: [linux, arch, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
