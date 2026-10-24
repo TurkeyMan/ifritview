@@ -5,6 +5,7 @@
 #include "decoders/decoder.h"
 #include "geocode.h"
 #include "integration.h"
+#include "plugins.h"
 
 #include <algorithm>
 #include <array>
@@ -420,6 +421,28 @@ rap::node controls_page(const Config& cfg, State& st)
     }};
 }
 
+// The format plugins in use, a line for the File Types page.
+std::string plugin_list()
+{
+    if (!plugins::ready())
+        return "Format plugins: still loading.";
+    std::string text;
+    for (const plugins::PluginSummary& p : plugins::loaded())
+    {
+        std::string exts;
+        for (const plugins::FormatSummary& f : p.formats)
+            for (const std::string& e : f.extensions)
+                exts += (exts.empty() ? "" : " ") + e;
+        text += (text.empty() ? "" : "; ") + p.name + (p.version.empty() ? "" : " " + p.version) + " (" + exts + ")";
+    }
+    const size_t failed = plugins::failures().size();
+    if (text.empty())
+        text = "none";
+    if (failed)
+        text += "; " + std::to_string(failed) + " not loaded (see ifritview --plugins)";
+    return "Format plugins: " + text + ".";
+}
+
 rap::node file_types_page(const Config& cfg, State& st)
 {
     State* s = &st;
@@ -456,6 +479,7 @@ rap::node file_types_page(const Config& cfg, State& st)
             L::check{"Also for PDFs"}.tooltip("Leave unticked to keep your current PDF reader").bind(st.default_documents),
         },
         L::label{""}.bind(st.default_result),
+        L::label{plugin_list()},
     };
 }
 

@@ -1,11 +1,13 @@
 #include "decoder.h"
 
 #include "../platform.h"
+#include "../plugins.h"
 #include "../video.h"
 
 #include <glib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <mutex>
 #include <set>
@@ -171,7 +173,7 @@ DecodeOptions decode_options()
     return g_options;
 }
 
-const std::vector<const Decoder*>& decoders()
+static const std::vector<const Decoder*>& builtin_decoders()
 {
     static const std::vector<const Decoder*> list = []
     {
@@ -230,6 +232,52 @@ const std::vector<const Decoder*>& decoders()
     return list;
 }
 
+// The decoder list and its extensions as one snapshot. Registering plugins
+// swaps in a new one while decode threads may be walking the old, so a
+// snapshot, once published, is never freed (there's one swap per run).
+namespace
+{
+
+struct Registry
+{
+    std::vector<const Decoder*> list;
+    std::set<std::string> extensions;
+};
+
+Registry make_registry(const std::vector<const Decoder*>& extra)
+{
+    Registry r;
+    r.list = builtin_decoders();
+    r.list.insert(r.list.end() - 1, extra.begin(), extra.end());  // before the catch-all
+    for (const Decoder* d : r.list)
+        r.extensions.insert(d->extensions.begin(), d->extensions.end());
+    return r;
+}
+
+std::atomic<const Registry*> g_registry{nullptr};
+
+const Registry& registry()
+{
+    if (const Registry* r = g_registry.load(std::memory_order_acquire))
+        return *r;
+    static const Registry builtin = make_registry({});
+    return builtin;
+}
+
+}  // namespace
+
+const std::vector<const Decoder*>& decoders()
+{
+    return registry().list;
+}
+
+void register_decoders(const std::vector<const Decoder*>& extra)
+{
+    static std::mutex m;
+    std::lock_guard lock(m);
+    g_registry.store(new Registry(make_registry(extra)), std::memory_order_release);
+}
+
 bool decode_image(const std::string& path, Image& out, std::string& error)
 {
     error.clear();
@@ -251,19 +299,31 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
 
     bool ok = false;
     std::set<const Decoder*> tried;
-    for (const Decoder* d : decoders())
+    // By extension, then by content.
+    const auto attempt = [&](const std::vector<const Decoder*>& list)
     {
-        if (ok || !claims_extension(*d, ext))
-            continue;
-        tried.insert(d);
-        ok = try_decode(*d, path, out, error);
-    }
-    for (const Decoder* d : decoders())
+        for (const Decoder* d : list)
+        {
+            if (ok || tried.count(d) || !claims_extension(*d, ext))
+                continue;
+            tried.insert(d);
+            ok = try_decode(*d, path, out, error);
+        }
+        for (const Decoder* d : list)
+        {
+            if (ok || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
+                continue;
+            tried.insert(d);
+            ok = try_decode(*d, path, out, error);
+        }
+    };
+    attempt(decoders());
+    // Nothing built in took it, but a plugin may: wait for them to load
+    // (only such files ever wait) and try theirs.
+    if (!ok && !plugins::ready())
     {
-        if (ok || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
-            continue;
-        tried.insert(d);
-        ok = try_decode(*d, path, out, error);
+        plugins::wait();
+        attempt(decoders());
     }
     const Decoder* fallback = decoders().back();
     if (!ok && !tried.count(fallback))
@@ -320,12 +380,7 @@ std::vector<std::string> default_extensions()
 
 bool extension_supported(const std::string& ext)
 {
-    static const std::set<std::string> supported = []
-    {
-        const std::vector<std::string> all = default_extensions();
-        return std::set<std::string>(all.begin(), all.end());
-    }();
-    return supported.count(ext) != 0;
+    return registry().extensions.count(ext) != 0;
 }
 
 void preload_optional_libraries()

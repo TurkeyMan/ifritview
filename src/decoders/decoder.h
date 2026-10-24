@@ -4,20 +4,23 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <vector>
 
 // One image format backend. Decoders are plain tables of functions so the
 // registry can try them by extension first, then by sniffing the file header.
+// The built-in ones are free functions; a plugin's carry their format along
+// (src/plugins.cpp), hence std::function.
 struct Decoder
 {
     const char* name;
-    std::vector<std::string> extensions;             // lowercase, without the dot
-    bool (*sniff)(const uint8_t* head, size_t len);  // may be null
-    bool (*decode)(const std::string& path, Image& out, std::string& error);
+    std::vector<std::string> extensions;                          // lowercase, without the dot
+    std::function<bool(const uint8_t* head, size_t len)> sniff;   // may be empty
+    std::function<bool(const std::string& path, Image& out, std::string& error)> decode;
     // Optional quick approximation (a raw's embedded JPEG) shown while the
-    // real decode runs. May be null; returns false when there is none.
-    bool (*preview)(const std::string& path, Image& out) = nullptr;
+    // real decode runs. May be empty; returns false when there is none.
+    std::function<bool(const std::string& path, Image& out)> preview = nullptr;
     // Reads the file itself (videos): no preload, no container metadata pass.
     bool streaming = false;
 };
@@ -48,8 +51,13 @@ FILE* open_file(const std::string& path);
 // Forget the cached bytes (the next file_bytes reads afresh).
 void release_file_bytes();
 
-// Compiled-in decoders in priority order.
+// Decoders in priority order: the compiled-in ones, then the plugins' once
+// they're loaded, then the gdk-pixbuf catch-all. Safe from any thread; the
+// list returned stays valid (a new one replaces it, the old one is kept).
 const std::vector<const Decoder*>& decoders();
+
+// Adds the plugins' decoders after the built-in ones (src/plugins.cpp).
+void register_decoders(const std::vector<const Decoder*>& extra);
 
 // Decode a file with whichever decoder claims it; `error` describes the
 // failure of the most relevant decoder.
@@ -58,7 +66,7 @@ bool decode_image(const std::string& path, Image& out, std::string& error);
 // A quick stand-in for the file if its decoder offers one.
 bool decode_preview(const std::string& path, Image& out);
 
-// Every extension handled by the compiled-in decoders, in priority order.
+// Every extension handled by the decoders, in priority order.
 std::vector<std::string> default_extensions();
 
 // Whether some available decoder handles this extension. Optional libraries

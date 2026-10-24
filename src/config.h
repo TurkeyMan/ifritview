@@ -75,4 +75,9 @@ struct Config
     bool save() const;
     void reset_extensions();
     bool accepts_extension(const std::string& ext) const;  // ext lowercase, no dot
+    // Supported extensions the list hasn't met before (not in the saved
+    // known_extensions) join it, as when a plugin brings new formats; ones
+    // the user took out stay out. Whether any were added.
+    bool add_new_extensions(const std::vector<std::string>& supported);
+    std::vector<std::string> known_extensions;  // as of the last save; empty without a settings file
 };

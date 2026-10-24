@@ -2,6 +2,7 @@
 
 #include "../image.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -45,7 +46,8 @@ struct Encoder
     const char* name;       // shown in the format chooser
     const char* extension;  // written onto the file name
     std::vector<EncodeSetting> settings;
-    bool (*encode)(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error);
+    // A std::function so a plugin's encoder can carry its format along.
+    std::function<bool(const Image& image, const std::string& path, const EncodeOptions& options, std::string& error)> encode;
     // Whether these options lose detail; unset means "has a quality and
     // isn't set lossless". The save dialog previews what loses detail.
     bool (*reduces)(const EncodeOptions& options) = nullptr;
@@ -71,7 +73,7 @@ struct Encoder
     }
 };
 
-// Encoders for the formats compiled in, PNG first.
+// Encoders for the formats compiled in, PNG first, then the plugins'.
 const std::vector<const Encoder*>& encoders();
 
 // Straight-alpha RGBA8 or RGB8 rows from the premultiplied ARGB32 buffer,

@@ -1,6 +1,7 @@
 #include "app.h"
 #include "platform.h"
 #include "pipeline.h"
+#include "plugins.h"
 #include "probe.h"
 
 #include <rapport/rapport.h>
@@ -155,6 +156,8 @@ int main(int argc, char** argv)
     }
     if (argc > 3 && std::strcmp(argv[1], "--convert") == 0)
         return convert(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--plugins") == 0)
+        return plugins::print_report();
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0)

@@ -86,9 +86,22 @@ bool Config::accepts_extension(const std::string& ext) const
     return std::find(extensions.begin(), extensions.end(), ext) != extensions.end();
 }
 
+bool Config::add_new_extensions(const std::vector<std::string>& supported)
+{
+    bool added = false;
+    for (const std::string& e : supported)
+        if (!accepts_extension(e) && std::find(known_extensions.begin(), known_extensions.end(), e) == known_extensions.end())
+        {
+            extensions.push_back(e);
+            added = true;
+        }
+    return added;
+}
+
 void Config::load()
 {
     reset_extensions();
+    known_extensions.clear();
     GKeyFile* kf = g_key_file_new();
     if (!g_key_file_load_from_file(kf, path().c_str(), G_KEY_FILE_NONE, nullptr))
     {
@@ -112,7 +125,7 @@ void Config::load()
         // out stay out. `known_extensions` records what was supported at the
         // last save. Older files predate it: everything missing from them is
         // new except PDF, which may have been left out on purpose.
-        std::vector<std::string> known;
+        std::vector<std::string>& known = known_extensions;
         gsize k = 0;
         if (gchar** kl = g_key_file_get_string_list(kf, kFiles, "known_extensions", &k, nullptr))
         {
@@ -124,9 +137,7 @@ void Config::load()
             known = extensions;
             known.push_back("pdf");
         }
-        for (const std::string& e : default_extensions())
-            if (!accepts_extension(e) && std::find(known.begin(), known.end(), e) == known.end())
-                extensions.push_back(e);
+        add_new_extensions(default_extensions());
     }
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);

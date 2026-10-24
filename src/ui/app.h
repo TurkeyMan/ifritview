@@ -73,6 +73,7 @@ public:
     void script_compare(const std::string& how);  // a, b, swipe, diff, swap, side or gain:N
 
 private:
+    void plugins_loaded();  // their extensions join the list; the folder is listed again
     void build_ui();
     rap::node tool_button(const char* icon, const char* tooltip, void (App::*action)());
     rap::node compare_button(rap::icon icon, const char* tooltip, View::Compare mode);

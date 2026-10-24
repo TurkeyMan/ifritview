@@ -6,6 +6,7 @@
 #include "reduce.h"
 
 #include "../platform.h"
+#include "../plugins.h"
 
 
 #include <algorithm>
@@ -841,6 +842,10 @@ const std::vector<const Encoder*>& encoders()
 #ifdef HAVE_HEIF
         v.push_back(&avif_encoder());
 #endif
+        // Then the plugins' (this waits for them to load; it's asked for
+        // when saving, long after they have).
+        for (const Encoder* e : plugins::encoders())
+            v.push_back(e);
         return v;
     }();
     return list;

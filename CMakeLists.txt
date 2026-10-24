@@ -63,6 +63,7 @@ add_library(ifrit_core STATIC
   src/jpeg_lossless.cpp
   src/pipeline.cpp
   src/platform.cpp
+  src/plugins.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
   src/decoders/ilbm.cpp
@@ -86,7 +87,7 @@ add_library(ifrit_core STATIC
 )
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
 target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
-target_include_directories(ifrit_core PUBLIC src ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(ifrit_core PUBLIC src include ${CMAKE_BINARY_DIR}/generated)
 # zlib: compressed metadata in PNG (profiles, XMP). It comes with libpng anyway.
 pkg_check_modules(ZLIB_PC REQUIRED IMPORTED_TARGET zlib)
 target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE PkgConfig::ZLIB_PC ${CMAKE_DL_LIBS})
@@ -96,6 +97,16 @@ if(WIN32)
   target_link_libraries(ifrit_core PUBLIC shell32 advapi32)
 else()
   target_sources(ifrit_core PRIVATE src/integration.cpp)
+endif()
+
+# Image format plugins (src/plugins.cpp, include/ifritview_plugin.h): the
+# installed system folder is lib/<multiarch>/ifritview/plugins on Linux,
+# beside the private libraries in lib/<multiarch>/ifritview.
+if(NOT WIN32)
+  set(IFRIT_FORMAT_PLUGIN_DIR "${CMAKE_INSTALL_LIBDIR}/ifritview/plugins")
+  set_property(SOURCE src/plugins.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    IFRIT_FORMAT_PLUGIN_DIR="${IFRIT_FORMAT_PLUGIN_DIR}"
+    IFRIT_FORMAT_PLUGIN_DIR_FULL="${CMAKE_INSTALL_FULL_LIBDIR}/ifritview/plugins")
 endif()
 
 # The app: native widgets from whichever toolkit is at hand (GTK or Qt on

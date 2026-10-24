@@ -4,6 +4,7 @@
 #include "encoders/encoder.h"
 #include "jpeg_lossless.h"
 #include "metadata/file_metadata.h"
+#include "plugins.h"
 
 #include <algorithm>
 #include <cmath>
@@ -317,6 +318,7 @@ int process(int argc, char** argv)
 
 int formats_report()
 {
+    plugins::wait();  // their formats too
     std::printf("Opens (by extension, then by the file's first bytes):\n");
     for (const Decoder* d : decoders())
     {
@@ -362,6 +364,7 @@ USAGE
                                      shorthand for --process IN save:OUT,KEY=VALUE,...
   ifritview --probe FILE...          decode files and report what they hold, no window
   ifritview --formats                list what opens, what saves, and every save setting
+  ifritview --plugins                list format plugins, the folders searched, and any not loaded
   ifritview --version | --help
 
 PROCESS STEPS (applied left to right; positions are in pixels of the image as

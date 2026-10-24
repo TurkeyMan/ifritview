@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "platform.h"
+#include "plugins.h"
 #include "save.h"
 #include "settings.h"
 
@@ -80,6 +81,10 @@ double random01()
 
 }  // namespace
 
+// The app while it exists, for work posted from other threads that may land
+// after it's gone (both sides on the main thread).
+static App* s_app = nullptr;
+
 App::App(rap::ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
 {
     platform::trace("app starting");
@@ -89,10 +94,36 @@ App::App(rap::ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r
     geocoder_.set_provider(cfg_.geocoder_url);
     set_decode_options(decode_options_for(cfg_));
     build_ui();
+    // Format plugins load on a thread of their own, the first image never
+    // waiting for them; once they're in, their formats join the folder.
+    s_app = this;
+    plugins::load_async([] { platform::post_main([] { if (s_app) s_app->plugins_loaded(); }); });
+}
+
+void App::plugins_loaded()
+{
+    // The folder was listed without them (even where the settings already
+    // name their extensions), so it's listed again whenever there are any.
+    const std::vector<std::string> extensions = plugins::extensions();
+    if (extensions.empty())
+        return;
+    cfg_.add_new_extensions(extensions);
+    // A file opened by name stays even if its type isn't listed; scan() keeps it.
+    const std::string current = folder_.current();
+    const bool was_empty = folder_.empty();
+    if (!current.empty())
+        folder_.scan(current, cfg_);
+    else
+        folder_.rescan(cfg_);
+    if (was_empty && !folder_.empty())
+        load_current();  // a folder of nothing but plugin formats
+    update_title();
+    update_status();
 }
 
 App::~App()
 {
+    s_app = nullptr;
     stop_video();
     outgoing_video_.stop();
     // A save preview still encoding uses the encoders' and decoders' statics,
