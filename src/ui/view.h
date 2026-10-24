@@ -98,7 +98,6 @@ public:
     // Slideshow motion between two framings (centres in image coordinates).
     void begin_motion(double zoom0, double zoom1, double cx0, double cy0, double cx1, double cy1, int duration_ms, int64_t start_us = 0);
     void end_motion();
-    bool motion_active() const { return motion_.active; }
     void crossfade_next(int ms);
     void crossfade_live();
     void outgoing_changed() { invalidate(); }

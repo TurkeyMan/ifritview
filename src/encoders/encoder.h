@@ -82,6 +82,9 @@ struct Encoder
 
 // Encoders for the formats compiled in, PNG first, then the plugins'.
 const std::vector<const Encoder*>& encoders();
+// The encoder that writes files with extension `ext` (lower case, no dot),
+// its other spellings included (jpeg, jpe, jfif, tiff); null if none.
+const Encoder* encoder_for_extension(const std::string& ext);
 
 // Straight-alpha RGBA8 or RGB8 rows from the premultiplied ARGB32 buffer,
 // which is what every encoder wants.

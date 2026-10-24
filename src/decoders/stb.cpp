@@ -38,9 +38,7 @@ bool sniff(const uint8_t* h, size_t n)
 
 std::string format_name(const std::string& path)
 {
-    auto dot = path.find_last_of('.');
-    std::string ext = dot == std::string::npos ? "" : path.substr(dot + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    const std::string ext = file_extension(path);
     if (ext == "psd" || ext == "psb")
         return "Photoshop PSD";
     if (ext == "tga" || ext == "targa")

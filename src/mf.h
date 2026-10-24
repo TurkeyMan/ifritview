@@ -41,7 +41,6 @@ HRESULT create_attributes(IMFAttributes** out, UINT32 size);
 HRESULT create_media_type(IMFMediaType** out);
 HRESULT create_source_reader(const std::wstring& url, IMFAttributes* attributes, IMFSourceReader** out);
 
-std::wstring wide(const std::string& utf8);
 
 // COM pointer: released when it goes.
 template <class T>

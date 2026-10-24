@@ -143,21 +143,6 @@ ExifData* load(const uint8_t* data, size_t size)
     return ed;
 }
 
-ExifSummary read_exif_file(const std::string& path, Image& out)
-{
-    ExifLoader* loader = exif_loader_new();
-    const uint8_t* bytes = nullptr;
-    size_t length = 0;
-    if (file_bytes(path, bytes, length))
-        exif_loader_write(loader, const_cast<uint8_t*>(bytes), unsigned(length));
-    const unsigned char* buf = nullptr;
-    unsigned int size = 0;
-    exif_loader_get_buf(loader, &buf, &size);
-    ExifSummary summary = size ? read(load(buf, size), out) : ExifSummary{};
-    exif_loader_unref(loader);
-    return summary;
-}
-
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out)
 {
     if (!data || size < 8 || size > (size_t(1) << 28))

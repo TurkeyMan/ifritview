@@ -73,6 +73,12 @@ std::vector<std::string> default_extensions();
 // (GStreamer, poppler) that aren't installed take their extensions with them.
 bool extension_supported(const std::string& ext);
 
+// A path's extension, lower case, without the dot ("jpg"); empty when its
+// last part has none. Either slash separates parts.
+std::string file_extension(const std::string& path);
+// An extension as typed in a list (" .JPG"): lower case, no dot or spaces.
+std::string normalise_extension(std::string ext);
+
 // Load the optional libraries (GStreamer, poppler) on a low-priority thread,
 // so the first video or PDF opens without the wait. Called once the first
 // image is on screen; later calls do nothing.
@@ -145,7 +151,6 @@ struct ExifSummary
     std::string camera;
     std::string color_space;  // "sRGB" / "Adobe RGB (1998)" when declared
 };
-ExifSummary read_exif_file(const std::string& path, Image& out);
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
 #endif
 

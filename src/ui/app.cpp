@@ -639,11 +639,10 @@ void App::build_ui()
         view_->image_changed();
         if (video_.duration() > 0)
             view_->set_video_progress(video_.position() / video_.duration(), video_.playing());
-        static int last_w = 0, last_h = 0;  // a rotated stream can change shape after the poster
-        if (w != last_w || h != last_h)
+        // A rotated stream can change shape after the poster.
+        if (w != video_shape_[0] || h != video_shape_[1])
             fit_window_to_image();
-        last_w = w;
-        last_h = h;
+        video_shape_ = {w, h};
     };
     view_->on_selection_changed = [this]
     {
@@ -1710,25 +1709,6 @@ void App::crop_to_selection()
 namespace
 {
 
-std::string lower_extension(const std::string& path)
-{
-    std::string ext = std::filesystem::path(path).extension().string();
-    if (!ext.empty())
-        ext = ext.substr(1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-    return ext == "jpeg" ? std::string("jpg") : ext;
-}
-
-std::string human_bytes(uintmax_t n)
-{
-    char buf[32];
-    if (n >= 1000 * 1000)
-        std::snprintf(buf, sizeof buf, "%.1f MB", n / 1e6);
-    else
-        std::snprintf(buf, sizeof buf, "%.0f kB", n / 1e3);
-    return buf;
-}
-
 }  // namespace
 
 // Save As: the format and its settings first (previewing lossy ones in the
@@ -1795,7 +1775,8 @@ void App::save_as()
     // The file's own format and settings, as decoded (a .jpeg is "jpg"); a
     // difference image has none.
     const bool own = !diff_session_ && !image_->encoded_as.empty();
-    const std::string format = diff_session_ ? std::string("png") : own ? image_->encoded_as : lower_extension(image_path_);
+    const Encoder* by_name = encoder_for_extension(file_extension(image_path_));
+    const std::string format = diff_session_ ? std::string("png") : own ? image_->encoded_as : by_name ? by_name->extension : "";
     save_dialog_ = SaveDialog::open(ui_, window_.get(), format, own ? image_->encoding : std::map<std::string, int>{}, save_options_, metadata,
                                     present, std::move(cb));
     plan_lossless();
@@ -1862,7 +1843,7 @@ void App::preview_lossless()
         return;
     }
     if (save_dialog_)
-        save_dialog_->set_info(human_bytes(plan->data.size()));  // the metadata comes on top
+        save_dialog_->set_info(human_size(plan->data.size()));  // the metadata comes on top
     if (plan->differs.empty())
     {
         show_save_preview(false);  // exactly the image as shown
@@ -1965,7 +1946,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
                     preview_difference_ = difference;
                     if (save_dialog_->preview_shown())
                         show_save_preview(true);
-                    save_dialog_->set_info(human_bytes(size));
+                    save_dialog_->set_info(human_size(size));
                 });
         })
         .detach();
@@ -2026,7 +2007,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                         if (files.empty())
                             return;
                         std::string path = files.front();
-                        if (lower_extension(path) != enc->extension)
+                        if (encoder_for_extension(file_extension(path)) != enc)
                             path += std::string(".") + enc->extension;  // not every toolkit's dialog adds it
                         std::string error;
                         const bool ok = lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), path, error) : enc->encode(*source, path, o, error);
@@ -2320,7 +2301,7 @@ void App::open_settings_page(int page)
             view_->config_changed();
             refresh_metadata();
             const bool reload =
-                ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->format.find("RAW") != std::string::npos) ||
+                ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->is_raw) ||
                 (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
             if (reload)
             {

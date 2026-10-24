@@ -185,6 +185,7 @@ private:
     std::shared_ptr<Image> save_source_;
     std::shared_ptr<const struct LosslessJpeg> lossless_plan_;
     std::unique_ptr<rap::sys::directory_watch> watch_;
+    std::array<int, 2> video_shape_{};  // the video frame last fitted to
     std::string watched_dir_;  // for JPEG's Lossless, once worked out
     uint64_t lossless_generation_ = 0;  // what Save As saves: the image, or the difference shown
     rap::label* status_left_ = nullptr;

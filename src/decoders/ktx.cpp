@@ -9,6 +9,7 @@
 // and UASTC need its transcoder and aren't supported, nor is zlib.
 // KTXorientation is honoured, so a bottom-up texture shows the right way up.
 #include "astc.h"
+#include "../bytes.h"
 #include "bcn.h"
 #include "decoder.h"
 #include "texel.h"
@@ -31,21 +32,6 @@ namespace
 
 const uint8_t kKtx1Id[12] = {0xAB, 'K', 'T', 'X', ' ', '1', '1', 0xBB, '\r', '\n', 0x1A, '\n'};
 const uint8_t kKtx2Id[12] = {0xAB, 'K', 'T', 'X', ' ', '2', '0', 0xBB, '\r', '\n', 0x1A, '\n'};
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
-
-uint64_t le64(const uint8_t* p)
-{
-    return uint64_t(le32(p)) | uint64_t(le32(p + 4)) << 32;
-}
-
-uint32_t be32(const uint8_t* p)
-{
-    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | uint32_t(p[3]);
-}
 
 bool sniff1(const uint8_t* h, size_t n)
 {
@@ -301,17 +287,6 @@ size_t image_bytes(const Texture& t, int w, int h, size_t row_align)
     return row * h;
 }
 
-uint32_t extract(uint32_t v, uint32_t mask)
-{
-    if (!mask)
-        return 0;
-    int shift = 0;
-    while (!(mask >> shift & 1))
-        ++shift;
-    const uint32_t max = mask >> shift;
-    return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
-}
-
 bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, size_t row_align, bool big_endian, bool premultiplied,
                   Image& out, std::string& error)
 {
@@ -336,14 +311,14 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, s
                 v = (v >> 8 | v << 8) & 0xFFFF;
             uint32_t r, g, b, a = 255;
             if (m.alpha_only)
-                r = g = b = extract(v, m.a);
+                r = g = b = mask_channel(v, m.a);
             else
             {
-                r = extract(v, m.r);
-                g = m.luminance ? r : extract(v, m.g);
-                b = m.luminance ? r : extract(v, m.b);
+                r = mask_channel(v, m.r);
+                g = m.luminance ? r : mask_channel(v, m.g);
+                b = m.luminance ? r : mask_channel(v, m.b);
                 if (m.a)
-                    a = extract(v, m.a);
+                    a = mask_channel(v, m.a);
             }
             if (premultiplied)
             {

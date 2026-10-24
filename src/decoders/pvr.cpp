@@ -16,8 +16,10 @@
 // are shown; PVRTC isn't decoded.
 // The first surface and face, largest mipmap, is shown.
 #include "astc.h"
+#include "../bytes.h"
 #include "bcn.h"
 #include "decoder.h"
+#include "texel.h"
 #include "etc.h"
 #include "platform.h"
 
@@ -33,16 +35,6 @@
 namespace
 {
 
-uint16_t le16(const uint8_t* p)
-{
-    return uint16_t(p[0] | p[1] << 8);
-}
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
-
 bool is_pow2(int v)
 {
     return v > 0 && (v & (v - 1)) == 0;
@@ -55,25 +47,6 @@ uint32_t to8(uint32_t v, int bits)
         return v >> (bits - 8);
     const uint32_t max = (1u << bits) - 1;
     return (v * 255 + max / 2) / max;
-}
-
-uint32_t argb(uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool premultiplied = false)
-{
-    if (a == 0)
-        return 0;
-    if (premultiplied)
-    {
-        r = std::min(r, a);  // a stored colour can't outshine its alpha
-        g = std::min(g, a);
-        b = std::min(b, a);
-    }
-    else if (a < 255)
-    {
-        r = (r * a + 127) / 255;
-        g = (g * a + 127) / 255;
-        b = (b * a + 127) / 255;
-    }
-    return a << 24 | r << 16 | g << 8 | b;
 }
 
 void set_has_alpha(Image& out)

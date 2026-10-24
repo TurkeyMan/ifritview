@@ -114,9 +114,7 @@ void Config::load()
         extensions.clear();
         for (gsize i = 0; i < n; ++i)
         {
-            std::string e = list[i];
-            e.erase(std::remove_if(e.begin(), e.end(), [](unsigned char c) { return std::isspace(c) || c == '.'; }), e.end());
-            std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
+            const std::string e = normalise_extension(list[i]);
             if (!e.empty() && e != "gz" && e != "svggz" && !accepts_extension(e))  // gz came from the SVGZ loader by mistake
                 extensions.push_back(e);
         }

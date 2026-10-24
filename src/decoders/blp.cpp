@@ -6,7 +6,9 @@
 // (World of Warcraft) is a palette with 0, 1, 4 or 8-bit alpha, DXT1/3/5
 // (through bcn.cpp), or plain BGRA.
 #include "bcn.h"
+#include "../bytes.h"
 #include "decoder.h"
+#include "texel.h"
 
 #include <algorithm>
 #include <cstring>
@@ -16,26 +18,9 @@
 namespace
 {
 
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
-
 bool sniff(const uint8_t* h, size_t n)
 {
     return n >= 4 && (std::memcmp(h, "BLP1", 4) == 0 || std::memcmp(h, "BLP2", 4) == 0);
-}
-
-void put(uint32_t* px, uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool& opaque)
-{
-    if (a < 255)
-    {
-        opaque = false;
-        r = (r * a + 127) / 255;
-        g = (g * a + 127) / 255;
-        b = (b * a + 127) / 255;
-    }
-    *px = a << 24 | r << 16 | g << 8 | b;
 }
 
 // Pixel i of an alpha plane `bits` deep, packed from the low bits up.
@@ -70,7 +55,7 @@ bool decode_palette(const uint8_t* palette, const uint8_t* d, size_t size, int w
         {
             const size_t i = size_t(y) * w + x;
             const uint8_t* e = palette + d[i] * 4;
-            put(px + x, e[2], e[1], e[0], alpha_at(d + pixels, i, alpha_bits), opaque);
+            put_argb(px + x, e[2], e[1], e[0], alpha_at(d + pixels, i, alpha_bits), opaque);
         }
     }
     out.has_alpha = !opaque;
@@ -113,9 +98,9 @@ bool decode_jpeg(const uint8_t* d, size_t size, const uint8_t* mip, size_t mip_s
         for (int x = 0; x < w; ++x, s += n)
         {
             if (n == 1)
-                put(px + x, s[0], s[0], s[0], 255, opaque);
+                put_argb(px + x, s[0], s[0], s[0], 255, opaque);
             else  // B, G, R, then alpha when there are four and the header says so
-                put(px + x, s[2], s[1], s[0], n == 4 && alpha_bits ? s[3] : 255, opaque);
+                put_argb(px + x, s[2], s[1], s[0], n == 4 && alpha_bits ? s[3] : 255, opaque);
         }
     }
     out.has_alpha = !opaque;
@@ -239,7 +224,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
             uint32_t* px = out.row(y);
             const uint8_t* s = mip + size_t(y) * w * 4;
             for (int x = 0; x < w; ++x, s += 4)
-                put(px + x, s[2], s[1], s[0], alpha_bits ? s[3] : 255, opaque);
+                put_argb(px + x, s[2], s[1], s[0], alpha_bits ? s[3] : 255, opaque);
         }
         out.has_alpha = !opaque;
         out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, alpha_bits ? "BGRA" : "BGRX", 8);

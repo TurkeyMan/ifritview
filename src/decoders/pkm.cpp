@@ -3,6 +3,7 @@
 // the size padded to whole blocks and the size proper), then one surface of
 // blocks, decoded through etc.cpp.
 #include "decoder.h"
+#include "../bytes.h"
 #include "etc.h"
 
 #include <cstring>
@@ -11,11 +12,6 @@
 
 namespace
 {
-
-uint16_t be16(const uint8_t* p)
-{
-    return uint16_t(p[0] << 8 | p[1]);
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {

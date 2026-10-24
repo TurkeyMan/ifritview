@@ -2,6 +2,7 @@
 // PNG's chunks, WebP's RIFF chunks and JPEG XL's boxes. Every length and
 // offset is checked against the buffer; anything malformed is skipped.
 #include "file_metadata.h"
+#include "../bytes.h"
 
 #include <zlib.h>
 
@@ -10,21 +11,6 @@
 
 namespace
 {
-
-uint32_t be16(const uint8_t* p)
-{
-    return uint32_t(p[0]) << 8 | p[1];
-}
-
-uint32_t be32(const uint8_t* p)
-{
-    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
-}
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
 
 bool starts_with(const uint8_t* d, size_t n, const char* prefix, size_t len)
 {
@@ -292,4 +278,55 @@ FileMetadata extract_metadata(const uint8_t* d, size_t n)
     else if (starts_with(d, n, "\0\0\0\x0CJXL \r\n\x87\n", 12))
         from_jxl_boxes(d, n, m);
     return m;
+}
+
+namespace
+{
+
+// A marker segment: FF, the marker, the length (counting itself), the bytes.
+void segment(std::vector<uint8_t>& out, uint8_t marker, const char* header, size_t header_len, const uint8_t* body, size_t n)
+{
+    const size_t len = 2 + header_len + n;
+    out.insert(out.end(), {0xFF, marker, uint8_t(len >> 8), uint8_t(len)});
+    out.insert(out.end(), header, header + header_len);
+    out.insert(out.end(), body, body + n);
+}
+
+}  // namespace
+
+std::vector<uint8_t> jpeg_metadata_segments(const FileMetadata& m)
+{
+    std::vector<uint8_t> out;
+    constexpr size_t kMax = 65533;
+    if (!m.exif.empty() && 6 + m.exif.size() <= kMax)
+        segment(out, 0xE1, "Exif\0\0", 6, m.exif.data(), m.exif.size());
+    if (!m.xmp.empty() && 29 + m.xmp.size() <= kMax)
+        segment(out, 0xE1, "http://ns.adobe.com/xap/1.0/\0", 29, m.xmp.data(), m.xmp.size());
+    if (!m.icc.empty())
+    {
+        constexpr size_t kChunk = kMax - 14;
+        const size_t count = (m.icc.size() + kChunk - 1) / kChunk;
+        if (count < 256)
+            for (size_t i = 0; i < count; ++i)
+            {
+                char header[14] = "ICC_PROFILE";
+                header[12] = char(i + 1);
+                header[13] = char(count);
+                const size_t at = i * kChunk;
+                segment(out, 0xE2, header, 14, m.icc.data() + at, std::min(kChunk, m.icc.size() - at));
+            }
+    }
+    if (!m.iptc.empty())
+    {
+        std::vector<uint8_t> irb = {'8', 'B', 'I', 'M', 0x04, 0x04, 0, 0};
+        const uint32_t n = uint32_t(m.iptc.size());
+        for (int shift : {24, 16, 8, 0})
+            irb.push_back(uint8_t(n >> shift));
+        irb.insert(irb.end(), m.iptc.begin(), m.iptc.end());
+        if (irb.size() & 1)
+            irb.push_back(0);
+        if (14 + irb.size() <= kMax)
+            segment(out, 0xED, "Photoshop 3.0\0", 14, irb.data(), irb.size());
+    }
+    return out;
 }

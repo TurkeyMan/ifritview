@@ -3,6 +3,7 @@
 // mono, 2/4-plane EGA (16 colours from the header palette), 8-bit palette
 // and 24-bit (three 8-bit planes).
 #include "decoder.h"
+#include "../bytes.h"
 
 #include <cstdio>
 #include <cstring>
@@ -10,11 +11,6 @@
 
 namespace
 {
-
-uint16_t le16(const uint8_t* p)
-{
-    return uint16_t(p[0] | (p[1] << 8));
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {

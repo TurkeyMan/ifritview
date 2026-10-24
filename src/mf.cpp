@@ -1,4 +1,5 @@
 #include "mf.h"
+#include "platform.h"
 
 #include <cstring>
 #include <mutex>
@@ -85,14 +86,6 @@ HRESULT create_media_type(IMFMediaType** out)
 HRESULT create_source_reader(const std::wstring& url, IMFAttributes* attributes, IMFSourceReader** out)
 {
     return api().started ? api().create_source_reader(url.c_str(), attributes, out) : E_NOTIMPL;
-}
-
-std::wstring wide(const std::string& utf8)
-{
-    const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), int(utf8.size()), nullptr, 0);
-    std::wstring w(size_t(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), int(utf8.size()), w.data(), n);
-    return w;
 }
 
 int upright_turn(IMFMediaType* native_type)

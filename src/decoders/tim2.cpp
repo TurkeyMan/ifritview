@@ -7,6 +7,8 @@
 // that order); CSM2 is linear. PS2 alpha runs 0-128, 128 opaque. The first
 // picture's largest mipmap is shown.
 #include "decoder.h"
+#include "texel.h"
+#include "../bytes.h"
 
 #include <algorithm>
 #include <cstring>
@@ -15,15 +17,6 @@
 
 namespace
 {
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
-uint16_t le16(const uint8_t* p)
-{
-    return uint16_t(p[0] | p[1] << 8);
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {
@@ -57,15 +50,6 @@ uint32_t colour(const uint8_t* p, int bytes)
     }
     const uint32_t a = bytes == 4 ? ps2_alpha(p[3]) : 255;
     return a << 24 | uint32_t(p[0]) << 16 | uint32_t(p[1]) << 8 | p[2];
-}
-
-uint32_t premultiply(uint32_t c)
-{
-    const uint32_t a = c >> 24;
-    if (a == 255)
-        return c;
-    const uint32_t r = ((c >> 16 & 0xFF) * a + 127) / 255, g = ((c >> 8 & 0xFF) * a + 127) / 255, b = ((c & 0xFF) * a + 127) / 255;
-    return a << 24 | r << 16 | g << 8 | b;
 }
 
 const char* type_name(int t)

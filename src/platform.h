@@ -39,7 +39,19 @@ std::string executable_path();
 #endif
 bool library_installed(const char* name);
 void* open_library(const char* name, std::string* error = nullptr);
+// A library by its path (a plugin): its own folder searched for what it
+// needs, and no system message box if that's missing, just `error`.
+void* open_module(const std::string& path, std::string& error);
 void* library_symbol(void* library, const char* symbol);
+void close_library(void* library);
+
+#ifdef _WIN32
+// UTF-8 to Windows' UTF-16, and back.
+std::wstring widen(const std::string& utf8);
+std::string narrow(const wchar_t* utf16);
+// GetLastError() as text: "The specified module could not be found (error 126)".
+std::string last_error_text();
+#endif
 
 // Work for the main (UI) thread, from any thread. The front end installs its
 // toolkit's way of doing that at startup; until then (and in the GTK front

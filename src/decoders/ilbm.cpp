@@ -3,6 +3,7 @@
 // compressed BODY. Handles 1–8 planes with a palette, EHB, HAM6/HAM8,
 // 24-bit and 32-bit direct colour, and a mask plane.
 #include "decoder.h"
+#include "../bytes.h"
 
 #include <cstdio>
 #include <cstring>
@@ -10,15 +11,6 @@
 
 namespace
 {
-
-uint32_t be32(const uint8_t* p)
-{
-    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
-}
-uint16_t be16(const uint8_t* p)
-{
-    return uint16_t((p[0] << 8) | p[1]);
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {

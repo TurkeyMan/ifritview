@@ -14,6 +14,7 @@
 // A are shown, unprefixed by preference, else from the first layer that has
 // them ("diffuse.R"); Y alone is grey. Other channels are listed only.
 #include "decoder.h"
+#include "../bytes.h"
 #include "../half.h"
 
 #include <zlib.h>
@@ -31,24 +32,9 @@
 namespace
 {
 
-uint16_t le16(const uint8_t* p)
-{
-    return uint16_t(p[0] | p[1] << 8);
-}
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
-
 int32_t le32s(const uint8_t* p)
 {
     return int32_t(le32(p));
-}
-
-uint64_t le64(const uint8_t* p)
-{
-    return uint64_t(le32(p)) | uint64_t(le32(p + 4)) << 32;
 }
 
 float lef(const uint8_t* p)

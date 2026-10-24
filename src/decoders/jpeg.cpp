@@ -185,7 +185,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (!ok)
         return false;
 #ifdef HAVE_EXIF
-    const ExifSummary exif = read_exif_file(path, out);
+    const ExifSummary exif = read_exif_blob(bytes, size, out);  // the file's bytes, already in memory
     out.apply_orientation(exif.orientation);
     out.info = exif.camera;
     if (out.color_space.empty())

@@ -3,6 +3,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -195,6 +196,81 @@ void* library_symbol(void* library, const char* symbol)
     return dlsym(library, symbol);
 #endif
 }
+
+void close_library(void* library)
+{
+#ifdef _WIN32
+    FreeLibrary(static_cast<HMODULE>(library));
+#else
+    dlclose(library);
+#endif
+}
+
+#ifdef _WIN32
+std::wstring widen(const std::string& utf8)
+{
+    std::wstring w;
+    if (gunichar2* u = g_utf8_to_utf16(utf8.c_str(), -1, nullptr, nullptr, nullptr))
+    {
+        w = reinterpret_cast<const wchar_t*>(u);
+        g_free(u);
+    }
+    return w;
+}
+
+std::string narrow(const wchar_t* utf16)
+{
+    std::string s;
+    if (gchar* u = g_utf16_to_utf8(reinterpret_cast<const gunichar2*>(utf16), -1, nullptr, nullptr, nullptr))
+    {
+        s = u;
+        g_free(u);
+    }
+    return s;
+}
+
+std::string last_error_text()
+{
+    const DWORD code = GetLastError();
+    wchar_t* text = nullptr;
+    FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0,
+                   reinterpret_cast<wchar_t*>(&text), 0, nullptr);
+    std::string s = text ? narrow(text) : std::string();
+    if (text)
+        LocalFree(text);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '.'))
+        s.pop_back();
+    return s + " (error " + std::to_string(code) + ")";
+}
+
+void* open_module(const std::string& path, std::string& error)
+{
+    std::wstring wide = widen(path);
+    std::replace(wide.begin(), wide.end(), L'/', L'\\');  // LOAD_WITH_ALTERED_SEARCH_PATH wants a Windows path
+    DWORD old_mode = 0;
+    SetThreadErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX, &old_mode);
+    // Altered search path: DLLs beside it satisfy its own imports.
+    HMODULE m = LoadLibraryExW(wide.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!m)
+        error = last_error_text();
+    SetThreadErrorMode(old_mode, nullptr);
+    return m;
+}
+#else
+void* open_module(const std::string& path, std::string& error)
+{
+    // RTLD_LOCAL: modules don't see each other's symbols, nor clash.
+    void* m = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!m)
+    {
+        const char* e = dlerror();
+        error = e ? e : "cannot load";
+        if (error.rfind(path + ": ", 0) == 0)  // the path is listed already
+            error.erase(0, path.size() + 2);
+    }
+    return m;
+}
+#endif
 
 void* allocate_pixels(size_t bytes)
 {

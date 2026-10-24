@@ -7,6 +7,7 @@
 // uncompressed formats are 8-bit channels in various orders, packed 16-bit
 // pixels, 16-bit integer or half-float and 32-bit float (clipped to 0..1).
 #include "bcn.h"
+#include "../bytes.h"
 #include "decoder.h"
 #include "texel.h"
 
@@ -19,16 +20,6 @@
 
 namespace
 {
-
-uint16_t le16(const uint8_t* p)
-{
-    return uint16_t(p[0] | p[1] << 8);
-}
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {
@@ -114,29 +105,6 @@ uint64_t image_size(const Format& f, int w, int h)
     return uint64_t(w) * uint64_t(h) * uint64_t(f.bytes);
 }
 
-uint32_t extract(uint32_t v, uint32_t mask)
-{
-    if (!mask)
-        return 0;
-    int shift = 0;
-    while (!(mask >> shift & 1))
-        ++shift;
-    const uint32_t max = mask >> shift;
-    return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
-}
-
-void put(uint32_t* px, uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool& opaque)
-{
-    if (a < 255)
-    {
-        opaque = false;
-        r = (r * a + 127) / 255;
-        g = (g * a + 127) / 255;
-        b = (b * a + 127) / 255;
-    }
-    *px = a << 24 | r << 16 | g << 8 | b;
-}
-
 // Uncompressed pixels; the caller has checked there are w × h of them.
 void decode_pixels(const Format& f, const uint8_t* d, int w, int h, Image& out)
 {
@@ -158,13 +126,13 @@ void decode_pixels(const Format& f, const uint8_t* d, int w, int h, Image& out)
                     uint32_t a = f.a == kNone ? 255 : s[f.a];
                     if (f.bluescreen && r == 0 && g == 0 && b == 255)
                         a = 0;
-                    put(px + x, r, g, b, a, opaque);
+                    put_argb(px + x, r, g, b, a, opaque);
                     break;
                 }
                 case Kind::Packed:
                 {
                     const uint32_t v = le16(s);
-                    put(px + x, extract(v, f.r), extract(v, f.g), extract(v, f.b), f.a ? extract(v, f.a) : 255, opaque);
+                    put_argb(px + x, mask_channel(v, f.r), mask_channel(v, f.g), mask_channel(v, f.b), f.a ? mask_channel(v, f.a) : 255, opaque);
                     break;
                 }
                 default: break;  // wider kinds: decode_wide

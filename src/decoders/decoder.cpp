@@ -28,16 +28,28 @@ thread_local FileBuffer t_file;
 std::mutex g_options_mutex;
 DecodeOptions g_options;
 
-std::string lowercase_extension(const std::string& path)
+}  // namespace
+
+std::string file_extension(const std::string& path)
 {
-    auto slash = path.find_last_of('/');
-    auto dot = path.find_last_of('.');
+    const size_t slash = path.find_last_of("/\\");
+    const size_t dot = path.find_last_of('.');
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
         return {};
     std::string ext = path.substr(dot + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     return ext;
 }
+
+std::string normalise_extension(std::string ext)
+{
+    ext.erase(std::remove_if(ext.begin(), ext.end(), [](unsigned char c) { return std::isspace(c) || c == '.'; }), ext.end());
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    return ext;
+}
+
+namespace
+{
 
 bool claims_extension(const Decoder& d, const std::string& ext)
 {
@@ -306,7 +318,7 @@ void register_decoders(const std::vector<const Decoder*>& extra)
 bool decode_image(const std::string& path, Image& out, std::string& error)
 {
     error.clear();
-    const std::string ext = lowercase_extension(path);
+    const std::string ext = file_extension(path);
     // Videos: GStreamer streams the file; don't read gigabytes for a poster frame.
     for (const Decoder* d : decoders())
         if (d->streaming && claims_extension(*d, ext))
@@ -368,7 +380,7 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
 
 bool decode_preview(const std::string& path, Image& out)
 {
-    const std::string ext = lowercase_extension(path);
+    const std::string ext = file_extension(path);
     for (const Decoder* d : decoders())
         if (d->preview && claims_extension(*d, ext))
         {

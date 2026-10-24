@@ -9,7 +9,9 @@
 // Big-endian files (PS3) are read the same way with their words swapped.
 // The first picture's first frame and level is shown.
 #include "bcn.h"
+#include "../bytes.h"
 #include "decoder.h"
+#include "texel.h"
 
 #include <algorithm>
 #include <cstring>
@@ -63,23 +65,14 @@ int format_bits(int f)
     return f >= 0 && f <= kDXT5 ? bits[f] : 0;
 }
 
-uint32_t get16(const uint8_t* p, bool big)
-{
-    return big ? uint32_t(p[0]) << 8 | p[1] : uint32_t(p[0]) | uint32_t(p[1]) << 8;
-}
-uint32_t get32(const uint8_t* p, bool big)
-{
-    return big ? get16(p, true) << 16 | get16(p + 2, true) : get16(p, false) | get16(p + 2, false) << 16;
-}
-
 struct File
 {
     const uint8_t* d;
     size_t size;
     bool big;  // PS3
 
-    uint32_t u16(size_t at) const { return get16(d + at, big); }
-    uint32_t u32(size_t at) const { return get32(d + at, big); }
+    uint32_t u16(size_t at) const { return rd16(d + at, big); }
+    uint32_t u32(size_t at) const { return rd32(d + at, big); }
 };
 
 // A block found in the tree: where it starts and ends, and its contents.
@@ -204,15 +197,6 @@ uint32_t straight(int format, uint32_t v)
     return a << 24 | r << 16 | g << 8 | b;
 }
 
-uint32_t premultiply(uint32_t c)
-{
-    const uint32_t a = c >> 24;
-    if (a == 255)
-        return c;
-    const uint32_t r = ((c >> 16 & 0xFF) * a + 127) / 255, g = ((c >> 8 & 0xFF) * a + 127) / 255, b = ((c & 0xFF) * a + 127) / 255;
-    return a << 24 | r << 16 | g << 8 | b;
-}
-
 // The level's samples (colours or indices) in raster order, unswizzled
 // and with the row padding dropped.
 bool samples(const Level& l, bool big, std::vector<uint32_t>& out, std::string& error)
@@ -250,8 +234,8 @@ bool samples(const Level& l, bool big, std::vector<uint32_t>& out, std::string& 
             {
                 case 4: o[x] = s[x >> 1] >> (x & 1) * 4 & 0xF; break;  // low nibble first
                 case 8: o[x] = s[x]; break;
-                case 16: o[x] = get16(s + size_t(x) * 2, big); break;
-                default: o[x] = get32(s + size_t(x) * 4, big); break;
+                case 16: o[x] = rd16(s + size_t(x) * 2, big); break;
+                default: o[x] = rd32(s + size_t(x) * 4, big); break;
             }
     }
     return true;

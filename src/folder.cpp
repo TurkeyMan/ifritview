@@ -12,22 +12,12 @@
 namespace
 {
 
-std::string lowercase_extension(const std::string& name)
-{
-    auto dot = name.find_last_of('.');
-    if (dot == std::string::npos || dot == 0)
-        return {};
-    std::string ext = name.substr(dot + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
-    return ext;
-}
-
 // Whether `name` in `dir` is one the list shows.
 bool qualifies(const std::string& dir, const char* name, const Config& cfg)
 {
     if (!cfg.show_hidden && name[0] == '.')
         return false;
-    const std::string ext = lowercase_extension(name);
+    const std::string ext = file_extension(name);
     if (!cfg.accepts_extension(ext) || !extension_supported(ext))  // e.g. videos without GStreamer
         return false;
     gchar* full = g_build_filename(dir.c_str(), name, nullptr);

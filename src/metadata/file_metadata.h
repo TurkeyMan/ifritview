@@ -68,6 +68,13 @@ struct SaveTarget
 // passed through whatever the choice.
 FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& choice, const SaveTarget& target);
 
+// The metadata as JPEG markers, each complete (FF, marker, length, bytes):
+// EXIF and XMP in APP1, the ICC profile in APP2 (in chunks, as many as it
+// needs), IPTC in Photoshop's APP13. A segment holds 64 KB less its header:
+// EXIF or XMP bigger than that (extended XMP, outsized maker notes) is left
+// out. The JPEG encoder and the lossless writer both write these.
+std::vector<uint8_t> jpeg_metadata_segments(const FileMetadata& m);
+
 struct Image;
 // What's saved with `image`: its file's metadata made to describe the file
 // written (`width` × `height`, or the image's own size when 0), keeping what

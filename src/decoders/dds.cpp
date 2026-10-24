@@ -4,6 +4,7 @@
 // described by bit masks (legacy) or a DXGI format, or is 16/32-bit float.
 // A cube map, array or volume shows its first face or slice.
 #include "bcn.h"
+#include "../bytes.h"
 #include "texel.h"
 #include "decoder.h"
 
@@ -17,11 +18,6 @@
 
 namespace
 {
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
 
 constexpr uint32_t fourcc(const char (&s)[5])
 {
@@ -46,29 +42,6 @@ struct Masks
 };
 
 
-uint32_t extract(uint32_t v, uint32_t mask)
-{
-    if (!mask)
-        return 0;
-    int shift = 0;
-    while (!(mask >> shift & 1))
-        ++shift;
-    const uint32_t max = mask >> shift;
-    return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
-}
-
-void put(uint32_t* px, uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool& opaque)
-{
-    if (a < 255)
-    {
-        opaque = false;
-        r = (r * a + 127) / 255;
-        g = (g * a + 127) / 255;
-        b = (b * a + 127) / 255;
-    }
-    *px = a << 24 | r << 16 | g << 8 | b;
-}
-
 bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, Image& out, std::string& error)
 {
     const size_t row = size_t(w) * m.bytes;
@@ -90,13 +63,13 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, I
                 v |= uint32_t(s[i]) << (8 * i);
             if (m.alpha_only)
             {
-                const uint32_t a = extract(v, m.a);
-                put(px + x, a, a, a, 255, opaque);
+                const uint32_t a = mask_channel(v, m.a);
+                put_argb(px + x, a, a, a, 255, opaque);
                 continue;
             }
-            const uint32_t r = extract(v, m.r);
-            const uint32_t g = m.luminance ? r : extract(v, m.g), b = m.luminance ? r : extract(v, m.b);
-            put(px + x, r, g, b, m.a ? extract(v, m.a) : 255, opaque);
+            const uint32_t r = mask_channel(v, m.r);
+            const uint32_t g = m.luminance ? r : mask_channel(v, m.g), b = m.luminance ? r : mask_channel(v, m.b);
+            put_argb(px + x, r, g, b, m.a ? mask_channel(v, m.a) : 255, opaque);
         }
     }
     out.has_alpha = !opaque;

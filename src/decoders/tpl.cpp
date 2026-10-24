@@ -13,6 +13,8 @@
 // when sampling, but that is a use of the texel, not stored transparency.
 // The first image of a TPL and the largest mipmap are shown.
 #include "decoder.h"
+#include "texel.h"
+#include "../bytes.h"
 
 #include <cstring>
 #include <string>
@@ -20,16 +22,6 @@
 
 namespace
 {
-
-uint16_t be16(const uint8_t* p)
-{
-    return uint16_t(p[0] << 8 | p[1]);
-}
-
-uint32_t be32(const uint8_t* p)
-{
-    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
-}
 
 enum Gx : uint32_t
 {
@@ -111,19 +103,6 @@ uint32_t expand5(uint32_t v)
 uint32_t expand6(uint32_t v)
 {
     return v << 2 | v >> 4;
-}
-
-uint32_t argb(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
-{
-    if (a == 0)
-        return 0;
-    if (a < 255)
-    {
-        r = (r * a + 127) / 255;
-        g = (g * a + 127) / 255;
-        b = (b * a + 127) / 255;
-    }
-    return a << 24 | r << 16 | g << 8 | b;
 }
 
 uint32_t grey(uint32_t i, uint32_t a = 255)

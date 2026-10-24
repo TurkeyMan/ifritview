@@ -250,7 +250,7 @@ void VideoPlayer::start(const std::string& path, std::shared_ptr<Image> target, 
     impl_->state->owner = this;
     impl_->state->target = std::move(target);
     impl_->state->loop = loop;
-    const std::wstring wpath = mf::wide(path);
+    const std::wstring wpath = platform::widen(path);
     impl_->worker = std::thread(
         [state = impl_->state, wpath, muted, loop]
         {

@@ -22,14 +22,6 @@ namespace
 const wchar_t* kProgId = L"IfritView.Image";
 const wchar_t* kCapabilities = L"Software\\IfritView\\Capabilities";
 
-std::wstring wide(const std::string& s)
-{
-    gunichar2* w = g_utf8_to_utf16(s.c_str(), -1, nullptr, nullptr, nullptr);
-    std::wstring out = w ? reinterpret_cast<wchar_t*>(w) : L"";
-    g_free(w);
-    return out;
-}
-
 bool set_value(const std::wstring& key, const wchar_t* name, const std::wstring& value, std::string& error)
 {
     HKEY h = nullptr;
@@ -62,7 +54,7 @@ void refresh_registration()
     DWORD size = sizeof value;
     if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS)
         return;  // never registered
-    const std::wstring expected = L"\"" + wide(platform::executable_path()) + L"\" \"%1\"";
+    const std::wstring expected = L"\"" + platform::widen(platform::executable_path()) + L"\" \"%1\"";
     if (_wcsicmp(value, expected.c_str()) == 0)
         return;
     std::string error;
@@ -72,7 +64,7 @@ void refresh_registration()
 
 bool ensure_desktop_entry(std::string& error)
 {
-    const std::wstring exe = wide(platform::executable_path());
+    const std::wstring exe = platform::widen(platform::executable_path());
     const std::wstring base = std::wstring(L"Software\\Classes\\") + kProgId;
     bool ok = set_value(base, nullptr, L"IfritView image", error);
     ok = set_value(base + L"\\DefaultIcon", nullptr, L"\"" + exe + L"\",0", error) && ok;
@@ -103,7 +95,7 @@ int set_default_for_extensions(const std::vector<std::string>& extensions, bool 
             continue;
         if (is_video(ext) ? !videos : (ext == "pdf" && !documents))
             continue;
-        const std::wstring key = L"Software\\Classes\\." + wide(ext) + L"\\OpenWithProgids";
+        const std::wstring key = L"Software\\Classes\\." + platform::widen(ext) + L"\\OpenWithProgids";
         HKEY h = nullptr;
         if (RegCreateKeyExW(HKEY_CURRENT_USER, key.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &h, nullptr) == ERROR_SUCCESS)
         {
@@ -111,8 +103,8 @@ int set_default_for_extensions(const std::vector<std::string>& extensions, bool 
                 ++count;
             RegCloseKey(h);
         }
-        set_value(L"Software\\Classes\\Applications\\ifritview.exe\\SupportedTypes", wide("." + ext).c_str(), L"", error);
-        set_value(std::wstring(kCapabilities) + L"\\FileAssociations", wide("." + ext).c_str(), kProgId, error);
+        set_value(L"Software\\Classes\\Applications\\ifritview.exe\\SupportedTypes", platform::widen("." + ext).c_str(), L"", error);
+        set_value(std::wstring(kCapabilities) + L"\\FileAssociations", platform::widen("." + ext).c_str(), kProgId, error);
     }
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     // The choice itself is the user's: Settings' Default apps, at IfritView's

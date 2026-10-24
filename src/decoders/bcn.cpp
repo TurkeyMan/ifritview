@@ -3,6 +3,7 @@
 // reads their signed forms; BC6H's HDR values, half floats of linear light,
 // are kept as the image's source and rendered from there (Image::set_source).
 #include "bcn.h"
+#include "texel.h"
 
 #define BCDEC_IMPLEMENTATION
 #define BCDEC_STATIC
@@ -23,11 +24,6 @@
 
 namespace
 {
-
-uint32_t to_byte(float v)
-{
-    return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
 
 }  // namespace
 
@@ -112,7 +108,7 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
                 {
                     const int i = y * 4 + x;
                     // Signed channels span -1..1: shown with 0 at mid-grey.
-                    const auto channel = [&](float v, bool is_signed) { return to_byte(is_signed ? (v + 1) / 2 : v); };
+                    const auto channel = [&](float v, bool is_signed) { return unit_to_byte(is_signed ? (v + 1) / 2 : v); };
                     uint32_t r, g, b, a = 255;
                     switch (format)
                     {

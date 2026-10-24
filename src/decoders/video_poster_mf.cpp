@@ -3,6 +3,7 @@
 // Foundation reads the file itself, so this decoder is marked streaming and
 // gets no preload.
 #include "../mf.h"
+#include "../platform.h"
 #include "../video.h"
 #include "decoder.h"
 
@@ -86,7 +87,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (attributes)
         attributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);  // decodes to RGB32 for us
     mf::Ptr<IMFSourceReader> reader;
-    if (FAILED(mf::create_source_reader(mf::wide(path), attributes.get(), reader.put())))
+    if (FAILED(mf::create_source_reader(platform::widen(path), attributes.get(), reader.put())))
     {
         error = "Media Foundation can't open it";
         return false;

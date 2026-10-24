@@ -3,6 +3,7 @@
 // blocks decode to 8 bits as the decode_unorm8 extension specifies; HDR
 // ones to linear floats, clipped to 0..1 and given the sRGB curve.
 #include "astc.h"
+#include "texel.h"
 
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
@@ -24,19 +25,6 @@ namespace
 {
 
 constexpr uint32_t kErrorColour = 0xFFFF00FFu;  // magenta, as the format specifies for a bad block
-
-uint32_t to_byte(float v)
-{
-    return std::isnan(v) ? 0 : uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
-
-float srgb(float linear)
-{
-    if (std::isnan(linear))
-        return 0;
-    linear = std::clamp(linear, 0.0f, 1.0f);
-    return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1 / 2.4f) - 0.055f;
-}
 
 }  // namespace
 
@@ -119,10 +107,10 @@ bool decode_astc(const uint8_t* data, size_t size, int block_w, int block_h, int
                     uint32_t r, g, b, a;
                     if (hdr)
                     {
-                        r = to_byte(srgb(f[i]));
-                        g = to_byte(srgb(f[i + 1]));
-                        b = to_byte(srgb(f[i + 2]));
-                        a = to_byte(f[i + 3]);
+                        r = unit_to_byte(linear_to_srgb(f[i]));
+                        g = unit_to_byte(linear_to_srgb(f[i + 1]));
+                        b = unit_to_byte(linear_to_srgb(f[i + 2]));
+                        a = unit_to_byte(f[i + 3]);
                     }
                     else
                     {

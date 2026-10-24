@@ -169,7 +169,7 @@ void read_xmp(const std::string& path, const uint8_t* data, size_t size, Image& 
     if (!read_sidecar(path + ".xmp", out))
     {
         const auto dot = path.find_last_of('.');
-        const auto slash = path.find_last_of('/');
+        const auto slash = path.find_last_of("/\\");  // either slash: a dot in a folder's name isn't one
         if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
             read_sidecar(path.substr(0, dot) + ".xmp", out);
     }

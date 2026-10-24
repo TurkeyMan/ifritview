@@ -153,35 +153,15 @@ struct JpegError
 
 const Encoder& jpeg_encoder();
 
-// EXIF and XMP in APP1, the ICC profile in APP2 (split as it needs), IPTC in
-// Photoshop's APP13. A segment holds 64 KB less its header: EXIF or XMP
-// bigger than that (extended XMP, outsized maker notes) is left out.
+// The metadata's segments (jpeg_metadata_segments), each to libjpeg.
 void write_jpeg_metadata(jpeg_compress_struct* cinfo, const FileMetadata& m)
 {
-    constexpr size_t kMax = 65533;
-    const auto segment = [cinfo](int marker, const char* header, size_t header_len, const std::vector<uint8_t>& body)
+    const std::vector<uint8_t> segments = jpeg_metadata_segments(m);
+    for (size_t at = 0; at + 4 <= segments.size();)
     {
-        if (body.empty() || header_len + body.size() > kMax)
-            return;
-        std::vector<uint8_t> s(header, header + header_len);
-        s.insert(s.end(), body.begin(), body.end());
-        jpeg_write_marker(cinfo, marker, s.data(), unsigned(s.size()));
-    };
-    segment(JPEG_APP0 + 1, "Exif\0\0", 6, m.exif);
-    segment(JPEG_APP0 + 1, "http://ns.adobe.com/xap/1.0/\0", 29, m.xmp);
-    if (!m.icc.empty())
-        jpeg_write_icc_profile(cinfo, m.icc.data(), unsigned(m.icc.size()));
-    if (!m.iptc.empty())
-    {
-        // One image resource, 0x0404, with an empty name, padded to even.
-        std::vector<uint8_t> irb = {'8', 'B', 'I', 'M', 0x04, 0x04, 0, 0};
-        const uint32_t n = uint32_t(m.iptc.size());
-        for (int shift : {24, 16, 8, 0})
-            irb.push_back(uint8_t(n >> shift));
-        irb.insert(irb.end(), m.iptc.begin(), m.iptc.end());
-        if (irb.size() & 1)
-            irb.push_back(0);
-        segment(JPEG_APP0 + 13, "Photoshop 3.0\0", 14, irb);
+        const size_t len = size_t(segments[at + 2]) << 8 | segments[at + 3];  // counting its own two bytes
+        jpeg_write_marker(cinfo, segments[at + 1], segments.data() + at + 4, unsigned(len - 2));
+        at += 2 + len;
     }
 }
 
@@ -863,4 +843,18 @@ const std::vector<const Encoder*>& encoders()
         return v;
     }();
     return list;
+}
+
+const Encoder* encoder_for_extension(const std::string& ext)
+{
+    // The extensions files of a format also go by.
+    static const std::pair<const char*, const char*> aliases[] = {{"jpeg", "jpg"}, {"jpe", "jpg"}, {"jfif", "jpg"}, {"tiff", "tif"}};
+    std::string want = ext;
+    for (const auto& [alias, extension] : aliases)
+        if (want == alias)
+            want = extension;
+    for (const Encoder* e : encoders())
+        if (want == e->extension)
+            return e;
+    return nullptr;
 }

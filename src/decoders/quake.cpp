@@ -11,6 +11,7 @@
 // Index 255 is transparent in both games' pictures (Quake 2's renderer
 // gives every 8-bit image that); conchars uses index 0 instead.
 #include "decoder.h"
+#include "../bytes.h"
 
 #include "../platform.h"
 
@@ -21,11 +22,6 @@
 
 namespace
 {
-
-uint32_t le32(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-}
 
 // The whole of a small file, or empty (missing, unreadable, too big).
 std::vector<uint8_t> read_small(const std::string& path, size_t max)

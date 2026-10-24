@@ -5,17 +5,13 @@
 // shows its first slice when its blocks are 2D, and isn't supported when
 // they're 3D.
 #include "astc.h"
+#include "../bytes.h"
 #include "decoder.h"
 
 #include <string>
 
 namespace
 {
-
-uint32_t le24(const uint8_t* p)
-{
-    return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16;
-}
 
 bool sniff(const uint8_t* h, size_t n)
 {

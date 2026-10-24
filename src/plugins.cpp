@@ -61,94 +61,8 @@ const std::string kEncodeName = "ifrit_encode";
 // -- the libraries ------------------------------------------------------------
 
 #ifdef _WIN32
-std::wstring to_wide(const std::string& s)
-{
-    std::wstring w;
-    if (gunichar2* u = g_utf8_to_utf16(s.c_str(), -1, nullptr, nullptr, nullptr))
-    {
-        w = reinterpret_cast<const wchar_t*>(u);
-        g_free(u);
-    }
-    return w;
-}
-
-std::string from_wide(const wchar_t* w)
-{
-    std::string s;
-    if (gchar* u = g_utf16_to_utf8(reinterpret_cast<const gunichar2*>(w), -1, nullptr, nullptr, nullptr))
-    {
-        s = u;
-        g_free(u);
-    }
-    return s;
-}
-
-std::string last_error_text()
-{
-    const DWORD code = GetLastError();
-    wchar_t* text = nullptr;
-    FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0,
-                   reinterpret_cast<wchar_t*>(&text), 0, nullptr);
-    std::string s = text ? from_wide(text) : std::string();
-    if (text)
-        LocalFree(text);
-    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '.'))
-        s.pop_back();
-    return s + " (error " + std::to_string(code) + ")";
-}
-
-void* open_module(const std::string& path, std::string& error)
-{
-    std::wstring wide = to_wide(path);
-    std::replace(wide.begin(), wide.end(), L'/', L'\\');  // LOAD_WITH_ALTERED_SEARCH_PATH wants a Windows path
-    // No "missing DLL" message box for a plugin whose dependencies are absent:
-    // it's just skipped, with the reason.
-    DWORD old_mode = 0;
-    SetThreadErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX, &old_mode);
-    // Altered search path: DLLs beside the plugin satisfy its own imports.
-    HMODULE m = LoadLibraryExW(wide.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (!m)
-        error = last_error_text();
-    SetThreadErrorMode(old_mode, nullptr);
-    return m;
-}
-
-void close_module(void* m)
-{
-    FreeLibrary(static_cast<HMODULE>(m));
-}
-
-void* symbol(void* m, const char* name)
-{
-    return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(m), name));
-}
-
 constexpr const char* kSuffix = ".dll";
 #else
-void* open_module(const std::string& path, std::string& error)
-{
-    // RTLD_LOCAL: plugins don't see each other's symbols, nor clash.
-    void* m = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!m)
-    {
-        const char* e = dlerror();
-        error = e ? e : "cannot load";
-        if (error.rfind(path + ": ", 0) == 0)  // the path is listed already
-            error.erase(0, path.size() + 2);
-    }
-    return m;
-}
-
-void close_module(void* m)
-{
-    dlclose(m);
-}
-
-void* symbol(void* m, const char* name)
-{
-    return dlsym(m, name);
-}
-
 constexpr const char* kSuffix = ".so";
 #endif
 
@@ -772,13 +686,6 @@ std::vector<std::string> split(const char* text, char sep)
     return parts;
 }
 
-std::string clean_extension(std::string e)
-{
-    e.erase(std::remove_if(e.begin(), e.end(), [](unsigned char c) { return std::isspace(c) || c == '.'; }), e.end());
-    std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-    return e;
-}
-
 // Builds a format's Decoder and Encoder; false (with `why`) if its
 // description doesn't hold together.
 bool make_format(Plugin& p, uint32_t index, const ifrit_format& d, Format& f, std::string& why)
@@ -799,7 +706,7 @@ bool make_format(Plugin& p, uint32_t index, const ifrit_format& d, Format& f, st
     f.summary.description = d.description ? d.description : "";
     for (const std::string& e : split(d.extensions, ';'))
     {
-        const std::string clean = clean_extension(e);
+        const std::string clean = normalise_extension(e);
         if (!clean.empty() && std::find(f.summary.extensions.begin(), f.summary.extensions.end(), clean) == f.summary.extensions.end())
             f.summary.extensions.push_back(clean);
     }
@@ -888,7 +795,7 @@ bool make_format(Plugin& p, uint32_t index, const ifrit_format& d, Format& f, st
 // Opens one library; a Plugin, or null with the reason.
 std::unique_ptr<Plugin> load_plugin(const std::string& path, std::string& why)
 {
-    void* module = open_module(path, why);
+    void* module = platform::open_module(path, why);
     if (!module)
         return nullptr;
     auto p = std::make_unique<Plugin>();
@@ -897,18 +804,18 @@ std::unique_ptr<Plugin> load_plugin(const std::string& path, std::string& why)
     const auto fail = [&](std::string reason)
     {
         why = std::move(reason);
-        close_module(module);
+        platform::close_library(module);
         return nullptr;
     };
-    auto info = reinterpret_cast<info_fn>(symbol(module, kInfoName.c_str()));
-    p->decode = reinterpret_cast<decode_fn>(symbol(module, kDecodeName.c_str()));
+    auto info = reinterpret_cast<info_fn>(platform::library_symbol(module, kInfoName.c_str()));
+    p->decode = reinterpret_cast<decode_fn>(platform::library_symbol(module, kDecodeName.c_str()));
     if (!info)
         return fail("not an IfritView plugin (no " + kInfoName + ")");
     if (!p->decode)
         return fail("required export " + kDecodeName + " is missing");
-    p->sniff = reinterpret_cast<sniff_fn>(symbol(module, kSniffName.c_str()));
-    p->preview = reinterpret_cast<preview_fn>(symbol(module, kPreviewName.c_str()));
-    p->encode = reinterpret_cast<encode_fn>(symbol(module, kEncodeName.c_str()));
+    p->sniff = reinterpret_cast<sniff_fn>(platform::library_symbol(module, kSniffName.c_str()));
+    p->preview = reinterpret_cast<preview_fn>(platform::library_symbol(module, kPreviewName.c_str()));
+    p->encode = reinterpret_cast<encode_fn>(platform::library_symbol(module, kEncodeName.c_str()));
     p->summary.sniff = p->sniff != nullptr;
     p->summary.preview = p->preview != nullptr;
 
@@ -1049,7 +956,7 @@ std::vector<std::string> search_paths()
 #ifdef _WIN32
     PWSTR local = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)))
-        add(from_wide(local) + "\\IfritView\\plugins");
+        add(platform::narrow(local) + "\\IfritView\\plugins");
     CoTaskMemFree(local);
 #else
     // There's no XDG variable for per-user libraries; ~/.local/lib is where

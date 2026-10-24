@@ -50,15 +50,7 @@ bool integer(const std::string& s, int& v)
 
 const Encoder* encoder_for(const std::string& path)
 {
-    std::string ext = lower(path.substr(path.find_last_of('.') == std::string::npos ? path.size() : path.find_last_of('.') + 1));
-    if (ext == "jpeg")
-        ext = "jpg";
-    if (ext == "tiff")
-        ext = "tif";
-    for (const Encoder* e : encoders())
-        if (ext == e->extension)
-            return e;
-    return nullptr;
+    return encoder_for_extension(file_extension(path));
 }
 
 // A setting's value as words or a number: yes/no for toggles, a choice's

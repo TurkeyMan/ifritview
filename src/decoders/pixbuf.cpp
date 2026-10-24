@@ -26,8 +26,7 @@ std::vector<std::string> extensions()
         gchar** exts = gdk_pixbuf_format_get_extensions(fmt);
         for (gchar** e = exts; e && *e; ++e)
         {
-            std::string ext = *e;
-            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+            const std::string ext = normalise_extension(*e);
             if (ext == "gz")
                 continue;  // the SVGZ loader claims it; a browse filter shouldn't
             if (std::find(list.begin(), list.end(), ext) == list.end())

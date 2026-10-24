@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../platform.h"
 
 #include "icc.h"
 
@@ -78,9 +79,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     (void)quiet;
 
 #ifdef _WIN32
-    gunichar2* wpath = g_utf8_to_utf16(path.c_str(), -1, nullptr, nullptr, nullptr);
-    TIFF* tif = wpath ? TIFFOpenW(reinterpret_cast<const wchar_t*>(wpath), "r") : nullptr;
-    g_free(wpath);
+    TIFF* tif = TIFFOpenW(platform::widen(path).c_str(), "r");
 #else
     TIFF* tif = TIFFOpen(path.c_str(), "r");
 #endif
