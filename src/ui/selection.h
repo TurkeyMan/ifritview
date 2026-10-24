@@ -24,11 +24,12 @@ inline SelectionRect selection_rect(double ax, double ay, double px, double py, 
     SelectionRect r;
     if (lock == SelectionLock::None || w < 1 || h < 1)
     {
-        // Every pixel the drag touches.
-        r.x0 = std::floor(std::min(ax, px));
-        r.y0 = std::floor(std::min(ay, py));
-        r.x1 = std::ceil(std::max(ax, px));
-        r.y1 = std::ceil(std::max(ay, py));
+        // Each edge at the pixel boundary nearest it: a drag's ends on a
+        // half pixel (a centred image's) add no row or column.
+        r.x0 = std::round(std::min(ax, px));
+        r.y0 = std::round(std::min(ay, py));
+        r.x1 = std::round(std::max(ax, px));
+        r.y1 = std::round(std::max(ay, py));
         return r;
     }
 
