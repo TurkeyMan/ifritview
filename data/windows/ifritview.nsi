@@ -75,4 +75,11 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   DeleteRegKey HKLM "Software\IfritView"
+  ; What the app registered for the user when offered as the default viewer.
+  ; (Extensions' "Open with" entries naming IfritView.Image are left: with
+  ; the ProgID gone, Windows passes over them.)
+  DeleteRegKey HKCU "Software\Classes\IfritView.Image"
+  DeleteRegKey HKCU "Software\Classes\Applications\ifritview.exe"
+  DeleteRegValue HKCU "Software\RegisteredApplications" "IfritView"
+  DeleteRegKey HKCU "Software\IfritView"
 SectionEnd

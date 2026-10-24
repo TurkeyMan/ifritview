@@ -1,8 +1,10 @@
 // Windows: register IfritView as a handler for the listed extensions, per
 // user (HKCU, no elevation). Windows 10 and later don't let an application
 // make itself the default; it can only offer itself, so this registers a
-// ProgID, adds it to each extension's "Open with" list, and opens Settings'
-// Default apps page where the user picks it.
+// ProgID, adds it to each extension's "Open with" list, registers the app's
+// capabilities (which gives it its own page in Default apps, listing its
+// types, with a "Set default" for all of them on Windows 11), and opens that
+// page, where the user makes the choice.
 #include "integration.h"
 
 #include "platform.h"
@@ -18,6 +20,7 @@ namespace
 {
 
 const wchar_t* kProgId = L"IfritView.Image";
+const wchar_t* kCapabilities = L"Software\\IfritView\\Capabilities";
 
 std::wstring wide(const std::string& s)
 {
@@ -62,6 +65,12 @@ bool ensure_desktop_entry(std::string& error)
     const std::wstring app = L"Software\\Classes\\Applications\\ifritview.exe";
     ok = set_value(app + L"\\shell\\open\\command", nullptr, L"\"" + exe + L"\" \"%1\"", error) && ok;
     ok = set_value(app, L"FriendlyAppName", L"IfritView", error) && ok;
+    // An app of its own in Settings' Default apps.
+    const std::wstring caps = kCapabilities;
+    ok = set_value(caps, L"ApplicationName", L"IfritView", error) && ok;
+    ok = set_value(caps, L"ApplicationDescription", L"A fast image viewer", error) && ok;
+    ok = set_value(caps, L"ApplicationIcon", L"\"" + exe + L"\",0", error) && ok;
+    ok = set_value(L"Software\\RegisteredApplications", L"IfritView", caps, error) && ok;
     return ok;
 }
 
@@ -87,9 +96,11 @@ int set_default_for_extensions(const std::vector<std::string>& extensions, bool 
             RegCloseKey(h);
         }
         set_value(L"Software\\Classes\\Applications\\ifritview.exe\\SupportedTypes", wide("." + ext).c_str(), L"", error);
+        set_value(std::wstring(kCapabilities) + L"\\FileAssociations", wide("." + ext).c_str(), kProgId, error);
     }
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    // The choice itself is the user's: open Settings > Default apps.
-    ShellExecuteW(nullptr, L"open", L"ms-settings:defaultapps", nullptr, nullptr, SW_SHOWNORMAL);
+    // The choice itself is the user's: Settings' Default apps, at IfritView's
+    // own page (Windows 11; older ones open the list of apps).
+    ShellExecuteW(nullptr, L"open", L"ms-settings:defaultapps?registeredAppUser=IfritView", nullptr, nullptr, SW_SHOWNORMAL);
     return count;
 }
