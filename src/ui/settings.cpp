@@ -628,6 +628,10 @@ rap::node about_page(rap::ui& ui)
                    "of games, with a fire spirit doing the heavy lifting.")},
         L::label{_("Conjured by Manu Evans, © 2026. Free software under the GNU GPL, version 3\n"
                    "or later: share it, change it, pass the flame along.")},
+        // Where the idea of a fast, friendly viewer comes from; no tie implied.
+        L::label{_("With a respectful bow to Irfan Škiljan, whose IrfanView showed us all\n"
+                   "how an image viewer should feel.")}
+            .link([] { platform::open_uri("https://www.irfanview.com/"); }),
         L::label{_("Project page and source")}.icon(github_icon()).link([] { platform::open_uri(kProjectUrl); }),
         L::label{_("The licence (GPL 3.0)")}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };

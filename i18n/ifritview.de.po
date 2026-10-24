@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: IfritView\n"
 "Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
-"POT-Creation-Date: 2026-10-24 17:24+0000\n"
+"POT-Creation-Date: 2026-10-24 17:29+0000\n"
 "PO-Revision-Date: 2026-10-25 12:00+0000\n"
 "Language-Team: German\n"
 "Language: de\n"
@@ -1816,39 +1816,47 @@ msgstr ""
 "Heraufbeschworen von Manu Evans, © 2026. Freie Software unter der GNU GPL,\n"
 "Version 3 oder neuer: weitergeben, verändern, die Flamme weiterreichen."
 
-#: src/ui/settings.cpp:631
+#: src/ui/settings.cpp:632
+msgid ""
+"With a respectful bow to Irfan Škiljan, whose IrfanView showed us all\n"
+"how an image viewer should feel."
+msgstr ""
+"Mit einer respektvollen Verbeugung vor Irfan Škiljan, dessen IrfanView uns\n"
+"allen gezeigt hat, wie sich ein Bildbetrachter anfühlen sollte."
+
+#: src/ui/settings.cpp:635
 msgid "Project page and source"
 msgstr "Projektseite und Quellcode"
 
-#: src/ui/settings.cpp:632
+#: src/ui/settings.cpp:636
 msgid "The licence (GPL 3.0)"
 msgstr "Die Lizenz (GPL 3.0)"
 
-#: src/ui/settings.cpp:636
+#: src/ui/settings.cpp:640
 msgid "Third-party notices: the friends who lent a hand"
 msgstr "Hinweise zu Drittanbietern: die Freunde, die mit angepackt haben"
 
-#: src/ui/settings.cpp:666
+#: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: src/ui/settings.cpp:669
+#: src/ui/settings.cpp:673
 msgid "General"
 msgstr "Allgemein"
 
-#: src/ui/settings.cpp:670
+#: src/ui/settings.cpp:674
 msgid "Viewing"
 msgstr "Anzeige"
 
-#: src/ui/settings.cpp:671
+#: src/ui/settings.cpp:675
 msgid "Controls"
 msgstr "Steuerung"
 
-#: src/ui/settings.cpp:672
+#: src/ui/settings.cpp:676
 msgid "File Types"
 msgstr "Dateitypen"
 
-#: src/ui/settings.cpp:673
+#: src/ui/settings.cpp:677
 msgid "About"
 msgstr "Über"
 

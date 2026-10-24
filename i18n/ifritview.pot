@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: IfritView\n"
 "Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
-"POT-Creation-Date: 2026-10-24 17:24+0000\n"
+"POT-Creation-Date: 2026-10-24 17:29+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1793,39 +1793,45 @@ msgid ""
 "or later: share it, change it, pass the flame along."
 msgstr ""
 
-#: src/ui/settings.cpp:631
+#: src/ui/settings.cpp:632
+msgid ""
+"With a respectful bow to Irfan Škiljan, whose IrfanView showed us all\n"
+"how an image viewer should feel."
+msgstr ""
+
+#: src/ui/settings.cpp:635
 msgid "Project page and source"
 msgstr ""
 
-#: src/ui/settings.cpp:632
+#: src/ui/settings.cpp:636
 msgid "The licence (GPL 3.0)"
 msgstr ""
 
-#: src/ui/settings.cpp:636
+#: src/ui/settings.cpp:640
 msgid "Third-party notices: the friends who lent a hand"
 msgstr ""
 
-#: src/ui/settings.cpp:666
+#: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr ""
 
-#: src/ui/settings.cpp:669
+#: src/ui/settings.cpp:673
 msgid "General"
 msgstr ""
 
-#: src/ui/settings.cpp:670
+#: src/ui/settings.cpp:674
 msgid "Viewing"
 msgstr ""
 
-#: src/ui/settings.cpp:671
+#: src/ui/settings.cpp:675
 msgid "Controls"
 msgstr ""
 
-#: src/ui/settings.cpp:672
+#: src/ui/settings.cpp:676
 msgid "File Types"
 msgstr ""
 
-#: src/ui/settings.cpp:673
+#: src/ui/settings.cpp:677
 msgid "About"
 msgstr ""
 
