@@ -148,3 +148,5 @@ struct ExifSummary
 ExifSummary read_exif_file(const std::string& path, Image& out);
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
 #endif
+
+const Decoder& exr_decoder();

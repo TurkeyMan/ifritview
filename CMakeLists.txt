@@ -71,6 +71,7 @@ add_library(ifrit_core STATIC
   src/decoders/netpbm.cpp
   src/decoders/bcn.cpp
   src/decoders/dds.cpp
+  src/decoders/exr.cpp
   src/decoders/vtf.cpp
   src/decoders/blp.cpp
   src/decoders/tim2.cpp
