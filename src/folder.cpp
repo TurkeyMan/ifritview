@@ -89,6 +89,17 @@ void Folder::scan(const std::string& path, const Config& cfg)
     }
 }
 
+void Folder::set_single(const std::string& file)
+{
+    gchar* d = g_path_get_dirname(file.c_str());
+    gchar* b = g_path_get_basename(file.c_str());
+    dir_ = d;
+    files_ = {b};
+    index_ = 0;
+    g_free(d);
+    g_free(b);
+}
+
 void Folder::rescan(const Config& cfg)
 {
     if (dir_.empty())

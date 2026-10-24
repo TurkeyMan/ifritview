@@ -12,6 +12,9 @@ public:
     // `path` may be a file (which becomes current if it qualifies) or a
     // directory (cursor goes to the first file).
     void scan(const std::string& path, const Config& cfg);
+    // Just this one file, until it's scanned: for showing it before the
+    // folder has been listed.
+    void set_single(const std::string& file);
     // Re-list the current directory, keeping the cursor on the same file if possible.
     void rescan(const Config& cfg);
 

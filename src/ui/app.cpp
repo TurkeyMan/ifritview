@@ -6,6 +6,7 @@
 #include "settings.h"
 
 #include "decoders/decoder.h"
+#include "first_image.h"
 #include "jpeg_lossless.h"
 #include "encoders/encoder.h"
 
@@ -630,6 +631,10 @@ void App::build_ui()
         crop_button_->set_enabled(view_->selection(x, y, w, h));
     };
     update_status();
+}
+
+void App::show_window()
+{
     platform::trace("showing the window");
     window_->show();
     platform::trace("window shown");
@@ -1223,14 +1228,40 @@ void App::quit()
 }
 
 // -- navigation ---------------------------------------------------------------
-void App::open_path(const std::string& path)
+void App::open_path(const std::string& path, FirstImage* first)
 {
     gchar* canonical = g_canonicalize_filename(path.c_str(), nullptr);
-    platform::trace("reading the folder");
-    folder_.scan(canonical, cfg_);
-    platform::trace("folder read: %d files", folder_.count());
+    const std::string file = canonical;
     g_free(canonical);
-    load_current();
+    if (!first)
+    {
+        platform::trace("reading the folder");
+        folder_.scan(file, cfg_);
+        platform::trace("folder read: %d files", folder_.count());
+        load_current();
+        return;
+    }
+    // The image is being decoded already: the window opens with it, and the
+    // folder is listed once it's painted (it isn't needed to show it).
+    folder_.set_single(file);
+    deferred_scan_ = file;
+    const uint64_t generation = ++load_generation_;
+    // A moment's wait for it, so a big one doesn't hold the window back:
+    // past that, it arrives in the open window.
+    if (first->wait_for(std::chrono::milliseconds(250)))
+        take_first_image(*first, file, generation);
+    else
+        first->on_done([this, first, file, generation] { ui_.post([this, first, file, generation] { take_first_image(*first, file, generation); }); });
+}
+
+void App::take_first_image(FirstImage& first, const std::string& file, uint64_t generation)
+{
+    if (generation != load_generation_)
+        return;  // something else was opened meanwhile
+    Loader::Result r{generation, file, first.image(), first.error(), first.preview()};
+    on_loaded(r);
+    if (first.preview())
+        loader_.request_develop(generation, file);  // the stand-in's real decode
 }
 
 void App::open_diff(const std::string& a_path, const std::string& b_path)
@@ -1358,6 +1389,21 @@ void App::image_presented()
     {
         first_presented_ = true;
         platform::trace("first image painted");
+        if (!deferred_scan_.empty())
+            ui_.post(
+                [this]
+                {
+                    // Now the rest of the folder, keeping to the image shown.
+                    const std::string file = std::move(deferred_scan_);
+                    deferred_scan_.clear();
+                    if (folder_.empty() || folder_.current() != file)
+                        return;  // something else was opened meanwhile
+                    folder_.scan(file, cfg_);
+                    platform::trace("folder read: %d files", folder_.count());
+                    update_title();
+                    update_status();
+                    schedule_prefetch();
+                });
     }
     awaiting_present_ = false;
     preload_optional_libraries();  // the first image is up; warm video and PDF support
@@ -1447,9 +1493,11 @@ void App::on_loaded(Loader::Result& r)
                          now_us() / 1000.0 - base);
     }
     const bool from_cache = r.cached;
-    platform::trace("UI has the result");
-    platform::trace("decoded on the loader thread: started %.1f ms ago, took %.1f ms, waited %.1f ms to reach the UI", (g_get_monotonic_time() - r.picked_us) / 1000.0,
-                    (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
+    if (r.picked_us)
+        platform::trace("UI has the loader's result: started %.1f ms ago, decoded in %.1f ms, waited %.1f ms to reach the UI",
+                        (g_get_monotonic_time() - r.picked_us) / 1000.0, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
+    else
+        platform::trace("UI has the image (%s)", r.cached ? "from the cache" : "decoded ahead");
     schedule_prefetch();
     if (tracing() && r.image)
         std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.image->is_preview()),

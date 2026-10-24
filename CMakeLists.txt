@@ -62,6 +62,7 @@ add_library(ifrit_core STATIC
   src/metadata/edit.cpp
   src/jpeg_lossless.cpp
   src/pipeline.cpp
+  src/first_image.cpp
   src/platform.cpp
   src/plugins.cpp
   src/decoders/stb.cpp

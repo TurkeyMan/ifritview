@@ -29,7 +29,10 @@ class App
 public:
     explicit App(rap::ui& ui);
     ~App();
-    void open_path(const std::string& path);
+    // The file (and its folder) or folder to show. `first`, when given, is
+    // the file already being decoded (from main), to open the window with.
+    void open_path(const std::string& path, class FirstImage* first = nullptr);
+    void show_window();  // after the first image is in, if it's quick
     // Two images compared, standalone (--diff, or two files dropped at once).
     void open_diff(const std::string& a_path, const std::string& b_path);
     int run();
@@ -225,6 +228,8 @@ private:
     std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
     bool refit_after_layout_ = false;
     bool first_presented_ = false;
+    std::string deferred_scan_;  // the folder of the first image, listed once it's painted
+    void take_first_image(class FirstImage& first, const std::string& file, uint64_t generation);
     void refit_after_pane_toggle();
     float pane_extra_ = 0;         // what the info pane adds to the window's width (learnt)
     float pane_toggled_from_ = 0;  // the width before the last toggle
