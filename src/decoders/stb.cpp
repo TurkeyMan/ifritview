@@ -51,12 +51,6 @@ std::string format_name(const std::string& path)
         return "Softimage PIC";
     if (ext == "hdr")
         return "Radiance HDR";
-    if (ext == "pgm")
-        return "PGM";
-    if (ext == "ppm")
-        return "PPM";
-    if (ext == "pnm")
-        return "PNM";
     return "stb_image";
 }
 
@@ -125,6 +119,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& stb_decoder()
 {
-    static const Decoder d{"stb_image", {"psd", "tga", "targa", "bmp", "dib", "pic", "hdr", "pgm", "ppm", "pnm"}, sniff, decode};
+    static const Decoder d{"stb_image", {"psd", "tga", "targa", "bmp", "dib", "pic", "hdr"}, sniff, decode};
     return d;
 }
