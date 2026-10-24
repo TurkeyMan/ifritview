@@ -444,6 +444,14 @@ void App::build_ui()
             refit_after_pane_toggle();
         else if (refit_when_laid_out_)
             fit_window_to_image();  // measured now: clears the flag
+        else if (fitted_scale_ > 0 && view_->scale_factor() != fitted_scale_)
+        {
+            // Fitted at another scale (Qt on Wayland learns its fractional one
+            // just after showing; a move to another monitor): again at this
+            // one. Posted, as this can run inside a paint.
+            fitted_scale_ = view_->scale_factor();
+            ui_.post([this] { fit_window_to_image(); });
+        }
         settle_side_by_side();
     };
     view_->on_video_toggle = [this] { toggle_video(); };
@@ -1194,6 +1202,7 @@ void App::fit_window_to_image()
     // Not laid out yet (GTK sizes nothing before the window shows): the
     // chrome was guessed, so fit again once the view has a size.
     refit_when_laid_out_ = vw <= 0 || vh <= 0;
+    fitted_scale_ = scale;
 
     // Leave room for the title bar and a little air around the window.
     const float max_w = work.w - 24, max_h = work.h - 72;

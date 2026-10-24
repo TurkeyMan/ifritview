@@ -14,7 +14,7 @@
 // channels byte by byte, 16-bit ones packed first channel highest) and BC1-
 // BC7 through bcn.cpp, ETC/EAC through etc.cpp and 2D ASTC through astc.cpp
 // are shown; PVRTC isn't decoded.
-// The first surface and face, largest mipmap, is shown.
+// Surfaces, cube faces and depth slices are pages, mipmaps levels.
 #include "astc.h"
 #include "../i18n.h"
 #include "../bytes.h"
@@ -285,7 +285,7 @@ std::vector<uint32_t> read_pvp(const std::string& path, std::string& format)
     return palette;
 }
 
-bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Image& out, std::string& error)
+bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, ImagePart part, Image& out, std::string& error)
 {
     size_t pos = 0;
     std::optional<uint32_t> global_index;
@@ -302,7 +302,7 @@ bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Im
         return false;
     }
     const int pixel = d[pos + 8], layout = d[pos + 9];
-    const int w = le16(d + pos + 12), h = le16(d + pos + 14);
+    int w = le16(d + pos + 12), h = le16(d + pos + 14);  // the level's, once checked
     const uint8_t* data = d + pos + 16;
     const size_t avail = size - pos - 16;
     if (!layout_name(layout))
@@ -338,6 +338,21 @@ bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Im
         return false;
     }
 
+    // Mipmaps, smallest first and the largest last, are levels, down to
+    // 2 × 2: the 1 × 1 one sits in a slot whose size differs by layout.
+    const int full_w = w;
+    int levels = 1;
+    while (has_mips(layout) && (full_w >> levels) >= 2)
+        ++levels;
+    out.level_count = levels;
+    if (part.page > 0 || part.level >= levels)
+    {
+        error = "the PVR has no such page or level";
+        return false;
+    }
+    if (part.level > 0)
+        w = h = full_w >> part.level;  // mipmapped ones are square
+
     // Every layout first becomes w × h texels in raster order: 16-bit
     // colours, palette indices, or (bitmaps) 32-bit colours.
     const size_t n = size_t(w) * h;
@@ -345,7 +360,7 @@ bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Im
     std::vector<uint16_t> codebook;
     if (is_vq(layout))
     {
-        const size_t entries = layout == SmallVQ || layout == SmallVQMips ? small_vq_entries(w, layout == SmallVQMips) : 256;
+        const size_t entries = layout == SmallVQ || layout == SmallVQMips ? small_vq_entries(full_w, layout == SmallVQMips) : 256;
         if (avail < entries * 8)
         {
             error = "PVR codebook is cut short";
@@ -459,9 +474,9 @@ bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Im
     if (has_mips(layout))
     {
         int levels = 1;
-        while ((1 << (levels - 1)) < w)
+        while ((1 << (levels - 1)) < full_w)
             ++levels;
-        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(levels) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(levels));
     }
     return true;
 }
@@ -728,6 +743,18 @@ void describe_sdk(Image& out, const Blocks& blocks, const std::optional<Channels
     out.pixel_format = PixelFormat::widths(grey ? M::L : M::RGB, names.c_str(), bits);
 }
 
+// Bytes of one w × h surface.
+size_t sdk_bytes(const Blocks& blocks, const std::optional<Channels>& channels, int w, int h)
+{
+    if (blocks.bcn)
+        return bcn_size(*blocks.bcn, w, h);
+    if (blocks.etc)
+        return etc_size(*blocks.etc, w, h);
+    if (blocks.astc_w)
+        return astc_size(blocks.astc_w, blocks.astc_h, w, h);
+    return (size_t(w) * size_t(h) * size_t(channel_bits(*channels)) + 7) / 8;
+}
+
 // Shared by v2 and v3 once the format is known.
 bool decode_sdk_surface(const Blocks& blocks, const std::optional<Channels>& channels, bool premultiplied, const uint8_t* d, size_t size, int w,
                         int h, Image& out, std::string& error)
@@ -759,7 +786,7 @@ bool decode_sdk_surface(const Blocks& blocks, const std::optional<Channels>& cha
     return true;
 }
 
-bool v2_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
+bool v2_decode(const uint8_t* d, size_t size, ImagePart part, Image& out, std::string& error)
 {
     const int h = int(le32(d + 4)), w = int(le32(d + 8));
     const uint32_t mips = le32(d + 12), flags = le32(d + 16), surfaces = le32(d + 48);
@@ -786,22 +813,41 @@ bool v2_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         error = "twiddled PowerVR SDK texture isn't supported";
         return false;
     }
-    if (!decode_sdk_surface(blocks, channels, premultiplied, d + 52, size - 52, w, h, out, error))
+    // Each surface (or cube face) with its mipmaps after it, largest first.
+    const int levels = flags & 0x100 ? int(std::min(mips, 31u)) + 1 : 1;
+    out.page_count = int(std::clamp(surfaces, 1u, 1u << 16));
+    out.level_count = levels;
+    if (part.page >= out.page_count || part.level >= levels)
+    {
+        error = "the PVR has no such page or level";
         return false;
+    }
+    if (flags & 0x1000)
+        out.page_label = cube_face_label(part.page, out.page_count / 6);
+    size_t at = 52;
+    for (int m = 0; m < levels; ++m)
+        at += sdk_bytes(blocks, channels, std::max(1, w >> m), std::max(1, h >> m)) * (m < part.level ? 1 + size_t(part.page) : size_t(part.page));
+    const int lw = std::max(1, w >> part.level), lh = std::max(1, h >> part.level);
+    if (at > size || !decode_sdk_surface(blocks, channels, premultiplied, d + at, size - at, lw, lh, out, error))
+    {
+        if (error.empty())
+            error = "PVR data is cut short";
+        return false;
+    }
     if (flags & 0x10000)  // stored bottom up
         flip_rows(out);
     out.add(N_("PVR"), N_("Version"), "PowerVR SDK v2");
     out.add(N_("PVR"), N_("Format"), blocks.any() ? blocks.name() : channels_name(*channels));
     if (flags & 0x100 && mips > 0)
-        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips + 1) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips + 1));
     if (flags & 0x1000)
-        out.add(N_("PVR"), N_("Cube map"), "first face shown");
+        out.add(N_("PVR"), N_("Cube map"), _("6 faces"));
     if (surfaces > 1 && !(flags & 0x1000))
-        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces) + ", the first shown");
+        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces));
     return true;
 }
 
-bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
+bool v3_decode(const uint8_t* d, size_t size, ImagePart part, Image& out, std::string& error)
 {
     if (size < 52)
     {
@@ -870,9 +916,32 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         }
         p += 12 + n;
     }
-    const size_t offset = 52 + size_t(meta);
-    if (!decode_sdk_surface(blocks, channels, premultiplied, d + offset, size - offset, w, h, out, error))
+    // Level-major: each level holds every surface's faces' slices (a
+    // volume's halving with each level; the page shows the one at its depth).
+    const uint32_t ns = std::max(1u, surfaces), nf = std::max(1u, faces), nd = std::max(1u, depth);
+    const int levels = int(std::clamp(mips, 1u, 32u));
+    out.page_count = int(std::min<uint64_t>(uint64_t(ns) * nf * nd, 1u << 16));
+    out.level_count = levels;
+    if (part.page >= out.page_count || part.level >= levels)
+    {
+        error = "the PVR has no such page or level";
         return false;
+    }
+    if (nf == 6)
+        out.page_label = cube_face_label(part.page / int(nd), int(ns));
+    const auto slices = [&](int m) { return std::max(1u, nd >> m); };
+    size_t offset = 52 + size_t(meta);
+    for (int m = 0; m < part.level; ++m)
+        offset += sdk_bytes(blocks, channels, std::max(1, w >> m), std::max(1, h >> m)) * ns * nf * slices(m);
+    const int lw = std::max(1, w >> part.level), lh = std::max(1, h >> part.level);
+    const uint32_t page = uint32_t(part.page), surface_face = page / nd, z = page % nd * slices(part.level) / nd;
+    offset += sdk_bytes(blocks, channels, lw, lh) * (size_t(surface_face) * slices(part.level) + z);
+    if (offset > size || !decode_sdk_surface(blocks, channels, premultiplied, d + offset, size - offset, lw, lh, out, error))
+    {
+        if (error.empty())
+            error = "PVR data is cut short";
+        return false;
+    }
     if (flip_y)
         flip_rows(out);
     if (flip_x)
@@ -884,13 +953,13 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
     if (premultiplied)
         out.add(N_("PVR"), N_("Alpha"), "premultiplied");
     if (mips > 1)
-        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips));
     if (faces > 1)
-        out.add(N_("PVR"), N_("Faces"), std::to_string(faces) + ", the first shown");
+        out.add(N_("PVR"), N_("Faces"), std::to_string(faces));
     if (surfaces > 1)
-        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces) + ", the first shown");
+        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces));
     if (depth > 1)
-        out.add(N_("PVR"), N_("Depth"), std::to_string(depth) + " slices, the first shown");
+        out.add(N_("PVR"), N_("Depth"), rap::i18n::format(_("{0} slices"), depth));
     return true;
 }
 
@@ -914,7 +983,7 @@ bool sniff(const uint8_t* h, size_t n)
     return (n >= 4 && std::memcmp(h, "PVR\x03", 4) == 0) || is_v2(h, n) || is_dreamcast(h, n);
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -924,11 +993,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
     if (size >= 4 && std::memcmp(d, "PVR\x03", 4) == 0)
-        return v3_decode(d, size, out, error);
+        return v3_decode(d, size, part, out, error);
     if (is_v2(d, size))
-        return v2_decode(d, size, out, error);
+        return v2_decode(d, size, part, out, error);
     if (size >= 8 && (std::memcmp(d, "PVRT", 4) == 0 || std::memcmp(d, "GBIX", 4) == 0))
-        return dreamcast_decode(path, d, size, out, error);
+        return dreamcast_decode(path, d, size, part, out, error);
     error = "not a PVR file";
     return false;
 }
@@ -937,6 +1006,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& pvr_decoder()
 {
-    static const Decoder d{"PVR", {"pvr"}, sniff, decode};
+    static const Decoder d{"PVR", {"pvr"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
