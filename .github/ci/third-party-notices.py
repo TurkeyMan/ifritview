@@ -42,7 +42,6 @@ PORTS = [
     ("libwebp", "libwebp"),
     ("pcre2", "PCRE2"),
     ("tiff", "libtiff"),
-    ("x265", "x265 (HEIC encoding)"),
     ("zlib", "zlib"),
 ]
 

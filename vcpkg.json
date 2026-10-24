@@ -14,7 +14,7 @@
     "tiff",
     { "name": "libraw", "features": ["dng-lossy"] },
     "lcms",
-    { "name": "libheif", "features": ["hevc", "libde265", "aom"] },
+    { "name": "libheif", "default-features": false, "features": ["libde265", "aom"] },
     "libjxl",
     "libexif",
     "zstd",
