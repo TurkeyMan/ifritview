@@ -12,6 +12,7 @@
 #include "view.h"
 
 #include <rapport/rapport.h>
+#include <rapport/sys.h>
 
 #include <array>
 #include <atomic>
@@ -65,6 +66,8 @@ public:
     void preview_save(const Encoder& e, const EncodeOptions& o);
     void preview_lossless();
     void leave_image();
+    void watch_folder();                            // the folder shown, for changes to its files
+    void folder_changed(const rap::sys::watch_batch& batch);
     void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source, std::shared_ptr<const struct LosslessJpeg> lossless);
     void plan_lossless();
     void toggle_metadata();
@@ -180,7 +183,9 @@ private:
     bool diff_session_ = false;  // comparing two files, not previewing a save
     std::string diff_name_;      // "a ↔ b"
     std::shared_ptr<Image> save_source_;
-    std::shared_ptr<const struct LosslessJpeg> lossless_plan_;  // for JPEG's Lossless, once worked out
+    std::shared_ptr<const struct LosslessJpeg> lossless_plan_;
+    std::unique_ptr<rap::sys::directory_watch> watch_;
+    std::string watched_dir_;  // for JPEG's Lossless, once worked out
     uint64_t lossless_generation_ = 0;  // what Save As saves: the image, or the difference shown
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;

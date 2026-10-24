@@ -138,6 +138,7 @@ void App::plugins_loaded()
 App::~App()
 {
     s_app = nullptr;
+    watch_.reset();  // its thread joined before anything it reports to goes
     stop_video();
     outgoing_video_.stop();
     // A save preview still encoding uses the encoders' and decoders' statics,
@@ -1351,10 +1352,89 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
         .detach();
 }
 
+// The folder shown, watched: files added, removed, renamed or rewritten
+// there change the list (and the image, if it's the one shown) as they
+// happen. Started once the first image is up, never in its way.
+void App::watch_folder()
+{
+    const std::string dir = folder_.directory();
+    if (!first_presented_ || dir == watched_dir_)
+        return;
+    watch_.reset();
+    watched_dir_ = dir;
+    if (dir.empty())
+        return;
+    rap::sys::watch_options options;
+    options.settle = std::chrono::milliseconds(300);  // a file being written arrives once, done
+    auto w = rap::sys::directory_watch::start(rap::sys::path_from_utf8(dir), options,
+                                              [](rap::sys::watch_batch batch)
+                                              {
+                                                  // On the watch's thread: over to the UI.
+                                                  platform::post_main([batch = std::move(batch)] { if (s_app) s_app->folder_changed(batch); });
+                                              });
+    if (w)
+        watch_ = std::move(*w);
+    else
+        platform::trace("not watching %s: %s", dir.c_str(), w.error().c_str());
+}
+
+void App::folder_changed(const rap::sys::watch_batch& batch)
+{
+    if (folder_.directory() != watched_dir_ || diff_session_)
+        return;  // a different folder by now, or comparing two files
+    const std::filesystem::path dir = rap::sys::path_from_utf8(watched_dir_).lexically_normal();
+    bool listed = batch.overflow, reload_shown = false;
+    if (batch.overflow)
+        folder_.rescan(cfg_);  // events were lost: what's there now
+    for (const rap::sys::file_event& e : batch.events)
+    {
+        if (batch.overflow || e.path.parent_path().lexically_normal() != dir)
+            continue;
+        const std::string name = rap::sys::path_to_utf8(e.path.filename());
+        const std::string full = rap::sys::path_to_utf8(e.path);
+        using K = rap::sys::file_event::kind;
+        switch (e.what)
+        {
+            case K::added: listed |= folder_.add(name, cfg_); break;
+            case K::removed: listed |= folder_.remove(name); break;
+            case K::modified:
+                listed |= folder_.add(name, cfg_);  // one that wasn't readable before, say
+                reload_shown |= name == folder_.current_name();
+                break;
+            case K::renamed:
+            {
+                const std::string from = rap::sys::path_to_utf8(e.old_path.filename());
+                const bool shown = from == folder_.current_name();
+                listed |= folder_.rename(from, name, cfg_);
+                cache_.erase(rap::sys::path_to_utf8(e.old_path));
+                if (shown)
+                    image_path_ = folder_.current();  // the same image, by its new name
+                break;
+            }
+        }
+        cache_.erase(full);  // what was cached of it is out of date
+    }
+    if (reload_shown)
+    {
+        // Rewritten: read it again. Not via the cache, which leaving it would
+        // fill with what's shown now, dated as the new file.
+        image_path_.clear();
+        load_current();
+    }
+    platform::trace("folder changed: %zu events%s, %d files", batch.events.size(), batch.overflow ? " (overflow)" : "", folder_.count());
+    if (listed || reload_shown)
+    {
+        update_title();
+        update_status();
+        schedule_prefetch();
+    }
+}
+
 void App::load_current()
 {
     if (diff_session_)
         end_comparing();  // a file opened: back to browsing
+    watch_folder();
     const std::string path = folder_.current();
     if (save_dialog_ && path != image_path_)
         save_dialog_->close();  // it was saving (and previewing) the image going away
@@ -1417,6 +1497,7 @@ void App::image_presented()
                         return;  // something else was opened meanwhile
                     folder_.scan(file, cfg_);
                     platform::trace("folder read: %d files", folder_.count());
+                    watch_folder();
                     update_title();
                     update_status();
                     schedule_prefetch();
