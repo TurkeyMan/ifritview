@@ -63,6 +63,8 @@ public:
     void quit();
     void crop_to_selection();
     void save_as();
+    void step_page(int delta);   // PgUp/PgDn: within the file, stopping at its ends
+    void step_level(int delta);  // Shift+PgUp/PgDn: the mip levels
     void print_image();  // app_print.cpp
     void preview_save(const Encoder& e, const EncodeOptions& o);
     void preview_lossless();
@@ -108,7 +110,9 @@ private:
     bool navigation_locked() const { return save_dialog_ || view_->comparing(); }
     bool on_key(const rap::key_event& e);
 
-    void load_current();
+    // The folder's current file, or `file` (paging: the file on screen,
+    // whatever the folder's listing says while it's still being read).
+    void load_current(const std::string& file = {});
     void on_loaded(Loader::Result& r);
     void sync_exposure_slider();
     void request_retone();
@@ -226,7 +230,14 @@ private:
     void schedule_animation_frame();
     uint64_t load_generation_ = 0;
     std::shared_ptr<Image> image_;
-    std::string image_path_;
+    std::string image_path_;  // the file shown
+    // Which of its pages and mip levels: the key it's loaded and cached by
+    // (part_key), and the part asked for (`part_`, of the file `part_file_`;
+    // another file starts at its first).
+    std::string image_key_;
+    ImagePart part_;
+    std::string part_file_;
+    std::string current_key() const { return part_key(folder_.current(), part_); }
     uint64_t file_size_ = 0;
     std::string status_message_;
     // A status saying work is under way (loading, developing, saving): the

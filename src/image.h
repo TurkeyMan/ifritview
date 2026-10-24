@@ -112,6 +112,22 @@ struct Animation
 // A decoded image in cairo's ARGB32 layout: one native-endian uint32 per
 // pixel, alpha premultiplied, so the buffer can be wrapped by a cairo image
 // surface without a copy.
+// Which image of a file: its page (a TIFF's directories, a PDF's pages, a
+// texture's array slices, cube faces or volume slices, a pack's textures)
+// and mip level. {0, 0} is what opening the file shows.
+struct ImagePart
+{
+    int page = 0;
+    int level = 0;
+    bool operator==(const ImagePart&) const = default;
+};
+// A part as one string, for what's keyed by path (the loader, the cache):
+// the path itself for {0, 0}, else the path and the part after a character
+// no path holds. key_file() and key_part() take it apart again.
+std::string part_key(const std::string& path, ImagePart part);
+std::string key_file(const std::string& key);
+ImagePart key_part(const std::string& key);
+
 struct Image
 {
     int width = 0;
@@ -182,6 +198,13 @@ struct Image
         if (transform.broken.empty())
             transform.broken = std::move(why);
     }
+    // The file's pages and this one's mip levels, where it has more than one;
+    // which this is, and its name where the format gives one ("+X", a
+    // texture's name in a pack).
+    ImagePart part;
+    int page_count = 1;
+    int level_count = 1;
+    std::string page_label;
     bool is_video = false;
     bool has_audio = false;  // videos: an audio stream exists  // the pixels are a frame (the first, until the player takes over)
     double duration = 0;     // seconds, for videos  // a camera raw (its preview is the embedded JPEG; it has an exposure control)

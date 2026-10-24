@@ -62,7 +62,7 @@ bool ImageCache::get(const std::string& path, Entry& entry)
     auto it = slots_.find(path);
     if (it == slots_.end())
         return false;
-    if (it->second.entry.mtime != file_mtime(path))
+    if (it->second.entry.mtime != file_mtime(key_file(path)))  // `path` may be a part's key
     {  // changed on disk since
         erase(path);
         return false;

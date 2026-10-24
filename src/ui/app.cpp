@@ -716,13 +716,19 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     }
 }
 
-void App::load_current()
+void App::load_current(const std::string& file)
 {
     if (diff_session_)
         end_comparing();  // a file opened: back to browsing
     watch_folder();
-    const std::string path = folder_.current();
-    if (save_dialog_ && path != image_path_)
+    const std::string path = file.empty() ? folder_.current() : file;
+    if (path != part_file_)
+    {
+        part_ = {};  // another file opens at its first image
+        part_file_ = path;
+    }
+    const std::string key = part_key(path, part_);
+    if (save_dialog_ && key != image_key_)
         save_dialog_->close();  // it was saving (and previewing) the image going away
     if (path.empty())
     {
@@ -735,15 +741,37 @@ void App::load_current()
     leave_image();
     ++load_generation_;
     ImageCache::Entry hit;
-    if (cache_.get(path, hit))
+    if (cache_.get(key, hit))
     {
-        Loader::Result r{load_generation_, path, hit.image, {}, hit.image->is_preview(), false, true};
+        Loader::Result r{load_generation_, key, hit.image, {}, hit.image->is_preview(), false, true};
         on_loaded(r);
         return;
     }
-    status_message_ = busy_message_ = rap::i18n::format(_("Loading {0}…"), folder_.current_name());
+    status_message_ = busy_message_ = rap::i18n::format(_("Loading {0}…"), std::filesystem::path(path).filename().string());
     update_status();
-    loader_.request(load_generation_, path);
+    loader_.request(load_generation_, key);
+}
+
+void App::step_page(int delta)
+{
+    if (!image_ || image_->page_count <= 1 || navigation_locked())
+        return;
+    const int page = std::clamp(part_.page + delta, 0, image_->page_count - 1);
+    if (page == part_.page)
+        return;
+    part_ = {page, 0};
+    load_current(image_path_);
+}
+
+void App::step_level(int delta)
+{
+    if (!image_ || image_->level_count <= 1 || navigation_locked())
+        return;
+    const int level = std::clamp(part_.level + delta, 0, image_->level_count - 1);
+    if (level == part_.level)
+        return;
+    part_.level = level;
+    load_current(image_path_);
 }
 
 void App::navigate(int delta)
@@ -827,9 +855,9 @@ void App::on_loaded(Loader::Result& r)
     if (r.prefetch)
     {
         // Never replace what is already cached: it may carry the user's edits.
-        if (r.image && r.path != image_path_ && !cache_.contains(r.path))
-            cache_.put(r.path, {r.image, ImageCache::file_mtime(r.path)});
-        if (r.image && r.path == folder_.current() && !image_)
+        if (r.image && r.path != image_key_ && !cache_.contains(r.path))
+            cache_.put(r.path, {r.image, ImageCache::file_mtime(key_file(r.path))});
+        if (r.image && r.path == current_key() && !image_)
         {  // user moved onto it while it was decoding
             r.generation = load_generation_;
             r.prefetch = false;
@@ -840,7 +868,7 @@ void App::on_loaded(Loader::Result& r)
         }
     }
     // A develop for the image on screen is adopted in place.
-    if (!r.preview && !r.cached && r.image && image_ && image_->is_preview() && image_path_ == r.path)
+    if (!r.preview && !r.cached && r.image && image_ && image_->is_preview() && image_key_ == r.path)
     {
         image_->adopt(std::move(*r.image));
         if (tracing())
@@ -882,14 +910,17 @@ void App::on_loaded(Loader::Result& r)
                         (g_get_monotonic_time() - r.picked_us) / 1000.0, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
     else
         platform::trace("UI has the image (%s)", r.cached ? "from the cache" : "decoded ahead");
-    schedule_prefetch();
     if (tracing() && r.image)
         std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.image->is_preview()),
                      cache_.bytes() >> 20);
     if (!r.image)
     {
         image_.reset();
-        image_path_ = r.path;
+        image_path_ = key_file(r.path);
+        image_key_ = r.path;
+        part_file_ = image_path_;
+        part_ = key_part(r.path);
+        schedule_prefetch();
         view_->set_image(nullptr);
         status_message_ = rap::i18n::format(_("Cannot load {0}: {1}"), folder_.current_name(), r.error);
         update_status();
@@ -899,9 +930,13 @@ void App::on_loaded(Loader::Result& r)
     }
     stop_animation();
     image_ = r.image;
-    image_path_ = r.path;
+    image_path_ = key_file(r.path);
+    image_key_ = r.path;
+    part_file_ = image_path_;  // however it came (the first image doesn't come through load_current)
+    part_ = key_part(r.path);
+    schedule_prefetch();  // its next page among them, now it's known
     std::error_code ec;
-    file_size_ = std::filesystem::file_size(r.path, ec);
+    file_size_ = std::filesystem::file_size(image_path_, ec);
     if (ec)
         file_size_ = 0;
     status_message_ = busy_message_ = image_->is_preview() && image_->is_raw ? _("Developing…") : "";
@@ -972,9 +1007,9 @@ void App::leave_image()
     if (!image_ || image_path_.empty())
         return;
     if (image_->edited)
-        cache_.erase(image_path_);
+        cache_.erase(image_key_);
     else
-        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
+        cache_.put(image_key_, {image_, ImageCache::file_mtime(image_path_)});
 }
 
 void App::crop_to_selection()
@@ -998,10 +1033,14 @@ void App::crop_to_selection()
 void App::schedule_prefetch()
 {
     std::vector<std::string> paths;
+    // The file's next page first, where it has pages: paging is browsing too.
+    if (image_ && part_.page + 1 < image_->page_count)
+        if (const std::string next = part_key(image_path_, {part_.page + 1, 0}); !cache_.contains(next))
+            paths.push_back(next);
     const int n = folder_.count();
     if (n <= 1)
     {
-        loader_.prefetch({});
+        loader_.prefetch(std::move(paths));
         return;
     }
     auto add = [&](int offset)
@@ -1056,7 +1095,7 @@ void App::ensure_developed()
         status_message_ = busy_message_ = _("Developing…");
         update_status();
     }
-    loader_.request_develop(load_generation_, folder_.current());
+    loader_.request_develop(load_generation_, current_key());
 }
 
 void App::retone()
@@ -1329,6 +1368,15 @@ void App::update_status()
             center += "  ·  " + human_size(file_size_);
         if (!image_->info.empty() && !image_->is_video)
             center += "  ·  " + image_->info;
+        // Which of the file's images: its page (and name), its mip level.
+        if (image_->page_count > 1)
+        {
+            center += "  ·  " + rap::i18n::format(_("page {0} / {1}"), image_->part.page + 1, image_->page_count);
+            if (!image_->page_label.empty())
+                center += " " + image_->page_label;
+        }
+        if (image_->level_count > 1)
+            center += "  ·  " + rap::i18n::format(_("mip {0} / {1}"), image_->part.level, image_->level_count - 1);
         if (image_->is_preview() && status_message_.empty())
             center += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
         // Against 1:1, which for a page is its actual size.

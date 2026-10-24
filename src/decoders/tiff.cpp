@@ -69,7 +69,7 @@ bool read_deep(TIFF* tif, uint32_t w, uint32_t h, uint16_t bps, uint16_t spp, bo
     return true;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     static const bool quiet = []
     {
@@ -89,6 +89,17 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "cannot open TIFF";
         return false;
     }
+    // Each directory is a page (a scan's pages, a layered export's layers).
+    const int pages = int(TIFFNumberOfDirectories(tif));
+    if (part.page > 0 && (part.page >= pages || !TIFFSetDirectory(tif, tdir_t(part.page))))
+    {
+        TIFFClose(tif);
+        error = "the TIFF has no such page";
+        return false;
+    }
+    out.page_count = std::max(1, pages);
+    if (uint32_t kind = 0; TIFFGetField(tif, TIFFTAG_SUBFILETYPE, &kind) && (kind & FILETYPE_REDUCEDIMAGE))
+        out.page_label = _("(a smaller copy)");
     uint32_t w = 0, h = 0;
     uint16_t bps = 8, spp = 0, extra_count = 0;
     uint16_t* extra = nullptr;
@@ -150,9 +161,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
         default:
             break;
     }
-    const int pages = int(TIFFNumberOfDirectories(tif));
-    if (pages > 1)
-        out.info = std::to_string(pages) + " pages";
 
     const struct
     {
@@ -294,6 +302,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& tiff_decoder()
 {
-    static const Decoder d{"TIFF", {"tif", "tiff"}, sniff, decode};
+    static const Decoder d{"TIFF", {"tif", "tiff"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }

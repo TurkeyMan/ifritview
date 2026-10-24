@@ -127,7 +127,7 @@ std::optional<Dxgi> dxgi(uint32_t f)
     return std::nullopt;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -283,18 +283,59 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
 
-    if (offset > size)
+    // The surfaces: each array element (each of a cube's six faces) with its
+    // mip chain after it, largest first; a volume's slices together in each
+    // level. The pages are the elements, or a volume's slices; the levels
+    // are the mips.
+    const bool dx10 = offset == 148;
+    const bool cube = (caps2 & 0x200) || (dx10 && (le32(d + 136) & 0x4));
+    const bool volume = (caps2 & 0x200000) && depth > 1;
+    const int levels = int(std::clamp(mips, 1u, 32u));
+    const int faces = cube ? 6 : 1;
+    out.page_count = volume ? int(depth) : int(std::min<uint32_t>(array_size * faces, 1u << 16));
+    out.level_count = levels;
+    if (part.page >= out.page_count || part.level >= levels)
+    {
+        error = "the DDS has no such page or level";
+        return false;
+    }
+    const auto surface = [&](int sw, int sh) -> size_t
+    {
+        if (bcn)
+            return size_t((sw + 3) / 4) * size_t((sh + 3) / 4) * bcn_block_bytes(*bcn);
+        if (masks)
+            return size_t(sw) * size_t(sh) * size_t(masks->bytes);
+        return size_t(sw) * size_t(sh) * size_t(wide->pixel_bytes());
+    };
+    const auto slices = [&](int m) { return volume ? std::max(1, int(depth) >> m) : 1; };
+    size_t chain = 0;
+    for (int m = 0; m < levels; ++m)
+        chain += surface(std::max(1, w >> m), std::max(1, h >> m)) * size_t(slices(m));
+    size_t at = offset + (volume ? 0 : size_t(part.page) * chain);
+    for (int m = 0; m < part.level; ++m)
+        at += surface(std::max(1, w >> m), std::max(1, h >> m)) * size_t(slices(m));
+    const int lw = std::max(1, w >> part.level), lh = std::max(1, h >> part.level);
+    if (volume)  // the slice at this level nearest the page's depth
+        at += surface(lw, lh) * size_t(part.page * slices(part.level) / int(depth));
+    if (cube)
+    {
+        static const char* const kFaces[] = {"+X", "\u2212X", "+Y", "\u2212Y", "+Z", "\u2212Z"};
+        out.page_label = kFaces[part.page % 6];
+        if (array_size > 1)
+            out.page_label = rap::i18n::format(_("cube {0}"), part.page / 6 + 1) + " " + out.page_label;
+    }
+    if (at > size)
     {
         error = "DDS data is cut short";
         return false;
     }
     bool ok;
     if (bcn)
-        ok = decode_bcn(*bcn, d + offset, size - offset, w, h, out, error, premultiplied);
+        ok = decode_bcn(*bcn, d + at, size - at, lw, lh, out, error, premultiplied);
     else if (masks)
-        ok = decode_masks(*masks, d + offset, size - offset, w, h, out, error);
+        ok = decode_masks(*masks, d + at, size - at, lw, lh, out, error);
     else
-        ok = decode_wide(*wide, d + offset, size - offset, w, h, 1, false, false, out, error);
+        ok = decode_wide(*wide, d + at, size - at, lw, lh, 1, false, false, out, error);
     if (!ok)
         return false;
     if (rxgb)
@@ -335,20 +376,20 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.encoded_as = "dds";
     out.encoding["format"] = dds_save_format(as_dxgi);
     out.encoding["mipmaps"] = mips > 1;
-    out.encoding["legacy"] = offset == 128;
+    out.encoding["legacy"] = !dx10;
     static const uint32_t kSrgb[] = {72, 75, 78, 99, 29, 91}, kLinear[] = {71, 74, 77, 98, 28, 87};
     if (std::find(std::begin(kSrgb), std::end(kSrgb), as_dxgi) != std::end(kSrgb))
         out.encoding["srgb"] = 1;
-    else if (offset != 128 && std::find(std::begin(kLinear), std::end(kLinear), as_dxgi) != std::end(kLinear))
+    else if (dx10 && std::find(std::begin(kLinear), std::end(kLinear), as_dxgi) != std::end(kLinear))
         out.encoding["srgb"] = 0;
     if (mips > 1)
         out.add(N_("DDS"), N_("Mipmaps"), std::to_string(mips));
-    if (caps2 & 0x200)
-        out.add(N_("DDS"), N_("Cube map"), "first face shown");
-    if (caps2 & 0x200000 && depth > 1)
-        out.add(N_("DDS"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
+    if (cube)
+        out.add(N_("DDS"), N_("Cube map"), _("6 faces"));
+    if (volume)
+        out.add(N_("DDS"), N_("Volume"), rap::i18n::format(_("{0} slices"), depth));
     if (array_size > 1)
-        out.add(N_("DDS"), N_("Array"), std::to_string(array_size) + " textures, the first shown");
+        out.add(N_("DDS"), N_("Array"), rap::i18n::format(_("{0} textures"), array_size));
     return true;
 }
 
@@ -356,6 +397,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& dds_decoder()
 {
-    static const Decoder d{"DDS", {"dds"}, sniff, decode};
+    static const Decoder d{"DDS", {"dds"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }

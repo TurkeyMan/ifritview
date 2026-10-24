@@ -130,7 +130,7 @@ struct MetadataPass
     }
 };
 
-bool try_decode(const Decoder& d, const std::string& path, Image& out, std::string& error)
+bool try_decode(const Decoder& d, const std::string& path, Image& out, std::string& error, ImagePart part = {})
 {
     out = Image{};
     std::string err;
@@ -138,7 +138,13 @@ bool try_decode(const Decoder& d, const std::string& path, Image& out, std::stri
     bool ok = false;
     try
     {
-        ok = d.decode(path, out, err);
+        if (d.decode_part)
+            ok = d.decode_part(path, part, out, err);
+        else if (part == ImagePart{})
+            ok = d.decode(path, out, err);
+        else
+            err = "it has one image";
+        out.part = part;
     }
     catch (const std::length_error& e)  // Image::allocate: too large to hold
     {
@@ -317,12 +323,17 @@ void register_decoders(const std::vector<const Decoder*>& extra)
 
 bool decode_image(const std::string& path, Image& out, std::string& error)
 {
+    return decode_image_part(path, {}, out, error);
+}
+
+bool decode_image_part(const std::string& path, ImagePart part, Image& out, std::string& error)
+{
     error.clear();
     const std::string ext = file_extension(path);
     // Videos: GStreamer streams the file; don't read gigabytes for a poster frame.
     for (const Decoder* d : decoders())
         if (d->streaming && claims_extension(*d, ext))
-            return try_decode(*d, path, out, error);
+            return try_decode(*d, path, out, error, part);
     const uint8_t* data = nullptr;  // read once; every decode releases the bytes when done, so this is fresh
     size_t size = 0;
     if (!file_bytes(path, data, size))
@@ -344,14 +355,14 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
             if (ok || tried.count(d) || !claims_extension(*d, ext))
                 continue;
             tried.insert(d);
-            ok = try_decode(*d, path, out, error);
+            ok = try_decode(*d, path, out, error, part);
         }
         for (const Decoder* d : list)
         {
             if (ok || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
                 continue;
             tried.insert(d);
-            ok = try_decode(*d, path, out, error);
+            ok = try_decode(*d, path, out, error, part);
         }
     };
     attempt(decoders());
@@ -364,7 +375,7 @@ bool decode_image(const std::string& path, Image& out, std::string& error)
     }
     const Decoder* fallback = decoders().back();
     if (!ok && !tried.count(fallback))
-        ok = try_decode(*fallback, path, out, error);
+        ok = try_decode(*fallback, path, out, error, part);
     if (ok)
     {
         meta.finish(out);

@@ -228,6 +228,10 @@ int process(int argc, char** argv)
             ;
         else if (st.name == "diff")
             ok = !st.arg.empty(), error = "diff: takes the file to compare with, e.g. diff:original.png";
+        else if (st.name == "page" || st.name == "level")
+            ok = integer(st.arg, v) && v >= 0 &&
+                 std::all_of(steps.begin(), steps.end(), [](const Step& p) { return p.name == "page" || p.name == "level"; }),
+            error = st.name + ": takes a number from 0, before any other step";
         else if (st.name == "shrink")
         {
             const std::vector<std::string> n = split(st.arg, ',');
@@ -236,7 +240,7 @@ int process(int argc, char** argv)
             error = "shrink: takes WIDTH,HEIGHT in pixels, no larger than the image at that step";
         }
         else
-            ok = false, error = "unknown step \"" + a + "\" (rotate, flip, crop, shrink, exposure, info, diff, save); --help explains them";
+            ok = false, error = "unknown step \"" + a + "\" (page, level, rotate, flip, crop, shrink, exposure, info, diff, save); --help explains them";
         if (!ok)
         {
             std::fprintf(stderr, "%s\n", error.c_str());
@@ -250,9 +254,16 @@ int process(int argc, char** argv)
         return 2;
     }
 
+    // Which of the file's images: page:N and level:N, first.
+    ImagePart part;
+    while (!steps.empty() && (steps.front().name == "page" || steps.front().name == "level"))
+    {
+        (steps.front().name == "page" ? part.page : part.level) = std::atoi(steps.front().arg.c_str());
+        steps.erase(steps.begin());
+    }
     Image img;
     std::string error;
-    if (!decode_image(in, img, error))
+    if (!decode_image_part(in, part, img, error))
     {
         std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
         return 1;
@@ -291,6 +302,9 @@ int process(int argc, char** argv)
         else if (st.name == "info")
         {
             std::printf("%d x %d, %s%s\n", img.width, img.height, img.format.c_str(), img.has_alpha ? ", alpha" : "");
+            if (img.page_count > 1 || img.level_count > 1)
+                std::printf("page %d of %d%s%s, level %d of %d\n", img.part.page, img.page_count, img.page_label.empty() ? "" : " ",
+                            img.page_label.c_str(), img.part.level, img.level_count);
             if (!img.color_space.empty())
                 std::printf("colour space: %s%s\n", img.color_space.c_str(),
                             img.stored && !img.stored->icc.empty() ? " (with an ICC profile, kept on saving)" : "");
@@ -412,6 +426,8 @@ it is at that step, after earlier turns and crops)
   flip:h | flip:v    mirror left-right (h) or top-bottom (v)
   crop:X,Y,W,H       keep the W x H rectangle whose top-left corner is X,Y
   exposure:EV        raw and HDR images only: brighter (+) or darker (-), in stops
+  page:N, level:N    first: the file's page N (from 0: a TIFF's directories, a PDF's
+                     pages, a texture's slices or faces) and mip level N
   shrink:W,H         reduce to W x H pixels with the filter the viewer draws a
                      zoomed-out image with (smaller only; the shape is up to you)
   diff:FILE          compare the image at this point with FILE (the same size): PSNR,

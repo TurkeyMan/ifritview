@@ -23,6 +23,10 @@ struct Decoder
     std::function<bool(const std::string& path, Image& out)> preview = nullptr;
     // Reads the file itself (videos): no preload, no container metadata pass.
     bool streaming = false;
+    // Any page and mip level of the file (ImagePart), for a format that has
+    // more than one; the decoded image says how many there are. Unset: the
+    // file is one image, and `decode` makes it.
+    std::function<bool(const std::string& path, ImagePart part, Image& out, std::string& error)> decode_part = nullptr;
 };
 
 // Options the decoders consult. Set from the main thread, read from the
@@ -62,6 +66,8 @@ void register_decoders(const std::vector<const Decoder*>& extra);
 // Decode a file with whichever decoder claims it; `error` describes the
 // failure of the most relevant decoder.
 bool decode_image(const std::string& path, Image& out, std::string& error);
+// One page and mip level of it; {0, 0} is decode_image.
+bool decode_image_part(const std::string& path, ImagePart part, Image& out, std::string& error);
 
 // A quick stand-in for the file if its decoder offers one.
 bool decode_preview(const std::string& path, Image& out);

@@ -59,8 +59,18 @@ bool App::on_key(const rap::key_event& e)
         case rap::key::f1:
             open_settings_page(4);  // About
             return true;
-        case rap::key::left:
         case rap::key::page_up:
+        case rap::key::page_down:
+        {
+            // Within the file: its pages, or with Shift its mip levels.
+            const int d = e.key == rap::key::page_up ? -1 : +1;
+            if (e.modifiers & rap::mod_shift)
+                step_level(d);
+            else
+                step_page(d);
+            return true;
+        }
+        case rap::key::left:
         case rap::key::backspace:
             navigate(-1);
             return true;
@@ -73,7 +83,6 @@ bool App::on_key(const rap::key_event& e)
             navigate(+1);
             return true;
         case rap::key::right:
-        case rap::key::page_down:
             navigate(+1);
             return true;
         case rap::key::home:

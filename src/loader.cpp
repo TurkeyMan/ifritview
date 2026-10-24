@@ -76,7 +76,7 @@ void Loader::post(Result* r, Lane lane)
 void Loader::decode_into(Result& r)
 {
     r.picked_us = g_get_monotonic_time();
-    if (!decode_image(r.path, *r.image, r.error))
+    if (!decode_image_part(key_file(r.path), key_part(r.path), *r.image, r.error))  // r.path: a part's key
         r.image.reset();
     else
         r.image->build_mips();
@@ -99,7 +99,7 @@ void Loader::run_foreground()
         // A quick stand-in first (a raw's embedded JPEG); its develop goes to
         // the background, ahead of any prefetching.
         auto preview = std::make_shared<Image>();
-        if (decode_preview(job.path, *preview))
+        if (key_part(job.path) == ImagePart{} && decode_preview(job.path, *preview))  // only a file's first image has one
         {
             preview->build_mips();
             post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);
@@ -159,7 +159,7 @@ void Loader::run_background()
         {
             // A neighbour is prepared the way a normal load would be: its
             // preview when it has one (cheap), otherwise the image itself.
-            if (decode_preview(job.path, *r->image))
+            if (key_part(job.path) == ImagePart{} && decode_preview(job.path, *r->image))
             {
                 r->preview = true;
                 r->image->build_mips();

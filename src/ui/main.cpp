@@ -79,6 +79,10 @@ void run_step(App& app, const std::string& step)
     else if (step == "wait")
     {
     }
+    else if (step == "page+" || step == "page-")
+        app.step_page(step == "page+" ? 1 : -1);
+    else if (step == "level+" || step == "level-")
+        app.step_level(step == "level+" ? 1 : -1);
     else if (step == "print")
         app.print_image();  // with RAPPORT_PRINT_TO set, to a file without the dialog
     else if (step == "metadata")

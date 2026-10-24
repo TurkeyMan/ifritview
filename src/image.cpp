@@ -353,6 +353,33 @@ PixelBuffer Image::retone_buffer(double ev) const
     return out;
 }
 
+namespace
+{
+constexpr char kPartMark = '\x1f';  // ASCII unit separator: in no real path
+}
+
+std::string part_key(const std::string& path, ImagePart part)
+{
+    if (part == ImagePart{})
+        return path;
+    return path + kPartMark + std::to_string(part.page) + "." + std::to_string(part.level);
+}
+
+std::string key_file(const std::string& key)
+{
+    const size_t mark = key.find(kPartMark);
+    return mark == std::string::npos ? key : key.substr(0, mark);
+}
+
+ImagePart key_part(const std::string& key)
+{
+    ImagePart part;
+    const size_t mark = key.find(kPartMark);
+    if (mark != std::string::npos)
+        std::sscanf(key.c_str() + mark + 1, "%d.%d", &part.page, &part.level);
+    return part;
+}
+
 std::string Image::location_text() const
 {
     char buf[64];

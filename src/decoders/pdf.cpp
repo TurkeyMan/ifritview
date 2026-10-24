@@ -1,7 +1,7 @@
-// PDF through poppler-glib: the first page rendered to pixels at 150 dpi,
-// over white, and kept open: the view renders it again at the size it's
-// shown, and this rendering stands in until that's ready (and is what
-// saving and thumbnails get). Page navigation can come later.
+// PDF through poppler-glib: a page rendered to pixels at 150 dpi, over
+// white, and kept open: the view renders it again at the size it's shown,
+// and this rendering stands in until that's ready (and is what saving and
+// thumbnails get). Each page is one of the file's parts.
 //
 // Poppler is optional at runtime: built against its headers, but dlopened
 // rather than linked (it drags in a few dozen packages). Without it, PDFs
@@ -36,6 +36,7 @@
     X(poppler_document_get_producer)           \
     X(poppler_document_get_pdf_version_string) \
     X(poppler_page_get_size)                   \
+    X(poppler_page_get_label)                  \
     X(poppler_page_render)
 
 namespace
@@ -88,6 +89,7 @@ bool load_poppler()
 #define poppler_document_get_producer g_poppler.poppler_document_get_producer
 #define poppler_document_get_pdf_version_string g_poppler.poppler_document_get_pdf_version_string
 #define poppler_page_get_size g_poppler.poppler_page_get_size
+#define poppler_page_get_label g_poppler.poppler_page_get_label
 #define poppler_page_render g_poppler.poppler_page_render
 
 // Quick to make, for the moment before the view's own; a page larger than
@@ -149,7 +151,7 @@ void add_info(Image& out, const char* key, gchar* value)
     g_free(value);
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     if (!pdf_supported())  // first PDF: load poppler now
     {
@@ -175,10 +177,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
     const int pages = poppler_document_get_n_pages(doc);
-    PopplerPage* page = pages > 0 ? poppler_document_get_page(doc, 0) : nullptr;
+    PopplerPage* page = part.page < pages ? poppler_document_get_page(doc, part.page) : nullptr;
     if (!page)
     {
-        error = "PDF has no pages";
+        error = pages > 0 ? "the PDF has no such page" : "PDF has no pages";
         g_object_unref(doc);
         return false;
     }
@@ -192,7 +194,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.format = "PDF";
     out.pixel_format.model = PixelFormat::Model::Vector;
     out.pixel_format.notes.push_back("rendered at " + std::to_string(int(std::lround(dpi))) + " dpi");
-    out.info = std::to_string(pages) + (pages == 1 ? " page" : " pages");
+    out.page_count = std::max(1, pages);
+    if (gchar* label = poppler_page_get_label(page))  // the document's own numbering ("iv", "A-3"), where it has one
+    {
+        if (*label && std::to_string(part.page + 1) != label)
+            out.page_label = std::string("(") + label + ")";
+        g_free(label);
+    }
     add_info(out, "Title", poppler_document_get_title(doc));
     add_info(out, "Author", poppler_document_get_author(doc));
     add_info(out, "Subject", poppler_document_get_subject(doc));
@@ -224,6 +232,7 @@ bool pdf_supported()
 
 const Decoder& pdf_decoder()
 {
-    static const Decoder d{"PDF", {"pdf"}, sniff, decode};
+    static const Decoder d{"PDF", {"pdf"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
