@@ -7,6 +7,7 @@
 
 #include "decoders/decoder.h"
 #include "first_image.h"
+#include "integration.h"
 #include "jpeg_lossless.h"
 #include "encoders/encoder.h"
 
@@ -1407,6 +1408,7 @@ void App::image_presented()
     {
         first_presented_ = true;
         platform::trace("first image painted");
+        std::thread([] { refresh_registration(); }).detach();  // after an upgrade that moved the executable
         if (!deferred_scan_.empty())
             ui_.post(
                 [this]

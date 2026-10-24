@@ -1,8 +1,8 @@
 ; IfritView's Windows installer. Built by .github/ci/build-windows.sh:
 ;   makensis -DVERSION=1.2 -DSTAGE=<install tree> -DOUT=<setup.exe> ifritview.nsi
 ; Windows paths (Windows' makensis doesn't expand File /r with '/').
-; STAGE holds the app as installed: bin\ifritview.exe (everything linked in),
-; bin\plugins\ifritview_plugin.h (the format plugin interface; plugin DLLs go
+; STAGE holds the app as installed: ifritview.exe (everything linked in),
+; plugins\ifritview_plugin.h (the format plugin interface; plugin DLLs go
 ; beside it), and the README and licence. Making it the default viewer is in
 ; its Settings.
 
@@ -41,30 +41,31 @@ VIAddVersionKey "FileDescription" "IfritView installer"
 VIAddVersionKey "LegalCopyright" "Manu Evans, GPL-3.0"
 
 Function RunAsUser
-  Exec '"$WINDIR\explorer.exe" "$INSTDIR\bin\ifritview.exe"'
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\ifritview.exe"'
 FunctionEnd
 
 Section "IfritView"
   SetShellVarContext all
-  ; A reinstall replaces the old tree rather than mixing DLLs of two versions,
-  ; but keeps the format plugins people put in bin\plugins (the stage's copy
-  ; of ifritview_plugin.h, there for plugin authors, then replaces the old).
-  Rename "$INSTDIR\bin\plugins" "$INSTDIR\plugins.keep"
+  ; A reinstall replaces the app rather than mixing two versions' files, but
+  ; keeps the format plugins people put in plugins (the stage's copy of
+  ; ifritview_plugin.h, there for plugin authors, then replaces the old).
+  ; Older versions had it all in bin\: their plugins move across.
+  CreateDirectory "$INSTDIR\plugins"
+  IfFileExists "$INSTDIR\bin\plugins\*.*" 0 +2
+    CopyFiles /SILENT "$INSTDIR\bin\plugins\*.*" "$INSTDIR\plugins"
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
-  CreateDirectory "$INSTDIR\bin"
-  Rename "$INSTDIR\plugins.keep" "$INSTDIR\bin\plugins"
   SetOutPath "$INSTDIR"
   File /r "${STAGE}\*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\IfritView.lnk" "$INSTDIR\bin\ifritview.exe"
+  CreateShortcut "$SMPROGRAMS\IfritView.lnk" "$INSTDIR\ifritview.exe"
 
   WriteRegStr HKLM "Software\IfritView" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "IfritView"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Manu Evans"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "URLInfoAbout" "https://github.com/TurkeyMan/ifritview"
-  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\bin\ifritview.exe"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\ifritview.exe"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
@@ -77,6 +78,10 @@ SectionEnd
 Section "Uninstall"
   SetShellVarContext all
   Delete "$SMPROGRAMS\IfritView.lnk"
+  Delete "$INSTDIR\ifritview.exe"
+  ; Plugins people added stay, and so the folder with them.
+  Delete "$INSTDIR\plugins\ifritview_plugin.h"
+  RMDir "$INSTDIR\plugins"
   RMDir /r "$INSTDIR\bin"
   RMDir /r "$INSTDIR\lib"
   Delete "$INSTDIR\README.md"

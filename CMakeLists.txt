@@ -103,10 +103,10 @@ endif()
 
 # Image format plugins (src/plugins.cpp, include/ifritview_plugin.h). The
 # header goes into the system plugin folder, for whoever writes one: Windows
-# bin\plugins beside the exe; Linux lib/<multiarch>/ifritview/plugins (beside
+# plugins beside the exe; Linux lib/<multiarch>/ifritview/plugins (beside
 # the private libraries in lib/<multiarch>/ifritview), and include/ifritview.
 if(WIN32)
-  install(FILES include/ifritview_plugin.h DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins)
+  install(FILES include/ifritview_plugin.h DESTINATION plugins)
 else()
   set(IFRIT_FORMAT_PLUGIN_DIR "${CMAKE_INSTALL_LIBDIR}/ifritview/plugins")
   set_property(SOURCE src/plugins.cpp APPEND PROPERTY COMPILE_DEFINITIONS
@@ -384,7 +384,12 @@ if(IFRIT_HAVE_WEBP AND IFRIT_HAVE_JXL AND IFRIT_HAVE_HEIF)
 endif()
 
 if(TARGET ifritview)
-  install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  # Windows: the folder is the app, its exe at the top (no bin\).
+  if(WIN32)
+    install(TARGETS ifritview RUNTIME DESTINATION .)
+  else()
+    install(TARGETS ifritview RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
 endif()
 install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 # The icon at each size, from data/ifritview.png (1024 px).

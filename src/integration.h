@@ -10,6 +10,11 @@
 // if present, otherwise a per-user copy pointing at this executable.
 bool ensure_desktop_entry(std::string& error);
 
+// Once registered, registered again if that was from somewhere else: an
+// upgrade that moved the executable, or a folder moved. Reads first, so it's
+// quick when nothing changed; off the UI thread all the same.
+void refresh_registration();
+
 // Set IfritView as the default handler for the MIME types behind these
 // extensions. Returns the number of types set; `skipped` lists extensions
 // whose type the system doesn't know.

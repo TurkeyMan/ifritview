@@ -17,6 +17,12 @@ const char* kDesktopId = "ifritview.desktop";
 
 }  // namespace
 
+void refresh_registration()
+{
+    // The packages install to one place; a per-user entry for a bare
+    // executable is made afresh whenever it's asked to be the default.
+}
+
 bool ensure_desktop_entry(std::string& error)
 {
     if (GDesktopAppInfo* existing = g_desktop_app_info_new(kDesktopId))

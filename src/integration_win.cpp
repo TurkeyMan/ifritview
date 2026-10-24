@@ -54,6 +54,22 @@ bool is_video(const std::string& ext)
 
 }  // namespace
 
+void refresh_registration()
+{
+    // The ProgID's command names the executable that registered.
+    const std::wstring key = std::wstring(L"Software\\Classes\\") + kProgId + L"\\shell\\open\\command";
+    wchar_t value[2048];
+    DWORD size = sizeof value;
+    if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS)
+        return;  // never registered
+    const std::wstring expected = L"\"" + wide(platform::executable_path()) + L"\" \"%1\"";
+    if (_wcsicmp(value, expected.c_str()) == 0)
+        return;
+    std::string error;
+    ensure_desktop_entry(error);
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+}
+
 bool ensure_desktop_entry(std::string& error)
 {
     const std::wstring exe = wide(platform::executable_path());

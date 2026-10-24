@@ -26,7 +26,7 @@
  *   3. Beside the program, for a build tree or an unpacked archive:
  *        <folder of the ifritview executable>/plugins
  *      (on Windows this is the installed folder:
- *        C:\Program Files\IfritView\bin\plugins)
+ *        C:\Program Files\IfritView\plugins)
  *   4. Linux, the installed system folder, where this header also lives:
  *        <prefix>/lib/<multiarch>/ifritview/plugins  (from a package: /usr/lib/...)
  *      and, for plugins built and installed locally,
