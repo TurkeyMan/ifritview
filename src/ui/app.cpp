@@ -159,6 +159,17 @@ rap::icon difference_icon()
         });
 }
 
+rap::icon side_by_side_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16;
+            p.rect({1.5f * u, 3.5f * u, 6 * u, 9 * u}, u, std::nullopt, ink);
+            p.rect({8.5f * u, 3.5f * u, 6 * u, 9 * u}, u, ink, ink);
+        });
+}
+
 rap::icon swap_icon()
 {
     return rap::icon::drawn(
@@ -191,6 +202,8 @@ rap::node App::compare_button(rap::icon icon, const char* tooltip, View::Compare
 
 void App::set_compare(View::Compare mode)
 {
+    if (mode == View::Compare::Difference && !view_->compare_difference())
+        mode = view_->compare_mode();  // not for images of different sizes
     view_->set_compare(mode);
     update_toolbar();  // the buttons act as one choice: unchecking the shown one keeps it
     update_status();
@@ -199,6 +212,81 @@ void App::set_compare(View::Compare mode)
 void App::swap_compare()
 {
     view_->swap_compare();
+    show_side();
+    update_toolbar();
+    update_status();
+}
+
+// Back to browsing: the view shows the image again, alone.
+void App::end_comparing()
+{
+    set_side_by_side(false);
+    view_->end_compare();
+    if (diff_session_)
+    {
+        diff_session_ = false;
+        status_message_.clear();
+    }
+    update_toolbar();
+    update_status();
+    update_title();
+}
+
+void App::show_side()
+{
+    if (!side_by_side_)
+        return;
+    side_view_->set_image(view_->compare_image(true));
+    side_view_->set_label(view_->compare_label(true));
+    syncing_framing_ = true;
+    side_view_->set_framing(view_->framing());
+    syncing_framing_ = false;
+}
+
+// The side pane opens to the right of the image, the window growing by as
+// much (as for the info pane), so the image keeps its size.
+void App::set_side_by_side(bool on)
+{
+    if (on && !view_->comparing())
+        on = false;
+    if (side_button_)
+        side_button_->set_checked(on);
+    if (on == side_by_side_)
+        return;
+    int vw = 0, vh = 0;
+    (on ? view_ : side_view_)->view_size(vw, vh);
+    const float extra = float(vw / view_->scale_factor());
+    const rap::size_f before = window_->size();
+    side_by_side_ = on;
+    side_pane_->set_visible(on);
+    if (on)
+    {
+        if (view_->compare_mode() == View::Compare::B)
+            view_->set_compare(View::Compare::A);  // B is beside it now
+        show_side();
+    }
+    else
+    {
+        side_view_->set_image(nullptr);
+        side_view_->set_label({});
+    }
+    if (!fullscreen_ && !window_->maximized())
+    {
+        float w = before.w + (on ? extra : -extra);
+        const rap::rect_f work = window_->work_area();
+        if (work.w > 0)
+            w = std::min(w, work.w - 24);
+        window_->resize({std::max(w, float(cfg_.min_window_width)), before.h});
+    }
+    pane_toggled_from_ = 0;  // not the info pane: nothing to learn from this one
+    refit_after_layout_ = true;
+    refit_timer_ = ui_.timer(150, false,
+                             [this]
+                             {
+                                 if (refit_after_layout_)
+                                     refit_after_pane_toggle();
+                             });
+    update_toolbar();
     update_status();
 }
 
@@ -223,6 +311,8 @@ void App::update_toolbar()
     exposure_box_->set_visible(!comparing && image_ && image_->is_raw);
     if (gain_)
         gain_->set_enabled(comparing && view_->compare_mode() == View::Compare::Difference);
+    if (compare_widgets_[size_t(View::Compare::Difference)])
+        compare_widgets_[size_t(View::Compare::Difference)]->set_enabled(view_->compare_difference() != nullptr);
     const bool browse = !navigation_locked();
     for (size_t i : {size_t(0), size_t(1), size_t(3)})  // previous, next, slideshow
         if (browse_widgets_[i])
@@ -232,6 +322,7 @@ void App::update_toolbar()
 void App::build_ui()
 {
     view_ = std::make_unique<View>(ui_, cfg_);
+    side_view_ = std::make_unique<View>(ui_, cfg_);
     namespace L = rap::layout;
     using L::hbox;
     using L::horizontal;
@@ -305,26 +396,36 @@ void App::build_ui()
                 compare_button(swipe_icon(), "Swipe: A left of the divider, B right of it (drag the divider)", View::Compare::Swipe),
                 compare_button(difference_icon(), "Difference: where A and B differ, amplified", View::Compare::Difference),
                 L::tool_button{swap_icon(), "Swap A and B"}.on_click([this] { swap_compare(); }).handle(diff_widgets_[0]),
+                L::tool_button{side_by_side_icon(), "Side by side: B in a second pane, beside A"}
+                    .toggle(false)
+                    .on_toggled([this](bool on) { set_side_by_side(on); })
+                    .bind(side_button_)
+                    .handle(diff_widgets_[1]),
                 spacer{},
                 exposure,
                 hbox{
                     L::label{"Gain"},
                     L::slider{1.0, 32.0, 8.0}
                         .step(1.0, 4.0)
-                        .show_value(0)
+                        // No value shown: the view's tag has it ("Difference ×8"), and
+                        // GTK would put it above the track, making the toolbar taller.
                         .on_changed([this](double v) { view_->set_compare_gain(int(v + 0.5)); })
                         .bind(gain_)
                         .width(rap::extent{14, rap::extent::unit::chars})
                         .tooltip("How much the difference is amplified"),
                 }
-                    .handle(diff_widgets_[1]),
+                    .handle(diff_widgets_[2]),
                 tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata),
                 tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings),
             }
                 .handle(toolbar_),
             L::splitter{
                 horizontal,
-                view_->node(),
+                hbox{
+                    view_->node(),
+                    vbox{side_view_->node()}.stretch().handle(side_pane_),
+                }
+                    .stretch(),
                 vbox{
                     L::list{{{"Tag", rap::extent{14, rap::extent::unit::chars}}, {"Value", {}, true}}, &metadata_model_}
                         .selection(rap::selection_mode::single)
@@ -354,12 +455,28 @@ void App::build_ui()
         }}}.size(rap::extent{float(cfg_.min_window_width), rap::extent::unit::px}, rap::extent{float(cfg_.min_window_height), rap::extent::unit::px})
                              .margins(false));
     view_->attach(view_->canvas());
+    side_view_->attach(side_view_->canvas());
+    side_pane_->set_visible(false);
+    side_view_->set_divided(true);
+    // Side by side, either view's zoom and pan carry over to the other.
+    const auto follow = [this](View& from, View& to)
+    {
+        if (!side_by_side_ || syncing_framing_)
+            return;
+        syncing_framing_ = true;
+        to.set_framing(from.framing());
+        syncing_framing_ = false;
+    };
+    view_->on_framing_changed = [this, follow] { follow(*view_, *side_view_); };
+    side_view_->on_framing_changed = [this, follow] { follow(*side_view_, *view_); };
     window_->on_key([this](const rap::key_event& e) { return on_key(e); });
     // A dropped file opens with its folder, as if opened from the menu.
     window_->on_files_dropped(
         [this](const std::vector<std::string>& paths)
         {
-            if (!paths.empty())
+            if (paths.size() == 2)
+                open_diff(paths[0], paths[1]);
+            else if (!paths.empty())
                 open_path(paths.front());
         });
     // A width the user drags the info pane to is kept for next time.
@@ -405,6 +522,7 @@ void App::build_ui()
                 break;
         }
     };
+    side_view_->on_action = view_->on_action;
     view_->on_zoom_changed = [this] { update_status(); };
     view_->on_presented = [this] { image_presented(); };
     view_->on_resized = [this]
@@ -519,6 +637,8 @@ void App::script_compare(const std::string& how)
 {
     if (how == "swap")
         swap_compare();
+    else if (how == "side")
+        set_side_by_side(!side_by_side_);
     else if (how.rfind("gain:", 0) == 0)
     {
         gain_->set_value(std::atoi(how.c_str() + 5));
@@ -1054,8 +1174,78 @@ void App::open_path(const std::string& path)
     load_current();
 }
 
+void App::open_diff(const std::string& a_path, const std::string& b_path)
+{
+    if (save_dialog_)
+        save_dialog_->close();
+    if (slideshow_)
+        stop_slideshow();
+    stop_video();
+    status_message_ = "Comparing…";
+    update_status();
+    const uint64_t generation = ++load_generation_;
+    ++preview_->running;  // waited for on exit, as a save preview is
+    std::thread(
+        [this, generation, a_path, b_path, state = preview_]
+        {
+            struct Done
+            {
+                PreviewState& s;
+                ~Done() { --s.running; }
+            } done{*state};
+            auto a = std::make_shared<Image>(), b = std::make_shared<Image>();
+            std::string error;
+            const bool ok = decode_image(a_path, *a, error) && decode_image(b_path, *b, error);
+            std::shared_ptr<const ImageDifference> difference;
+            if (ok)
+            {
+                a->build_mips();
+                b->build_mips();
+                if (a->width == b->width && a->height == b->height)
+                    difference = std::make_shared<ImageDifference>(compare_images(*a, *b));
+            }
+            platform::post_main(
+                [this, generation, a, b, a_path, b_path, difference, ok, error]
+                {
+                    if (generation != load_generation_)
+                        return;
+                    if (!ok)
+                    {
+                        status_message_ = "Can't compare: " + error;
+                        update_status();
+                        return;
+                    }
+                    // Named by file, or by folder and file when the names are the same.
+                    const std::filesystem::path pa(a_path), pb(b_path);
+                    const bool same = pa.filename() == pb.filename();
+                    const auto name = [same](const std::filesystem::path& p)
+                    { return same ? (p.parent_path().filename() / p.filename()).string() : p.filename().string(); };
+                    end_comparing();
+                    if (image_ && !image_path_.empty())
+                        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
+                    image_ = a;
+                    image_path_ = a_path;
+                    std::error_code ec;
+                    file_size_ = std::filesystem::file_size(a_path, ec);
+                    diff_session_ = true;
+                    diff_name_ = name(pa) + "  ↔  " + name(pb);
+                    status_message_ = diff_name_;
+                    view_->begin_compare(a, b, name(pa), name(pb), difference,
+                                         difference ? View::Compare::Difference : View::Compare::Swipe);
+                    view_->set_compare_gain(int(gain_->value() + 0.5));
+                    update_toolbar();
+                    update_title();
+                    update_status();
+                    fit_window_to_image();
+                });
+        })
+        .detach();
+}
+
 void App::load_current()
 {
+    if (diff_session_)
+        end_comparing();  // a file opened: back to browsing
     const std::string path = folder_.current();
     if (save_dialog_ && path != image_path_)
         save_dialog_->close();  // it was saving (and previewing) the image going away
@@ -1307,20 +1497,30 @@ void App::save_as()
 {
     if (!image_ || save_dialog_)
         return;
+    // Comparing two files, Save saves where they differ, as it's shown.
+    save_source_ = diff_session_ ? view_->difference_shown() : image_;
+    if (!save_source_)
+    {
+        status_message_ = "No difference image to save: the images are different sizes";
+        update_status();
+        return;
+    }
     SaveDialog::Callbacks cb;
     cb.changed = [this](const Encoder& e, const EncodeOptions& o) { preview_save(e, o); };
     cb.preview_shown = [this](bool on) { show_save_preview(on); };
     cb.chosen = [this](const Encoder& e, const EncodeOptions& o)
     {
         // After the dialog has gone, so the file dialog has the main window as parent.
-        ui_.post([this, e = &e, o] { choose_save_path(*e, o); });
+        ui_.post([this, e = &e, o, source = save_source_] { choose_save_path(*e, o, source); });
     };
     cb.closed = [this]
     {
         ++preview_->generation;
         preview_image_.reset();
         preview_difference_.reset();
-        view_->end_compare();
+        save_source_.reset();
+        if (!diff_session_)
+            end_comparing();
         save_dialog_.reset();
         status_message_.clear();
         update_toolbar();
@@ -1328,7 +1528,7 @@ void App::save_as()
     };
     if (slideshow_)
         stop_slideshow();
-    save_dialog_ = SaveDialog::open(ui_, window_.get(), lower_extension(image_path_), save_options_, std::move(cb));
+    save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, std::move(cb));
     update_toolbar();
 }
 
@@ -1336,11 +1536,16 @@ void App::save_as()
 // starting on B: what the save would look like.
 void App::show_save_preview(bool on)
 {
+    if (diff_session_)
+        return;  // saving the difference: the comparison stays as it is
     // The encode is already done: this only changes what the view shows.
     if (on && preview_image_ && image_)
     {
         if (view_->comparing())
+        {
             view_->set_compare_b(preview_image_, preview_difference_);
+            show_side();
+        }
         else
         {
             view_->begin_compare(image_, preview_image_, "Original", "Saved", preview_difference_, View::Compare::B);
@@ -1348,7 +1553,10 @@ void App::show_save_preview(bool on)
         }
     }
     else
-        view_->end_compare();
+    {
+        end_comparing();
+        return;
+    }
     update_toolbar();
     update_status();
 }
@@ -1358,7 +1566,7 @@ void App::show_save_preview(bool on)
 void App::preview_save(const Encoder& e, const EncodeOptions& o)
 {
     const uint64_t generation = ++preview_->generation;
-    if (!image_ || !e.lossy(o))
+    if (!save_source_ || !e.lossy(o))
     {
         preview_image_.reset();
         preview_difference_.reset();
@@ -1369,7 +1577,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
     }
     if (save_dialog_)
         save_dialog_->set_info("…");
-    std::shared_ptr<Image> source = image_;
+    std::shared_ptr<Image> source = save_source_;
     const Encoder* encoder = &e;
     ++preview_->running;
     std::thread(
@@ -1426,27 +1634,30 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
         .detach();
 }
 
-void App::choose_save_path(const Encoder& e, const EncodeOptions& o)
+void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source)
 {
-    if (!image_)
+    if (!source)
         return;
     rap::file_dialog_spec spec;
     spec.mode = rap::file_dialog_spec::mode::save;
     spec.title = std::string("Save as ") + e.name;
-    const std::string stem = std::filesystem::path(folder_.current_name()).stem().string();
+    std::string stem = std::filesystem::path(diff_session_ ? image_path_ : folder_.current_name()).stem().string();
+    if (diff_session_)
+        stem += "-difference";
     const std::string name = (stem.empty() ? std::string("image") : stem) + "." + e.extension;
-    spec.initial_path = folder_.directory().empty() ? name : folder_.directory() + "/" + name;
+    const std::string dir = diff_session_ ? std::filesystem::path(image_path_).parent_path().string() : folder_.directory();
+    spec.initial_path = dir.empty() ? name : dir + "/" + name;
     spec.filters = {{e.name, std::string("*.") + e.extension}};
     ui_.choose_files(window_.get(), spec,
-                    [this, enc = &e, o](std::vector<std::string> files)
+                    [this, enc = &e, o, source](std::vector<std::string> files)
                     {
-                        if (files.empty() || !image_)
+                        if (files.empty())
                             return;
                         std::string path = files.front();
                         if (lower_extension(path) != enc->extension)
                             path += std::string(".") + enc->extension;  // not every toolkit's dialog adds it
                         std::string error;
-                        const bool ok = enc->encode(*image_, path, o, error);
+                        const bool ok = enc->encode(*source, path, o, error);
                         status_message_ = ok ? "Saved " + std::filesystem::path(path).filename().string() : "Save failed: " + error;
                         if (ok)
                             folder_.rescan(cfg_);  // the new file may now be part of the folder
@@ -1608,7 +1819,8 @@ void App::fit_window_to_image()
     const double scale = view_->scale_factor();
     const rap::size_f cur = window_->size();
     const float pane_w = metadata_visible_ ? float(cfg_.metadata_pane_width) : 0.f;
-    const float chrome_w = vw > 0 ? std::max(0.f, cur.w - float(vw / scale) - pane_w) : 0.f;
+    const int images = side_by_side_ ? 2 : 1;  // side by side, B's pane is as wide as A's
+    const float chrome_w = vw > 0 ? std::max(0.f, cur.w - images * float(vw / scale) - pane_w) : 0.f;
     const float chrome_h = vh > 0 ? std::max(0.f, cur.h - float(vh / scale)) : 80.f;
 
     // Leave room for the title bar and a little air around the window.
@@ -1616,8 +1828,8 @@ void App::fit_window_to_image()
     const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
     const double iw = (stand_in ? image_->final_width : image_->width) / scale;  // logical pixels at 1:1
     const double ih = (stand_in ? image_->final_height : image_->height) / scale;
-    const double s = std::min({1.0, (max_w - chrome_w - pane_w) / iw, (max_h - chrome_h) / ih});
-    const float cw = float(std::ceil(iw * s)), ch = float(std::ceil(ih * s));
+    const double s = std::min({1.0, (max_w - chrome_w - pane_w) / (images * iw), (max_h - chrome_h) / ih});
+    const float cw = images * float(std::ceil(iw * s)), ch = float(std::ceil(ih * s));
     const float w = std::clamp(cw + chrome_w + pane_w, float(cfg_.min_window_width), max_w);
     const float h = std::clamp(ch + chrome_h, float(cfg_.min_window_height), max_h);
     if (std::fabs(cur.w - w) < 1 && std::fabs(cur.h - h) < 1)
@@ -1753,7 +1965,9 @@ void App::update_title()
     if (fullscreen_ || !window_)
         return;
     std::string title = "IfritView";
-    if (!folder_.empty())
+    if (diff_session_)
+        title = diff_name_ + " – IfritView";
+    else if (!folder_.empty())
         title = folder_.current_name() + " (" + std::to_string(folder_.index() + 1) + "/" + std::to_string(folder_.count()) + ") – IfritView";
     window_->set_title(title);
 }
@@ -1795,6 +2009,8 @@ void App::update_status()
         }
         if (view_->zoom_mode() == View::ZoomMode::Fit && view_->zoom() < 1.0)
             right += " (fit)";
+        if (const std::shared_ptr<Image> b = view_->compare_image(true); b && (b->width != image_->width || b->height != image_->height))
+            center += "  ·  B " + std::to_string(b->width) + " × " + std::to_string(b->height) + ", scaled to match";
         if (const ImageDifference* d = view_->compare_difference())
         {
             char buf[160];

@@ -98,6 +98,62 @@ void View::invalidate()
 {
     if (canvas_)
         canvas_->invalidate();
+    if (on_framing_changed && !applying_framing_)
+    {
+        const Framing f = framing();
+        if (!(f == last_framing_))
+        {
+            last_framing_ = f;
+            on_framing_changed();
+        }
+    }
+}
+
+View::Framing View::framing() const
+{
+    Framing f;
+    if (!image_ || image_->width <= 0 || image_->height <= 0)
+        return f;
+    int vw, vh;
+    view_size(vw, vh);
+    f.fit = mode_ == ZoomMode::Fit;
+    f.width = image_->width * zoom_;
+    f.cx = (vw / 2.0 - pan_x_) / (image_->width * zoom_);
+    f.cy = (vh / 2.0 - pan_y_) / (image_->height * zoom_);
+    return f;
+}
+
+void View::set_framing(const Framing& f)
+{
+    if (!image_ || image_->width <= 0)
+        return;
+    applying_framing_ = true;
+    if (f.fit)
+    {
+        mode_ = ZoomMode::Fit;
+        layout();
+    }
+    else
+    {
+        int vw, vh;
+        view_size(vw, vh);
+        end_motion();
+        mode_ = ZoomMode::Manual;
+        zoom_ = std::clamp(f.width / image_->width, kMinZoom, kMaxZoom);
+        pan_x_ = vw / 2.0 - f.cx * image_->width * zoom_;
+        pan_y_ = vh / 2.0 - f.cy * image_->height * zoom_;
+        clamp_pan();
+        invalidate();
+        zoom_changed();
+    }
+    last_framing_ = framing();
+    applying_framing_ = false;
+}
+
+void View::set_label(std::string label)
+{
+    label_ = std::move(label);
+    invalidate();
 }
 
 int View::scale_factor() const
@@ -290,7 +346,7 @@ void View::end_preview()
 void View::begin_compare(std::shared_ptr<Image> a, std::shared_ptr<Image> b, std::string a_label, std::string b_label,
                          std::shared_ptr<const ImageDifference> difference, Compare mode)
 {
-    if (!a || !b || a->width != b->width || a->height != b->height)
+    if (!a || !b || a->width <= 0 || b->width <= 0)
         return;
     end_preview();
     const bool same_size = image_ && image_->width == a->width && image_->height == a->height;
@@ -317,7 +373,7 @@ void View::begin_compare(std::shared_ptr<Image> a, std::shared_ptr<Image> b, std
 
 void View::set_compare_b(std::shared_ptr<Image> b, std::shared_ptr<const ImageDifference> difference)
 {
-    if (!compare_ || !b || b->width != compare_->a.image->width || b->height != compare_->a.image->height)
+    if (!compare_ || !b || b->width <= 0)
         return;
     compare_->b = Layer{std::move(b)};
     compare_->difference = std::move(difference);
@@ -387,30 +443,43 @@ double View::divider_x() const
 
 // A layer as the main image is drawn: pre-scaled when zoomed out, else the
 // full upload, filtered the same way.
-void View::draw_layer(rap::painter& p, Layer& layer, float alpha)
+void View::draw_layer(rap::painter& p, Layer& layer, float alpha, double rel)
 {
     if (!layer.image || layer.image->width <= 0)
         return;
     const Image& im = *layer.image;
+    const double zoom = zoom_ * rel;
     const double scale = scale_factor();
     const auto L = [scale](double device) { return float(device / scale); };
     if (!layer.base)
         layer.base = ui_.create_image(im.width, im.height, APixelFormat::bgra8_premultiplied, im.pixels.data(), im.stride);
-    if (zoom_ < 1.0 && cfg_.smooth_downscale && !im.is_video)
+    if (zoom < 1.0 && cfg_.smooth_downscale && !im.is_video)
     {
-        const int w = std::max(1, int(std::ceil(im.width * zoom_))), h = std::max(1, int(std::ceil(im.height * zoom_)));
-        if (!layer.scaled || layer.scaled_zoom != zoom_)
+        const int w = std::max(1, int(std::ceil(im.width * zoom))), h = std::max(1, int(std::ceil(im.height * zoom)));
+        if (!layer.scaled || layer.scaled_zoom != zoom)
         {
             const PixelBuffer px = downscale(im, w, h);
             layer.scaled = ui_.create_image(w, h, APixelFormat::bgra8_premultiplied, px.data(), size_t(w) * 4);
-            layer.scaled_zoom = zoom_;
+            layer.scaled_zoom = zoom;
         }
         p.image(*layer.scaled, {0, 0, float(w), float(h)}, {L(pan_x_), L(pan_y_), L(w), L(h)}, rap::filter::nearest, alpha);
         return;
     }
-    const bool smooth = zoom_ > 1.0 && cfg_.smooth_upscale;
-    p.image(*layer.base, {0, 0, float(im.width), float(im.height)}, {L(pan_x_), L(pan_y_), L(im.width * zoom_), L(im.height * zoom_)},
+    const bool smooth = zoom > 1.0 && cfg_.smooth_upscale;
+    p.image(*layer.base, {0, 0, float(im.width), float(im.height)}, {L(pan_x_), L(pan_y_), L(im.width * zoom), L(im.height * zoom)},
             smooth ? rap::filter::linear : rap::filter::nearest, alpha);
+}
+
+void View::draw_tag(rap::painter& p, const std::string& text, float x, float y, bool right_aligned)
+{
+    if (text.empty())
+        return;
+    rap::text_style style;
+    style.fg = rap::color{255, 255, 255};
+    const rap::size_f sz = p.measure(text, style);
+    const float x0 = right_aligned ? x - sz.w - 12 : x;
+    p.rect({x0, y, sz.w + 12, sz.h + 6}, 4, rap::color{0, 0, 0, 150}, std::nullopt);
+    p.text({x0 + 6, y + 3}, text, style);
 }
 
 void View::draw_compare(rap::painter& p, float alpha)
@@ -422,17 +491,8 @@ void View::draw_compare(rap::painter& p, float alpha)
     view_size(vw, vh);
     const double top = std::max(0.0, pan_y_), bottom = std::min(double(vh), pan_y_ + c.a.image->height * zoom_);
     // Which image is which, in a tag at the image's top edge.
-    rap::text_style style;
-    style.fg = rap::color{255, 255, 255};
-    const auto tag = [&](const std::string& text, float tx, bool right_aligned)
-    {
-        if (text.empty())
-            return;
-        const rap::size_f sz = p.measure(text, style);
-        const float x0 = right_aligned ? tx - sz.w - 12 : tx;
-        p.rect({x0, L(top) + 8, sz.w + 12, sz.h + 6}, 4, rap::color{0, 0, 0, 150}, std::nullopt);
-        p.text({x0 + 6, L(top) + 11}, text, style);
-    };
+    const auto tag = [&](const std::string& text, float tx, bool right_aligned) { draw_tag(p, text, tx, L(top) + 8, right_aligned); };
+    const double rel_b = double(c.a.image->width) / c.b.image->width;  // B drawn at A's width
     const float left = L(std::max(0.0, pan_x_)) + 8;
     switch (c.mode)
     {
@@ -441,7 +501,7 @@ void View::draw_compare(rap::painter& p, float alpha)
             tag(c.a_label, left, false);
             return;
         case Compare::B:
-            draw_layer(p, c.b, alpha);
+            draw_layer(p, c.b, alpha, rel_b);
             tag(c.b_label, left, false);
             return;
         case Compare::Difference:
@@ -451,13 +511,13 @@ void View::draw_compare(rap::painter& p, float alpha)
                 tag("Difference ×" + std::to_string(c.gain), left, false);
             }
             else
-                draw_layer(p, c.b, alpha);  // not worked out yet
+                draw_layer(p, c.b, alpha, rel_b);  // not worked out yet
             return;
         case Compare::Swipe:
             break;
     }
     // Swipe: B, with A over it left of the divider.
-    draw_layer(p, c.b, alpha);
+    draw_layer(p, c.b, alpha, rel_b);
     const double x = divider_x();
     if (x > 0)
     {
@@ -785,6 +845,8 @@ void View::paint(rap::painter& p, rap::size_f)
 
     const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
     p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
+    if (divided_)
+        p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);  // again over the image, below
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
 
@@ -863,6 +925,10 @@ void View::paint(rap::painter& p, rap::size_f)
         if (rap::image* base = base_image())  // the full-size upload, only when it's what gets drawn
             p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? rap::filter::linear : rap::filter::nearest, alpha);
     }
+    if (divided_)
+        p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);
+    if (!compare_ && !label_.empty())
+        draw_tag(p, label_, float(std::max(0.0, pan_x_) / scale_factor()) + 8, float(std::max(0.0, pan_y_) / scale_factor()) + 8, false);
     if (motion_.active)
         frame_ms_ = (now_us() - t_draw) / 1000.0;
     if (presented_ != image_.get())

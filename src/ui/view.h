@@ -40,10 +40,11 @@ public:
     // place, keeping zoom and pan; end_preview() puts the image back.
     void show_preview(std::shared_ptr<Image> preview);
     void end_preview();
-    // Comparing A with B, two images of the same size: one shown at a time,
-    // a swipe between them, or where they differ. A becomes the view's image
-    // (zoom, pan and selection follow it); B and the difference are drawn at
-    // its place. `difference` (from compare_images) may come later.
+    // Comparing A with B: one shown at a time, a swipe between them, or where
+    // they differ. A becomes the view's image (zoom, pan and selection follow
+    // it); B and the difference are drawn in its place, B scaled to A's width
+    // when the sizes differ. `difference` (from compare_images, same sizes
+    // only) may come later.
     enum class Compare
     {
         A,
@@ -62,6 +63,24 @@ public:
     Compare compare_mode() const { return compare_ ? compare_->mode : Compare::A; }
     const ImageDifference* compare_difference() const { return compare_ ? compare_->difference.get() : nullptr; }
     std::shared_ptr<Image> difference_shown();  // the difference as an image, at the current gain
+    std::shared_ptr<Image> compare_image(bool b) const { return compare_ ? (b ? compare_->b.image : compare_->a.image) : nullptr; }
+    std::string compare_label(bool b) const { return compare_ ? (b ? compare_->b_label : compare_->a_label) : std::string(); }
+    // A name in a tag at the image's top-left (a side-by-side pane's image).
+    void set_label(std::string label);
+    void set_divided(bool on) { divided_ = on; }  // a line down the left edge, from a view beside it
+
+    // What part of the image shows, independent of its size: for keeping a
+    // second view (side by side) on the same place.
+    struct Framing
+    {
+        bool fit = true;
+        double width = 0;          // the image's shown width, device px
+        double cx = 0.5, cy = 0.5;  // the view's centre, as a fraction across the image
+        bool operator==(const Framing&) const = default;
+    };
+    Framing framing() const;
+    void set_framing(const Framing& f);  // doesn't fire on_framing_changed
+    std::function<void()> on_framing_changed;
     using OverlaySections = std::vector<std::vector<std::string>>;
     void set_overlay(OverlaySections sections);
 
@@ -156,7 +175,12 @@ private:
         double swipe = 0.5;  // the divider, across the image (0..1)
         bool dragging = false;
     };
-    void draw_layer(rap::painter& p, Layer& layer, float alpha);
+    void draw_layer(rap::painter& p, Layer& layer, float alpha, double rel = 1.0);  // rel: layer px to A px
+    void draw_tag(rap::painter& p, const std::string& text, float x, float y, bool right_aligned);
+    std::string label_;
+    bool divided_ = false;
+    Framing last_framing_;
+    bool applying_framing_ = false;
     void draw_compare(rap::painter& p, float alpha);
     double divider_x() const;  // device px
     std::unique_ptr<Comparison> compare_;

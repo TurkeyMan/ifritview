@@ -145,6 +145,7 @@ int main(int argc, char** argv)
     {
         std::printf(
             "usage: ifritview [image-file | directory]\n"
+            "       ifritview --diff a b        compare two images\n"
             "       ifritview --probe file...   decode files and report, no window\n"
             "       ifritview --convert in out [setting=value...]   save `in` as `out`, no window\n"
             "       ifritview --version\n");
@@ -186,7 +187,9 @@ int main(int argc, char** argv)
 int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
 {
     App app(ui);
-    if (argc > 1)
+    if (argc > 3 && std::strcmp(argv[1], "--diff") == 0)
+        app.open_diff(argv[2], argv[3]);
+    else if (argc > 1)
         app.open_path(argv[1]);
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "startup: %.0f ms to window creation (%s)\n",

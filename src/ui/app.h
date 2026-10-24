@@ -29,6 +29,8 @@ public:
     explicit App(rap::ui& ui);
     ~App();
     void open_path(const std::string& path);
+    // Two images compared, standalone (--diff, or two files dropped at once).
+    void open_diff(const std::string& a_path, const std::string& b_path);
     int run();
     rap::ui& ui() { return ui_; }
     rap::window& window() { return *window_; }
@@ -52,7 +54,7 @@ public:
     void crop_to_selection();
     void save_as();
     void preview_save(const Encoder& e, const EncodeOptions& o);
-    void choose_save_path(const Encoder& e, const EncodeOptions& o);
+    void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source);
     void toggle_metadata();
     void toggle_xmp();
     void copy_to_clipboard();
@@ -66,7 +68,7 @@ public:
     void script_toggle_xmp();
     void remember_pane_width();
     void script_end_dialog(bool accept);
-    void script_compare(const std::string& how);  // a, b, swipe, diff, swap or gain:N
+    void script_compare(const std::string& how);  // a, b, swipe, diff, swap, side or gain:N
 
 private:
     void build_ui();
@@ -75,6 +77,9 @@ private:
     void set_compare(View::Compare mode);
     void swap_compare();
     void show_save_preview(bool on);
+    void end_comparing();
+    void set_side_by_side(bool on);
+    void show_side();  // B, its name and the main view's framing, in the side pane
     // The toolbar for what the view is doing: browsing the folder, or
     // comparing two images (and no browsing while Save As is open).
     void update_toolbar();
@@ -139,8 +144,17 @@ private:
     std::array<rap::widget*, 6> browse_widgets_{};  // hidden while comparing
     std::array<rap::widget*, 4> compare_widgets_{};  // by View::Compare; shown only while comparing
     std::array<rap::tool_button*, 4> compare_buttons_{};
-    std::array<rap::widget*, 2> diff_widgets_{};  // swap, gain
+    std::array<rap::widget*, 3> diff_widgets_{};  // swap, side by side, gain
     rap::slider* gain_ = nullptr;
+    // Side by side: B in a second view to the right, framed as the first.
+    std::unique_ptr<View> side_view_;
+    rap::widget* side_pane_ = nullptr;
+    rap::tool_button* side_button_ = nullptr;
+    bool side_by_side_ = false;
+    bool syncing_framing_ = false;
+    bool diff_session_ = false;  // comparing two files, not previewing a save
+    std::string diff_name_;      // "a ↔ b"
+    std::shared_ptr<Image> save_source_;  // what Save As saves: the image, or the difference shown
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;
