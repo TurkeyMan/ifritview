@@ -7,12 +7,16 @@
 #include "integration.h"
 #include "plugins.h"
 
+#include <gio/gio.h>
+#include <rapport/sys.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -483,6 +487,54 @@ rap::node file_types_page(const Config& cfg, State& st)
     };
 }
 
+// The licence notices of the code built in: beside the exe on Windows (and
+// in an unpacked archive), the package's doc folder on Linux, the source's
+// own in a build tree. Empty when none is there.
+std::string notices_path()
+{
+    const std::filesystem::path exe = rap::sys::executable_path().parent_path();
+    std::vector<std::filesystem::path> candidates = {exe / "THIRD-PARTY-NOTICES.txt"};
+#ifdef IFRIT_DOC_DIR
+    candidates.push_back(std::filesystem::path(IFRIT_DOC_DIR) / "THIRD-PARTY-NOTICES.txt");
+#endif
+#ifdef IFRIT_SOURCE_DIR
+    candidates.push_back(std::filesystem::path(IFRIT_SOURCE_DIR) / "third_party" / "NOTICES.txt");
+#endif
+    std::error_code ec;
+    for (const std::filesystem::path& p : candidates)
+        if (std::filesystem::is_regular_file(p, ec))
+            return rap::sys::path_to_utf8(p);
+    return {};
+}
+
+void open_uri(const std::string& uri)
+{
+    g_app_info_launch_default_for_uri(uri.c_str(), nullptr, nullptr);
+}
+
+rap::node about_page()
+{
+    rap::nodes items = {
+        L::label{std::string("IfritView ") + IFRIT_VERSION},
+        L::label{"A fast image viewer, for photos and camera raws, and the texture formats of games."},
+        L::label{"Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later."},
+        L::label{"Project page and source"}.link([] { open_uri("https://github.com/TurkeyMan/ifritview"); }),
+        L::label{"The licence (GPL 3.0)"}.link([] { open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
+    };
+    // The code it carries from elsewhere, and the licences that come with it.
+    if (const std::string notices = notices_path(); !notices.empty())
+        items.push_back(L::label{"Third-party notices"}.link(
+            [notices]
+            {
+                if (gchar* uri = g_filename_to_uri(notices.c_str(), nullptr, nullptr))
+                {
+                    open_uri(uri);
+                    g_free(uri);
+                }
+            }));
+    return rap::node{rap::spec::box{rap::orientation::vertical, items, false, {}}, {}};
+}
+
 }  // namespace
 
 std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent, Config& cfg, std::function<void(bool)> done, int page)
@@ -508,6 +560,7 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
                                              {"Viewing", L::lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
                                              {"Controls", L::lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
                                              {"File Types", L::lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
+                                             {"About", L::lazy{[] { return about_page(); }}},
                                          }
                                              .sidebar()
                                              .bind(st->tabs)

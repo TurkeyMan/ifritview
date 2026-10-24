@@ -2454,6 +2454,9 @@ bool App::on_key(const rap::key_event& e)
     const char32_t c = e.key == rap::key::character ? e.codepoint : 0;
     switch (e.key)
     {
+        case rap::key::f1:
+            open_settings_page(4);  // About
+            return true;
         case rap::key::left:
         case rap::key::page_up:
         case rap::key::backspace:

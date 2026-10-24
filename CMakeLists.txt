@@ -403,6 +403,9 @@ install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/m
 if(NOT WIN32)
   install(FILES third_party/NOTICES.txt DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME THIRD-PARTY-NOTICES.txt)
 endif()
+# Where About finds them: installed, or in the source when run from a build.
+set_property(SOURCE src/ui/settings.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+  IFRIT_DOC_DIR="${CMAKE_INSTALL_FULL_DOCDIR}" IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # The 256 px icon as C bytes, for a bare executable's own desktop entry.
 file(READ data/icons/hicolor/256x256/apps/ifritview.png IFRIT_ICON_HEX HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," IFRIT_ICON_PNG "${IFRIT_ICON_HEX}")
