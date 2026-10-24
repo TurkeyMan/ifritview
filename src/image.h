@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pixel_buffer.h"
+#include "metadata/file_metadata.h"
 #include "pixel_format.h"
 
 #include <cstdint>
@@ -151,6 +152,7 @@ struct Image
     void adopt(Image&& final);
     XmpDevelop xmp;                       // edits read from XMP, applied by the app if enabled
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out
+    std::shared_ptr<const FileMetadata> stored;  // the metadata as the file holds it, for saving; may be null
     bool has_location = false;            // GPS position from EXIF, decimal degrees
     double latitude = 0, longitude = 0;
     std::string place;  // reverse-geocoded name, filled in asynchronously

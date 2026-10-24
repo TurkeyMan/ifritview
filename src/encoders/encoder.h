@@ -3,6 +3,7 @@
 #include "../image.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,9 @@ struct EncodeSetting
 struct EncodeOptions
 {
     std::map<std::string, int> values;
+    // Written into the file as it is, where the format can hold it: the
+    // caller prepares it (prepare_metadata) for this file and choice.
+    std::shared_ptr<const FileMetadata> metadata;
     int get(const char* key, int fallback) const
     {
         auto it = values.find(key);

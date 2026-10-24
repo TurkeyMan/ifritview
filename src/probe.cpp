@@ -54,6 +54,9 @@ int probe(int argc, char** argv)
                 std::printf("        source: %s %s%s, peak %g, crc %08x\n", types[int(s.sample)], layouts[s.channels], s.linear ? " linear" : "",
                             double(s.peak), unsigned(crc32(s.data.data(), s.data.size())));
             }
+            if (img.stored)
+                std::printf("        stored: exif %zu, xmp %zu, iptc %zu, icc %zu bytes\n", img.stored->exif.size(), img.stored->xmp.size(),
+                            img.stored->iptc.size(), img.stored->icc.size());
             if (img.xmp.present)
                 std::printf("        xmp develop: exposure %+.2f temp %.0f orientation %d crop %d\n", img.xmp.exposure, img.xmp.temperature,
                             img.xmp.orientation, int(img.xmp.has_crop));
@@ -79,7 +82,7 @@ int convert(int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::fprintf(stderr, "usage: ifritview --convert in out [setting=value...]\n");
+        std::fprintf(stderr, "usage: ifritview --convert in out [setting=value...] [metadata=CHOICE]\n");
         return 2;
     }
     const std::string in = argv[0], out = argv[1];
@@ -97,10 +100,21 @@ int convert(int argc, char** argv)
         return 2;
     }
     EncodeOptions options;
+    MetadataChoice metadata;
     for (int i = 2; i < argc; ++i)
     {
         const std::string kv = argv[i];
         const auto eq = kv.find('=');
+        if (eq != std::string::npos && kv.compare(0, eq, "metadata") == 0)
+        {
+            std::string error;
+            if (!parse_metadata_choice(kv.substr(eq + 1), metadata, error))
+            {
+                std::fprintf(stderr, "%s\n", error.c_str());
+                return 2;
+            }
+            continue;
+        }
         if (eq == std::string::npos || !encoder->setting(kv.substr(0, eq).c_str()))
         {
             std::fprintf(stderr, "%s has no setting \"%s\"; it has:", encoder->name, kv.substr(0, eq).c_str());
@@ -117,6 +131,14 @@ int convert(int argc, char** argv)
     {
         std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
         return 1;
+    }
+    if (img.stored)
+    {
+        SaveTarget target;
+        target.width = img.width;
+        target.height = img.height;
+        target.drop_develop = img.is_raw;  // develop settings describe the raw, not this rendering
+        options.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*img.stored, metadata, target));
     }
     if (!encoder->encode(img, out, options, error))
     {

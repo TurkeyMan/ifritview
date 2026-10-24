@@ -232,7 +232,15 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     if (pages > 1)
         out.add("TIFF", "Pages", std::to_string(pages));
-#ifdef HAVE_IPTC
+    FileMetadata stored;  // as the file has it, for saving
+    {
+        uint32_t len = 0;
+        void* bytes = nullptr;
+        if (TIFFGetField(tif, TIFFTAG_ICCPROFILE, &len, &bytes) && bytes && len)
+            stored.icc.assign(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + len);
+        if (TIFFGetField(tif, TIFFTAG_XMLPACKET, &len, &bytes) && bytes && len)
+            stored.xmp.assign(static_cast<const uint8_t*>(bytes), static_cast<const uint8_t*>(bytes) + len);
+    }
     uint32_t iptc_count = 0;
     void* iptc = nullptr;
     if (TIFFGetField(tif, TIFFTAG_RICHTIFFIPTC, &iptc_count, &iptc) && iptc && iptc_count)
@@ -244,9 +252,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
         if (TIFFIsByteSwapped(tif) && TIFFFieldDataType(TIFFFieldWithTag(tif, TIFFTAG_RICHTIFFIPTC)) == TIFF_LONG)
             for (size_t i = 0; i + 3 < blob.size(); i += 4)
                 std::swap(blob[i], blob[i + 3]), std::swap(blob[i + 1], blob[i + 2]);
+        stored.iptc = blob;
+#ifdef HAVE_IPTC
         read_iptc_blob(blob.data(), blob.size(), out);
-    }
 #endif
+    }
+    if (!stored.empty())
+        out.stored = std::make_shared<const FileMetadata>(std::move(stored));
     toff_t exif_offset = 0;
     if (TIFFGetField(tif, TIFFTAG_EXIFIFD, &exif_offset) && TIFFReadEXIFDirectory(tif, exif_offset))
     {

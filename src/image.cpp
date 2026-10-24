@@ -400,6 +400,7 @@ Image Image::crop(int x, int y, int w, int h) const
     out.latitude = latitude;
     out.longitude = longitude;
     out.place = place;
+    out.stored = stored;
     for (int yy = 0; yy < h; ++yy)
         std::copy_n(row(y + yy) + x, w, out.row(yy));
     if (linear)
@@ -500,6 +501,8 @@ void Image::adopt(Image&& f)
         info = std::move(f.info);
     linear = std::move(f.linear);
     source = std::move(f.source);
+    if (f.stored)
+        stored = std::move(f.stored);
     mips = std::move(f.mips);  // empty if pending edits rewrote f's pixels
     animation = std::move(f.animation);
     if (f.exposure_bias != 0)

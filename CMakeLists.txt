@@ -58,6 +58,8 @@ add_library(ifrit_core STATIC
   src/scale.cpp
   src/probe.cpp
   src/compare.cpp
+  src/metadata/extract.cpp
+  src/metadata/edit.cpp
   src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp
@@ -81,7 +83,9 @@ add_library(ifrit_core STATIC
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
 target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
 target_include_directories(ifrit_core PUBLIC src ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE ${CMAKE_DL_LIBS})
+# zlib: compressed metadata in PNG (profiles, XMP). It comes with libpng anyway.
+pkg_check_modules(ZLIB_PC REQUIRED IMPORTED_TARGET zlib)
+target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE PkgConfig::ZLIB_PC ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
@@ -300,7 +304,7 @@ endif()
 # for jxl.lib).
 if(MSVC)
   set(vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
-  foreach(pkg CORE EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW ZSTD GEOCODE PDF_CAIRO)
+  foreach(pkg CORE ZLIB_PC EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW ZSTD GEOCODE PDF_CAIRO)
     if(NOT TARGET PkgConfig::${pkg})
       continue()
     endif()

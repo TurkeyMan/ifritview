@@ -88,6 +88,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 out.pixel_format.channels.push_back({'A', bits});
         }
     }
+    FileMetadata stored;  // as the file has it, for saving
     {
         const heif_color_profile_type type = heif_image_handle_get_color_profile_type(handle);
         if (type == heif_color_profile_type_nclx)
@@ -123,12 +124,14 @@ bool decode(const std::string& path, Image& out, std::string& error)
             const size_t n = heif_image_handle_get_raw_color_profile_size(handle);
             std::vector<uint8_t> icc(n);
             if (n && heif_image_handle_get_raw_color_profile(handle, icc.data()).code == heif_error_Ok)
+            {
                 out.color_space = icc_profile_description(icc.data(), n);
+                stored.icc = icc;
+            }
         }
     }
     out.add("HEIF", "Bits per pixel", std::to_string(out.bits_per_sample));
     out.add("HEIF", "Alpha channel", alpha ? "yes" : "no");
-#ifdef HAVE_EXIF
     heif_item_id ids[4];
     const int n = heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", ids, 4);
     for (int i = 0; i < n; ++i)
@@ -143,12 +146,29 @@ bool decode(const std::string& path, Image& out, std::string& error)
         const size_t off = 4 + ((size_t(data[0]) << 24) | (size_t(data[1]) << 16) | (size_t(data[2]) << 8) | data[3]);
         if (off < size)
         {
+            if (stored.exif.empty())
+                stored.exif.assign(data.begin() + long(off), data.end());
+#ifdef HAVE_EXIF
             const ExifSummary exif = read_exif_blob(data.data() + off, size - off, out);
             if (out.info.empty())
                 out.info = exif.camera;
+#endif
         }
     }
-#endif
+    // XMP: a "mime" block of type application/rdf+xml.
+    const int m = heif_image_handle_get_list_of_metadata_block_IDs(handle, "mime", ids, 4);
+    for (int i = 0; i < m && stored.xmp.empty(); ++i)
+    {
+        const char* type = heif_image_handle_get_metadata_content_type(handle, ids[i]);
+        const size_t size = heif_image_handle_get_metadata_size(handle, ids[i]);
+        if (!type || std::string(type) != "application/rdf+xml" || !size)
+            continue;
+        std::vector<uint8_t> data(size);
+        if (heif_image_handle_get_metadata(handle, ids[i], data.data()).code == heif_error_Ok)
+            stored.xmp = std::move(data);
+    }
+    if (!stored.empty())
+        out.stored = std::make_shared<const FileMetadata>(std::move(stored));
 
     heif_image_release(img);
     heif_image_handle_release(handle);

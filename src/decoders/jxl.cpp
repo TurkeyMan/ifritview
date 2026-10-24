@@ -97,7 +97,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 {
                     std::vector<uint8_t> icc(n);
                     if (JxlDecoderGetColorAsICCProfile(dec.get(), JXL_COLOR_PROFILE_TARGET_ORIGINAL, icc.data(), n) == JXL_DEC_SUCCESS)
+                    {
                         out.color_space = icc_profile_description(icc.data(), n);
+                        FileMetadata stored;  // the boxes' EXIF and XMP join it from the container pass
+                        stored.icc = std::move(icc);
+                        out.stored = std::make_shared<const FileMetadata>(std::move(stored));
+                    }
                 }
             }
         }

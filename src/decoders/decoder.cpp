@@ -48,6 +48,9 @@ bool claims_extension(const Decoder& d, const std::string& ext)
 // the pixels decode; the results land in `extra` and are merged afterwards.
 void enrich_metadata(const std::string& path, const uint8_t* data, size_t size, Image& extra)
 {
+    FileMetadata stored = extract_metadata(data, size);
+    if (!stored.empty())
+        extra.stored = std::make_shared<const FileMetadata>(std::move(stored));
 #ifdef HAVE_IPTC
     read_iptc_jpeg(data, size, extra);
 #endif
@@ -67,6 +70,15 @@ void merge_metadata(Image& out, Image&& extra)
         out.metadata.push_back(std::move(g));
     if (extra.xmp.present)
         out.xmp = extra.xmp;
+    // The container's and the decoder's (a library's) together.
+    if (extra.stored && out.stored)
+    {
+        FileMetadata both = *out.stored;
+        both.merge(*extra.stored);
+        out.stored = std::make_shared<const FileMetadata>(std::move(both));
+    }
+    else if (extra.stored)
+        out.stored = std::move(extra.stored);
 }
 
 // Starts the metadata pass alongside a decode; join() waits for it. The
