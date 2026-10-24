@@ -569,8 +569,7 @@ rap::node about_page()
         L::label{std::string("IfritView ") + IFRIT_VERSION},
         L::label{"A fast image viewer, for photos and camera raws, and the texture formats of games."},
         L::label{"Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later."},
-        L::hbox{L::button{"GitHub"}.icon(github_icon()).icon_only().flat().on_click([] { platform::open_uri(kProjectUrl); }),
-                L::label{"Project page and source"}.link([] { platform::open_uri(kProjectUrl); })},
+        L::label{"Project page and source"}.icon(github_icon()).link([] { platform::open_uri(kProjectUrl); }),
         L::label{"The licence (GPL 3.0)"}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };
     // The code it carries from elsewhere, and the licences that come with it.

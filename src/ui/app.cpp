@@ -258,6 +258,7 @@ void App::build_ui()
                 // Always: open and save, zoom, fullscreen.
                 tool_button("document-open-symbolic", "Open… (Ctrl+O)", &App::open_dialog),
                 tool_button("media-floppy-symbolic", "Save as… (Ctrl+S); comparing, saves the difference shown", &App::save_as),
+                tool_button("document-print-symbolic", "Print… (Ctrl+P); a selection prints alone", &App::print_image),
                 separator{},
                 tool_button("zoom-out-symbolic", "Zoom out (-, Ctrl+wheel)", &App::zoom_out),
                 tool_button("zoom-in-symbolic", "Zoom in (+, Ctrl+wheel)", &App::zoom_in),
@@ -321,7 +322,7 @@ void App::build_ui()
                 }
                     .handle(diff_widgets_[2]),
                 tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata),
-                tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings),
+                tool_button("preferences-system-symbolic", "Settings (Ctrl+,)", &App::open_settings),
             }
                 .handle(toolbar_),
             L::splitter{

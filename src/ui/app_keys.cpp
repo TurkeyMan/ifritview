@@ -146,6 +146,13 @@ bool App::on_key(const rap::key_event& e)
         case 'p':
             if (ctrl)
             {
+                print_image();
+                return true;
+            }
+            break;
+        case ',':
+            if (ctrl)
+            {
                 open_settings();
                 return true;
             }

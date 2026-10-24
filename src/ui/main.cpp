@@ -78,6 +78,8 @@ void run_step(App& app, const std::string& step)
     else if (step == "wait")
     {
     }
+    else if (step == "print")
+        app.print_image();  // with RAPPORT_PRINT_TO set, to a file without the dialog
     else if (step == "metadata")
         app.toggle_metadata();
     else if (step == "copy")

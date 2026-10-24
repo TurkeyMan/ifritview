@@ -63,6 +63,7 @@ public:
     void quit();
     void crop_to_selection();
     void save_as();
+    void print_image();  // app_print.cpp
     void preview_save(const Encoder& e, const EncodeOptions& o);
     void preview_lossless();
     void leave_image();
