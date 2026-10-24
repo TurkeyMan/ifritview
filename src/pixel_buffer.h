@@ -52,3 +52,4 @@ struct PixelAllocator
 
 using PixelBuffer = std::vector<uint8_t, PixelAllocator<uint8_t>>;
 using LinearBuffer = std::vector<uint16_t, PixelAllocator<uint16_t>>;
+using HalfBuffer = std::vector<uint16_t, PixelAllocator<uint16_t>>;  // IEEE half floats (half.h)

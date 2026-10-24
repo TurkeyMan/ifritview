@@ -325,7 +325,7 @@ void App::update_toolbar()
         if (compare_buttons_[i])
             compare_buttons_[i]->set_checked(comparing && size_t(view_->compare_mode()) == i);
     }
-    exposure_box_->set_visible(!comparing && image_ && image_->is_raw);
+    exposure_box_->set_visible(!comparing && exposure_applies());
     if (gain_)
         gain_->set_enabled(comparing && view_->compare_mode() == View::Compare::Difference);
     if (compare_widgets_[size_t(View::Compare::Difference)])
@@ -1155,11 +1155,11 @@ View::OverlaySections App::overlay_sections() const
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
         if (image_->is_preview())
             line += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
-        else if (image_->linear)
+        else if (image_->tonable())
         {
             char ev[32];
             std::snprintf(ev, sizeof ev, "%+.2f EV", exposure_->value());
-            line += std::string("  ·  developed  ·  ") + ev;
+            line += std::string(image_->linear ? "  ·  developed  ·  " : "  ·  HDR  ·  ") + ev;
         }
         lines.push_back(line);
     }
@@ -1453,13 +1453,15 @@ void App::on_loaded(Loader::Result& r)
 // Greyed while the embedded JPEG stands in for the raw.
 void App::sync_exposure_slider()
 {
-    const bool raw = image_ && image_->is_raw;
+    const bool shown = exposure_applies();
     if (!fullscreen_)
-        exposure_box_->set_visible(raw);
-    if (!raw)
+        exposure_box_->set_visible(shown);
+    if (!shown)
         return;
     const double bias = image_->exposure_bias;
-    exposure_->set_range(bias - 3.0, bias + 3.0);
+    // An HDR image may need taking down further than a raw to see its brightest.
+    const double down = image_->hdr() ? std::max(3.0, std::ceil(std::log2(double(image_->source->peak)))) : 3.0;
+    exposure_->set_range(bias - down, bias + 3.0);
     exposure_->set_value(bias + image_->exposure_edit);
     exposure_->set_enabled(!image_->is_preview());
 }
@@ -1478,7 +1480,7 @@ void App::crop_to_selection()
     if (!image_ || !view_->selection(x, y, w, h))
         return;
     *image_ = image_->crop(x, y, w, h);  // same object: the view, cache and pane keep their pointer
-    if (image_->linear)
+    if (image_->tonable())
         image_->retone(image_->exposure_edit);
     image_->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
     view_->image_changed();
@@ -1754,7 +1756,7 @@ void App::ensure_developed()
 
 void App::retone()
 {
-    if (!image_ || !image_->linear)
+    if (!image_ || !image_->tonable())
         return;
     image_->exposure_edit = exposure_->value() - image_->exposure_bias;
     request_retone();
@@ -1764,21 +1766,22 @@ void App::retone()
 // the UI thread. If the slider moved meanwhile, go again.
 void App::request_retone()
 {
-    if (retone_busy_ || !image_ || !image_->linear)
+    if (retone_busy_ || !image_ || !image_->tonable())
         return;
     retone_busy_ = true;
     auto image = image_;
     auto linear = image_->linear;
+    auto source = image_->source;
     const double ev = image_->exposure_edit;
     std::thread(
-        [this, image, linear, ev]
+        [this, image, linear, source, ev]
         {
             auto result = std::make_shared<PixelBuffer>(image->retone_buffer(ev));
             ui_.post(
-                [this, image, linear, ev, result]
+                [this, image, linear, source, ev, result]
                 {
                     retone_busy_ = false;
-                    const bool current = image->linear == linear && result->size() == image->pixels.size();
+                    const bool current = image->linear == linear && image->source == source && result->size() == image->pixels.size();
                     if (current)
                     {
                         image->pixels = std::move(*result);
@@ -1786,7 +1789,7 @@ void App::request_retone()
                         if (image == image_)
                             view_->image_changed();
                     }
-                    if (image == image_ && image_->linear && std::fabs(image_->exposure_edit - ev) > 1e-9)
+                    if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
                         request_retone();  // the slider moved on while we rendered
                 });
         })
@@ -1816,7 +1819,7 @@ void App::apply_xmp(bool fresh)
     if (fresh)
         apply_xmp_geometry(*image_);
     image_->exposure_edit = image_->xmp.exposure;
-    if (image_->linear)
+    if (image_->tonable())
         image_->retone(image_->exposure_edit);
     status_message_ = "XMP edits applied";
 }
@@ -1895,7 +1898,7 @@ void App::on_fullscreen_changed(bool fs)
         if (pane_before_fullscreen_)
             metadata_pane_->set_visible(true);
         update_title();
-        exposure_box_->set_visible(image_ && image_->is_raw);
+        exposure_box_->set_visible(exposure_applies());
     }
     view_->set_fullscreen(fs);
     if (fs && slideshow_)

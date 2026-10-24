@@ -1,4 +1,6 @@
 #include "decoder.h"
+
+#include "../half.h"
 #include "icc.h"
 
 #include <glib.h>
@@ -16,6 +18,76 @@ bool sniff(const uint8_t* h, size_t n)
 {
     return n >= 4 && (std::memcmp(h, "II*\0", 4) == 0 || std::memcmp(h, "MM\0*", 4) == 0 || std::memcmp(h, "II+\0", 4) == 0 ||
                       std::memcmp(h, "MM\0+", 4) == 0);  // BigTIFF
+}
+
+// The deep cases read sample by sample, keeping every bit as the image's
+// source: 16-bit integer grey or RGB (display-encoded) and 16/32-bit float
+// (linear light, which may go past 1), alpha unassociated or absent, in
+// strips, the right way up. False for anything else, which the RGBA path
+// below takes, at 8 bits.
+bool read_deep(TIFF* tif, uint32_t w, uint32_t h, uint16_t bps, uint16_t spp, bool alpha, Image& out)
+{
+    uint16_t photometric = PHOTOMETRIC_RGB, sample_format = SAMPLEFORMAT_UINT, planar = PLANARCONFIG_CONTIG, orientation = ORIENTATION_TOPLEFT;
+    uint16_t extra_count = 0;
+    uint16_t* extra = nullptr;
+    TIFFGetFieldDefaulted(tif, TIFFTAG_PHOTOMETRIC, &photometric);
+    TIFFGetFieldDefaulted(tif, TIFFTAG_SAMPLEFORMAT, &sample_format);
+    TIFFGetFieldDefaulted(tif, TIFFTAG_PLANARCONFIG, &planar);
+    TIFFGetFieldDefaulted(tif, TIFFTAG_ORIENTATION, &orientation);
+    const bool is_float = sample_format == SAMPLEFORMAT_IEEEFP && (bps == 16 || bps == 32);
+    const bool is_uint16 = sample_format == SAMPLEFORMAT_UINT && bps == 16;
+    const int colours = photometric == PHOTOMETRIC_RGB ? 3 : photometric == PHOTOMETRIC_MINISBLACK ? 1 : 0;
+    if (!(is_float || is_uint16) || !colours || spp < colours || spp > colours + 1 + 2 || planar != PLANARCONFIG_CONTIG ||
+        orientation != ORIENTATION_TOPLEFT || TIFFIsTiled(tif))
+        return false;
+    if (alpha && TIFFGetField(tif, TIFFTAG_EXTRASAMPLES, &extra_count, &extra) && extra_count && extra[0] == EXTRASAMPLE_ASSOCALPHA)
+        return false;  // premultiplied samples: the RGBA path undoes that
+    const tmsize_t line = TIFFScanlineSize(tif);
+    if (line < tmsize_t(size_t(w) * spp * (bps / 8)))
+        return false;
+    std::vector<uint8_t> buf(static_cast<size_t>(line));
+    std::vector<float> rgba(is_float ? size_t(w) * h * 4 : 0);
+    std::vector<uint16_t> rgba16(is_float ? 0 : size_t(w) * h * 4);
+    for (uint32_t y = 0; y < h; ++y)
+    {
+        if (TIFFReadScanline(tif, buf.data(), y, 0) < 0)
+            return false;
+        for (uint32_t x = 0; x < w; ++x)
+        {
+            float v[4] = {0, 0, 0, 1};
+            uint16_t u[4] = {0, 0, 0, 0xFFFF};
+            for (int c = 0; c < colours + (alpha ? 1 : 0); ++c)
+            {
+                const uint8_t* s = buf.data() + (size_t(x) * spp + c) * (bps / 8);
+                const int to = c < colours ? c : 3;
+                if (bps == 32)
+                    std::memcpy(&v[to], s, 4);
+                else if (is_float)
+                {
+                    uint16_t half;
+                    std::memcpy(&half, s, 2);
+                    v[to] = half_to_float(half);
+                }
+                else
+                    std::memcpy(&u[to], s, 2);
+            }
+            if (colours == 1)
+            {
+                v[1] = v[2] = v[0];
+                u[1] = u[2] = u[0];
+            }
+            if (is_float)
+                std::copy_n(v, 4, &rgba[(size_t(y) * w + x) * 4]);
+            else
+                std::copy_n(u, 4, &rgba16[(size_t(y) * w + x) * 4]);
+        }
+    }
+    out.allocate(int(w), int(h));
+    if (is_float)
+        out.set_linear_source(rgba.data());
+    else
+        out.from_rgba16(rgba16.data(), int(w) * 8);
+    return true;
 }
 
 bool decode(const std::string& path, Image& out, std::string& error)
@@ -57,17 +129,20 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
 
-    // libtiff composes any photometric/compression combination into packed
-    // RGBA for us; this is the pragmatic route for a viewer.
-    std::vector<uint32_t> raster(size_t(w) * h);
-    if (!TIFFReadRGBAImageOriented(tif, w, h, raster.data(), ORIENTATION_TOPLEFT, 0))
+    // Otherwise libtiff composes any photometric/compression combination
+    // into packed RGBA for us; this is the pragmatic route for a viewer.
+    if (!read_deep(tif, w, h, bps, spp, alpha, out))
     {
-        error = "TIFF decode failed";
-        TIFFClose(tif);
-        return false;
+        std::vector<uint32_t> raster(size_t(w) * h);
+        if (!TIFFReadRGBAImageOriented(tif, w, h, raster.data(), ORIENTATION_TOPLEFT, 0))
+        {
+            error = "TIFF decode failed";
+            TIFFClose(tif);
+            return false;
+        }
+        out.allocate(int(w), int(h));
+        out.from_rgba8(reinterpret_cast<const uint8_t*>(raster.data()), int(w) * 4);
     }
-    out.allocate(int(w), int(h));
-    out.from_rgba8(reinterpret_cast<const uint8_t*>(raster.data()), int(w) * 4);
     out.has_alpha = alpha;
     out.bits_per_sample = bps;
     out.format = "TIFF";

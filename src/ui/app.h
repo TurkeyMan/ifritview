@@ -85,6 +85,8 @@ private:
     // The toolbar for what the view is doing: browsing the folder, or
     // comparing two images (and no browsing while Save As is open).
     void update_toolbar();
+    // A raw, or an HDR image: the exposure control is shown for it.
+    bool exposure_applies() const { return image_ && (image_->is_raw || image_->hdr()); }
     bool navigation_locked() const { return save_dialog_ || view_->comparing(); }
     bool on_key(const rap::key_event& e);
 

@@ -6,11 +6,14 @@
 #include "bcn.h"
 #include "decoder.h"
 
+#include "../half.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -64,19 +67,6 @@ uint32_t extract(uint32_t v, uint32_t mask)
         ++shift;
     const uint32_t max = mask >> shift;
     return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
-}
-
-float half_to_float(uint16_t h)
-{
-    const uint32_t sign = (h >> 15) & 1, exp = (h >> 10) & 0x1F, mant = h & 0x3FF;
-    float v;
-    if (exp == 0)
-        v = std::ldexp(float(mant), -24);
-    else if (exp == 31)
-        v = mant ? 0.0f : 65504.0f;  // NaN shown black; infinity clipped
-    else
-        v = std::ldexp(float(mant | 0x400), int(exp) - 25);
-    return sign ? -v : v;
 }
 
 uint32_t clip(float v)
@@ -141,11 +131,16 @@ bool decode_wide(const WideFormat& f, const uint8_t* d, size_t size, int w, int 
     }
     out.allocate(w, h);
     bool opaque = true;
+    // Every sample is kept as the image's source: float ones as linear light
+    // (shown from there, with exposure if they go past 1), 16-bit integer
+    // ones as they're encoded.
+    std::vector<float> all(size_t(w) * h * 4);
+    float* keep = all.data();
     for (int y = 0; y < h; ++y)
     {
         uint32_t* px = out.row(y);
         const uint8_t* s = d + size_t(y) * row;
-        for (int x = 0; x < w; ++x)
+        for (int x = 0; x < w; ++x, keep += 4)
         {
             float c[4] = {0, 0, 0, 1};
             for (int i = 0; i < f.channels; ++i, s += sample)
@@ -162,10 +157,21 @@ bool decode_wide(const WideFormat& f, const uint8_t* d, size_t size, int w, int 
             }
             if (f.channels == 1)
                 c[1] = c[2] = c[0];
+            std::copy_n(c, 4, keep);
             put(px + x, clip(c[0]), clip(c[1]), clip(c[2]), clip(c[3]), opaque);
         }
     }
     out.has_alpha = !opaque;
+    if (f.kind == Wide::Unorm16)
+    {
+        auto deep = std::make_shared<SourceData>();
+        deep->rgba.resize(all.size());
+        for (size_t i = 0; i < all.size(); ++i)
+            deep->rgba[i] = float_to_half(all[i]);
+        out.source = std::move(deep);
+    }
+    else
+        out.set_linear_source(all.data());
     return true;
 }
 

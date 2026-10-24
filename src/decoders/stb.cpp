@@ -63,14 +63,25 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "cannot read file";
         return false;
     }
-    unsigned char* data = stbi_load_from_memory(bytes, int(size), &w, &h, &channels, 4);
+    // Radiance HDR as its floats, 16-bit files (PSD) as their 16 bits: kept
+    // as the image's source beside the 8-bit pixels.
+    const bool hdr = stbi_is_hdr_from_memory(bytes, int(size));
+    const bool deep = !hdr && stbi_is_16_bit_from_memory(bytes, int(size));
+    void* data = hdr    ? static_cast<void*>(stbi_loadf_from_memory(bytes, int(size), &w, &h, &channels, 4))
+                 : deep ? static_cast<void*>(stbi_load_16_from_memory(bytes, int(size), &w, &h, &channels, 4))
+                        : static_cast<void*>(stbi_load_from_memory(bytes, int(size), &w, &h, &channels, 4));
     if (!data)
     {
         error = "stb_image could not decode the file";
         return false;
     }
     out.allocate(w, h);
-    out.from_rgba8(data, w * 4);
+    if (hdr)
+        out.set_linear_source(static_cast<const float*>(data));
+    else if (deep)
+        out.from_rgba16(static_cast<const uint16_t*>(data), w * 8);
+    else
+        out.from_rgba8(static_cast<const uint8_t*>(data), w * 4);
     stbi_image_free(data);
     out.has_alpha = channels == 4 || channels == 2;
     // stb always reports PSDs as 4-channel; the header knows better.
@@ -81,7 +92,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
             out.has_alpha = ((head[12] << 8) | head[13]) >= 4;
         std::fclose(f);
     }
-    out.bits_per_sample = stbi_is_16_bit_from_memory(bytes, int(size)) ? 16 : 8;
+    out.bits_per_sample = deep ? 16 : 8;
     {
         using M = PixelFormat::Model;
         const char* names = channels == 1 ? "Y" : channels == 2 ? "YA" : channels == 4 ? "RGBA" : "RGB";

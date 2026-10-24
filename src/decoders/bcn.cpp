@@ -1,7 +1,7 @@
 // BCn surfaces block by block through bcdec, into Image's premultiplied
 // 0xAARRGGBB. BC4/BC5 go through bcdec's precise float path, which also
-// reads their signed forms; BC6H's HDR is clipped to 0..1 and given the
-// sRGB curve, its values being linear.
+// reads their signed forms; BC6H's HDR values, linear, are kept whole as the
+// image's source, and rendered from there (clipped, through the sRGB curve).
 #include "bcn.h"
 
 #define BCDEC_IMPLEMENTATION
@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace
 {
@@ -25,12 +26,6 @@ namespace
 uint32_t to_byte(float v)
 {
     return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
-
-float srgb(float linear)
-{
-    linear = std::clamp(linear, 0.0f, 1.0f);
-    return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1 / 2.4f) - 0.055f;
 }
 
 }  // namespace
@@ -76,6 +71,8 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
     uint8_t rgba[4 * 4 * 4];
     float f[4 * 4 * 3];
     bool opaque = true;
+    const bool hdr = format == Bcn::BC6H || format == Bcn::BC6HS;
+    std::vector<float> linear(hdr ? size_t(w) * h * 4 : 0);
     for (int by = 0; by < blocks_y; ++by)
         for (int bx = 0; bx < blocks_x; ++bx)
         {
@@ -116,10 +113,15 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
                             break;
                         case Bcn::BC6H:
                         case Bcn::BC6HS:
-                            r = to_byte(srgb(f[i * 3]));
-                            g = to_byte(srgb(f[i * 3 + 1]));
-                            b = to_byte(srgb(f[i * 3 + 2]));
+                        {
+                            float* l = linear.data() + (size_t(by * 4 + y) * w + bx * 4 + x) * 4;
+                            l[0] = f[i * 3];
+                            l[1] = f[i * 3 + 1];
+                            l[2] = f[i * 3 + 2];
+                            l[3] = 1;
+                            r = g = b = 0;  // rendered from the source below
                             break;
+                        }
                         default:
                             r = rgba[i * 4];
                             g = rgba[i * 4 + 1];
@@ -145,5 +147,7 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
             }
         }
     out.has_alpha = !opaque;
+    if (hdr)
+        out.set_linear_source(linear.data());
     return true;
 }

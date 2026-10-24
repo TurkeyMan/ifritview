@@ -1,5 +1,7 @@
 #include "image.h"
 
+#include "half.h"
+
 #include <glib.h>
 #include <algorithm>
 #include <cctype>
@@ -24,6 +26,11 @@ inline uint32_t pack(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
 inline uint32_t pack_premultiplied(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
 {
     return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+inline uint32_t to8(uint32_t v16)
+{
+    return (v16 * 255u + 32767u) / 65535u;
 }
 
 }  // namespace
@@ -91,24 +98,73 @@ void Image::from_bgra8(const uint8_t* src, int src_stride, bool premultiplied)
 
 void Image::from_rgb16(const uint16_t* src, int src_stride)
 {
+    auto deep = std::make_shared<SourceData>();
+    deep->rgba.resize(size_t(width) * height * 4);
+    uint16_t* h = deep->rgba.data();
+    const uint16_t one = float_to_half(1.0f);
     for (int y = 0; y < height; ++y)
     {
         const uint16_t* s = reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride);
         uint32_t* d = row(y);
-        for (int x = 0; x < width; ++x, s += 3)
-            d[x] = pack_premultiplied(s[0] >> 8, s[1] >> 8, s[2] >> 8, 255);
+        for (int x = 0; x < width; ++x, s += 3, h += 4)
+        {
+            d[x] = pack_premultiplied(to8(s[0]), to8(s[1]), to8(s[2]), 255);
+            for (int c = 0; c < 3; ++c)
+                h[c] = float_to_half(s[c] / 65535.0f);
+            h[3] = one;
+        }
     }
+    source = std::move(deep);
 }
 
 void Image::from_rgba16(const uint16_t* src, int src_stride)
 {
+    auto deep = std::make_shared<SourceData>();
+    deep->rgba.resize(size_t(width) * height * 4);
+    uint16_t* h = deep->rgba.data();
     for (int y = 0; y < height; ++y)
     {
         const uint16_t* s = reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride);
         uint32_t* d = row(y);
-        for (int x = 0; x < width; ++x, s += 4)
-            d[x] = pack(s[0] >> 8, s[1] >> 8, s[2] >> 8, s[3] >> 8);
+        for (int x = 0; x < width; ++x, s += 4, h += 4)
+        {
+            d[x] = pack(to8(s[0]), to8(s[1]), to8(s[2]), to8(s[3]));
+            for (int c = 0; c < 4; ++c)
+                h[c] = float_to_half(s[c] / 65535.0f);
+        }
     }
+    source = std::move(deep);
+}
+
+void SourceData::measure_peak()
+{
+    peak = 0;
+    for (size_t i = 0; i < rgba.size(); i += 4)
+        for (int c = 0; c < 3; ++c)
+        {
+            const float v = half_to_float(rgba[i + c]);
+            if (v > peak && v < 65536.0f)  // not infinity
+                peak = v;
+        }
+}
+
+void Image::set_linear_source(const float* src)
+{
+    auto deep = std::make_shared<SourceData>();
+    deep->linear = true;
+    deep->rgba.resize(size_t(width) * height * 4);
+    for (size_t i = 0; i < deep->rgba.size(); ++i)
+        deep->rgba[i] = float_to_half(src[i]);
+    deep->measure_peak();
+    if (deep->peak > 1.0f)
+    {
+        char range[64];
+        std::snprintf(range, sizeof range, "%.3g× white (%+.1f EV)", double(deep->peak), std::log2(double(deep->peak)));
+        add("Image", "Brightest", range);
+    }
+    source = std::move(deep);
+    pixels = retone_buffer(0);
+    mips.clear();
 }
 
 namespace
@@ -124,7 +180,7 @@ inline double srgb_encode(double v)
 
 void Image::retone(double ev)
 {
-    if (!linear)
+    if (!linear && !(source && source->linear))
         return;
     pixels = retone_buffer(ev);
     mips.clear();
@@ -161,10 +217,32 @@ void Image::build_mips()
 PixelBuffer Image::retone_buffer(double ev) const
 {
     PixelBuffer out(pixels.size());
-    if (!linear || out.empty())
+    const bool from_source = !linear && source && source->linear;
+    if ((!linear && !from_source) || out.empty())
         return out;
     auto row_of = [&](int y) { return reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride); };
     const double exposure = std::pow(2.0, ev);
+    if (from_source)
+    {
+        // Half-float linear -> exposure -> clip -> sRGB transfer -> 8-bit,
+        // through one table over every half; alpha just clipped.
+        std::vector<uint8_t> colour(65536), alpha(65536);
+        for (uint32_t i = 0; i < 65536; ++i)
+        {
+            const float v = half_to_float(uint16_t(i));
+            const bool number = v == v;  // NaN shows black
+            colour[i] = number ? uint8_t(std::lround(srgb_encode(v * exposure) * 255.0)) : 0;
+            alpha[i] = number ? uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)) : 0;
+        }
+        const uint16_t* s = source->rgba.data();
+        for (int y = 0; y < height; ++y)
+        {
+            uint32_t* d = row_of(y);
+            for (int x = 0; x < width; ++x, s += 4)
+                d[x] = pack(colour[s[0]], colour[s[1]], colour[s[2]], alpha[s[3]]);
+        }
+        return out;
+    }
     if (linear->tone.empty())
     {
         // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
@@ -272,6 +350,16 @@ Image Image::crop(int x, int y, int w, int h) const
             std::copy_n(linear->rgb.data() + (size_t(y + yy) * width + x) * 3, size_t(w) * 3, l->rgb.data() + size_t(yy) * w * 3);
         out.linear = std::move(l);
     }
+    if (source)
+    {
+        auto deep = std::make_shared<SourceData>();
+        deep->linear = source->linear;
+        deep->rgba.resize(size_t(w) * h * 4);
+        for (int yy = 0; yy < h; ++yy)
+            std::copy_n(source->rgba.data() + (size_t(y + yy) * width + x) * 4, size_t(w) * 4, deep->rgba.data() + size_t(yy) * w * 4);
+        deep->peak = source->peak;  // still the same image's range, whatever part is kept
+        out.source = std::move(deep);
+    }
     return out;
 }
 
@@ -351,6 +439,7 @@ void Image::adopt(Image&& f)
     if (!f.info.empty())
         info = std::move(f.info);
     linear = std::move(f.linear);
+    source = std::move(f.source);
     mips = std::move(f.mips);  // empty if pending edits rewrote f's pixels
     animation = std::move(f.animation);
     if (f.exposure_bias != 0)
@@ -381,7 +470,7 @@ void Image::adopt(Image&& f)
     has_audio = has_audio || f.has_audio;
     final_width = final_height = 0;
     stage = Stage::Final;
-    if (linear && exposure_edit != 0)
+    if (tonable() && exposure_edit != 0)
         retone(exposure_edit);
 }
 
@@ -406,6 +495,12 @@ void Image::apply_orientation(int o)
         l->rgb.resize(linear->rgb.size());
         reorient(linear->rgb.data(), W, H, 3, o, l->rgb.data(), dw, dh);
         linear = std::move(l);
+    }
+    if (source)
+    {
+        auto deep = std::make_shared<SourceData>(*source);
+        reorient(source->rgba.data(), W, H, 4, o, deep->rgba.data(), dw, dh);
+        source = std::move(deep);
     }
     width = dw;
     height = dh;

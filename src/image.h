@@ -19,6 +19,19 @@ struct LinearData
     std::vector<float> tone;
 };
 
+// The source's own samples where it has more than 8 bits a channel (16-bit
+// PNG and TIFF, half and float formats, HDR), kept beside the 8-bit pixels
+// that are drawn: half-float RGBA, not premultiplied. Linear ones (float
+// formats) that go past 1 have more than the display shows, and take an
+// exposure like a raw's linear data.
+struct SourceData
+{
+    HalfBuffer rgba;      // 4 halves a pixel
+    bool linear = false;  // scene-linear light; else display-encoded, as the 8-bit pixels are
+    float peak = 1;       // the largest colour value
+    void measure_peak();
+};
+
 // Edits found in XMP (embedded or sidecar) that the viewer can honour.
 struct XmpDevelop
 {
@@ -70,6 +83,11 @@ struct Image
     std::string color_space;             // declared colour space ("sRGB", "Adobe RGB (1998)", "BT.2020 PQ"); empty when the file says nothing
     std::string info;                    // extra detail for the status bar, may be empty
     std::shared_ptr<LinearData> linear;  // only for raw files
+    std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null
+    // More than the display shows (a linear source past 1): exposure applies.
+    bool hdr() const { return source && source->linear && source->peak > 1.0f; }
+    // Re-rendered by retone(): a raw's linear data, or an HDR source.
+    bool tonable() const { return linear || hdr(); }
     // Halvings of `pixels` (½, ¼, …) for fast downscaled display, built off the
     // main thread after a decode. Empty when absent or stale; anything that
     // rewrites `pixels` clears them.
@@ -122,8 +140,12 @@ struct Image
     void add(const std::string& group, std::string key, std::string value);
 
     // Re-render pixels from `linear` with an exposure offset in stops
-    // around the automatic gain. No-op without linear data.
+    // around the automatic gain, or from an HDR source (0 EV: its values as
+    // they are, 1 being white). No-op for anything else.
     void retone(double ev);
+    // A linear float source in its place: keeps it as `source` and renders
+    // the 8-bit pixels from it at 0 EV. `rgba` is w × h × 4, not premultiplied.
+    void set_linear_source(const float* rgba);
     // Same rendering into a fresh buffer, safe to run off the main thread while
     // `pixels` is being displayed; the caller swaps it in.
     PixelBuffer retone_buffer(double ev) const;
@@ -135,7 +157,7 @@ struct Image
     // Converters from common decoder outputs into the ARGB32 buffer. The
     // image must already be allocated to the source dimensions. src_stride is
     // in bytes. The source may alias the image's own buffer when it has four
-    // bytes per pixel.
+    // bytes per pixel. The 16-bit ones keep the samples as `source` too.
     void from_rgb8(const uint8_t* src, int src_stride);
     void from_bgrx8(const uint8_t* src, int src_stride);
     void from_rgba8(const uint8_t* src, int src_stride, bool premultiplied = false);
