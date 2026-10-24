@@ -246,7 +246,7 @@ void* IFRIT_CALL host_pixels(void* context, int32_t width, int32_t height, ifrit
         host_error(context, ("plugin asked for an unknown pixel layout " + std::to_string(layout)).c_str());
         return nullptr;
     }
-    if (width < 1 || height < 1 || width > 65535 || height > 65535)
+    if (!Image::fits(width, height) || width > 65535 || height > 65535)  // checked here: nothing may throw into a plugin
     {
         host_error(context, ("plugin asked for an image of " + std::to_string(width) + "×" + std::to_string(height)).c_str());
         return nullptr;

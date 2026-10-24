@@ -221,7 +221,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     const uint32_t lo_format = le32(d + 57);
     const int lo_w = d[61], lo_h = d[62];
     const int depth = minor >= 2 ? std::max(1, int(le16(d + 63))) : 1;
-    if (w <= 0 || h <= 0 || int64_t(w) * h > (int64_t(1) << 30))
+    if (!Image::fits(w, h))
     {
         error = "bad VTF size";
         return false;

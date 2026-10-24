@@ -211,6 +211,11 @@ struct Image
     // 8-bit pixels from `source` (linear ones at exposure `ev`).
     PixelBuffer render_source(double ev) const;
 
+    // The largest image held: each side, and pixels in all (4 GiB of ARGB).
+    // Decoders check a header's size with it before allocating.
+    static bool fits(int64_t w, int64_t h) { return w > 0 && h > 0 && w <= (1 << 20) && h <= (1 << 20) && w * h <= (int64_t(1) << 30); }
+    // Throws std::length_error for a size that doesn't fit (decode_image
+    // reports it), so a check a decoder lacks can't become an overflow.
     void allocate(int w, int h);
     uint32_t* row(int y) { return reinterpret_cast<uint32_t*>(pixels.data() + size_t(y) * stride); }
     const uint32_t* row(int y) const { return reinterpret_cast<const uint32_t*>(pixels.data() + size_t(y) * stride); }

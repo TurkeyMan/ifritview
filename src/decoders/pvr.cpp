@@ -790,7 +790,7 @@ bool v2_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
     const int h = int(le32(d + 4)), w = int(le32(d + 8));
     const uint32_t mips = le32(d + 12), flags = le32(d + 16), surfaces = le32(d + 48);
     const int type = flags & 0xFF;
-    if (w <= 0 || h <= 0 || int64_t(w) * h > (int64_t(1) << 28))
+    if (!Image::fits(w, h))
     {
         error = "bad PVR size";
         return false;
@@ -839,7 +839,7 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
     const int h = int(le32(d + 24)), w = int(le32(d + 28));
     const uint32_t depth = le32(d + 32), surfaces = le32(d + 36), faces = le32(d + 40), mips = le32(d + 44);
     const uint32_t meta = le32(d + 48);
-    if (w <= 0 || h <= 0 || int64_t(w) * h > (int64_t(1) << 28))
+    if (!Image::fits(w, h))
     {
         error = "bad PVR size";
         return false;

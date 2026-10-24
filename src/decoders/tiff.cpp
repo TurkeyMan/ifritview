@@ -99,7 +99,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     bool alpha = false;
     if (TIFFGetField(tif, TIFFTAG_EXTRASAMPLES, &extra_count, &extra) && extra_count > 0)
         alpha = extra[0] == EXTRASAMPLE_ASSOCALPHA || extra[0] == EXTRASAMPLE_UNASSALPHA;
-    if (w == 0 || h == 0 || size_t(w) * h > size_t(1) << 30)
+    if (!Image::fits(w, h))
     {
         error = "invalid TIFF dimensions";
         TIFFClose(tif);

@@ -1,5 +1,7 @@
 #include "image.h"
 
+#include <stdexcept>
+
 #include "half.h"
 
 #include <glib.h>
@@ -33,6 +35,8 @@ inline uint32_t pack_premultiplied(uint32_t r, uint32_t g, uint32_t b, uint32_t 
 
 void Image::allocate(int w, int h)
 {
+    if (!fits(w, h))
+        throw std::length_error("the image is too large (" + std::to_string(w) + " × " + std::to_string(h) + ")");
     width = w;
     height = h;
     stride = w * 4;

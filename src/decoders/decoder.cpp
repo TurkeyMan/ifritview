@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <thread>
 
 namespace
@@ -122,7 +123,15 @@ bool try_decode(const Decoder& d, const std::string& path, Image& out, std::stri
     out = Image{};
     std::string err;
     const gint64 t0 = g_get_monotonic_time();
-    const bool ok = d.decode(path, out, err);
+    bool ok = false;
+    try
+    {
+        ok = d.decode(path, out, err);
+    }
+    catch (const std::length_error& e)  // Image::allocate: too large to hold
+    {
+        err = e.what();
+    }
     if (g_getenv("IFRIT_DECODE_TIMING"))
         std::fprintf(stderr, "  %s decode %.1f ms\n", d.name, (g_get_monotonic_time() - t0) / 1000.0);
     if (ok)
@@ -369,7 +378,14 @@ bool decode_preview(const std::string& path, Image& out)
                 return false;
             MetadataPass meta(path, data, size);
             out = Image{};
-            const bool ok = d->preview(path, out);
+            bool ok = false;
+            try
+            {
+                ok = d->preview(path, out);
+            }
+            catch (const std::length_error&)  // too large: the full decode will say
+            {
+            }
             if (ok)
             {
                 out.stage = Image::Stage::Preview;

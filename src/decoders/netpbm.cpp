@@ -131,7 +131,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         }
         depth = kind == 3 || kind == 6 ? 3 : 1;
     }
-    if (w <= 0 || h <= 0 || w * h > (1L << 30) || maxval < 1 || maxval > 65535 || depth < 1 || depth > 4)
+    if (!Image::fits(w, h) || maxval < 1 || maxval > 65535 || depth < 1 || depth > 4)
     {
         error = "bad Netpbm header";
         return false;

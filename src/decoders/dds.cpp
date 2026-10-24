@@ -166,7 +166,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     const uint32_t pf_flags = le32(d + 80), cc = le32(d + 84), bits = le32(d + 88);
     const uint32_t rmask = le32(d + 92), gmask = le32(d + 96), bmask = le32(d + 100), amask = le32(d + 104);
     const uint32_t caps2 = le32(d + 112);
-    if (w <= 0 || h <= 0 || int64_t(w) * h > (int64_t(1) << 30))
+    if (!Image::fits(w, h))
     {
         error = "bad DDS size";
         return false;

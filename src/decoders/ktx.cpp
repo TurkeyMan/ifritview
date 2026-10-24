@@ -551,7 +551,7 @@ void add_layout(Image& out, const char* group, uint32_t levels, uint32_t layers,
 
 bool check_size(uint32_t w, uint32_t h, const char* what, std::string& error)
 {
-    if (w == 0 || h == 0 || uint64_t(w) * h > (uint64_t(1) << 30))
+    if (!Image::fits(w, h))
     {
         error = std::string("bad ") + what + " size";
         return false;

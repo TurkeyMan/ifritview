@@ -38,7 +38,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "3D ASTC blocks (" + std::to_string(bw) + "x" + std::to_string(bh) + "x" + std::to_string(bd) + ") aren't supported";
         return false;
     }
-    if (w == 0 || h == 0 || depth == 0 || uint64_t(w) * h > (uint64_t(1) << 30))
+    if (depth == 0 || !Image::fits(w, h))
     {
         error = "bad ASTC size";
         return false;
