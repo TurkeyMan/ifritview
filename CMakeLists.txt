@@ -57,6 +57,7 @@ add_library(ifrit_core STATIC
   src/loader.cpp
   src/scale.cpp
   src/probe.cpp
+  src/compare.cpp
   src/platform.cpp
   src/decoders/stb.cpp
   src/decoders/tim.cpp

@@ -99,9 +99,134 @@ App::~App()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
+namespace
+{
+
+// Icons for comparing, which no icon theme has: drawn in the theme's text colour.
+const rap::paint ink{rap::theme_color::window_text};
+
+// A and B as strokes, not text: a font's size means something different to
+// each toolkit, and the letters must sit with the other icons.
+rap::icon a_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16, w = 1.8f * u;
+            p.line({4 * u, 13.5f * u}, {8 * u, 2.5f * u}, ink, w, rap::line_cap::round);
+            p.line({8 * u, 2.5f * u}, {12 * u, 13.5f * u}, ink, w, rap::line_cap::round);
+            p.line({5.6f * u, 9.5f * u}, {10.4f * u, 9.5f * u}, ink, w);
+        });
+}
+
+rap::icon b_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16, w = 1.8f * u, half = 1.5707963f;
+            p.line({5 * u, 2.1f * u}, {5 * u, 13.9f * u}, ink, w);  // past the bars, for square corners
+            p.line({5 * u, 3 * u}, {8.5f * u, 3 * u}, ink, w);
+            p.arc({8.5f * u, 5.5f * u}, 2.5f * u, -half, half, ink, w);
+            p.line({5 * u, 8 * u}, {9 * u, 8 * u}, ink, w);
+            p.arc({9 * u, 10.5f * u}, 2.5f * u, -half, half, ink, w);
+            p.line({5 * u, 13 * u}, {9 * u, 13 * u}, ink, w);
+        });
+}
+
+rap::icon swipe_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16;
+            p.rect({2 * u, 3 * u, 12 * u, 10 * u}, u, std::nullopt, ink);
+            p.line({8 * u, 1 * u}, {8 * u, 15 * u}, ink, 1.5f * u);
+            p.polygon({{3.5f * u, 8 * u}, {6 * u, 6 * u}, {6 * u, 10 * u}}, ink, std::nullopt);
+            p.polygon({{12.5f * u, 8 * u}, {10 * u, 6 * u}, {10 * u, 10 * u}}, ink, std::nullopt);
+        });
+}
+
+rap::icon difference_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16;
+            p.rect({2 * u, 2 * u, 8 * u, 8 * u}, u, std::nullopt, ink);
+            p.rect({6 * u, 6 * u, 8 * u, 8 * u}, u, std::nullopt, ink);
+            p.rect({6 * u, 6 * u, 4 * u, 4 * u}, 0, ink, std::nullopt);  // where they overlap
+        });
+}
+
+rap::icon swap_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16, w = 1.5f * u;
+            p.line({3 * u, 5.5f * u}, {12 * u, 5.5f * u}, ink, w);
+            p.polygon({{14 * u, 5.5f * u}, {11 * u, 3 * u}, {11 * u, 8 * u}}, ink, std::nullopt);
+            p.line({4 * u, 10.5f * u}, {13 * u, 10.5f * u}, ink, w);
+            p.polygon({{2 * u, 10.5f * u}, {5 * u, 8 * u}, {5 * u, 13 * u}}, ink, std::nullopt);
+        });
+}
+
+}  // namespace
+
 rap::node App::tool_button(const char* icon, const char* tooltip, void (App::*action)())
 {
     return rap::layout::tool_button{rap::icon::named(icon), tooltip}.on_click([this, action] { (this->*action)(); });
+}
+
+rap::node App::compare_button(rap::icon icon, const char* tooltip, View::Compare mode)
+{
+    const size_t i = size_t(mode);
+    return rap::layout::tool_button{std::move(icon), tooltip}
+        .toggle(false)
+        .on_toggled([this, mode](bool) { set_compare(mode); })
+        .bind(compare_buttons_[i])
+        .handle(compare_widgets_[i]);
+}
+
+void App::set_compare(View::Compare mode)
+{
+    view_->set_compare(mode);
+    update_toolbar();  // the buttons act as one choice: unchecking the shown one keeps it
+    update_status();
+}
+
+void App::swap_compare()
+{
+    view_->swap_compare();
+    update_status();
+}
+
+void App::update_toolbar()
+{
+    if (!toolbar_)
+        return;
+    const bool comparing = view_->comparing();
+    for (rap::widget* w : browse_widgets_)
+        if (w)
+            w->set_visible(!comparing);
+    for (rap::widget* w : diff_widgets_)
+        if (w)
+            w->set_visible(comparing);
+    for (size_t i = 0; i < compare_widgets_.size(); ++i)
+    {
+        if (compare_widgets_[i])
+            compare_widgets_[i]->set_visible(comparing);
+        if (compare_buttons_[i])
+            compare_buttons_[i]->set_checked(comparing && size_t(view_->compare_mode()) == i);
+    }
+    exposure_box_->set_visible(!comparing && image_ && image_->is_raw);
+    if (gain_)
+        gain_->set_enabled(comparing && view_->compare_mode() == View::Compare::Difference);
+    const bool browse = !navigation_locked();
+    for (size_t i : {size_t(0), size_t(1), size_t(3)})  // previous, next, slideshow
+        if (browse_widgets_[i])
+            browse_widgets_[i]->set_enabled(browse);
 }
 
 void App::build_ui()
@@ -134,21 +259,14 @@ void App::build_ui()
         "IfritView",
         {vbox{
             L::toolbar{
+                // Always: open and save, zoom, fullscreen.
                 tool_button("document-open-symbolic", "Open… (Ctrl+O)", &App::open_dialog),
-                tool_button("media-floppy-symbolic", "Save as… (Ctrl+S)", &App::save_as),
-                separator{},
-                L::tool_button{rap::icon::named("go-previous-symbolic"), "Previous image (Left, wheel up)"}.on_click([this] { navigate(-1); }),
-                L::tool_button{rap::icon::named("go-next-symbolic"), "Next image (Right, wheel down)"}.on_click([this] { navigate(+1); }),
+                tool_button("media-floppy-symbolic", "Save as… (Ctrl+S); comparing, saves the difference shown", &App::save_as),
                 separator{},
                 tool_button("zoom-out-symbolic", "Zoom out (-, Ctrl+wheel)", &App::zoom_out),
                 tool_button("zoom-in-symbolic", "Zoom in (+, Ctrl+wheel)", &App::zoom_in),
                 tool_button("zoom-original-symbolic", "Actual pixels (1)", &App::zoom_original),
                 tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit),
-                separator{},
-                tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen),
-                tool_button("media-playback-start-symbolic", "Slideshow (S): fullscreen, timed, with gentle motion", &App::toggle_slideshow),
-                separator{},
-                L::tool_button{rap::icon::named("edit-cut-symbolic"), "Crop to selection (Ctrl+Y)"}.on_click([this] { crop_to_selection(); }).bind(crop_button_),
                 L::tool_button{rap::icon::named("view-grid-symbolic"), "Smooth when zoomed in (off shows crisp pixels)"}
                     .toggle(cfg_.smooth_upscale)
                     .on_toggled(
@@ -159,12 +277,47 @@ void App::build_ui()
                             view_->config_changed();
                         })
                     .bind(smooth_toggle_),
+                tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen),
+                separator{},
+                // Browsing: through the folder, and what's done to an image.
+                L::tool_button{rap::icon::named("go-previous-symbolic"), "Previous image (Left, wheel up)"}
+                    .on_click([this] { navigate(-1); })
+                    .handle(browse_widgets_[0]),
+                L::tool_button{rap::icon::named("go-next-symbolic"), "Next image (Right, wheel down)"}
+                    .on_click([this] { navigate(+1); })
+                    .handle(browse_widgets_[1]),
+                separator{}.handle(browse_widgets_[2]),
+                L::tool_button{rap::icon::named("media-playback-start-symbolic"), "Slideshow (S): fullscreen, timed, with gentle motion"}
+                    .on_click([this] { toggle_slideshow(); })
+                    .handle(browse_widgets_[3]),
+                L::tool_button{rap::icon::named("edit-cut-symbolic"), "Crop to selection (Ctrl+Y)"}
+                    .on_click([this] { crop_to_selection(); })
+                    .bind(crop_button_)
+                    .handle(browse_widgets_[4]),
                 L::tool_button{rap::icon::named("document-edit-symbolic"), "Apply edits from XMP sidecars (exposure, crop, rotation)"}
                     .toggle(cfg_.apply_xmp_edits)
                     .on_toggled([this](bool) { toggle_xmp(); })
-                    .bind(xmp_toggle_),
+                    .bind(xmp_toggle_)
+                    .handle(browse_widgets_[5]),
+                // Comparing two images, in place of browsing.
+                compare_button(a_icon(), "Show A (Tab flips A and B)", View::Compare::A),
+                compare_button(b_icon(), "Show B (Tab flips A and B)", View::Compare::B),
+                compare_button(swipe_icon(), "Swipe: A left of the divider, B right of it (drag the divider)", View::Compare::Swipe),
+                compare_button(difference_icon(), "Difference: where A and B differ, amplified", View::Compare::Difference),
+                L::tool_button{swap_icon(), "Swap A and B"}.on_click([this] { swap_compare(); }).handle(diff_widgets_[0]),
                 spacer{},
                 exposure,
+                hbox{
+                    L::label{"Gain"},
+                    L::slider{1.0, 32.0, 8.0}
+                        .step(1.0, 4.0)
+                        .show_value(0)
+                        .on_changed([this](double v) { view_->set_compare_gain(int(v + 0.5)); })
+                        .bind(gain_)
+                        .width(rap::extent{14, rap::extent::unit::chars})
+                        .tooltip("How much the difference is amplified"),
+                }
+                    .handle(diff_widgets_[1]),
                 tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata),
                 tool_button("preferences-system-symbolic", "Settings (Ctrl+P)", &App::open_settings),
             }
@@ -222,6 +375,7 @@ void App::build_ui()
     metadata_pane_->set_visible(false);
     exposure_box_->set_visible(false);
     crop_button_->set_enabled(false);
+    update_toolbar();
     status_location_->set_visible(false);
     status_location_->set_tooltip("Open in maps");
 
@@ -361,6 +515,19 @@ void App::script_end_dialog(bool accept)
     }
 }
 
+void App::script_compare(const std::string& how)
+{
+    if (how == "swap")
+        swap_compare();
+    else if (how.rfind("gain:", 0) == 0)
+    {
+        gain_->set_value(std::atoi(how.c_str() + 5));
+        view_->set_compare_gain(std::atoi(how.c_str() + 5));
+    }
+    else
+        set_compare(how == "a" ? View::Compare::A : how == "swipe" ? View::Compare::Swipe : how == "diff" ? View::Compare::Difference : View::Compare::B);
+}
+
 void App::toggle_xmp()
 {
     cfg_.apply_xmp_edits = xmp_toggle_->checked();
@@ -383,7 +550,7 @@ void App::toggle_slideshow()
         stop_slideshow();
         return;
     }
-    if (folder_.empty())
+    if (folder_.empty() || navigation_locked())
         return;
     slideshow_ = true;
     slideshow_order_.clear();
@@ -919,6 +1086,8 @@ void App::load_current()
 
 void App::navigate(int delta)
 {
+    if (navigation_locked())
+        return;
     if (awaiting_present_)
     {
         pending_steps_ = std::clamp(pending_steps_ + delta, -8, 8);
@@ -947,12 +1116,16 @@ void App::image_presented()
 
 void App::go_first()
 {
+    if (navigation_locked())
+        return;
     if (folder_.go(0))
         load_current();
 }
 
 void App::go_last()
 {
+    if (navigation_locked())
+        return;
     if (folder_.go(folder_.count() - 1))
         load_current();
 }
@@ -1136,14 +1309,7 @@ void App::save_as()
         return;
     SaveDialog::Callbacks cb;
     cb.changed = [this](const Encoder& e, const EncodeOptions& o) { preview_save(e, o); };
-    cb.preview_shown = [this](bool on)
-    {
-        // The encode is already done: this only swaps what the view shows.
-        if (on && preview_image_)
-            view_->show_preview(preview_image_);
-        else
-            view_->end_preview();
-    };
+    cb.preview_shown = [this](bool on) { show_save_preview(on); };
     cb.chosen = [this](const Encoder& e, const EncodeOptions& o)
     {
         // After the dialog has gone, so the file dialog has the main window as parent.
@@ -1153,12 +1319,38 @@ void App::save_as()
     {
         ++preview_->generation;
         preview_image_.reset();
-        view_->end_preview();
+        preview_difference_.reset();
+        view_->end_compare();
         save_dialog_.reset();
         status_message_.clear();
+        update_toolbar();
         update_status();
     };
+    if (slideshow_)
+        stop_slideshow();
     save_dialog_ = SaveDialog::open(ui_, window_.get(), lower_extension(image_path_), save_options_, std::move(cb));
+    update_toolbar();
+}
+
+// The view compares the original (A) with the image as it would save (B),
+// starting on B: what the save would look like.
+void App::show_save_preview(bool on)
+{
+    // The encode is already done: this only changes what the view shows.
+    if (on && preview_image_ && image_)
+    {
+        if (view_->comparing())
+            view_->set_compare_b(preview_image_, preview_difference_);
+        else
+        {
+            view_->begin_compare(image_, preview_image_, "Original", "Saved", preview_difference_, View::Compare::B);
+            view_->set_compare_gain(int(gain_->value() + 0.5));  // the gain stays as last set
+        }
+    }
+    else
+        view_->end_compare();
+    update_toolbar();
+    update_status();
 }
 
 // Encodes the image as it would save, decodes that back and shows it in the
@@ -1169,7 +1361,8 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
     if (!image_ || !e.lossy(o))
     {
         preview_image_.reset();
-        view_->end_preview();
+        preview_difference_.reset();
+        show_save_preview(false);
         if (save_dialog_)
             save_dialog_->set_info("");
         return;
@@ -1208,8 +1401,11 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
             std::filesystem::remove(path, ec);
             if (state->generation.load() != generation)
                 return;
+            std::shared_ptr<const ImageDifference> difference;
+            if (ok)
+                difference = std::make_shared<ImageDifference>(compare_images(*source, *result));
             platform::post_main(
-                [this, generation, result, ok, size, error, state]
+                [this, generation, result, difference, ok, size, error, state]
                 {
                     if (state->generation.load() != generation || !save_dialog_)
                         return;
@@ -1221,8 +1417,9 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
                         return;
                     }
                     preview_image_ = result;
+                    preview_difference_ = difference;
                     if (save_dialog_->preview_shown())
-                        view_->show_preview(result);
+                        show_save_preview(true);
                     save_dialog_->set_info(human_bytes(size));
                 });
         })
@@ -1598,6 +1795,16 @@ void App::update_status()
         }
         if (view_->zoom_mode() == View::ZoomMode::Fit && view_->zoom() < 1.0)
             right += " (fit)";
+        if (const ImageDifference* d = view_->compare_difference())
+        {
+            char buf[160];
+            if (d->max_error == 0)
+                std::snprintf(buf, sizeof buf, "identical");
+            else
+                std::snprintf(buf, sizeof buf, "PSNR %.1f dB  ·  largest error %d  ·  %.1f%% changed", d->psnr,
+                              d->max_error, d->changed * 100.0);
+            center += std::string("  ·  ") + buf;
+        }
     }
     if (image_ && image_->has_location)
     {
@@ -1690,6 +1897,11 @@ bool App::on_key(const rap::key_event& e)
             return true;
         case rap::key::f5:
             reload();
+            return true;
+        case rap::key::tab:
+            if (!view_->comparing())
+                return false;
+            set_compare(view_->compare_mode() == View::Compare::A ? View::Compare::B : View::Compare::A);
             return true;
         default:
             break;

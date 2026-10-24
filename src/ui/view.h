@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compare.h"
 #include "controls.h"
 #include "image.h"
 
@@ -39,6 +40,28 @@ public:
     // place, keeping zoom and pan; end_preview() puts the image back.
     void show_preview(std::shared_ptr<Image> preview);
     void end_preview();
+    // Comparing A with B, two images of the same size: one shown at a time,
+    // a swipe between them, or where they differ. A becomes the view's image
+    // (zoom, pan and selection follow it); B and the difference are drawn at
+    // its place. `difference` (from compare_images) may come later.
+    enum class Compare
+    {
+        A,
+        B,
+        Swipe,
+        Difference
+    };
+    void begin_compare(std::shared_ptr<Image> a, std::shared_ptr<Image> b, std::string a_label, std::string b_label,
+                       std::shared_ptr<const ImageDifference> difference, Compare mode);
+    void set_compare_b(std::shared_ptr<Image> b, std::shared_ptr<const ImageDifference> difference);
+    void set_compare(Compare mode);
+    void set_compare_gain(int gain);
+    void swap_compare();  // A and B change places
+    void end_compare();
+    bool comparing() const { return bool(compare_); }
+    Compare compare_mode() const { return compare_ ? compare_->mode : Compare::A; }
+    const ImageDifference* compare_difference() const { return compare_ ? compare_->difference.get() : nullptr; }
+    std::shared_ptr<Image> difference_shown();  // the difference as an image, at the current gain
     using OverlaySections = std::vector<std::vector<std::string>>;
     void set_overlay(OverlaySections sections);
 
@@ -112,6 +135,31 @@ private:
     rap::image* base_image();
     rap::image* scaled_image(double zoom);
     rap::image* checker_image(int w, int h);
+    // A compared image, with its own uploads so switching between them is instant.
+    struct Layer
+    {
+        Layer() = default;
+        explicit Layer(std::shared_ptr<Image> im) : image(std::move(im)) {}
+        std::shared_ptr<Image> image;
+        std::unique_ptr<rap::image> base, scaled;
+        double scaled_zoom = 0;
+    };
+    struct Comparison
+    {
+        Layer a, b, difference_layer;
+        std::shared_ptr<Image> original;  // the A it began with, shown again when it ends
+        std::string a_label, b_label;
+        std::shared_ptr<const ImageDifference> difference;
+        int difference_gain = 0;  // the gain difference_layer was made at
+        int gain = 8;
+        Compare mode = Compare::B;
+        double swipe = 0.5;  // the divider, across the image (0..1)
+        bool dragging = false;
+    };
+    void draw_layer(rap::painter& p, Layer& layer, float alpha);
+    void draw_compare(rap::painter& p, float alpha);
+    double divider_x() const;  // device px
+    std::unique_ptr<Comparison> compare_;
     void drop_caches();
     void zoom_changed();
     bool pointer(const rap::pointer_event& e);

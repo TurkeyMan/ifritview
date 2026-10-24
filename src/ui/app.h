@@ -13,6 +13,7 @@
 
 #include <rapport/rapport.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -65,10 +66,19 @@ public:
     void script_toggle_xmp();
     void remember_pane_width();
     void script_end_dialog(bool accept);
+    void script_compare(const std::string& how);  // a, b, swipe, diff, swap or gain:N
 
 private:
     void build_ui();
     rap::node tool_button(const char* icon, const char* tooltip, void (App::*action)());
+    rap::node compare_button(rap::icon icon, const char* tooltip, View::Compare mode);
+    void set_compare(View::Compare mode);
+    void swap_compare();
+    void show_save_preview(bool on);
+    // The toolbar for what the view is doing: browsing the folder, or
+    // comparing two images (and no browsing while Save As is open).
+    void update_toolbar();
+    bool navigation_locked() const { return save_dialog_ || view_->comparing(); }
     bool on_key(const rap::key_event& e);
 
     void load_current();
@@ -126,6 +136,11 @@ private:
     rap::tool_button* xmp_toggle_ = nullptr;
     std::function<void(bool)> end_settings_;  // while Settings is open
     rap::tool_button* crop_button_ = nullptr;
+    std::array<rap::widget*, 6> browse_widgets_{};  // hidden while comparing
+    std::array<rap::widget*, 4> compare_widgets_{};  // by View::Compare; shown only while comparing
+    std::array<rap::tool_button*, 4> compare_buttons_{};
+    std::array<rap::widget*, 2> diff_widgets_{};  // swap, gain
+    rap::slider* gain_ = nullptr;
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;
@@ -168,7 +183,8 @@ private:
     std::string status_message_;
     rap::subscription refit_timer_;
     std::shared_ptr<SaveDialog> save_dialog_;
-    std::shared_ptr<Image> preview_image_;  // the latest preview, shown while its toggle is on
+    std::shared_ptr<Image> preview_image_;  // the latest preview, compared while its toggle is on
+    std::shared_ptr<const ImageDifference> preview_difference_;  // between image_ and preview_image_
     std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
     // Shared with the preview workers, which may outlive a request: the
     // latest generation wins, and the app waits for running ones on exit.

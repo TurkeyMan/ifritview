@@ -107,6 +107,8 @@ void run_step(App& app, const std::string& step)
         app.set_exposure(std::stod(step.substr(3)));
     else if (step == "save")
         app.save_as();
+    else if (step.rfind("compare:", 0) == 0)
+        app.script_compare(step.substr(8));
     else if (step == "quit")
         app.quit();
     else

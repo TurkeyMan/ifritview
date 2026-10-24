@@ -123,7 +123,12 @@ void View::cancel_deferred_click()
 void View::update_cursor(double x, double y)
 {
     rap::cursor want = rap::cursor::default_;
-    if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_), fullscreen_) == Action::Pan)
+    if (compare_ && compare_->mode == Compare::Swipe &&
+        (compare_->dragging || std::abs(x * scale_factor() - divider_x()) <= 8.0 * scale_factor()))
+    {
+        want = compare_->dragging ? rap::cursor::grabbing : rap::cursor::grab;
+    }
+    else if (drag_active_ && pressed_button_ && cfg_.control(drag_control(pressed_button_), fullscreen_) == Action::Pan)
     {
         want = rap::cursor::grabbing;
     }
@@ -278,6 +283,197 @@ void View::end_preview()
     image_ = std::move(previewed_);
     previewed_.reset();
     image_changed();
+}
+
+// -- comparing ----------------------------------------------------------------
+
+void View::begin_compare(std::shared_ptr<Image> a, std::shared_ptr<Image> b, std::string a_label, std::string b_label,
+                         std::shared_ptr<const ImageDifference> difference, Compare mode)
+{
+    if (!a || !b || a->width != b->width || a->height != b->height)
+        return;
+    end_preview();
+    const bool same_size = image_ && image_->width == a->width && image_->height == a->height;
+    compare_ = std::make_unique<Comparison>();
+    compare_->a.image = a;
+    compare_->original = a;
+    compare_->b.image = std::move(b);
+    compare_->a_label = std::move(a_label);
+    compare_->b_label = std::move(b_label);
+    compare_->difference = std::move(difference);
+    compare_->mode = mode;
+    if (image_ != a)
+    {
+        if (same_size)
+        {
+            image_ = std::move(a);  // zoom and pan stay
+            image_changed();
+        }
+        else
+            set_image(std::move(a));
+    }
+    invalidate();
+}
+
+void View::set_compare_b(std::shared_ptr<Image> b, std::shared_ptr<const ImageDifference> difference)
+{
+    if (!compare_ || !b || b->width != compare_->a.image->width || b->height != compare_->a.image->height)
+        return;
+    compare_->b = Layer{std::move(b)};
+    compare_->difference = std::move(difference);
+    compare_->difference_layer = Layer{};
+    invalidate();
+}
+
+void View::set_compare(Compare mode)
+{
+    if (!compare_ || compare_->mode == mode)
+        return;
+    compare_->mode = mode;
+    compare_->dragging = false;
+    invalidate();
+}
+
+void View::set_compare_gain(int gain)
+{
+    if (!compare_ || gain == compare_->gain)
+        return;
+    compare_->gain = std::clamp(gain, 1, 255);
+    invalidate();
+}
+
+void View::swap_compare()
+{
+    if (!compare_)
+        return;
+    std::swap(compare_->a, compare_->b);
+    std::swap(compare_->a_label, compare_->b_label);
+    compare_->difference_layer = Layer{};  // drawn over A's grey
+    image_ = compare_->a.image;
+    image_changed();
+    invalidate();
+}
+
+void View::end_compare()
+{
+    if (!compare_)
+        return;
+    std::shared_ptr<Image> original = std::move(compare_->original);
+    compare_.reset();
+    if (original && image_ != original)
+    {
+        image_ = std::move(original);  // a swap left B in its place
+        image_changed();
+    }
+    invalidate();
+}
+
+std::shared_ptr<Image> View::difference_shown()
+{
+    if (!compare_ || !compare_->difference)
+        return nullptr;
+    if (!compare_->difference_layer.image || compare_->difference_gain != compare_->gain)
+    {
+        compare_->difference_layer = Layer{difference_image(*compare_->a.image, *compare_->difference, compare_->gain)};
+        compare_->difference_gain = compare_->gain;
+    }
+    return compare_->difference_layer.image;
+}
+
+double View::divider_x() const
+{
+    return compare_ && compare_->a.image ? pan_x_ + compare_->swipe * compare_->a.image->width * zoom_ : 0;
+}
+
+// A layer as the main image is drawn: pre-scaled when zoomed out, else the
+// full upload, filtered the same way.
+void View::draw_layer(rap::painter& p, Layer& layer, float alpha)
+{
+    if (!layer.image || layer.image->width <= 0)
+        return;
+    const Image& im = *layer.image;
+    const double scale = scale_factor();
+    const auto L = [scale](double device) { return float(device / scale); };
+    if (!layer.base)
+        layer.base = ui_.create_image(im.width, im.height, APixelFormat::bgra8_premultiplied, im.pixels.data(), im.stride);
+    if (zoom_ < 1.0 && cfg_.smooth_downscale && !im.is_video)
+    {
+        const int w = std::max(1, int(std::ceil(im.width * zoom_))), h = std::max(1, int(std::ceil(im.height * zoom_)));
+        if (!layer.scaled || layer.scaled_zoom != zoom_)
+        {
+            const PixelBuffer px = downscale(im, w, h);
+            layer.scaled = ui_.create_image(w, h, APixelFormat::bgra8_premultiplied, px.data(), size_t(w) * 4);
+            layer.scaled_zoom = zoom_;
+        }
+        p.image(*layer.scaled, {0, 0, float(w), float(h)}, {L(pan_x_), L(pan_y_), L(w), L(h)}, rap::filter::nearest, alpha);
+        return;
+    }
+    const bool smooth = zoom_ > 1.0 && cfg_.smooth_upscale;
+    p.image(*layer.base, {0, 0, float(im.width), float(im.height)}, {L(pan_x_), L(pan_y_), L(im.width * zoom_), L(im.height * zoom_)},
+            smooth ? rap::filter::linear : rap::filter::nearest, alpha);
+}
+
+void View::draw_compare(rap::painter& p, float alpha)
+{
+    Comparison& c = *compare_;
+    const double scale = scale_factor();
+    const auto L = [scale](double device) { return float(device / scale); };
+    int vw, vh;
+    view_size(vw, vh);
+    const double top = std::max(0.0, pan_y_), bottom = std::min(double(vh), pan_y_ + c.a.image->height * zoom_);
+    // Which image is which, in a tag at the image's top edge.
+    rap::text_style style;
+    style.fg = rap::color{255, 255, 255};
+    const auto tag = [&](const std::string& text, float tx, bool right_aligned)
+    {
+        if (text.empty())
+            return;
+        const rap::size_f sz = p.measure(text, style);
+        const float x0 = right_aligned ? tx - sz.w - 12 : tx;
+        p.rect({x0, L(top) + 8, sz.w + 12, sz.h + 6}, 4, rap::color{0, 0, 0, 150}, std::nullopt);
+        p.text({x0 + 6, L(top) + 11}, text, style);
+    };
+    const float left = L(std::max(0.0, pan_x_)) + 8;
+    switch (c.mode)
+    {
+        case Compare::A:
+            draw_layer(p, c.a, alpha);
+            tag(c.a_label, left, false);
+            return;
+        case Compare::B:
+            draw_layer(p, c.b, alpha);
+            tag(c.b_label, left, false);
+            return;
+        case Compare::Difference:
+            if (difference_shown())
+            {
+                draw_layer(p, c.difference_layer, alpha);
+                tag("Difference ×" + std::to_string(c.gain), left, false);
+            }
+            else
+                draw_layer(p, c.b, alpha);  // not worked out yet
+            return;
+        case Compare::Swipe:
+            break;
+    }
+    // Swipe: B, with A over it left of the divider.
+    draw_layer(p, c.b, alpha);
+    const double x = divider_x();
+    if (x > 0)
+    {
+        p.push_clip({0, 0, L(std::min(x, double(vw))), L(vh)});
+        draw_layer(p, c.a, alpha);
+        p.pop_clip();
+    }
+    // The divider, and a handle on it.
+    p.rect({L(x) - 1.5f, L(top), 3, L(bottom - top)}, 0, rap::color{0, 0, 0, 140}, std::nullopt);
+    p.rect({L(x) - 0.5f, L(top), 1, L(bottom - top)}, 0, rap::color{255, 255, 255, 230}, std::nullopt);
+    const float mid = L((top + bottom) / 2);
+    p.circle({L(x), mid}, 9, rap::color{255, 255, 255, 230}, rap::paint{rap::color{0, 0, 0, 160}});
+    p.polygon({{L(x) - 6, mid}, {L(x) - 2, mid - 4}, {L(x) - 2, mid + 4}}, rap::color{40, 40, 40}, std::nullopt);
+    p.polygon({{L(x) + 6, mid}, {L(x) + 2, mid - 4}, {L(x) + 2, mid + 4}}, rap::color{40, 40, 40}, std::nullopt);
+    tag(c.a_label, L(x) - 8, true);
+    tag(c.b_label, L(x) + 8, false);
 }
 
 void View::image_changed()
@@ -646,7 +842,9 @@ void View::paint(rap::painter& p, rap::size_f)
         checker(pan_x_, pan_y_, sw, sh, float(fade_alpha));
     const int64_t t_draw = now_us();
     const float alpha = float(fade_alpha);
-    if (motion_.active)
+    if (compare_)
+        draw_compare(p, alpha);
+    else if (motion_.active)
     {
         // Pre-scaled to the motion's largest zoom; each frame only shrinks it a little.
         rap::image* src = scaled_image(motion_.z_cache);
@@ -1062,6 +1260,34 @@ bool View::pointer(const rap::pointer_event& e)
     const int s = scale_factor();
     const double ex = e.pos.x, ey = e.pos.y;
     const double dx = ex * s, dy = ey * s;
+
+    // Swipe's divider: pressed near it, it follows the pointer, before any
+    // of the usual click and drag actions.
+    if (compare_ && compare_->mode == Compare::Swipe)
+    {
+        Comparison& c = *compare_;
+        if (e.type == T::press && e.button == 1 && std::abs(dx - divider_x()) <= 8.0 * s)
+        {
+            c.dragging = true;
+            update_cursor(ex, ey);
+            return true;
+        }
+        if (c.dragging)
+        {
+            if (e.type == T::move)
+            {
+                c.swipe = std::clamp((dx - pan_x_) / (c.a.image->width * zoom_), 0.0, 1.0);
+                invalidate();
+                return true;
+            }
+            if (e.type == T::release)
+            {
+                c.dragging = false;
+                update_cursor(ex, ey);
+                return true;
+            }
+        }
+    }
 
     if (e.type == T::move || e.type == T::enter)
     {
