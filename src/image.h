@@ -19,16 +19,36 @@ struct LinearData
     std::vector<float> tone;
 };
 
-// The source's own samples where it has more than 8 bits a channel (16-bit
-// PNG and TIFF, half and float formats, HDR), kept beside the 8-bit pixels
-// that are drawn: half-float RGBA, not premultiplied. Linear ones (float
-// formats) that go past 1 have more than the display shows, and take an
-// exposure like a raw's linear data.
+// The source's own samples where it has more than 8 bits a channel, kept as
+// the file has them (sample type and channels, bit for bit) beside the 8-bit
+// pixels that are drawn: 16-bit PNG, TIFF and PSD, signed 16-bit, half and
+// float formats, HDR. Not premultiplied. Linear ones (the floats) that go
+// past 1 have more than the display shows, and take an exposure like a
+// raw's linear data.
 struct SourceData
 {
-    HalfBuffer rgba;      // 4 halves a pixel
-    bool linear = false;  // scene-linear light; else display-encoded, as the 8-bit pixels are
-    float peak = 1;       // the largest colour value
+    enum class Sample
+    {
+        U16,  // unsigned, 0..65535 for 0..1
+        I16,  // signed, -32767..32767 for -1..1
+        F16,  // IEEE half (half.h)
+        F32,  // IEEE float
+    };
+    SourceData(Sample sample, int channels, int width, int height, bool linear);
+    Sample sample;
+    int channels;  // 1 grey, 2 grey + alpha, 3 RGB, 4 RGBA
+    int width, height;
+    PixelBuffer data;  // rows of width × channels samples, packed, native byte order
+    bool linear;       // scene-linear light; else display-encoded, as the 8-bit pixels are
+    float peak = 1;    // the largest colour value (linear sources)
+
+    int sample_bytes() const { return sample == Sample::F32 ? 4 : 2; }
+    size_t pixel_bytes() const { return size_t(sample_bytes()) * channels; }
+    uint8_t* pixel(int x, int y) { return data.data() + (size_t(y) * width + x) * pixel_bytes(); }
+    const uint8_t* pixel(int x, int y) const { return data.data() + (size_t(y) * width + x) * pixel_bytes(); }
+    // Channel c of a pixel as a float: integers normalised (0..1, signed -1..1).
+    float value(const uint8_t* px, int c) const;
+    bool has_alpha() const { return channels == 2 || channels == 4; }
     void measure_peak();
 };
 
@@ -143,12 +163,15 @@ struct Image
     // around the automatic gain, or from an HDR source (0 EV: its values as
     // they are, 1 being white). No-op for anything else.
     void retone(double ev);
-    // A linear float source in its place: keeps it as `source` and renders
-    // the 8-bit pixels from it at 0 EV. `rgba` is w × h × 4, not premultiplied.
-    void set_linear_source(const float* rgba);
+    // Keeps `src` as the image's source and renders the 8-bit pixels from it
+    // (allocated to its size): linear ones at 0 EV, the rest as they're
+    // encoded. Sets has_alpha.
+    void set_source(std::shared_ptr<SourceData> src);
     // Same rendering into a fresh buffer, safe to run off the main thread while
     // `pixels` is being displayed; the caller swaps it in.
     PixelBuffer retone_buffer(double ev) const;
+    // 8-bit pixels from `source` (linear ones at exposure `ev`).
+    PixelBuffer render_source(double ev) const;
 
     void allocate(int w, int h);
     uint32_t* row(int y) { return reinterpret_cast<uint32_t*>(pixels.data() + size_t(y) * stride); }

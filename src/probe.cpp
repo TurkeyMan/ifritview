@@ -10,6 +10,23 @@
 #include <cstdlib>
 #include <string>
 
+namespace
+{
+
+uint32_t crc32(const uint8_t* d, size_t n)
+{
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; ++i)
+    {
+        c ^= d[i];
+        for (int k = 0; k < 8; ++k)
+            c = c >> 1 ^ (0xEDB88320u & (0u - (c & 1)));
+    }
+    return ~c;
+}
+
+}  // namespace
+
 int probe(int argc, char** argv)
 {
     int failures = 0;
@@ -27,6 +44,16 @@ int probe(int argc, char** argv)
             if (!img.pixel_format.empty())
                 std::printf("        pixel format: %s%s%s\n", img.pixel_format.describe(img.width, img.height).c_str(), img.color_space.empty() ? "" : " · ",
                             img.color_space.c_str());
+            if (img.source)
+            {
+                // The deep samples kept beside the 8-bit pixels, and a checksum of
+                // them (CRC-32 of the bytes), for checking they arrived intact.
+                static const char* const types[] = {"u16", "i16", "f16", "f32"};
+                static const char* const layouts[] = {"", "grey", "grey+alpha", "RGB", "RGBA"};
+                const SourceData& s = *img.source;
+                std::printf("        source: %s %s%s, peak %g, crc %08x\n", types[int(s.sample)], layouts[s.channels], s.linear ? " linear" : "",
+                            double(s.peak), unsigned(crc32(s.data.data(), s.data.size())));
+            }
             if (img.xmp.present)
                 std::printf("        xmp develop: exposure %+.2f temp %.0f orientation %d crop %d\n", img.xmp.exposure, img.xmp.temperature,
                             img.xmp.orientation, int(img.xmp.has_crop));

@@ -6,7 +6,6 @@
 #include "bcn.h"
 #include "decoder.h"
 
-#include "../half.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,6 +48,7 @@ struct Masks
 enum class Wide
 {
     Unorm16,  // per channel, little-endian
+    Snorm16,
     Half,
     Float
 };
@@ -67,11 +67,6 @@ uint32_t extract(uint32_t v, uint32_t mask)
         ++shift;
     const uint32_t max = mask >> shift;
     return uint32_t((uint64_t((v & mask) >> shift) * 255 + max / 2) / max);
-}
-
-uint32_t clip(float v)
-{
-    return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
 void put(uint32_t* px, uint32_t r, uint32_t g, uint32_t b, uint32_t a, bool& opaque)
@@ -120,58 +115,21 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, I
     return true;
 }
 
+// Kept as they're stored, as the image's source, which renders the pixels:
+// floats as linear light (with an exposure when they go past 1), 16-bit
+// integers as they're encoded.
 bool decode_wide(const WideFormat& f, const uint8_t* d, size_t size, int w, int h, Image& out, std::string& error)
 {
-    const int sample = f.kind == Wide::Float ? 4 : 2;
-    const size_t row = size_t(w) * f.channels * sample;
-    if (size < row * h)
+    using S = SourceData::Sample;
+    const S sample = f.kind == Wide::Float ? S::F32 : f.kind == Wide::Half ? S::F16 : f.kind == Wide::Snorm16 ? S::I16 : S::U16;
+    auto deep = std::make_shared<SourceData>(sample, f.channels, w, h, sample == S::F16 || sample == S::F32);
+    if (size < deep->data.size())
     {
         error = "DDS data is cut short";
         return false;
     }
-    out.allocate(w, h);
-    bool opaque = true;
-    // Every sample is kept as the image's source: float ones as linear light
-    // (shown from there, with exposure if they go past 1), 16-bit integer
-    // ones as they're encoded.
-    std::vector<float> all(size_t(w) * h * 4);
-    float* keep = all.data();
-    for (int y = 0; y < h; ++y)
-    {
-        uint32_t* px = out.row(y);
-        const uint8_t* s = d + size_t(y) * row;
-        for (int x = 0; x < w; ++x, keep += 4)
-        {
-            float c[4] = {0, 0, 0, 1};
-            for (int i = 0; i < f.channels; ++i, s += sample)
-            {
-                if (f.kind == Wide::Unorm16)
-                    c[i] = float(s[0] | s[1] << 8) / 65535.0f;
-                else if (f.kind == Wide::Half)
-                    c[i] = half_to_float(uint16_t(s[0] | s[1] << 8));
-                else
-                {
-                    uint32_t bits = le32(s);
-                    std::memcpy(&c[i], &bits, 4);
-                }
-            }
-            if (f.channels == 1)
-                c[1] = c[2] = c[0];
-            std::copy_n(c, 4, keep);
-            put(px + x, clip(c[0]), clip(c[1]), clip(c[2]), clip(c[3]), opaque);
-        }
-    }
-    out.has_alpha = !opaque;
-    if (f.kind == Wide::Unorm16)
-    {
-        auto deep = std::make_shared<SourceData>();
-        deep->rgba.resize(all.size());
-        for (size_t i = 0; i < all.size(); ++i)
-            deep->rgba[i] = float_to_half(all[i]);
-        out.source = std::move(deep);
-    }
-    else
-        out.set_linear_source(all.data());
+    std::memcpy(deep->data.data(), d, deep->data.size());  // little-endian, as the machine is
+    out.set_source(std::move(deep));
     return true;
 }
 
@@ -211,7 +169,9 @@ std::optional<Dxgi> dxgi(uint32_t f)
         case 11: return Dxgi{{}, {}, WideFormat{Wide::Unorm16, 4}, "R16G16B16A16"};
         case 10: return Dxgi{{}, {}, WideFormat{Wide::Half, 4}, "R16G16B16A16 float"};
         case 2: return Dxgi{{}, {}, WideFormat{Wide::Float, 4}, "R32G32B32A32 float"};
+        case 13: return Dxgi{{}, {}, WideFormat{Wide::Snorm16, 4}, "R16G16B16A16 signed"};
         case 56: return Dxgi{{}, {}, WideFormat{Wide::Unorm16, 1}, "R16"};
+        case 58: return Dxgi{{}, {}, WideFormat{Wide::Snorm16, 1}, "R16 signed"};
         case 54: return Dxgi{{}, {}, WideFormat{Wide::Half, 1}, "R16 float"};
         case 41: return Dxgi{{}, {}, WideFormat{Wide::Float, 1}, "R32 float"};
     }
@@ -391,8 +351,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
     {
         out.bits_per_sample = wide->kind == Wide::Float ? 32 : 16;
         out.pixel_format = PixelFormat::packed(wide->channels == 1 ? M::Gray : M::RGB, wide->channels == 1 ? "R" : "RGBA", out.bits_per_sample);
-        if (wide->kind != Wide::Unorm16)
+        if (wide->kind == Wide::Half || wide->kind == Wide::Float)
             out.pixel_format.sample = PixelFormat::Sample::Float;
+        else if (wide->kind == Wide::Snorm16)
+            out.pixel_format.sample = PixelFormat::Sample::Signed;
     }
     else
     {

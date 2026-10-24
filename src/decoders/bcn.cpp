@@ -1,7 +1,7 @@
 // BCn surfaces block by block through bcdec, into Image's premultiplied
 // 0xAARRGGBB. BC4/BC5 go through bcdec's precise float path, which also
-// reads their signed forms; BC6H's HDR values, linear, are kept whole as the
-// image's source, and rendered from there (clipped, through the sRGB curve).
+// reads their signed forms; BC6H's HDR values, half floats of linear light,
+// are kept as the image's source and rendered from there (Image::set_source).
 #include "bcn.h"
 
 #define BCDEC_IMPLEMENTATION
@@ -18,7 +18,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
+#include <cstring>
+#include <memory>
 
 namespace
 {
@@ -69,10 +70,24 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
     const size_t block_bytes = bcn_block_bytes(format);
     const int blocks_x = (w + 3) / 4, blocks_y = (h + 3) / 4;
     uint8_t rgba[4 * 4 * 4];
-    float f[4 * 4 * 3];
+    float f[4 * 4 * 2];
     bool opaque = true;
     const bool hdr = format == Bcn::BC6H || format == Bcn::BC6HS;
-    std::vector<float> linear(hdr ? size_t(w) * h * 4 : 0);
+    if (hdr)
+    {
+        auto deep = std::make_shared<SourceData>(SourceData::Sample::F16, 3, w, h, true);
+        uint16_t halves[4 * 4 * 3];
+        for (int by = 0; by < blocks_y; ++by)
+            for (int bx = 0; bx < blocks_x; ++bx)
+            {
+                bcdec_bc6h_half(data + (size_t(by) * blocks_x + bx) * block_bytes, halves, 12, format == Bcn::BC6HS);
+                for (int y = 0; y < 4 && by * 4 + y < h; ++y)
+                    for (int x = 0; x < 4 && bx * 4 + x < w; ++x)
+                        std::memcpy(deep->pixel(bx * 4 + x, by * 4 + y), halves + (y * 4 + x) * 3, 6);
+            }
+        out.set_source(std::move(deep));
+        return true;
+    }
     for (int by = 0; by < blocks_y; ++by)
         for (int bx = 0; bx < blocks_x; ++bx)
         {
@@ -88,7 +103,7 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
                 case Bcn::BC5:
                 case Bcn::BC5S: bcdec_bc5_float(block, f, 8, format == Bcn::BC5S); break;
                 case Bcn::BC6H:
-                case Bcn::BC6HS: bcdec_bc6h_float(block, f, 12, format == Bcn::BC6HS); break;
+                case Bcn::BC6HS: break;  // above
             }
             for (int y = 0; y < 4 && by * 4 + y < h; ++y)
             {
@@ -111,17 +126,6 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
                             g = channel(f[i * 2 + 1], format == Bcn::BC5S);
                             b = format == Bcn::BC5S ? 128 : 0;  // the missing channel at zero, as signed ones show it
                             break;
-                        case Bcn::BC6H:
-                        case Bcn::BC6HS:
-                        {
-                            float* l = linear.data() + (size_t(by * 4 + y) * w + bx * 4 + x) * 4;
-                            l[0] = f[i * 3];
-                            l[1] = f[i * 3 + 1];
-                            l[2] = f[i * 3 + 2];
-                            l[3] = 1;
-                            r = g = b = 0;  // rendered from the source below
-                            break;
-                        }
                         default:
                             r = rgba[i * 4];
                             g = rgba[i * 4 + 1];
@@ -147,7 +151,5 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
             }
         }
     out.has_alpha = !opaque;
-    if (hdr)
-        out.set_linear_source(linear.data());
     return true;
 }

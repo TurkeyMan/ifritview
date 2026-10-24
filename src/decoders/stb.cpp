@@ -67,7 +67,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     // as the image's source beside the 8-bit pixels.
     const bool hdr = stbi_is_hdr_from_memory(bytes, int(size));
     const bool deep = !hdr && stbi_is_16_bit_from_memory(bytes, int(size));
-    void* data = hdr    ? static_cast<void*>(stbi_loadf_from_memory(bytes, int(size), &w, &h, &channels, 4))
+    void* data = hdr    ? static_cast<void*>(stbi_loadf_from_memory(bytes, int(size), &w, &h, &channels, 3))
                  : deep ? static_cast<void*>(stbi_load_16_from_memory(bytes, int(size), &w, &h, &channels, 4))
                         : static_cast<void*>(stbi_load_from_memory(bytes, int(size), &w, &h, &channels, 4));
     if (!data)
@@ -77,7 +77,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     out.allocate(w, h);
     if (hdr)
-        out.set_linear_source(static_cast<const float*>(data));
+    {
+        // RGBE's shared exponent: exactly representable as floats.
+        auto deep = std::make_shared<SourceData>(SourceData::Sample::F32, 3, w, h, true);
+        std::memcpy(deep->data.data(), data, deep->data.size());
+        out.set_source(std::move(deep));
+    }
     else if (deep)
         out.from_rgba16(static_cast<const uint16_t*>(data), w * 8);
     else

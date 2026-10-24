@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 
 namespace
@@ -26,11 +27,6 @@ inline uint32_t pack(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
 inline uint32_t pack_premultiplied(uint32_t r, uint32_t g, uint32_t b, uint32_t a)
 {
     return (a << 24) | (r << 16) | (g << 8) | b;
-}
-
-inline uint32_t to8(uint32_t v16)
-{
-    return (v16 * 255u + 32767u) / 65535u;
 }
 
 }  // namespace
@@ -98,72 +94,90 @@ void Image::from_bgra8(const uint8_t* src, int src_stride, bool premultiplied)
 
 void Image::from_rgb16(const uint16_t* src, int src_stride)
 {
-    auto deep = std::make_shared<SourceData>();
-    deep->rgba.resize(size_t(width) * height * 4);
-    uint16_t* h = deep->rgba.data();
-    const uint16_t one = float_to_half(1.0f);
+    auto deep = std::make_shared<SourceData>(SourceData::Sample::U16, 3, width, height, false);
     for (int y = 0; y < height; ++y)
-    {
-        const uint16_t* s = reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride);
-        uint32_t* d = row(y);
-        for (int x = 0; x < width; ++x, s += 3, h += 4)
-        {
-            d[x] = pack_premultiplied(to8(s[0]), to8(s[1]), to8(s[2]), 255);
-            for (int c = 0; c < 3; ++c)
-                h[c] = float_to_half(s[c] / 65535.0f);
-            h[3] = one;
-        }
-    }
-    source = std::move(deep);
+        std::memcpy(deep->pixel(0, y), reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride, size_t(width) * 6);
+    set_source(std::move(deep));
 }
 
 void Image::from_rgba16(const uint16_t* src, int src_stride)
 {
-    auto deep = std::make_shared<SourceData>();
-    deep->rgba.resize(size_t(width) * height * 4);
-    uint16_t* h = deep->rgba.data();
+    auto deep = std::make_shared<SourceData>(SourceData::Sample::U16, 4, width, height, false);
     for (int y = 0; y < height; ++y)
+        std::memcpy(deep->pixel(0, y), reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride, size_t(width) * 8);
+    set_source(std::move(deep));
+}
+
+SourceData::SourceData(Sample s, int c, int w, int h, bool lin)
+    : sample(s), channels(c), width(w), height(h), linear(lin)
+{
+    data.resize(size_t(w) * h * pixel_bytes());
+}
+
+float SourceData::value(const uint8_t* px, int c) const
+{
+    const uint8_t* s = px + size_t(c) * sample_bytes();
+    switch (sample)
     {
-        const uint16_t* s = reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(src) + size_t(y) * src_stride);
-        uint32_t* d = row(y);
-        for (int x = 0; x < width; ++x, s += 4, h += 4)
+        case Sample::U16:
         {
-            d[x] = pack(to8(s[0]), to8(s[1]), to8(s[2]), to8(s[3]));
-            for (int c = 0; c < 4; ++c)
-                h[c] = float_to_half(s[c] / 65535.0f);
+            uint16_t v;
+            std::memcpy(&v, s, 2);
+            return v / 65535.0f;
+        }
+        case Sample::I16:
+        {
+            int16_t v;
+            std::memcpy(&v, s, 2);
+            return std::max(-1.0f, v / 32767.0f);
+        }
+        case Sample::F16:
+        {
+            uint16_t v;
+            std::memcpy(&v, s, 2);
+            return half_to_float(v);
+        }
+        case Sample::F32:
+        {
+            float v;
+            std::memcpy(&v, s, 4);
+            return v;
         }
     }
-    source = std::move(deep);
+    return 0;
 }
 
 void SourceData::measure_peak()
 {
     peak = 0;
-    for (size_t i = 0; i < rgba.size(); i += 4)
-        for (int c = 0; c < 3; ++c)
-        {
-            const float v = half_to_float(rgba[i + c]);
-            if (v > peak && v < 65536.0f)  // not infinity
-                peak = v;
-        }
+    const int colours = channels >= 3 ? 3 : 1;
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+            for (int c = 0; c < colours; ++c)
+            {
+                const float v = value(pixel(x, y), c);
+                if (v > peak && v <= 3.4e38f)  // not infinity (nor NaN)
+                    peak = v;
+            }
 }
 
-void Image::set_linear_source(const float* src)
+void Image::set_source(std::shared_ptr<SourceData> src)
 {
-    auto deep = std::make_shared<SourceData>();
-    deep->linear = true;
-    deep->rgba.resize(size_t(width) * height * 4);
-    for (size_t i = 0; i < deep->rgba.size(); ++i)
-        deep->rgba[i] = float_to_half(src[i]);
-    deep->measure_peak();
-    if (deep->peak > 1.0f)
+    if (width != src->width || height != src->height)
+        allocate(src->width, src->height);
+    if (src->linear)
     {
-        char range[64];
-        std::snprintf(range, sizeof range, "%.3g× white (%+.1f EV)", double(deep->peak), std::log2(double(deep->peak)));
-        add("Image", "Brightest", range);
+        src->measure_peak();
+        if (src->peak > 1.0f)
+        {
+            char range[64];
+            std::snprintf(range, sizeof range, "%.3g× white (%+.1f EV)", double(src->peak), std::log2(double(src->peak)));
+            add("Image", "Brightest", range);
+        }
     }
-    source = std::move(deep);
-    pixels = retone_buffer(0);
+    has_alpha = src->has_alpha();
+    source = std::move(src);
+    pixels = render_source(0);
     mips.clear();
 }
 
@@ -214,6 +228,73 @@ void Image::build_mips()
     }
 }
 
+// The source's samples to 8-bit premultiplied pixels. Linear ones take the
+// exposure, are clipped and get the sRGB curve, through a table over every
+// half float (the output has 8 bits; a float is looked up by its nearest
+// half once exposed, so values past a half's range still come down); the
+// rest are as they're encoded, signed ones with 0 at mid-grey.
+PixelBuffer Image::render_source(double ev) const
+{
+    PixelBuffer out(size_t(width) * height * 4);
+    const SourceData& s = *source;
+    if (s.width != width || s.height != height)
+        return out;
+    std::vector<uint8_t> colour, alpha;
+    const bool halves = s.sample == SourceData::Sample::F16;
+    const float exposure = float(std::pow(2.0, ev));
+    if (s.linear)
+    {
+        const float table_exposure = halves ? exposure : 1.0f;  // floats are exposed before the lookup
+        colour.resize(65536);
+        alpha.resize(65536);
+        for (uint32_t i = 0; i < 65536; ++i)
+        {
+            const float v = half_to_float(uint16_t(i));
+            const bool number = v == v;  // NaN shows black
+            colour[i] = number ? uint8_t(std::lround(srgb_encode(v * table_exposure) * 255.0)) : 0;
+            alpha[i] = number ? uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)) : 0;
+        }
+    }
+    const bool is_signed = s.sample == SourceData::Sample::I16;
+    const auto encoded = [&](const uint8_t* px, int c, bool is_alpha) -> uint32_t
+    {
+        if (s.linear)
+        {
+            uint16_t h;
+            if (halves)
+                std::memcpy(&h, px + size_t(c) * 2, 2);
+            else
+                h = float_to_half(is_alpha ? s.value(px, c) : s.value(px, c) * exposure);
+            return is_alpha ? alpha[h] : colour[h];
+        }
+        float v = s.value(px, c);
+        if (is_signed && !is_alpha)
+            v = (v + 1) / 2;
+        return uint32_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+    };
+    for (int y = 0; y < height; ++y)
+    {
+        uint32_t* d = reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride);
+        for (int x = 0; x < width; ++x)
+        {
+            const uint8_t* px = s.pixel(x, y);
+            uint32_t r, g, b, a = 255;
+            if (s.channels >= 3)
+            {
+                r = encoded(px, 0, false);
+                g = encoded(px, 1, false);
+                b = encoded(px, 2, false);
+            }
+            else
+                r = g = b = encoded(px, 0, false);
+            if (s.has_alpha())
+                a = encoded(px, s.channels - 1, true);
+            d[x] = pack(r, g, b, a);
+        }
+    }
+    return out;
+}
+
 PixelBuffer Image::retone_buffer(double ev) const
 {
     PixelBuffer out(pixels.size());
@@ -223,26 +304,7 @@ PixelBuffer Image::retone_buffer(double ev) const
     auto row_of = [&](int y) { return reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride); };
     const double exposure = std::pow(2.0, ev);
     if (from_source)
-    {
-        // Half-float linear -> exposure -> clip -> sRGB transfer -> 8-bit,
-        // through one table over every half; alpha just clipped.
-        std::vector<uint8_t> colour(65536), alpha(65536);
-        for (uint32_t i = 0; i < 65536; ++i)
-        {
-            const float v = half_to_float(uint16_t(i));
-            const bool number = v == v;  // NaN shows black
-            colour[i] = number ? uint8_t(std::lround(srgb_encode(v * exposure) * 255.0)) : 0;
-            alpha[i] = number ? uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)) : 0;
-        }
-        const uint16_t* s = source->rgba.data();
-        for (int y = 0; y < height; ++y)
-        {
-            uint32_t* d = row_of(y);
-            for (int x = 0; x < width; ++x, s += 4)
-                d[x] = pack(colour[s[0]], colour[s[1]], colour[s[2]], alpha[s[3]]);
-        }
-        return out;
-    }
+        return render_source(ev);
     if (linear->tone.empty())
     {
         // 16-bit linear -> gain -> clip -> sRGB transfer -> 8-bit, via one table.
@@ -352,11 +414,9 @@ Image Image::crop(int x, int y, int w, int h) const
     }
     if (source)
     {
-        auto deep = std::make_shared<SourceData>();
-        deep->linear = source->linear;
-        deep->rgba.resize(size_t(w) * h * 4);
+        auto deep = std::make_shared<SourceData>(source->sample, source->channels, w, h, source->linear);
         for (int yy = 0; yy < h; ++yy)
-            std::copy_n(source->rgba.data() + (size_t(y + yy) * width + x) * 4, size_t(w) * 4, deep->rgba.data() + size_t(yy) * w * 4);
+            std::memcpy(deep->pixel(0, yy), source->pixel(x, y + yy), size_t(w) * source->pixel_bytes());
         deep->peak = source->peak;  // still the same image's range, whatever part is kept
         out.source = std::move(deep);
     }
@@ -499,7 +559,9 @@ void Image::apply_orientation(int o)
     if (source)
     {
         auto deep = std::make_shared<SourceData>(*source);
-        reorient(source->rgba.data(), W, H, 4, o, deep->rgba.data(), dw, dh);
+        deep->width = dw;
+        deep->height = dh;
+        reorient(source->data.data(), W, H, int(source->pixel_bytes()), o, deep->data.data(), dw, dh);
         source = std::move(deep);
     }
     width = dw;

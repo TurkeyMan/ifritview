@@ -51,8 +51,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     int depth = 0, color = 0, interlace = 0;
     png_get_IHDR(png, info, &w, &h, &depth, &color, &interlace, nullptr, nullptr);
 
-    // Normalise everything to 8-bit BGRA, or 16-bit RGBA when the file has
-    // 16 bits (kept whole as the image's source).
+    // Normalise everything to 8-bit BGRA; or, when the file has 16 bits,
+    // keep its samples and channels as they are, as the image's source.
     const bool deep = depth == 16;
     if (color == PNG_COLOR_TYPE_PALETTE)
         png_set_palette_to_rgb(png);
@@ -61,17 +61,16 @@ bool decode(const std::string& path, Image& out, std::string& error)
     const bool trns = png_get_valid(png, info, PNG_INFO_tRNS);
     if (trns)
         png_set_tRNS_to_alpha(png);
-    if (color == PNG_COLOR_TYPE_GRAY || color == PNG_COLOR_TYPE_GRAY_ALPHA)
-        png_set_gray_to_rgb(png);
     if (deep)
     {
-        png_set_filler(png, 0xFFFF, PNG_FILLER_AFTER);
         const uint16_t probe = 1;
         if (*reinterpret_cast<const uint8_t*>(&probe) == 1)
             png_set_swap(png);  // PNG's 16-bit samples are big-endian
     }
     else
     {
+        if (color == PNG_COLOR_TYPE_GRAY || color == PNG_COLOR_TYPE_GRAY_ALPHA)
+            png_set_gray_to_rgb(png);
         png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
         png_set_bgr(png);
     }
@@ -80,13 +79,16 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
     out.allocate(int(w), int(h));
     rows.resize(h);
-    PixelBuffer wide(deep ? size_t(w) * h * 8 : 0);
+    // 16-bit: grey, grey + alpha, RGB or RGBA (a transparency key made alpha).
+    std::shared_ptr<SourceData> wide;
+    if (deep)
+        wide = std::make_shared<SourceData>(SourceData::Sample::U16, int(png_get_channels(png, info)), int(w), int(h), false);
     for (png_uint_32 y = 0; y < h; ++y)
-        rows[y] = deep ? wide.data() + size_t(y) * w * 8 : reinterpret_cast<png_bytep>(out.row(int(y)));
+        rows[y] = deep ? wide->pixel(0, int(y)) : reinterpret_cast<png_bytep>(out.row(int(y)));
     png_read_image(png, rows.data());
     png_read_end(png, info);
     if (deep)
-        out.from_rgba16(reinterpret_cast<const uint16_t*>(wide.data()), int(w) * 8);
+        out.set_source(std::move(wide));
 
     {
         using M = PixelFormat::Model;
