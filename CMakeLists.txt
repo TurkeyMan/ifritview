@@ -396,9 +396,11 @@ install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applic
 # The icon at each size, from data/ifritview.png (1024 px).
 install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
-# Bundled code whose licence asks for its notices to travel with the program.
+# The licence notices of the bundled code (third_party/), which ask to travel
+# with the program; the libraries are the distribution's, with their own.
+# (Windows builds its fuller list in .github/ci/third-party-notices.py.)
 if(NOT WIN32)
-  install(FILES third_party/astc/LICENSE third_party/astc/NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR}/licenses/astc)
+  install(FILES third_party/NOTICES.txt DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME THIRD-PARTY-NOTICES.txt)
 endif()
 # The 256 px icon as C bytes, for a bare executable's own desktop entry.
 file(READ data/icons/hicolor/256x256/apps/ifritview.png IFRIT_ICON_HEX HEX)
