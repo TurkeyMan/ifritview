@@ -68,6 +68,7 @@ private:
     rap::node metadata_node(const MetadataChoice& initial);
     void preset_chosen(int index);
     void group_toggled();
+    void show_choice();
     void update_metadata();  // greyed where the format or the image has none
 
     rap::ui* ui_ = nullptr;
@@ -85,5 +86,6 @@ private:
     std::vector<rap::check*> groups_;
     rap::label* metadata_note_ = nullptr;
     MetadataChoice present_;
+    MetadataChoice choice_;  // as chosen; groups the image lacks keep their setting, shown unchecked
     bool syncing_ = false;
 };

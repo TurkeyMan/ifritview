@@ -99,10 +99,8 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
         d->update_enabled(p);
     d->window_->on_finished([s](rap::dialog_role role) { s->finish(role == rap::dialog_role::ok); });
     d->show_format(initial);
-    d->preset_chosen(preset_index(metadata));
-    if (preset_index(metadata) == 5)
-        for (size_t i = 0; i < d->groups_.size(); ++i)
-            d->groups_[i]->set_checked(metadata.*kGroups[i].flag);
+    d->choice_ = metadata;
+    d->show_choice();
     d->window_->show();
     return d;
 }
@@ -182,40 +180,39 @@ rap::node SaveDialog::metadata_node(const MetadataChoice& initial)
 
 void SaveDialog::preset_chosen(int index)
 {
-    if (syncing_ || index < 0 || index > 5)
-        return;
-    if (index < 5)
-    {
-        MetadataChoice c;
-        std::string ignored;
-        parse_metadata_choice(kPresets[index], c, ignored);
-        for (size_t i = 0; i < groups_.size(); ++i)
-            groups_[i]->set_checked(c.keep && c.*kGroups[i].flag);
-    }
-    update_metadata();
+    if (syncing_ || index < 0 || index >= 5)
+        return;  // Custom keeps the groups as they are
+    std::string ignored;
+    parse_metadata_choice(kPresets[index], choice_, ignored);
+    show_choice();
 }
 
-// A group set by hand: the preset it now matches, or Custom.
+// A group set by hand: the preset the choice now matches, or Custom.
 void SaveDialog::group_toggled()
 {
+    choice_.keep = true;
+    for (size_t i = 0; i < groups_.size(); ++i)
+        if (present_.*kGroups[i].flag)  // a greyed one keeps what the choice had
+            choice_.*kGroups[i].flag = groups_[i]->checked();
+    show_choice();
+}
+
+// The choice in the controls: its preset, and each group checked if it's
+// kept and the image has any (a group with nothing in it is greyed and
+// unchecked: nothing of it will be saved, whatever the choice).
+void SaveDialog::show_choice()
+{
     syncing_ = true;
-    preset_->set_current(preset_index(metadata()));
+    preset_->set_current(preset_index(choice_));
     syncing_ = false;
+    for (size_t i = 0; i < groups_.size(); ++i)
+        groups_[i]->set_checked(choice_.keep && choice_.*kGroups[i].flag && present_.*kGroups[i].flag);
     update_metadata();
 }
 
 MetadataChoice SaveDialog::metadata() const
 {
-    MetadataChoice c;
-    if (preset_ && preset_->current() == 4)
-    {
-        c.keep = false;
-        return c;
-    }
-    for (size_t i = 0; i < groups_.size(); ++i)
-        if (groups_[i])
-            c.*kGroups[i].flag = groups_[i]->checked();
-    return c;
+    return choice_;
 }
 
 void SaveDialog::update_metadata()
