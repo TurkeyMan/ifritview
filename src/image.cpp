@@ -401,6 +401,7 @@ Image Image::crop(int x, int y, int w, int h) const
     out.longitude = longitude;
     out.place = place;
     out.stored = stored;
+    out.edited = true;
     for (int yy = 0; yy < h; ++yy)
         std::copy_n(row(y + yy) + x, w, out.row(yy));
     if (linear)
@@ -544,6 +545,7 @@ void Image::apply_orientation(int o)
     if (is_preview())
         pending_edits.push_back({o, 0, 0, 0, 0});
     mips.clear();
+    edited = true;
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;

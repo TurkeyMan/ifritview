@@ -865,6 +865,21 @@ std::vector<std::pair<uint16_t, std::string>> exif_strings(const std::vector<uin
     return out;
 }
 
+std::string metadata_choice_text(const MetadataChoice& c)
+{
+    std::string text = metadata_preset(c);
+    if (!text.empty())
+        return text;
+    text = "only:";
+    for (const char* name : {"location", "personal", "author", "description", "capture", "history"})
+    {
+        MetadataChoice copy = c;
+        if (*group_flag(copy, name))
+            text += std::string(text.size() > 5 ? "+" : "") + name;
+    }
+    return text;
+}
+
 FileMetadata prepare_metadata(const FileMetadata& source, const MetadataChoice& choice, const SaveTarget& target)
 {
     FileMetadata m;

@@ -771,7 +771,8 @@ const Encoder& bmp_encoder()
                             {"srgb", "sRGB colour space tag", Kind::Toggle, 0, 1, 1},
                             {"topdown", "Top-down rows", Kind::Toggle, 0, 1, 0}},
                            encode_bmp,
-                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }};
+                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; },
+                           false};
     return e;
 }
 const Encoder& tga_encoder()
@@ -783,7 +784,8 @@ const Encoder& tga_encoder()
                             {"rle", "RLE compression", Kind::Toggle, 0, 1, 0},
                             {"topleft", "Top-left origin", Kind::Toggle, 0, 1, 0}},
                            encode_tga,
-                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }};
+                           [](const EncodeOptions& o) { return o.get("format", 0) >= 3; },
+                           false};
     return e;
 }
 #ifdef HAVE_WEBP

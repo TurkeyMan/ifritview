@@ -17,6 +17,7 @@ const char* kControlsGroup = "controls";
 const char* kFullscreenControlsGroup = "controls_fullscreen";
 const char* kMaps = "maps";
 const char* kOverlay = "overlay";
+const char* kSave = "save";
 
 bool get_bool(GKeyFile* kf, const char* group, const char* key, bool fallback)
 {
@@ -172,6 +173,7 @@ void Config::load()
     overlay_windowed = get_bool(kf, kOverlay, "windowed", overlay_windowed);
     overlay_color = get_string(kf, kOverlay, "color", overlay_color);
     overlay_font_pt = std::clamp(get_int(kf, kOverlay, "font_pt", overlay_font_pt), 6, 40);
+    save_metadata = get_string(kf, kSave, "metadata", save_metadata);
     map_url = get_string(kf, kMaps, "url", map_url);
     geocoder_url = get_string(kf, kMaps, "geocoder_url", geocoder_url);
     if (!geocoder_url.empty() && (geocoder_url.find("{lat}") == std::string::npos || geocoder_url.find("{lon}") == std::string::npos))
@@ -239,6 +241,7 @@ bool Config::save() const
         g_key_file_set_string(kf, kControlsGroup, c.key, action_info(controls[size_t(c.id)]).key);
         g_key_file_set_string(kf, kFullscreenControlsGroup, c.key, action_info(fullscreen_controls[size_t(c.id)]).key);
     }
+    g_key_file_set_string(kf, kSave, "metadata", save_metadata.c_str());
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
     g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
     g_key_file_set_boolean(kf, kOverlay, "enabled", overlay_enabled);

@@ -132,6 +132,7 @@ struct Image
     Stage stage = Stage::Final;
     bool is_preview() const { return stage == Stage::Preview; }
     bool is_raw = false;
+    bool edited = false;  // cropped or turned since it was read: a stored thumbnail no longer matches
     bool is_video = false;
     bool has_audio = false;  // videos: an audio stream exists  // the pixels are a frame (the first, until the player takes over)
     double duration = 0;     // seconds, for videos  // a camera raw (its preview is the embedded JPEG; it has an exposure control)

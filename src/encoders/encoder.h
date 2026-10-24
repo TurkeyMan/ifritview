@@ -49,6 +49,7 @@ struct Encoder
     // Whether these options lose detail; unset means "has a quality and
     // isn't set lossless". The save dialog previews what loses detail.
     bool (*reduces)(const EncodeOptions& options) = nullptr;
+    bool metadata = true;  // can hold EXIF, XMP and the rest
 
     const EncodeSetting* setting(const char* key) const
     {

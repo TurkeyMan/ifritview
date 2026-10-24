@@ -1,6 +1,7 @@
 #pragma once
 
 #include "encoders/encoder.h"
+#include "metadata/file_metadata.h"
 
 #include <rapport/rapport.h>
 
@@ -10,9 +11,10 @@
 #include <string>
 #include <vector>
 
-// Save As, first step: the format, and below it that format's own settings.
-// Modeless, so the main view (zoom, pan) stays usable for judging a preview.
-// Save… then hands over to the file dialog for that format's files.
+// Save As, first step: the format, below it that format's own settings, and
+// what of the image's metadata to keep. Modeless, so the main view (zoom,
+// pan) stays usable for judging a preview. Save… then hands over to the file
+// dialog for that format's files.
 class SaveDialog
 {
 public:
@@ -31,8 +33,12 @@ public:
     // `own_extension` (lower case, "jpg" for JPEG) is preselected when
     // there's an encoder for it. `remembered` keeps each format's settings
     // between saves; it must outlive the dialog.
+    // `metadata` is the choice to start from; `has_metadata` whether the
+    // image has any (else that part is greyed).
     static std::shared_ptr<SaveDialog> open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
-                                            std::map<std::string, EncodeOptions>& remembered, Callbacks callbacks);
+                                            std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata, bool has_metadata,
+                                            Callbacks callbacks);
+    MetadataChoice metadata() const;  // as chosen
 
     void set_info(const std::string& text);  // beside the format: the preview's file size
     bool preview_shown() const { return !preview_ || preview_->checked(); }
@@ -59,6 +65,10 @@ private:
     void show_format(int index);
     void report();
     void finish(bool save);
+    rap::node metadata_node(const MetadataChoice& initial);
+    void preset_chosen(int index);
+    void group_toggled();
+    void update_metadata();  // greyed where the format or the image has none
 
     rap::ui* ui_ = nullptr;
     std::unique_ptr<rap::window> window_;
@@ -70,4 +80,10 @@ private:
     bool finished_ = false;
     rap::label* info_ = nullptr;
     rap::check* preview_ = nullptr;
+    // Metadata: a preset, and the groups it stands for (which can be set one by one).
+    rap::drop_down* preset_ = nullptr;
+    std::vector<rap::check*> groups_;
+    rap::label* metadata_note_ = nullptr;
+    bool has_metadata_ = false;
+    bool syncing_ = false;
 };

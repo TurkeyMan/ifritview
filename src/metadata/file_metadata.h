@@ -48,6 +48,8 @@ struct MetadataChoice
 bool parse_metadata_choice(const std::string& text, MetadataChoice& choice, std::string& error);
 // The preset a choice matches ("all", ...), or "" for any other mix.
 std::string metadata_preset(const MetadataChoice& choice);
+// The choice in words parse_metadata_choice reads: its preset, else "only:...".
+std::string metadata_choice_text(const MetadataChoice& choice);
 
 // The file being written, so the metadata can be made to describe it.
 struct SaveTarget

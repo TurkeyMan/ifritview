@@ -56,6 +56,9 @@ struct Config
     std::string overlay_color = "#a6d96a";
     int overlay_font_pt = 10;
 
+    // Save As: the metadata kept, as parse_metadata_choice reads it.
+    std::string save_metadata = "all";
+
     // Maps: where a GPS location link goes; {lat} and {lon} are substituted.
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;

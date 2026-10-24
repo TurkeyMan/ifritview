@@ -1530,8 +1530,23 @@ void App::save_as()
     SaveDialog::Callbacks cb;
     cb.changed = [this](const Encoder& e, const EncodeOptions& o) { preview_save(e, o); };
     cb.preview_shown = [this](bool on) { show_save_preview(on); };
-    cb.chosen = [this](const Encoder& e, const EncodeOptions& o)
+    cb.chosen = [this](const Encoder& e, const EncodeOptions& chosen)
     {
+        EncodeOptions o = chosen;
+        const MetadataChoice metadata = save_dialog_->metadata();
+        cfg_.save_metadata = metadata_choice_text(metadata);
+        cfg_.save();
+        // The file's metadata, made to describe what's being saved. A
+        // difference image has none of its own.
+        if (save_source_ == image_ && image_->stored && e.metadata)
+        {
+            SaveTarget target;
+            target.width = image_->width;
+            target.height = image_->height;
+            target.pixels_changed = image_->edited || image_->exposure_edit != 0;
+            target.drop_develop = image_->is_raw || (cfg_.apply_xmp_edits && image_->xmp.present);
+            o.metadata = std::make_shared<const FileMetadata>(prepare_metadata(*image_->stored, metadata, target));
+        }
         // After the dialog has gone, so the file dialog has the main window as parent.
         ui_.post([this, e = &e, o, source = save_source_] { choose_save_path(*e, o, source); });
     };
@@ -1550,7 +1565,13 @@ void App::save_as()
     };
     if (slideshow_)
         stop_slideshow();
-    save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, std::move(cb));
+    MetadataChoice metadata;
+    std::string ignored;
+    parse_metadata_choice(cfg_.save_metadata, metadata, ignored);  // an unreadable setting keeps everything
+    const bool has_metadata =
+        save_source_ == image_ && image_->stored && !(image_->stored->exif.empty() && image_->stored->xmp.empty() && image_->stored->iptc.empty());
+    save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, metadata,
+                                    has_metadata, std::move(cb));
     update_toolbar();
 }
 
