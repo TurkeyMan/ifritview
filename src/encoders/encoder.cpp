@@ -720,7 +720,7 @@ bool encode_tga(const Image& image, const std::string& path, const EncodeOptions
 using Kind = EncodeSetting::Kind;
 
 const EncodeSetting kQuality{"quality", "Quality", Kind::Range, 1, 100, 90, {}, nullptr, "lossless"};
-const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "exact; larger"};
+const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "exact"};
 
 #ifdef HAVE_PNG
 const Encoder& png_encoder()

@@ -395,9 +395,13 @@ Image Image::crop(int x, int y, int w, int h) const
     out.format = format;
     out.pixel_format = pixel_format;
     out.color_space = color_space;
+    out.declared_space = declared_space;
     out.info = info;
+    out.encoded_as = encoded_as;  // still the file's pixels: lossless JPEG crops start from it
+    out.encoding = encoding;
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
+    out.is_raw = is_raw;
     out.xmp = xmp;
     out.stage = stage;
     out.exposure_edit = exposure_edit;

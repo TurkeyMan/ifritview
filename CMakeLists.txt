@@ -33,6 +33,9 @@ if(VCPKG_TARGET_TRIPLET MATCHES "static")
   add_compile_definitions(JSON_STATIC_BUILD)  # json-glib's .pc doesn't say so
 endif()
 find_package(PkgConfig REQUIRED)
+# The package's name, lower case, as distributions name the folder; not the
+# project's (IfritView), which GNUInstallDirs would use.
+set(CMAKE_INSTALL_DOCDIR share/doc/ifritview CACHE PATH "Documentation (share/doc/ifritview)")
 include(GNUInstallDirs)
 # The core needs GLib/GIO and gdk-pixbuf; the toolkits come with rapport.
 if(WIN32)
@@ -420,8 +423,13 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/icons/hicolo
   data/ifritview.desktop)
 
 # Refresh the desktop/MIME/icon caches on `cmake --install` so file managers
-# pick the app up immediately (packages do this in their own postinst).
+# pick the app up immediately. Not into a DESTDIR (a package being built):
+# the package manager refreshes them, and owns the caches, which a package
+# carrying its own would clash with.
 install(CODE "
+  if(NOT \"\$ENV{DESTDIR}\" STREQUAL \"\")
+    return()
+  endif()
   foreach(tool update-desktop-database update-mime-database gtk-update-icon-cache)
     find_program(IFRIT_TOOL_\${tool} \${tool})
   endforeach()

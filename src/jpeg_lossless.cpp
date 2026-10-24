@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #ifdef HAVE_TURBOJPEG
 #include <turbojpeg.h>
@@ -20,17 +21,16 @@ namespace
 #ifdef HAVE_TURBOJPEG
 // TurboJPEG's functions. On Windows it's linked in; on Linux it's loaded
 // when first wanted, so the library is a recommended package, not a
-// required one: without it, lossless saving says it needs it.
+// required one: without it, lossless saving says it needs it. The 2.x
+// API, which 3.x keeps: Debian 13 still has 2.1, under the same soname.
 struct TurboJpeg
 {
-    tjhandle (*init)(int) = nullptr;  // tj3Init: a macro over tj3InitVersion since 3.2
-    tjhandle (*init_version)(int, int) = nullptr;
-    decltype(&tj3Destroy) destroy = nullptr;
-    decltype(&tj3GetErrorStr) error = nullptr;
-    decltype(&tj3DecompressHeader) header = nullptr;
-    decltype(&tj3Get) get = nullptr;
-    decltype(&tj3Transform) transform = nullptr;
-    decltype(&tj3Free) free = nullptr;
+    decltype(&tjInitTransform) init = nullptr;
+    decltype(&tjDestroy) destroy = nullptr;
+    decltype(&tjGetErrorStr2) error = nullptr;
+    decltype(&tjDecompressHeader3) header = nullptr;
+    decltype(&tjTransform) transform = nullptr;
+    decltype(&tjFree) free = nullptr;
 };
 
 const TurboJpeg* turbojpeg()
@@ -46,24 +46,21 @@ const TurboJpeg* turbojpeg()
                        if (!lib)
                            return;
                        const auto sym = [lib](auto& f, const char* name) { f = reinterpret_cast<std::remove_reference_t<decltype(f)>>(platform::library_symbol(lib, name)); };
-                       sym(tj.init, "tj3Init");
-                       sym(tj.init_version, "tj3InitVersion");
-                       sym(tj.destroy, "tj3Destroy");
-                       sym(tj.error, "tj3GetErrorStr");
-                       sym(tj.header, "tj3DecompressHeader");
-                       sym(tj.get, "tj3Get");
-                       sym(tj.transform, "tj3Transform");
-                       sym(tj.free, "tj3Free");
+                       sym(tj.init, "tjInitTransform");
+                       sym(tj.destroy, "tjDestroy");
+                       sym(tj.error, "tjGetErrorStr2");
+                       sym(tj.header, "tjDecompressHeader3");
+                       sym(tj.transform, "tjTransform");
+                       sym(tj.free, "tjFree");
 #else
-                       tj.init = [](int type) { return tj3Init(type); };
-                       tj.destroy = tj3Destroy;
-                       tj.error = tj3GetErrorStr;
-                       tj.header = tj3DecompressHeader;
-                       tj.get = tj3Get;
-                       tj.transform = tj3Transform;
-                       tj.free = tj3Free;
+                       tj.init = tjInitTransform;
+                       tj.destroy = tjDestroy;
+                       tj.error = tjGetErrorStr2;
+                       tj.header = tjDecompressHeader3;
+                       tj.transform = tjTransform;
+                       tj.free = tjFree;
 #endif
-                       ok = (tj.init || tj.init_version) && tj.destroy && tj.error && tj.header && tj.get && tj.transform && tj.free;
+                       ok = tj.init && tj.destroy && tj.error && tj.header && tj.transform && tj.free;
                    });
     return ok ? &tj : nullptr;
 }
@@ -128,14 +125,18 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         plan.why_not = "the original file can't be read";
         return plan;
     }
+    if (src.size() > std::numeric_limits<unsigned long>::max() / 2)  // the API's sizes, 32 bits on Windows
+    {
+        plan.why_not = "the original is too large for the transform";
+        return plan;
+    }
     const TurboJpeg* tj = turbojpeg();
     if (!tj)
     {
         plan.why_not = "it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)";
         return plan;
     }
-    // The 3.0 API version: what this file uses.
-    tjhandle handle = tj->init ? tj->init(TJINIT_TRANSFORM) : tj->init_version(TJINIT_TRANSFORM, 3000000);
+    tjhandle handle = tj->init();
     if (!handle)
     {
         plan.why_not = "the lossless JPEG transform isn't available";
@@ -147,12 +148,12 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         tjhandle handle;
         ~Done() { tj->destroy(handle); }
     } done{tj, handle};
-    if (tj->header(handle, src.data(), src.size()) != 0)
+    int W = 0, H = 0, subsamp = -1, colorspace = 0;
+    if (tj->header(handle, src.data(), static_cast<unsigned long>(src.size()), &W, &H, &subsamp, &colorspace) != 0)
     {
         plan.why_not = std::string("the original can't be read: ") + tj->error(handle);
         return plan;
     }
-    const int W = tj->get(handle, TJPARAM_JPEGWIDTH), H = tj->get(handle, TJPARAM_JPEGHEIGHT), subsamp = tj->get(handle, TJPARAM_SUBSAMP);
     // Untouched since it was read, the image is the whole file upright.
     const int orientation = t.width ? t.orientation : 1;
     const bool turned = orientation >= 5;
@@ -210,8 +211,8 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         xf.r = {x0, y0, x1 - x0, y1 - y0};
     }
     unsigned char* dst = nullptr;
-    size_t dst_size = 0;
-    if (tj->transform(handle, src.data(), src.size(), 1, &dst, &dst_size, &xf) != 0)
+    unsigned long dst_size = 0;
+    if (tj->transform(handle, src.data(), static_cast<unsigned long>(src.size()), 1, &dst, &dst_size, &xf, 0) != 0)
     {
         plan.why_not = std::string("the transform failed: ") + tj->error(handle);
         tj->free(dst);
@@ -219,14 +220,13 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     }
     plan.data.assign(dst, dst + dst_size);
     tj->free(dst);
-    if (tj->header(handle, plan.data.data(), plan.data.size()) != 0)
+    int out_subsamp = 0;
+    if (tj->header(handle, plan.data.data(), static_cast<unsigned long>(plan.data.size()), &plan.width, &plan.height, &out_subsamp, &colorspace) != 0)
     {
         plan.why_not = "the transform's result can't be read";
         plan.data.clear();
         return plan;
     }
-    plan.width = tj->get(handle, TJPARAM_JPEGWIDTH);
-    plan.height = tj->get(handle, TJPARAM_JPEGHEIGHT);
     // Against the image as shown, in the turned image's coordinates: the
     // result starts at the trimmed strip plus the block corner.
     const int start_x = trim_left + x0, start_y = trim_top + y0;
