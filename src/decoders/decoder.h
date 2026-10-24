@@ -92,6 +92,7 @@ const Decoder& netpbm_decoder();
 const Decoder& dds_decoder();
 const Decoder& vtf_decoder();
 const Decoder& blp_decoder();
+const Decoder& tim2_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.

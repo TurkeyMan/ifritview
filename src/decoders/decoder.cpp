@@ -200,6 +200,7 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&dds_decoder());
         v.push_back(&vtf_decoder());
         v.push_back(&blp_decoder());
+        v.push_back(&tim2_decoder());
         v.push_back(&stb_decoder());
         v.push_back(&pixbuf_decoder());  // catch-all, must stay last
         return v;
