@@ -327,12 +327,26 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                         std::string path = files.front();
                         if (encoder_for_extension(file_extension(path)) != enc)
                             path += std::string(".") + enc->extension;  // not every toolkit's dialog adds it
-                        std::string error;
-                        const bool ok = lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), path, error) : enc->encode(*source, path, o, error);
-                        status_message_ = ok ? "Saved " + std::filesystem::path(path).filename().string() : "Save failed: " + error;
-                        if (ok)
-                            folder_.rescan(cfg_);  // the new file may now be part of the folder
+                        // On a thread: some formats take seconds to encode (AVIF, BC7
+                        // with its mipmaps), and the window keeps working meanwhile.
+                        const std::string name = std::filesystem::path(path).filename().string();
+                        status_message_ = "Saving " + name + "…";
                         update_status();
-                        update_title();
+                        std::thread(
+                            [this, enc, o, source, lossless, path, name]
+                            {
+                                std::string error;
+                                const bool ok = lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), path, error) : enc->encode(*source, path, o, error);
+                                platform::post_main(
+                                    [this, ok, error, name]
+                                    {
+                                        status_message_ = ok ? "Saved " + name : "Save failed: " + error;
+                                        if (ok)
+                                            folder_.rescan(cfg_);  // the new file may now be part of the folder
+                                        update_status();
+                                        update_title();
+                                    });
+                            })
+                            .detach();
                     });
 }

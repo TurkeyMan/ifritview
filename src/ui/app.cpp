@@ -1369,7 +1369,7 @@ void App::update_status()
     {
         status_location_->set_visible(false);
     }
-    const bool busy = status_message_.rfind("Loading", 0) == 0 || status_message_.rfind("Developing", 0) == 0;
+    const bool busy = status_message_.rfind("Loading", 0) == 0 || status_message_.rfind("Developing", 0) == 0 || status_message_.rfind("Saving", 0) == 0;
     view_->set_busy(busy);
     view_->set_overlay(overlay_sections());
     status_left_->set_text(left);
