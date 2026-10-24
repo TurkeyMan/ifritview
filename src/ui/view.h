@@ -273,6 +273,7 @@ private:
     double press_x_ = 0, press_y_ = 0;  // logical px
     double drag_x_ = 0, drag_y_ = 0;
     double sel_anchor_x_ = 0, sel_anchor_y_ = 0;
+    unsigned drag_modifiers_ = 0;  // rap::mod_*, from the latest pointer event
     bool has_selection_ = false;
     double sel_x0_ = 0, sel_y0_ = 0, sel_x1_ = 0, sel_y1_ = 0;
     double scroll_accum_ = 0;

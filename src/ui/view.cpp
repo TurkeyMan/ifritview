@@ -3,6 +3,7 @@
 #include "config.h"
 #include "controls.h"
 #include "scale.h"
+#include "selection.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1190,10 +1191,16 @@ void View::update_selection(double x, double y)
     to_image(x, y, ix, iy);
     ix = std::clamp(ix, 0.0, double(image_->width));
     iy = std::clamp(iy, 0.0, double(image_->height));
-    sel_x0_ = std::floor(std::min(sel_anchor_x_, ix));
-    sel_y0_ = std::floor(std::min(sel_anchor_y_, iy));
-    sel_x1_ = std::ceil(std::max(sel_anchor_x_, ix));
-    sel_y1_ = std::ceil(std::max(sel_anchor_y_, iy));
+    // Shift makes a square and Ctrl the image's own shape. Read on every
+    // move, so pressing or letting go of one mid-drag changes the rectangle.
+    const SelectionLock lock = (drag_modifiers_ & rap::mod_shift)  ? SelectionLock::Square
+                               : (drag_modifiers_ & rap::mod_ctrl) ? SelectionLock::ImageRatio
+                                                                   : SelectionLock::None;
+    const SelectionRect r = selection_rect(sel_anchor_x_, sel_anchor_y_, ix, iy, image_->width, image_->height, lock);
+    sel_x0_ = r.x0;
+    sel_y0_ = r.y0;
+    sel_x1_ = r.x1;
+    sel_y1_ = r.y1;
     has_selection_ = sel_x1_ - sel_x0_ >= 2 && sel_y1_ - sel_y0_ >= 2;
     invalidate();
 }
@@ -1355,6 +1362,7 @@ bool View::pointer(const rap::pointer_event& e)
         }
     }
 
+    drag_modifiers_ = e.modifiers;
     if (e.type == T::move || e.type == T::enter)
     {
         poke_controls();

@@ -402,6 +402,7 @@ rap::node controls_page(const Config& cfg, State& st)
     State* s = &st;
     return L::scroll{L::vbox{
         rap::node{form, {}},
+        L::label{"While selecting a region, hold Shift for a square or Ctrl for the image's own shape."},
         L::hbox{
             L::spacer{},
             L::button{"Reset to defaults"}.on_click(
