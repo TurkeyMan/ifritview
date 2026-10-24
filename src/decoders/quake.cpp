@@ -1,7 +1,7 @@
 // Quake's 8-bit images, which carry no palette: the game's palette is a
 // file of its own. Quake 2 WAL textures: a 32-byte name, width, height,
 // four mipmap offsets, the next animation frame's name and the surface
-// flags, then the mipmaps (the largest is shown). Quake 1 LMP pictures:
+// flags, then the mipmaps, which are its levels. Quake 1 LMP pictures:
 // the "qpic" layout (32-bit width and height, then the pixels), and the
 // headerless lumps beside them: palette.lmp (shown as a 16 × 16 swatch),
 // colormap.lmp (256 × 64 lighting ramps) and conchars (the 128 × 128 font).
@@ -16,6 +16,7 @@
 
 #include "../platform.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -124,7 +125,7 @@ void note_palette(const std::string& group, const std::string& found, Image& out
     out.add(group, "Palette", found.empty() ? "not found, shown in grey" : found);
 }
 
-bool decode_wal(const std::string& path, Image& out, std::string& error)
+bool decode_wal_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -133,12 +134,21 @@ bool decode_wal(const std::string& path, Image& out, std::string& error)
         error = "not a WAL file";
         return false;
     }
-    const uint32_t w = le32(d + 32), h = le32(d + 36), offset = le32(d + 40);
-    if (w == 0 || h == 0 || w > 8192 || h > 8192)
+    const uint32_t width = le32(d + 32), height = le32(d + 36);
+    if (width == 0 || height == 0 || width > 8192 || height > 8192)
     {
         error = "bad WAL size";
         return false;
     }
+    // Always four mipmaps, each half the one before.
+    out.level_count = 4;
+    if (part.level >= 4)
+    {
+        error = "the WAL has no such level";
+        return false;
+    }
+    const uint32_t w = std::max(1u, width >> part.level), h = std::max(1u, height >> part.level);
+    const uint32_t offset = le32(d + 40 + part.level * 4);
     if (offset < 100 || offset > size || size - offset < size_t(w) * h)
     {
         error = "WAL data is cut short";
@@ -242,7 +252,8 @@ bool decode_lmp(const std::string& path, Image& out, std::string& error)
 // No signatures: the extension alone claims these.
 const Decoder& wal_decoder()
 {
-    static const Decoder d{"WAL", {"wal"}, nullptr, decode_wal};
+    static const Decoder d{"WAL", {"wal"}, nullptr, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_wal_part(path, {}, out, error); }, nullptr, false, decode_wal_part};
     return d;
 }
 

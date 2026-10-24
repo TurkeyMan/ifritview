@@ -1,5 +1,5 @@
 // Blizzard's BLP textures: a header with sixteen mipmap offsets and sizes,
-// then the mipmaps; the largest is shown. BLP1 (Warcraft III) is either
+// then the mipmaps, which are its levels. BLP1 (Warcraft III) is either
 // JPEG, each mipmap a JPEG body completed by a header shared between them
 // and holding B, G, R, A as the four components with no colour transform,
 // or a 256-colour BGRA palette with the alpha as a separate plane. BLP2
@@ -115,7 +115,7 @@ bool decode_jpeg(const uint8_t* d, size_t size, const uint8_t* mip, size_t mip_s
 #endif
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -142,7 +142,6 @@ bool decode(const std::string& path, Image& out, std::string& error)
     if (!blp2 && alpha_bits != 0 && alpha_bits != 1 && alpha_bits != 4)
         alpha_bits = 8;
     const uint8_t encoding = blp2 ? d[8] : 0, alpha_type = blp2 ? d[10] : 0;
-    const uint32_t offset = le32(d + tables), length = le32(d + tables + 64);
     int mips = 0;
     for (int i = 0; i < 16; ++i)
         mips += le32(d + tables + i * 4) && le32(d + tables + 64 + i * 4);
@@ -156,12 +155,24 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "BLP alpha depth " + std::to_string(alpha_bits) + " isn't supported";
         return false;
     }
+    // The levels: the mipmaps the table lists from the first on, each half
+    // the one before, down to 1 × 1.
+    int levels = 1;
+    while (levels < 16 && (width | height) >> levels && le32(d + tables + levels * 4) && le32(d + tables + 64 + levels * 4))
+        ++levels;
+    out.level_count = levels;
+    if (part.level >= levels)
+    {
+        error = "the BLP has no such level";
+        return false;
+    }
+    const uint32_t offset = le32(d + tables + part.level * 4), length = le32(d + tables + 64 + part.level * 4);
     if (offset > size || length > size - offset)
     {
         error = "BLP data is cut short";
         return false;
     }
-    const int w = int(width), h = int(height);
+    const int w = std::max(1, int(width >> part.level)), h = std::max(1, int(height >> part.level));
     const uint8_t* mip = d + offset;
     std::string kind;
     bool ok = false;
@@ -254,6 +265,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& blp_decoder()
 {
-    static const Decoder d{"BLP", {"blp"}, sniff, decode};
+    static const Decoder d{"BLP", {"blp"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }

@@ -4,6 +4,7 @@
 
 #include <libheif/heif.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -21,7 +22,7 @@ bool sniff(const uint8_t* h, size_t n)
     return false;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     heif_context* ctx = heif_context_alloc();
     const uint8_t* bytes = nullptr;
@@ -39,8 +40,26 @@ bool decode(const std::string& path, Image& out, std::string& error)
         heif_context_free(ctx);
         return false;
     }
+    // The top-level images are the pages: a burst, a collection, a camera's
+    // bracketed set. The primary comes first, so opening the file shows it,
+    // then the others in file order.
+    std::vector<heif_item_id> pages(size_t(std::max(0, heif_context_get_number_of_top_level_images(ctx))));
+    pages.resize(size_t(heif_context_get_list_of_top_level_image_IDs(ctx, pages.data(), int(pages.size()))));
+    heif_item_id primary = 0;
+    if (heif_context_get_primary_image_ID(ctx, &primary).code == heif_error_Ok)
+        if (auto at = std::find(pages.begin(), pages.end(), primary); at != pages.end())
+            std::rotate(pages.begin(), at, at + 1);
+    out.page_count = std::max(1, int(pages.size()));
+    if (part.page >= out.page_count)
+    {
+        error = "the HEIF has no such page";
+        heif_context_free(ctx);
+        return false;
+    }
+    if (pages.size() > 1 && part.page == 0 && pages[0] == primary)
+        out.page_label = _("(primary)");
     heif_image_handle* handle = nullptr;
-    err = heif_context_get_primary_image_handle(ctx, &handle);
+    err = pages.empty() ? heif_context_get_primary_image_handle(ctx, &handle) : heif_context_get_image_handle(ctx, pages[size_t(part.page)], &handle);
     if (err.code != heif_error_Ok)
     {
         error = err.message;
@@ -166,6 +185,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& heif_decoder()
 {
-    static const Decoder d{"HEIF", {"heic", "heif", "hif", "avif"}, sniff, decode};
+    static const Decoder d{"HEIF", {"heic", "heif", "hif", "avif"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }

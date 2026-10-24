@@ -1,14 +1,15 @@
 // .astc, ARM's container for one ASTC surface: a 16-byte header (the magic
 // 0x5CA1AB13, the block footprint in x, y and z, then the size as three
 // 24-bit little-endian numbers), then the blocks, decoded through astc.cpp.
-// Whether a file is LDR or HDR is told by its blocks; a volume (z > 1)
-// shows its first slice when its blocks are 2D, and isn't supported when
-// they're 3D.
+// Whether a file is LDR or HDR is told by its blocks. A volume (z > 1)
+// with 2D blocks holds its slices one after another, and each is a page;
+// one with 3D blocks isn't supported.
 #include "astc.h"
 #include "../i18n.h"
 #include "../bytes.h"
 #include "decoder.h"
 
+#include <algorithm>
 #include <string>
 
 namespace
@@ -19,7 +20,7 @@ bool sniff(const uint8_t* h, size_t n)
     return n >= 4 && h[0] == 0x13 && h[1] == 0xAB && h[2] == 0xA1 && h[3] == 0x5C;
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart part, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -40,7 +41,23 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "bad ASTC size";
         return false;
     }
-    if (!decode_astc(d + 16, size - 16, bw, bh, int(w), int(h), AstcProfile::Auto, out, error))
+    out.page_count = int(std::min<uint32_t>(depth, 1 << 16));
+    if (part.page >= out.page_count)
+    {
+        error = "the ASTC file has no such page";
+        return false;
+    }
+    // Every slice is whole blocks, so each starts a fixed stride after the
+    // last. A footprint the format doesn't define has no stride; decode_astc
+    // turns it down.
+    const uint64_t slice = astc_footprint_valid(bw, bh) ? astc_size(bw, bh, int(w), int(h)) : 0;
+    const uint64_t at = 16 + slice * uint64_t(part.page);
+    if (at > size)
+    {
+        error = "ASTC data is cut short";
+        return false;
+    }
+    if (!decode_astc(d + at, size - size_t(at), bw, bh, int(w), int(h), AstcProfile::Auto, out, error))
         return false;
 
     out.format = "ASTC";
@@ -49,7 +66,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.add(N_("ASTC"), N_("Block size"), footprint);
     out.add(N_("ASTC"), N_("Profile"), out.bits_per_sample > 8 ? "HDR" : "LDR");
     if (depth > 1)
-        out.add(N_("ASTC"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
+        out.add(N_("ASTC"), N_("Volume"), rap::i18n::format(_("{0} slices"), depth));
     return true;
 }
 
@@ -57,6 +74,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& astc_decoder()
 {
-    static const Decoder d{"ASTC", {"astc"}, sniff, decode};
+    static const Decoder d{"ASTC", {"astc"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
