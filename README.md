@@ -41,6 +41,10 @@ an old game ever produced.
   rebind for windowed and fullscreen use.
 - **Saves to other formats,** with each format's own settings and a live
   preview of lossy encoding before anything is written.
+- **Takes format plugins:** shared libraries written to a small C interface,
+  [include/ifritview_plugin.h](include/ifritview_plugin.h), which says where
+  they go and what they export. `ifritview --plugins` lists what's loaded;
+  [examples/plugins/farbfeld](examples/plugins/farbfeld) is a complete one.
 
 ## Building
 

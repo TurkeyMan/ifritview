@@ -29,6 +29,11 @@ mkdir -p build-ci/smoke
 printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > build-ci/smoke/rgb.ppm
 build-ci/ifritview --probe build-ci/smoke/rgb.ppm
 build-ci/ifritview --version
+# A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
+# packaged), reading a 1x1 image.
+printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > build-ci/smoke/red.ff
+build-ci/ifritview --plugins
+build-ci/ifritview --probe build-ci/smoke/red.ff
 
 if [ "$generator" = DEB ]; then
   # The .deb depends on what the exe and the core need, not the plugins: a

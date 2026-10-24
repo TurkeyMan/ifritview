@@ -108,6 +108,11 @@ if(NOT WIN32)
     IFRIT_FORMAT_PLUGIN_DIR="${IFRIT_FORMAT_PLUGIN_DIR}"
     IFRIT_FORMAT_PLUGIN_DIR_FULL="${CMAKE_INSTALL_FULL_LIBDIR}/ifritview/plugins")
 endif()
+# The farbfeld example plugin, built into <build>/plugins (not installed).
+option(IFRIT_EXAMPLE_PLUGINS "Build the example format plugin (examples/plugins; not installed)" ON)
+if(IFRIT_EXAMPLE_PLUGINS)
+  add_subdirectory(examples/plugins/farbfeld)
+endif()
 
 # The app: native widgets from whichever toolkit is at hand (GTK or Qt on
 # Linux, Win32 on Windows), through rapport, linked in statically from the
