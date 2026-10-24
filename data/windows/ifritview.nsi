@@ -40,12 +40,46 @@ VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "IfritView installer"
 VIAddVersionKey "LegalCopyright" "Manu Evans, GPL-3.0"
 
+; Windows won't let a running exe be replaced or deleted: before either, ask
+; to close the IfritView windows that are open, as installers do, and close
+; them as their close button would (taskkill without /F). The exe being
+; locked is the test, so another copy elsewhere doesn't count.
+!macro CLOSE_RUNNING prefix
+Function ${prefix}CloseRunning
+  IfFileExists "$INSTDIR\ifritview.exe" 0 done
+  ClearErrors
+  FileOpen $0 "$INSTDIR\ifritview.exe" a
+  IfErrors 0 unlocked
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "IfritView is open. Setup will close it to continue." /SD IDOK IDOK close
+  Abort
+close:
+  nsExec::Exec 'taskkill /IM ifritview.exe'
+  Pop $1
+  StrCpy $1 0
+wait:
+  Sleep 250
+  ClearErrors
+  FileOpen $0 "$INSTDIR\ifritview.exe" a
+  IfErrors 0 unlocked
+  IntOp $1 $1 + 1
+  IntCmp $1 20 0 wait 0  ; five seconds
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "IfritView is still open. Close it, then choose Retry." /SD IDCANCEL IDRETRY close
+  Abort
+unlocked:
+  FileClose $0
+done:
+FunctionEnd
+!macroend
+!insertmacro CLOSE_RUNNING ""
+!insertmacro CLOSE_RUNNING "un."
+
 Function RunAsUser
   Exec '"$WINDIR\explorer.exe" "$INSTDIR\ifritview.exe"'
 FunctionEnd
 
 Section "IfritView"
   SetShellVarContext all
+  Call CloseRunning
   ; A reinstall replaces the app rather than mixing two versions' files, but
   ; keeps the format plugins people put in plugins (the stage's copy of
   ; ifritview_plugin.h, there for plugin authors, then replaces the old).
@@ -77,6 +111,7 @@ SectionEnd
 
 Section "Uninstall"
   SetShellVarContext all
+  Call un.CloseRunning
   Delete "$SMPROGRAMS\IfritView.lnk"
   Delete "$INSTDIR\ifritview.exe"
   ; Plugins people added stay, and so the folder with them.
