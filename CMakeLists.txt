@@ -75,6 +75,7 @@ add_library(ifrit_core STATIC
   src/decoders/pkm.cpp
   src/decoders/astc.cpp
   src/decoders/astc_file.cpp
+  src/decoders/ktx.cpp
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})
@@ -212,6 +213,20 @@ ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
 ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
 ifrit_backend(xmp  HAVE_XMP  src/decoders/xmp.cpp  exempi-2.0)
 
+# Zstandard, for KTX2 levels supercompressed with it (optional: without it
+# such files are refused with a message).
+option(IFRIT_WITH_ZSTD "Read Zstandard-supercompressed KTX2" ON)
+if(IFRIT_WITH_ZSTD)
+  pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
+endif()
+if(ZSTD_FOUND)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_ZSTD)
+  target_link_libraries(ifrit_core PUBLIC PkgConfig::ZSTD)
+  message(STATUS "zstd: enabled")
+else()
+  message(STATUS "zstd: not found (libzstd), KTX2 Zstandard supercompression unsupported")
+endif()
+
 # LibRaw ships a reentrant variant; prefer it, fall back to the plain one.
 pkg_check_modules(LIBRAW_R QUIET libraw_r)
 if(LIBRAW_R_FOUND)
@@ -285,7 +300,7 @@ endif()
 # for jxl.lib).
 if(MSVC)
   set(vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
-  foreach(pkg CORE EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW GEOCODE PDF_CAIRO)
+  foreach(pkg CORE EXIF JPEG PNG WEBP HEIF JXL JXL_THREADS TIFF RAW ZSTD GEOCODE PDF_CAIRO)
     if(NOT TARGET PkgConfig::${pkg})
       continue()
     endif()

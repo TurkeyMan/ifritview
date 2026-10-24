@@ -206,6 +206,8 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&lmp_decoder());
         v.push_back(&pkm_decoder());
         v.push_back(&astc_decoder());
+        v.push_back(&ktx_decoder());
+        v.push_back(&ktx2_decoder());
         v.push_back(&stb_decoder());
         v.push_back(&pixbuf_decoder());  // catch-all, must stay last
         return v;

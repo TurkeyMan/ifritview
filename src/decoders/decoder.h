@@ -102,6 +102,8 @@ const Decoder& lmp_decoder();
 bool pcx_vga_palette(const uint8_t* data, size_t size, uint32_t palette[256]);
 const Decoder& pkm_decoder();
 const Decoder& astc_decoder();
+const Decoder& ktx_decoder();
+const Decoder& ktx2_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
