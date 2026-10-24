@@ -136,6 +136,10 @@ struct PixelFormat
                 if (c.name == 'A')
                     s += " + alpha";
         }
+        else if (channels.empty())
+        {
+            s = model == Model::L ? "Grey" : model == Model::RGB ? "RGB" : model == Model::CMYK ? "CMYK" : model == Model::Lab ? "Lab" : "";
+        }
         else
         {
             for (const Channel& c : channels)
@@ -146,7 +150,11 @@ struct PixelFormat
         for (const Channel& c : channels)
             uniform &= c.bits == channels[0].bits;
         const int bits0 = channels.empty() ? 0 : channels[0].bits;
-        if (sample == Sample::Float)
+        if (channels.empty())
+        {
+            // Nothing known per channel (a block-compressed texture): no depth to give.
+        }
+        else if (sample == Sample::Float)
         {
             s += " float" + std::to_string(bits0);
         }
@@ -180,7 +188,7 @@ private:
     std::string join_notes(std::string s) const
     {
         for (const std::string& n : notes)
-            s += ", " + n;
+            s += (s.empty() ? "" : ", ") + n;
         return s;
     }
 };

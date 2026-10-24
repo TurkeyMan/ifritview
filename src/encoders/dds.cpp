@@ -231,6 +231,50 @@ void punch_through(uint8_t* block, const uint8_t* px)
         block[4 + b] = uint8_t(indices >> (8 * b));
 }
 
+// BC7 for an opaque block: bc7enc's mode 6 can leave its alpha at 254 (a
+// p-bit of 0 under alpha endpoints of 127), which makes an opaque image
+// faintly transparent. Both alpha endpoints and p-bits set make it 255; the
+// p-bits also end the colour endpoints, which move by 1/255 at most.
+void opaque_bc7(uint8_t* block, const uint8_t* px)
+{
+    for (int i = 0; i < 16; ++i)
+        if (px[i * 4 + 3] != 255)
+            return;
+    if ((block[0] & 0x7F) != 0x40)  // mode 6: six zero bits, then a one
+        return;
+    uint64_t lo, hi;
+    std::memcpy(&lo, block, 8);
+    std::memcpy(&hi, block + 8, 8);
+    lo |= ((uint64_t(1) << 14) - 1) << 49;  // A0 and A1, bits 49-62
+    lo |= uint64_t(1) << 63;                // P0
+    hi |= 1;                                // P1, bit 64
+    std::memcpy(block, &lo, 8);
+    std::memcpy(block + 8, &hi, 8);
+}
+
+// A block's clear pixels take the colour of the rest (weighted by alpha),
+// so the colour fit isn't pulled towards what nobody sees (black, from
+// unpremultiplying).
+void fill_clear(uint8_t* px)
+{
+    uint32_t sum[3] = {0, 0, 0}, weight = 0;
+    bool any_clear = false;
+    for (int i = 0; i < 16; ++i)
+    {
+        const uint8_t* p = px + i * 4;
+        any_clear = any_clear || p[3] == 0;
+        for (int c = 0; c < 3; ++c)
+            sum[c] += uint32_t(p[c]) * p[3];
+        weight += p[3];
+    }
+    if (!any_clear || weight == 0)
+        return;
+    for (int i = 0; i < 16; ++i)
+        if (px[i * 4 + 3] == 0)
+            for (int c = 0; c < 3; ++c)
+                px[i * 4 + c] = uint8_t((sum[c] + weight / 2) / weight);
+}
+
 // BC2's alpha: 4 bits a pixel, as they are.
 void explicit_alpha(uint8_t* block, const uint8_t* px)
 {
@@ -268,6 +312,8 @@ void compress(const Level& l, Layout layout, const Settings& s, uint8_t* out)
                                for (int c = 0; c < 4; ++c)
                                    px[i * 4 + c] = to_byte(p[c]);
                            }
+                           if (layout != Layout::BC4 && layout != Layout::BC5)  // their channels are data, alpha or not
+                               fill_clear(px);
                            uint8_t* dst = out + (size_t(by) * bw + bx) * block_bytes;
                            switch (layout)
                            {
@@ -282,7 +328,10 @@ void compress(const Level& l, Layout layout, const Settings& s, uint8_t* out)
                                case Layout::BC3: rgbcx::encode_bc3(s.level, dst, px); break;
                                case Layout::BC4: rgbcx::encode_bc4(dst, px); break;
                                case Layout::BC5: rgbcx::encode_bc5(dst, px); break;
-                               default: bc7enc_compress_block(dst, px, &s.bc7); break;
+                               default:
+                                   bc7enc_compress_block(dst, px, &s.bc7);
+                                   opaque_bc7(dst, px);
+                                   break;
                            }
                        }
                    });
