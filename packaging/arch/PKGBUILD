@@ -57,6 +57,10 @@ check() {
   printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > smoke/rgb.ppm
   build/ifritview --probe smoke/rgb.ppm
   build/ifritview --version
+  # The downscaler every zoomed-out image is drawn with.
+  printf 'P6\n64 48\n255\n' > smoke/big.ppm
+  head -c $((64 * 48 * 3)) /dev/urandom >> smoke/big.ppm
+  build/ifritview --process smoke/big.ppm shrink:23,17 info
   printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > smoke/red.ff
   build/ifritview --probe smoke/red.ff
 }

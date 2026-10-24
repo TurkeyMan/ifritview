@@ -1,8 +1,10 @@
 #include "pipeline.h"
 
+#include "compare.h"
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
 #include "jpeg_lossless.h"
+#include "scale.h"
 #include "metadata/file_metadata.h"
 #include "plugins.h"
 
@@ -224,8 +226,17 @@ int process(int argc, char** argv)
             ok = parse_save(st.arg, st.save, error);
         else if (st.name == "info")
             ;
+        else if (st.name == "diff")
+            ok = !st.arg.empty(), error = "diff: takes the file to compare with, e.g. diff:original.png";
+        else if (st.name == "shrink")
+        {
+            const std::vector<std::string> n = split(st.arg, ',');
+            int w, h;
+            ok = n.size() == 2 && integer(n[0], w) && integer(n[1], h) && w > 0 && h > 0;
+            error = "shrink: takes WIDTH,HEIGHT in pixels, no larger than the image at that step";
+        }
         else
-            ok = false, error = "unknown step \"" + a + "\" (rotate, flip, crop, exposure, info, save); --help explains them";
+            ok = false, error = "unknown step \"" + a + "\" (rotate, flip, crop, shrink, exposure, info, diff, save); --help explains them";
         if (!ok)
         {
             std::fprintf(stderr, "%s\n", error.c_str());
@@ -291,6 +302,46 @@ int process(int argc, char** argv)
                     std::printf(" %s=%d", key.c_str(), value);
                 std::printf("\n");
             }
+        }
+        else if (st.name == "shrink")
+        {
+            const std::vector<std::string> n = split(st.arg, ',');
+            const int w = std::atoi(n[0].c_str()), h = std::atoi(n[1].c_str());
+            if (w > img.width || h > img.height)
+            {
+                std::fprintf(stderr, "shrink:%s is larger than the image, which is %d x %d at that step\n", st.arg.c_str(), img.width, img.height);
+                return 2;
+            }
+            // The viewer's own reduction, as it draws a zoomed-out image.
+            Image small;
+            small.allocate(w, h);
+            const PixelBuffer px = downscale(img, w, h);
+            std::memcpy(small.pixels.data(), px.data(), px.size());
+            small.has_alpha = img.has_alpha;
+            small.format = img.format;
+            small.declared_space = img.declared_space;
+            small.color_space = img.color_space;
+            small.stored = img.stored;
+            img = std::move(small);
+        }
+        else if (st.name == "diff")
+        {
+            Image other;
+            if (!decode_image(st.arg, other, error))
+            {
+                std::fprintf(stderr, "%s: %s\n", st.arg.c_str(), error.c_str());
+                return 1;
+            }
+            if (other.width != img.width || other.height != img.height)
+            {
+                std::fprintf(stderr, "diff: %s is %d x %d, the image %d x %d at that step\n", st.arg.c_str(), other.width, other.height, img.width, img.height);
+                return 2;
+            }
+            const ImageDifference d = compare_images(img, other);
+            if (d.max_error == 0)
+                std::printf("identical to %s\n", st.arg.c_str());
+            else
+                std::printf("against %s: PSNR %.2f dB, largest error %d, %.2f%% of pixels changed\n", st.arg.c_str(), d.psnr, d.max_error, d.changed * 100);
         }
         else if (st.name == "save")
         {
@@ -361,6 +412,10 @@ it is at that step, after earlier turns and crops)
   flip:h | flip:v    mirror left-right (h) or top-bottom (v)
   crop:X,Y,W,H       keep the W x H rectangle whose top-left corner is X,Y
   exposure:EV        raw and HDR images only: brighter (+) or darker (-), in stops
+  shrink:W,H         reduce to W x H pixels with the filter the viewer draws a
+                     zoomed-out image with (smaller only; the shape is up to you)
+  diff:FILE          compare the image at this point with FILE (the same size): PSNR,
+                     the largest difference, and how much of it differs
   info               print the image's size and format at this point, and how the
                      input was saved as its format's save settings ("the file's jpg
                      settings: progressive=1 quality=85 subsampling=3"; quality
