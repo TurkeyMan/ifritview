@@ -19,6 +19,13 @@ struct Span
     int weights[8];  // reductions here are at most ~2x after mip selection, so few taps
 };
 
+// GCC 16.2's IPA-CP, under LTO, compiles this as if every call asked for
+// one output pixel (dst == 1) while the callers pass the real size: the
+// first zoomed-out paint then reads past the spans. Kept out of
+// interprocedural optimisation, for whoever builds with LTO.
+#if defined(__GNUC__) && !defined(__clang__)
+[[gnu::noipa]]
+#endif
 std::vector<Span> spans(int src, int dst)
 {
     std::vector<Span> out(dst);
