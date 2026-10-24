@@ -91,10 +91,16 @@ const Decoder& pcx_decoder();
 const Decoder& netpbm_decoder();
 const Decoder& dds_decoder();
 const Decoder& vtf_decoder();
+const Decoder& blp_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
 bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error);
+// The samples as stored, `components` bytes a pixel: four-component data
+// is left as it is (no CMYK or YCCK conversion; BLP1 keeps B, G, R, A
+// there), three-component data is converted to RGB as usual.
+bool decode_jpeg_samples(const uint8_t* data, size_t size, std::vector<uint8_t>& samples, int& width, int& height,
+                         int& components, std::string& error);
 #endif
 
 #ifdef HAVE_IPTC

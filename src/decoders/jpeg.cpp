@@ -174,6 +174,46 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
     return true;
 }
 
+bool decode_jpeg_samples(const uint8_t* data, size_t size, std::vector<uint8_t>& samples, int& width, int& height,
+                         int& components, std::string& error)
+{
+    jpeg_decompress_struct cinfo;
+    ErrorManager err{};
+    setup(cinfo, err);
+    jpeg_mem_src(&cinfo, data, static_cast<unsigned long>(size));
+    if (setjmp(err.jump))
+    {
+        error = err.message;
+        jpeg_destroy_decompress(&cinfo);
+        return false;
+    }
+    jpeg_read_header(&cinfo, TRUE);
+    if (cinfo.num_components == 4)
+        cinfo.jpeg_color_space = cinfo.out_color_space = JCS_CMYK;  // the samples untouched, whatever the markers say
+    else if (cinfo.num_components != 1)
+        cinfo.out_color_space = JCS_RGB;
+    if (uint64_t(cinfo.image_width) * cinfo.image_height > (uint64_t(1) << 30))
+    {
+        error = "JPEG is too large";
+        jpeg_destroy_decompress(&cinfo);
+        return false;
+    }
+    jpeg_start_decompress(&cinfo);
+    width = int(cinfo.output_width);
+    height = int(cinfo.output_height);
+    components = cinfo.output_components;
+    const size_t row = size_t(width) * components;
+    samples.resize(row * height);
+    while (cinfo.output_scanline < cinfo.output_height)
+    {
+        JSAMPROW rows[1] = {samples.data() + row * cinfo.output_scanline};
+        jpeg_read_scanlines(&cinfo, rows, 1);
+    }
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+    return true;
+}
+
 const Decoder& jpeg_decoder()
 {
     static const Decoder d{"JPEG", {"jpg", "jpeg", "jpe", "jfif"}, sniff, decode};
