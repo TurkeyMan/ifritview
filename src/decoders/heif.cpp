@@ -96,47 +96,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
             heif_color_profile_nclx* nclx = nullptr;
             if (heif_image_handle_get_nclx_color_profile(handle, &nclx).code == heif_error_Ok && nclx)
             {
-                const char* primaries = nclx->color_primaries == heif_color_primaries_ITU_R_BT_709_5               ? "BT.709"
-                                        : nclx->color_primaries == heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ? "BT.2020"
-                                        : nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1             ? "Display P3"
-                                        : nclx->color_primaries == heif_color_primaries_SMPTE_RP_431_2             ? "DCI-P3"
-                                                                                                                   : nullptr;
-                const char* transfer = nclx->transfer_characteristics == heif_transfer_characteristic_IEC_61966_2_1         ? "sRGB"
-                                       : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_PQ  ? "PQ"
-                                       : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_HLG ? "HLG"
-                                       : nclx->transfer_characteristics == heif_transfer_characteristic_linear              ? "linear"
-                                       : nclx->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_709_5      ? "BT.709"
-                                                                                                                            : nullptr;
-                if (primaries && transfer)
-                {
-                    if (std::string(primaries) == "BT.709" && std::string(transfer) == "sRGB")
-                        out.color_space = "sRGB";
-                    else
-                        out.color_space = std::string(primaries) + " " + transfer;
-                }
-                else if (primaries)
-                    out.color_space = primaries;
-                // A profile for it, to save with: the pixels come as encoded
-                // (PQ and HLG wait for HDR display).
-                using T = ColorSpace::Transfer;
-                const auto curve = nclx->transfer_characteristics;
-                const std::optional<T> t = curve == heif_transfer_characteristic_IEC_61966_2_1 ? std::optional(T::SRGB)
-                                           : curve == heif_transfer_characteristic_ITU_R_BT_709_5 ||
-                                                     curve == heif_transfer_characteristic_ITU_R_BT_2020_2_10bit ||
-                                                     curve == heif_transfer_characteristic_ITU_R_BT_2020_2_12bit
-                                               ? std::optional(T::BT709)
-                                           : curve == heif_transfer_characteristic_linear ? std::optional(T::Linear)
-                                                                                          : std::nullopt;
-                const auto p = nclx->color_primaries;
-                const std::optional<ColorSpace> base =
-                    p == heif_color_primaries_ITU_R_BT_709_5               ? std::optional(ColorSpace::srgb())
-                    : p == heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ? std::optional(ColorSpace::rec2020())
-                    : p == heif_color_primaries_SMPTE_EG_432_1             ? std::optional(ColorSpace::display_p3())
-                    : p == heif_color_primaries_SMPTE_RP_431_2
-                        ? std::optional(ColorSpace::from_primaries({0.680, 0.320}, {0.265, 0.690}, {0.150, 0.060}, {0.314, 0.351}, T::Gamma, 2.6, "DCI-P3"))
-                        : std::nullopt;
-                if (base && t)
-                    out.declared_space = base->with_transfer(*t);
+                // H.273 code points, as JPEG XL's: a profile made for the space
+                // travels with the image (PQ and HLG wait for HDR display).
+                const CicpSpace cicp = from_cicp(int(nclx->color_primaries), int(nclx->transfer_characteristics));
+                out.color_space = cicp.label;
+                out.declared_space = cicp.space;
                 heif_nclx_color_profile_free(nclx);
             }
         }

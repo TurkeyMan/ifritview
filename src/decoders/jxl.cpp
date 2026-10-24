@@ -72,23 +72,34 @@ bool decode(const std::string& path, Image& out, std::string& error)
             JxlColorEncoding enc;
             if (JxlDecoderGetColorAsEncodedProfile(dec.get(), JXL_COLOR_PROFILE_TARGET_ORIGINAL, &enc) == JXL_DEC_SUCCESS)
             {
-                const char* primaries = enc.primaries == JXL_PRIMARIES_SRGB   ? "BT.709"
-                                        : enc.primaries == JXL_PRIMARIES_2100 ? "BT.2020"
-                                        : enc.primaries == JXL_PRIMARIES_P3   ? "Display P3"
-                                                                              : nullptr;
-                const char* transfer = enc.transfer_function == JXL_TRANSFER_FUNCTION_SRGB     ? "sRGB"
-                                       : enc.transfer_function == JXL_TRANSFER_FUNCTION_PQ     ? "PQ"
-                                       : enc.transfer_function == JXL_TRANSFER_FUNCTION_HLG    ? "HLG"
-                                       : enc.transfer_function == JXL_TRANSFER_FUNCTION_LINEAR ? "linear"
-                                       : enc.transfer_function == JXL_TRANSFER_FUNCTION_709    ? "BT.709"
-                                                                                               : nullptr;
+                // As H.273 code points, which JPEG XL's mostly are: P3 is 12
+                // with a D65 white, 11 (DCI) with DCI's; gamma is the encoding
+                // exponent, its inverse the curve.
+                const bool gamma = enc.transfer_function == JXL_TRANSFER_FUNCTION_GAMMA && enc.gamma > 0;
+                const int transfer = gamma ? 0 : int(enc.transfer_function);
+                int primaries = int(enc.primaries);
+                if (enc.primaries == JXL_PRIMARIES_P3)
+                    primaries = enc.white_point == JXL_WHITE_POINT_DCI ? 11 : 12;
+                CicpSpace cicp = from_cicp(primaries, transfer, gamma ? 1.0 / enc.gamma : 0);
+                if (enc.primaries == JXL_PRIMARIES_CUSTOM && enc.color_space == JXL_COLOR_SPACE_RGB)
+                {
+                    // Its own primaries: with the curve the code points gave.
+                    const CicpSpace curve = from_cicp(1, transfer, gamma ? 1.0 / enc.gamma : 0);
+                    if (curve.space)
+                    {
+                        cicp.space = ColorSpace::from_primaries({enc.primaries_red_xy[0], enc.primaries_red_xy[1]}, {enc.primaries_green_xy[0], enc.primaries_green_xy[1]},
+                                                                {enc.primaries_blue_xy[0], enc.primaries_blue_xy[1]}, {enc.white_point_xy[0], enc.white_point_xy[1]},
+                                                                curve.space->transfer, curve.space->gamma, "JPEG XL primaries");
+                        cicp.label = cicp.space->name;
+                    }
+                }
                 if (enc.color_space == JXL_COLOR_SPACE_GRAY)
-                    out.color_space = std::string("Gray") + (transfer ? std::string(" ") + transfer : "");
-                else if (primaries && transfer)
-                    out.color_space =
-                        (std::string(primaries) == "BT.709" && std::string(transfer) == "sRGB") ? "sRGB" : std::string(primaries) + " " + transfer;
-                else if (primaries)
-                    out.color_space = primaries;
+                    out.color_space = "Grey" + (cicp.label.empty() ? std::string() : ", " + cicp.label);
+                else
+                {
+                    out.color_space = cicp.label;
+                    out.declared_space = cicp.space;
+                }
             }
             else
             {

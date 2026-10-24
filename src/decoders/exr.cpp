@@ -1267,27 +1267,13 @@ void unpremultiply(SourceData& src, int x0, int y0, int x1, int y1)
         }
 }
 
-std::string colour_space(const float* c)
+// The space of these chromaticities (red, green, blue, white xy): EXR's
+// samples are linear light.
+ColorSpace colour_space(const float* c)
 {
-    auto near = [c](std::initializer_list<float> v)
-    {
-        int i = 0;
-        for (float f : v)
-            if (std::fabs(c[i++] - f) > 0.002f)
-                return false;
-        return true;
-    };
-    if (near({0.64f, 0.33f, 0.30f, 0.60f, 0.15f, 0.06f, 0.3127f, 0.3290f}))
-        return "Linear Rec. 709";
-    if (near({0.7347f, 0.2653f, 0.0f, 1.0f, 0.0001f, -0.0770f, 0.32168f, 0.33767f}))
-        return "ACES2065-1 (AP0)";
-    if (near({0.713f, 0.293f, 0.165f, 0.830f, 0.128f, 0.044f, 0.32168f, 0.33767f}))
-        return "ACEScg (AP1)";
-    if (near({0.708f, 0.292f, 0.170f, 0.797f, 0.131f, 0.046f, 0.3127f, 0.3290f}))
-        return "Linear Rec. 2020";
-    if (near({1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f / 3, 1.0f / 3}))
-        return "CIE XYZ";
-    return "Linear, custom primaries";
+    if (std::fabs(c[0] - 1) < 0.002f && c[1] == 0 && c[2] == 0 && std::fabs(c[3] - 1) < 0.002f)
+        return ColorSpace{"CIE XYZ", {1, 0}, {0, 1}, {0, 0}, {1.0 / 3, 1.0 / 3}, ColorSpace::Transfer::Linear};
+    return ColorSpace::from_primaries({c[0], c[1]}, {c[2], c[3]}, {c[4], c[5]}, {c[6], c[7]}, ColorSpace::Transfer::Linear, 1, "Linear, custom primaries");
 }
 
 bool decode(const std::string& path, Image& out, std::string& error)
@@ -1606,12 +1592,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
         pf.notes.push_back("tiled");
     if (part.has_chromaticities)
     {
-        out.color_space = colour_space(part.chromaticities);
+        const ColorSpace space = colour_space(part.chromaticities);
+        out.color_space = space.name;
         // The 8-bit rendering, which is what's saved, has these primaries and
         // sRGB's curve: a profile made for that travels with the image.
-        const float* c = part.chromaticities;
-        out.declared_space = ColorSpace::from_primaries({c[0], c[1]}, {c[2], c[3]}, {c[4], c[5]}, {c[6], c[7]}, ColorSpace::Transfer::SRGB, 2.2,
-                                                        out.color_space.empty() ? "EXR chromaticities" : out.color_space);
+        out.declared_space = space.with_transfer(ColorSpace::Transfer::SRGB);
     }
 
     out.add("EXR", "Compression", compression_name(part.compression));

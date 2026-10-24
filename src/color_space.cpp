@@ -152,10 +152,19 @@ ColorSpace ColorSpace::prophoto()
     return {"ProPhoto RGB", {0.7347, 0.2653}, {0.1596, 0.8404}, {0.0366, 0.0001}, {0.3457, 0.3585}, Transfer::ROMM};
 }
 
+ColorSpace ColorSpace::aces_ap0()
+{
+    return {"ACES2065-1 (AP0)", {0.7347, 0.2653}, {0.0, 1.0}, {0.0001, -0.0770}, {0.32168, 0.33767}, Transfer::Linear};
+}
+ColorSpace ColorSpace::aces_ap1()
+{
+    return {"ACEScg (AP1)", {0.713, 0.293}, {0.165, 0.830}, {0.128, 0.044}, {0.32168, 0.33767}, Transfer::Linear};
+}
+
 ColorSpace ColorSpace::from_primaries(XY red, XY green, XY blue, XY white, Transfer transfer, double gamma, const std::string& name)
 {
     const auto near = [](XY a, XY b) { return std::fabs(a.x - b.x) < 0.002 && std::fabs(a.y - b.y) < 0.002; };
-    for (ColorSpace s : {srgb(), display_p3(), adobe_rgb(), rec2020(), prophoto()})
+    for (ColorSpace s : {srgb(), display_p3(), adobe_rgb(), rec2020(), prophoto(), aces_ap0(), aces_ap1()})
         if (near(red, s.red) && near(green, s.green) && near(blue, s.blue) && near(white, s.white))
         {
             if (s.transfer == transfer && (transfer != Transfer::Gamma || std::fabs(s.gamma - gamma) < 0.01))
@@ -251,4 +260,47 @@ std::vector<uint8_t> icc_profile(const ColorSpace& space)
         w.sig(tags[i].sig), w.u32(offset[i]), w.u32(size[i]);
     w.b.insert(w.b.end(), data.b.begin(), data.b.end());
     return w.b;
+}
+
+CicpSpace from_cicp(int primaries, int transfer, double gamma)
+{
+    using T = ColorSpace::Transfer;
+    std::optional<ColorSpace> base;
+    const char* p = nullptr;
+    switch (primaries)
+    {
+        case 1: base = ColorSpace::srgb(), p = "BT.709"; break;
+        case 9: base = ColorSpace::rec2020(), p = "BT.2020"; break;
+        case 11:
+            base = ColorSpace::from_primaries({0.680, 0.320}, {0.265, 0.690}, {0.150, 0.060}, {0.314, 0.351}, T::Gamma, 2.6, "DCI-P3");
+            p = "DCI-P3";
+            break;
+        case 12: base = ColorSpace::display_p3(), p = "Display P3"; break;
+        default: break;
+    }
+    std::optional<T> t;
+    const char* tn = nullptr;
+    switch (transfer)
+    {
+        case 1: case 6: case 14: case 15: t = T::BT709, tn = "BT.709"; break;
+        case 4: t = T::Gamma, gamma = 2.2, tn = "gamma 2.2"; break;
+        case 5: t = T::Gamma, gamma = 2.8, tn = "gamma 2.8"; break;
+        case 8: t = T::Linear, tn = "linear"; break;
+        case 13: t = T::SRGB, tn = "sRGB"; break;
+        case 16: tn = "PQ"; break;
+        case 18: tn = "HLG"; break;
+        default:
+            if (gamma > 0)
+                t = T::Gamma, tn = "gamma";
+            break;
+    }
+    CicpSpace c;
+    if (base && t)
+    {
+        c.space = base->with_transfer(*t, gamma);
+        c.label = c.space->is_srgb() ? "sRGB" : c.space->name;
+    }
+    else if (p)
+        c.label = tn ? std::string(p) + " " + tn : p;
+    return c;
 }
