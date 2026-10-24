@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "decoders/decoder.h"
 #include "geocode.h"
+#include "embedded.h"
 #include "i18n.h"
 #include "integration.h"
 #include "platform.h"
@@ -589,18 +590,50 @@ rap::icon github_icon()
         });
 }
 
-rap::node about_page()
+// The mascot: the icon's Ifrit, from the copy built into the exe, decoded on
+// its first paint and drawn to fit its width, on the page's background.
+rap::node mascot(rap::ui& ui)
 {
-    rap::nodes items = {
+    auto art = std::make_shared<std::unique_ptr<rap::image>>();
+    auto tried = std::make_shared<bool>(false);
+    return L::canvas{}
+        .on_paint(
+            [&ui, art, tried](rap::painter& p, rap::size_f s)
+            {
+                p.rect({0, 0, s.w, s.h}, 0, rap::paint{rap::theme_color::window}, std::nullopt);
+                if (!*tried)
+                {
+                    *tried = true;
+                    if (auto d = rap::sys::decode_image(kIconPng))
+                        *art = ui.create_image(d->width, d->height, d->format, d->pixels.data(), size_t(d->width) * 4);
+                }
+                if (const rap::image* im = art->get())
+                {
+                    // At the top, beside the title, however tall the row is.
+                    const float side = std::min(s.w, s.h);
+                    p.image(*im, {0, 0, float(im->width()), float(im->height())}, {(s.w - side) / 2, 0, side, side});
+                }
+            })
+        .tooltip(_("Ifrit, at your service."))
+        .width(rap::extent{144, rap::extent::unit::px})
+        .height(rap::extent{144, rap::extent::unit::px});
+}
+
+rap::node about_page(rap::ui& ui)
+{
+    rap::nodes text = {
         L::label{std::string("IfritView ") + IFRIT_VERSION},
-        L::label{_("A fast image viewer, for photos and camera raws, and the texture formats of games.")},
-        L::label{_("Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later.")},
+        L::label{_("Your images, summoned in a flash.")},
+        L::label{_("A fast image viewer for photos, camera raws and the curious texture formats\n"
+                   "of games, with a fire spirit doing the heavy lifting.")},
+        L::label{_("Conjured by Manu Evans, © 2026. Free software under the GNU GPL, version 3\n"
+                   "or later: share it, change it, pass the flame along.")},
         L::label{_("Project page and source")}.icon(github_icon()).link([] { platform::open_uri(kProjectUrl); }),
         L::label{_("The licence (GPL 3.0)")}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };
     // The code it carries from elsewhere, and the licences that come with it.
     if (const std::string notices = notices_path(); !notices.empty())
-        items.push_back(L::label{_("Third-party notices")}.link(
+        text.push_back(L::label{_("Third-party notices: the friends who lent a hand")}.link(
             [notices]
             {
                 if (gchar* uri = g_filename_to_uri(notices.c_str(), nullptr, nullptr))
@@ -609,7 +642,7 @@ rap::node about_page()
                     g_free(uri);
                 }
             }));
-    return rap::node{rap::spec::box{rap::orientation::vertical, items, false, {}}, {}};
+    return L::hbox{mascot(ui), rap::node{rap::spec::box{rap::orientation::vertical, text, false, {}}, {}}};
 }
 
 }  // namespace
@@ -637,7 +670,7 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
                                              {_("Viewing"), L::lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
                                              {_("Controls"), L::lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
                                              {_("File Types"), L::lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
-                                             {_("About"), L::lazy{[] { return about_page(); }}},
+                                             {_("About"), L::lazy{[&ui] { return about_page(ui); }}},
                                          }
                                              .sidebar()
                                              .bind(st->tabs)

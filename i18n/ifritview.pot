@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: IfritView\n"
 "Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
-"POT-Creation-Date: 2026-10-24 17:08+0000\n"
+"POT-Creation-Date: 2026-10-24 17:24+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -225,7 +225,7 @@ msgstr ""
 msgid "Display window"
 msgstr ""
 
-#: src/decoders/exr.cpp:1621 src/ui/settings.cpp:294 src/ui/settings.cpp:369
+#: src/decoders/exr.cpp:1621 src/ui/settings.cpp:295 src/ui/settings.cpp:370
 msgid "Window"
 msgstr ""
 
@@ -681,7 +681,7 @@ msgstr ""
 #: src/decoders/video_poster.cpp:108 src/decoders/video_poster.cpp:110
 #: src/decoders/video_poster_mf.cpp:176 src/decoders/video_poster_mf.cpp:194
 #: src/decoders/video_poster_mf.cpp:195 src/decoders/video_poster_mf.cpp:196
-#: src/decoders/video_poster_mf.cpp:197 src/ui/settings.cpp:374
+#: src/decoders/video_poster_mf.cpp:197 src/ui/settings.cpp:375
 msgid "Video"
 msgstr ""
 
@@ -1117,7 +1117,7 @@ msgstr ""
 msgid "Crop to selection (Ctrl+Y)"
 msgstr ""
 
-#: src/ui/app.cpp:295 src/ui/settings.cpp:314
+#: src/ui/app.cpp:295 src/ui/settings.cpp:315
 msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
 msgstr ""
 
@@ -1384,7 +1384,7 @@ msgstr ""
 msgid "Saved {0}"
 msgstr ""
 
-#: src/ui/metadata_model.h:29 src/ui/save.cpp:24 src/ui/settings.cpp:397
+#: src/ui/metadata_model.h:29 src/ui/save.cpp:24 src/ui/settings.cpp:398
 msgid "Location"
 msgstr ""
 
@@ -1404,7 +1404,7 @@ msgstr ""
 msgid "Copyright and contact only"
 msgstr ""
 
-#: src/ui/save.cpp:15 src/ui/settings.cpp:248 src/ui/settings.cpp:262
+#: src/ui/save.cpp:15 src/ui/settings.cpp:249 src/ui/settings.cpp:263
 msgid "Custom"
 msgstr ""
 
@@ -1460,364 +1460,372 @@ msgstr ""
 msgid "The colour profile is always kept."
 msgstr ""
 
-#: src/ui/settings.cpp:250
+#: src/ui/settings.cpp:251
 msgid "Off"
 msgstr ""
 
-#: src/ui/settings.cpp:273
+#: src/ui/settings.cpp:274
 msgid "Automatic (the system's)"
 msgstr ""
 
-#: src/ui/settings.cpp:289 src/ui/settings.cpp:291
+#: src/ui/settings.cpp:290 src/ui/settings.cpp:292
 msgid "Language"
 msgstr ""
 
-#: src/ui/settings.cpp:292
+#: src/ui/settings.cpp:293
 msgid "Takes effect when IfritView next starts."
 msgstr ""
 
-#: src/ui/settings.cpp:296
+#: src/ui/settings.cpp:297
 msgid "Resize the window to fit each image"
 msgstr ""
 
-#: src/ui/settings.cpp:297
+#: src/ui/settings.cpp:298
 msgid "Min window width"
 msgstr ""
 
-#: src/ui/settings.cpp:298
+#: src/ui/settings.cpp:299
 msgid "Min window height"
 msgstr ""
 
-#: src/ui/settings.cpp:300
+#: src/ui/settings.cpp:301
 msgid "Browsing"
 msgstr ""
 
-#: src/ui/settings.cpp:302
+#: src/ui/settings.cpp:303
 msgid "Wrap around at the end of the folder"
 msgstr ""
 
-#: src/ui/settings.cpp:303
+#: src/ui/settings.cpp:304
 msgid "Include hidden files"
 msgstr ""
 
-#: src/ui/settings.cpp:304
+#: src/ui/settings.cpp:305
 msgid "Preload images ahead"
 msgstr ""
 
-#: src/ui/settings.cpp:305
+#: src/ui/settings.cpp:306
 msgid "Preload images behind"
 msgstr ""
 
-#: src/ui/settings.cpp:306
+#: src/ui/settings.cpp:307
 msgid "Image cache (MB, 0 = auto)"
 msgstr ""
 
-#: src/ui/settings.cpp:307
+#: src/ui/settings.cpp:308
 msgid "0 = automatic: a quarter of the memory free at startup"
 msgstr ""
 
-#: src/ui/settings.cpp:309
+#: src/ui/settings.cpp:310
 msgid "Camera RAW"
 msgstr ""
 
-#: src/ui/settings.cpp:311
+#: src/ui/settings.cpp:312
 msgid "Decode"
 msgstr ""
 
-#: src/ui/settings.cpp:311
+#: src/ui/settings.cpp:312
 msgid "Embedded JPEG only (never develop)"
 msgstr ""
 
-#: src/ui/settings.cpp:311
+#: src/ui/settings.cpp:312
 msgid "Full resolution"
 msgstr ""
 
-#: src/ui/settings.cpp:311
+#: src/ui/settings.cpp:312
 msgid "Half size (fast, bins 2×2 photosites)"
 msgstr ""
 
-#: src/ui/settings.cpp:313
+#: src/ui/settings.cpp:314
 msgid ""
 "Frame as the camera did (crop the sensor margins the camera never shows)"
 msgstr ""
 
-#: src/ui/settings.cpp:316
+#: src/ui/settings.cpp:317
 msgid "Maps"
 msgstr ""
 
-#: src/ui/settings.cpp:318
+#: src/ui/settings.cpp:319
 msgid "Open locations in"
 msgstr ""
 
-#: src/ui/settings.cpp:328
+#: src/ui/settings.cpp:329
 msgid "URL template"
 msgstr ""
 
-#: src/ui/settings.cpp:330
+#: src/ui/settings.cpp:331
 msgid "URL template; {lat} and {lon} are replaced with the coordinates"
 msgstr ""
 
-#: src/ui/settings.cpp:334
+#: src/ui/settings.cpp:335
 msgid "Look up place names with"
 msgstr ""
 
-#: src/ui/settings.cpp:348
+#: src/ui/settings.cpp:349
 msgid "Lookup URL template"
 msgstr ""
 
-#: src/ui/settings.cpp:349
+#: src/ui/settings.cpp:350
 msgid ""
 "Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced"
 msgstr ""
 
-#: src/ui/settings.cpp:361
+#: src/ui/settings.cpp:362
 msgid "Scaling"
 msgstr ""
 
-#: src/ui/settings.cpp:363
+#: src/ui/settings.cpp:364
 msgid "Smooth when zoomed in"
 msgstr ""
 
-#: src/ui/settings.cpp:364
+#: src/ui/settings.cpp:365
 msgid "Smooth when zoomed out"
 msgstr ""
 
-#: src/ui/settings.cpp:365
+#: src/ui/settings.cpp:366
 msgid "In fullscreen, enlarge small images to fill the screen"
 msgstr ""
 
-#: src/ui/settings.cpp:367
+#: src/ui/settings.cpp:368
 msgid "Background"
 msgstr ""
 
-#: src/ui/settings.cpp:369
+#: src/ui/settings.cpp:370
 msgid "Window background"
 msgstr ""
 
-#: src/ui/settings.cpp:370 src/ui/settings.cpp:420
+#: src/ui/settings.cpp:371 src/ui/settings.cpp:421
 msgid "Fullscreen"
 msgstr ""
 
-#: src/ui/settings.cpp:370
+#: src/ui/settings.cpp:371
 msgid "Fullscreen background"
 msgstr ""
 
-#: src/ui/settings.cpp:371
+#: src/ui/settings.cpp:372
 msgid "Show transparency as a checkerboard"
 msgstr ""
 
-#: src/ui/settings.cpp:372
+#: src/ui/settings.cpp:373
 msgid "Play animated GIF and WebP (A toggles)"
 msgstr ""
 
-#: src/ui/settings.cpp:376
+#: src/ui/settings.cpp:377
 msgid "Play videos as soon as they are shown (Space toggles)"
 msgstr ""
 
-#: src/ui/settings.cpp:377
+#: src/ui/settings.cpp:378
 msgid "Start muted (M toggles)"
 msgstr ""
 
-#: src/ui/settings.cpp:378
+#: src/ui/settings.cpp:379
 msgid "Loop"
 msgstr ""
 
-#: src/ui/settings.cpp:380
+#: src/ui/settings.cpp:381
 msgid "Slideshow"
 msgstr ""
 
-#: src/ui/settings.cpp:382
+#: src/ui/settings.cpp:383
 msgid "Seconds per image"
 msgstr ""
 
-#: src/ui/settings.cpp:383
+#: src/ui/settings.cpp:384
 msgid "Gentle pan and zoom on each image"
 msgstr ""
 
-#: src/ui/settings.cpp:384
+#: src/ui/settings.cpp:385
 msgid "Motion amount (%)"
 msgstr ""
 
-#: src/ui/settings.cpp:385
+#: src/ui/settings.cpp:386
 msgid "Shuffle"
 msgstr ""
 
-#: src/ui/settings.cpp:386
+#: src/ui/settings.cpp:387
 msgid "Cross-fade (ms, 0 = cut)"
 msgstr ""
 
-#: src/ui/settings.cpp:388
+#: src/ui/settings.cpp:389
 msgid "Fullscreen info overlay"
 msgstr ""
 
-#: src/ui/settings.cpp:390
+#: src/ui/settings.cpp:391
 msgid "Show the overlay (I toggles it in fullscreen)"
 msgstr ""
 
-#: src/ui/settings.cpp:394
+#: src/ui/settings.cpp:395
 msgid "File: name, position in folder, size, date"
 msgstr ""
 
-#: src/ui/settings.cpp:395
+#: src/ui/settings.cpp:396
 msgid "Format: dimensions, depth, codec details, colour profile"
 msgstr ""
 
-#: src/ui/settings.cpp:396
+#: src/ui/settings.cpp:397
 msgid "Shot: camera, lens, aperture, shutter, ISO, focal length"
 msgstr ""
 
-#: src/ui/settings.cpp:398
+#: src/ui/settings.cpp:399
 msgid "View: zoom, raw state, exposure"
 msgstr ""
 
-#: src/ui/settings.cpp:399
+#: src/ui/settings.cpp:400
 msgid "Also show in the window, not only in fullscreen"
 msgstr ""
 
-#: src/ui/settings.cpp:400
+#: src/ui/settings.cpp:401
 msgid "Overlay text"
 msgstr ""
 
-#: src/ui/settings.cpp:400
+#: src/ui/settings.cpp:401
 msgid "Text colour"
 msgstr ""
 
-#: src/ui/settings.cpp:401
+#: src/ui/settings.cpp:402
 msgid "Text size (pt)"
 msgstr ""
 
-#: src/ui/settings.cpp:420
+#: src/ui/settings.cpp:421
 msgid "Windowed"
 msgstr ""
 
-#: src/ui/settings.cpp:435
+#: src/ui/settings.cpp:436
 msgid ""
 "While selecting a region, hold Shift for a square or Ctrl for the image's "
 "own shape."
 msgstr ""
 
-#: src/ui/settings.cpp:438
+#: src/ui/settings.cpp:439
 msgid "Reset to defaults"
 msgstr ""
 
-#: src/ui/settings.cpp:457
+#: src/ui/settings.cpp:458
 msgid "Format plugins: still loading."
 msgstr ""
 
-#: src/ui/settings.cpp:469
+#: src/ui/settings.cpp:470
 msgid "none"
 msgstr ""
 
-#: src/ui/settings.cpp:471
+#: src/ui/settings.cpp:472
 #, c++-format
 msgid "{0} not loaded (see ifritview --plugins)"
 msgid_plural "{0} not loaded (see ifritview --plugins)"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/settings.cpp:472
+#: src/ui/settings.cpp:473
 #, c++-format
 msgid "Format plugins: {0}."
 msgstr ""
 
-#: src/ui/settings.cpp:479
+#: src/ui/settings.cpp:480
 msgid "File extensions to include when browsing a folder, separated by spaces:"
 msgstr ""
 
-#: src/ui/settings.cpp:482
+#: src/ui/settings.cpp:483
 msgid "Make IfritView the default viewer for these types"
 msgstr ""
 
-#: src/ui/settings.cpp:489
+#: src/ui/settings.cpp:490
 #, c++-format
 msgid "IfritView is now the default for {0} file type."
 msgid_plural "IfritView is now the default for {0} file types."
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/settings.cpp:491
+#: src/ui/settings.cpp:492
 msgid "No file types were set."
 msgstr ""
 
-#: src/ui/settings.cpp:493
+#: src/ui/settings.cpp:494
 msgid "Videos were left alone."
 msgstr ""
 
-#: src/ui/settings.cpp:499
+#: src/ui/settings.cpp:500
 #, c++-format
 msgid "Unknown to the system: {0}."
 msgstr ""
 
-#: src/ui/settings.cpp:502
+#: src/ui/settings.cpp:503
 #, c++-format
 msgid "Error: {0}"
 msgstr ""
 
-#: src/ui/settings.cpp:506
+#: src/ui/settings.cpp:507
 msgid "Reset to all supported formats"
 msgstr ""
 
-#: src/ui/settings.cpp:509
+#: src/ui/settings.cpp:510
 msgid "Also for videos"
 msgstr ""
 
-#: src/ui/settings.cpp:509
+#: src/ui/settings.cpp:510
 msgid "Leave unticked to keep your current video player for mp4, mov, mkv…"
 msgstr ""
 
-#: src/ui/settings.cpp:510
+#: src/ui/settings.cpp:511
 msgid "Also for PDFs"
 msgstr ""
 
-#: src/ui/settings.cpp:510
+#: src/ui/settings.cpp:511
 msgid "Leave unticked to keep your current PDF reader"
 msgstr ""
 
-#: src/ui/settings.cpp:596
-msgid ""
-"A fast image viewer, for photos and camera raws, and the texture formats of "
-"games."
+#: src/ui/settings.cpp:617
+msgid "Ifrit, at your service."
 msgstr ""
 
-#: src/ui/settings.cpp:597
-msgid ""
-"Copyright © 2026 Manu Evans. Free software, under the GNU General Public "
-"License, version 3 or later."
+#: src/ui/settings.cpp:626
+msgid "Your images, summoned in a flash."
 msgstr ""
 
-#: src/ui/settings.cpp:598
+#: src/ui/settings.cpp:627
+msgid ""
+"A fast image viewer for photos, camera raws and the curious texture formats\n"
+"of games, with a fire spirit doing the heavy lifting."
+msgstr ""
+
+#: src/ui/settings.cpp:629
+msgid ""
+"Conjured by Manu Evans, © 2026. Free software under the GNU GPL, version 3\n"
+"or later: share it, change it, pass the flame along."
+msgstr ""
+
+#: src/ui/settings.cpp:631
 msgid "Project page and source"
 msgstr ""
 
-#: src/ui/settings.cpp:599
+#: src/ui/settings.cpp:632
 msgid "The licence (GPL 3.0)"
 msgstr ""
 
-#: src/ui/settings.cpp:603
-msgid "Third-party notices"
+#: src/ui/settings.cpp:636
+msgid "Third-party notices: the friends who lent a hand"
 msgstr ""
 
-#: src/ui/settings.cpp:633
+#: src/ui/settings.cpp:666
 msgid "Settings"
 msgstr ""
 
-#: src/ui/settings.cpp:636
+#: src/ui/settings.cpp:669
 msgid "General"
 msgstr ""
 
-#: src/ui/settings.cpp:637
+#: src/ui/settings.cpp:670
 msgid "Viewing"
 msgstr ""
 
-#: src/ui/settings.cpp:638
+#: src/ui/settings.cpp:671
 msgid "Controls"
 msgstr ""
 
-#: src/ui/settings.cpp:639
+#: src/ui/settings.cpp:672
 msgid "File Types"
 msgstr ""
 
-#: src/ui/settings.cpp:640
+#: src/ui/settings.cpp:673
 msgid "About"
 msgstr ""
 
