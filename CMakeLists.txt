@@ -395,6 +395,10 @@ install(FILES data/ifritview.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applic
 # The icon at each size, from data/ifritview.png (1024 px).
 install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES data/ifritview.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+# Bundled code whose licence asks for its notices to travel with the program.
+if(NOT WIN32)
+  install(FILES third_party/astc/LICENSE third_party/astc/NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR}/licenses/astc)
+endif()
 # The 256 px icon as C bytes, for a bare executable's own desktop entry.
 file(READ data/icons/hicolor/256x256/apps/ifritview.png IFRIT_ICON_HEX HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," IFRIT_ICON_PNG "${IFRIT_ICON_HEX}")

@@ -52,6 +52,9 @@ Copy-Item "$build\Release\ifritview.exe" "$stage\"
 # Format plugins go in plugins, beside the exe; the interface they're written to waits there.
 Copy-Item include\ifritview_plugin.h "$stage\plugins\"
 Copy-Item README.md, LICENSE $stage
+# Bundled code whose licence asks for its notices to travel with the program.
+New-Item -ItemType Directory -Force "$stage\licenses\astc" | Out-Null
+Copy-Item third_party\astc\LICENSE, third_party\astc\NOTICE "$stage\licenses\astc\"
 
 $suffix = if ($version) { "-$version" } else { '' }
 $appVersion = if ($version) { $version -replace '~.*', '' } else {
