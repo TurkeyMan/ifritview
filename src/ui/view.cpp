@@ -910,8 +910,12 @@ void View::paint(rap::painter& p, rap::size_f)
     const double sw = image_->width * zoom_, sh = image_->height * zoom_;
     const rap::rect_f dst{L(pan_x_), L(pan_y_), L(sw), L(sh)};
     // Mid-fade the checkerboard fades in with its image (not quite a group
-    // fade where the image is part-transparent, but close).
-    if (image_->has_alpha && cfg_.checkerboard)
+    // fade where the image is part-transparent, but close). Comparing, it's
+    // there whatever the setting: what's transparent in either is a difference
+    // worth seeing (a lossless save's dropped edges).
+    const bool compared_alpha =
+        compare_ && ((compare_->a.image && compare_->a.image->has_alpha) || (compare_->b.image && compare_->b.image->has_alpha));
+    if ((image_->has_alpha && cfg_.checkerboard) || compared_alpha)
         checker(pan_x_, pan_y_, sw, sh, float(fade_alpha));
     const int64_t t_draw = now_us();
     const float alpha = float(fade_alpha);
