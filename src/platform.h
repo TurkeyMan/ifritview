@@ -48,6 +48,16 @@ using MainDispatch = std::function<void(std::function<void()>)>;
 void set_main_dispatch(MainDispatch dispatch);
 void post_main(std::function<void()> fn);
 
+// With IFRIT_TRACE set, a line on stderr stamped with the milliseconds since
+// the process was created (on Windows including the loader's time before
+// main), for following startup and loading. printf-style.
+bool tracing();
+void trace(const char* format, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
+
 // Large pixel buffers: aligned for huge pages where the system offers them.
 void* allocate_pixels(size_t bytes);
 void free_pixels(void* p);

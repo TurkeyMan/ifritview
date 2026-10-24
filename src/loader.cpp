@@ -61,6 +61,8 @@ void Loader::prefetch(std::vector<std::string> paths)
 // wait until the main thread is otherwise idle.
 void Loader::post(Result* r, Lane lane)
 {
+    if (lane == Lane::Foreground)
+        platform::trace("loader: the image on screen is decoded, posted to the UI");
     const int priority = lane == Lane::Foreground ? 0 : lane == Lane::Develop ? 1 : 2;
     dispatch_(
         [this, r]

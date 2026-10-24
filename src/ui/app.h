@@ -223,6 +223,7 @@ private:
     };
     std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
     bool refit_after_layout_ = false;
+    bool first_presented_ = false;
     void refit_after_pane_toggle();
     float pane_extra_ = 0;         // what the info pane adds to the window's width (learnt)
     float pane_toggled_from_ = 0;  // the width before the last toggle

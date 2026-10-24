@@ -123,6 +123,7 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
 int main(int argc, char** argv)
 {
     const auto t_start = std::chrono::steady_clock::now();
+    platform::trace("main");
 #ifdef _WIN32
     // A GUI program has no console of its own: output already redirected
     // (to a file or pipe) stays there, and otherwise, run from a console
@@ -169,7 +170,9 @@ int main(int argc, char** argv)
     options.search_paths = {rap::sys::path_to_utf8(exe_dir / "lib" / "ifritview"),
                             rap::sys::path_to_utf8(exe_dir / ".." / IFRIT_PLUGIN_DIR)};
 #endif
+    platform::trace("loading the toolkit");
     auto ui = rap::ui::load(argc, argv, options);
+    platform::trace("toolkit loaded (%s)", ui ? std::string((*ui)->backend_name()).c_str() : "none");
     if (!ui)
     {
         std::fprintf(stderr, "%s\n", ui.error().c_str());
@@ -187,10 +190,12 @@ int main(int argc, char** argv)
 int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start)
 {
     App app(ui);
+    platform::trace("window built");
     if (argc > 3 && std::strcmp(argv[1], "--diff") == 0)
         app.open_diff(argv[2], argv[3]);
     else if (argc > 1)
         app.open_path(argv[1]);
+    platform::trace("first image requested");
     if (g_getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "startup: %.0f ms to window creation (%s)\n",
                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count(), std::string(ui.backend_name()).c_str());

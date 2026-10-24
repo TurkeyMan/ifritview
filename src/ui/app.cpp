@@ -82,7 +82,9 @@ double random01()
 
 App::App(rap::ui& ui) : ui_(ui), loader_([this](Loader::Result& r) { on_loaded(r); }, [&ui](std::function<void()> fn, int) { ui.post(std::move(fn)); }), cache_(0)
 {
+    platform::trace("app starting");
     cfg_.load();
+    platform::trace("settings read");
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
     set_decode_options(decode_options_for(cfg_));
@@ -597,7 +599,9 @@ void App::build_ui()
         crop_button_->set_enabled(view_->selection(x, y, w, h));
     };
     update_status();
+    platform::trace("showing the window");
     window_->show();
+    platform::trace("window shown");
     view_->canvas()->focus();
 }
 
@@ -1178,6 +1182,7 @@ void App::refresh_metadata()
 
 int App::run()
 {
+    ui_.post([] { platform::trace("event loop running"); });
     return ui_.run();
 }
 
@@ -1190,7 +1195,9 @@ void App::quit()
 void App::open_path(const std::string& path)
 {
     gchar* canonical = g_canonicalize_filename(path.c_str(), nullptr);
+    platform::trace("reading the folder");
     folder_.scan(canonical, cfg_);
+    platform::trace("folder read: %d files", folder_.count());
     g_free(canonical);
     load_current();
 }
@@ -1316,6 +1323,11 @@ void App::navigate(int delta)
 // The current image is on screen: play out one queued step, if any.
 void App::image_presented()
 {
+    if (!first_presented_)
+    {
+        first_presented_ = true;
+        platform::trace("first image painted");
+    }
     awaiting_present_ = false;
     preload_optional_libraries();  // the first image is up; warm video and PDF support
     if (pending_steps_ == 0)
@@ -1404,6 +1416,9 @@ void App::on_loaded(Loader::Result& r)
                          now_us() / 1000.0 - base);
     }
     const bool from_cache = r.cached;
+    platform::trace("UI has the result");
+    platform::trace("decoded on the loader thread: started %.1f ms ago, took %.1f ms, waited %.1f ms to reach the UI", (g_get_monotonic_time() - r.picked_us) / 1000.0,
+                    (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
     schedule_prefetch();
     if (tracing() && r.image)
         std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", r.path.c_str(), r.image->width, r.image->height, int(r.image->is_preview()),

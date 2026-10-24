@@ -3,6 +3,9 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#include <chrono>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -246,6 +249,55 @@ void post_main(std::function<void()> fn)
             return G_SOURCE_REMOVE;
         },
         new std::function<void()>(std::move(fn)), +[](gpointer p) { delete static_cast<std::function<void()>*>(p); });
+}
+
+namespace
+{
+
+// When the process began, as a steady_clock time. Windows knows exactly;
+// elsewhere, static initialisation is the earliest this code runs.
+std::chrono::steady_clock::time_point process_start()
+{
+    static const std::chrono::steady_clock::time_point start = []
+    {
+        const auto now = std::chrono::steady_clock::now();
+#ifdef _WIN32
+        FILETIME created, exited, kernel, user, current;
+        if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+        {
+            GetSystemTimePreciseAsFileTime(&current);
+            const auto ticks = [](const FILETIME& t) { return (int64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+            const int64_t since = ticks(current) - ticks(created);  // 100 ns units
+            if (since > 0)
+                return now - std::chrono::microseconds(since / 10);
+        }
+#endif
+        return now;
+    }();
+    return start;
+}
+
+[[maybe_unused]] const auto g_start_at_init = process_start();  // fixed early, before anything traces
+
+}  // namespace
+
+bool tracing()
+{
+    static const bool on = std::getenv("IFRIT_TRACE") != nullptr;
+    return on;
+}
+
+void trace(const char* format, ...)
+{
+    if (!tracing())
+        return;
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - process_start()).count();
+    char line[512];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(line, sizeof line, format, args);
+    va_end(args);
+    std::fprintf(stderr, "[%7.1f ms] %s\n", ms, line);
 }
 
 }  // namespace platform
