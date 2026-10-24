@@ -100,6 +100,7 @@ const Decoder& lmp_decoder();
 // The 256-colour VGA palette trailing an 8-bit PCX, as straight 0xFFRRGGBB.
 // False if the file has none. (Quake 2 keeps its palette in colormap.pcx.)
 bool pcx_vga_palette(const uint8_t* data, size_t size, uint32_t palette[256]);
+const Decoder& pkm_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
