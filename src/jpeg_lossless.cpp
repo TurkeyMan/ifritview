@@ -23,7 +23,8 @@ namespace
 // required one: without it, lossless saving says it needs it.
 struct TurboJpeg
 {
-    decltype(&tj3Init) init = nullptr;
+    tjhandle (*init)(int) = nullptr;  // tj3Init: a macro over tj3InitVersion since 3.2
+    tjhandle (*init_version)(int, int) = nullptr;
     decltype(&tj3Destroy) destroy = nullptr;
     decltype(&tj3GetErrorStr) error = nullptr;
     decltype(&tj3DecompressHeader) header = nullptr;
@@ -46,6 +47,7 @@ const TurboJpeg* turbojpeg()
                            return;
                        const auto sym = [lib](auto& f, const char* name) { f = reinterpret_cast<std::remove_reference_t<decltype(f)>>(platform::library_symbol(lib, name)); };
                        sym(tj.init, "tj3Init");
+                       sym(tj.init_version, "tj3InitVersion");
                        sym(tj.destroy, "tj3Destroy");
                        sym(tj.error, "tj3GetErrorStr");
                        sym(tj.header, "tj3DecompressHeader");
@@ -53,9 +55,15 @@ const TurboJpeg* turbojpeg()
                        sym(tj.transform, "tj3Transform");
                        sym(tj.free, "tj3Free");
 #else
-                       tj = {tj3Init, tj3Destroy, tj3GetErrorStr, tj3DecompressHeader, tj3Get, tj3Transform, tj3Free};
+                       tj.init = [](int type) { return tj3Init(type); };
+                       tj.destroy = tj3Destroy;
+                       tj.error = tj3GetErrorStr;
+                       tj.header = tj3DecompressHeader;
+                       tj.get = tj3Get;
+                       tj.transform = tj3Transform;
+                       tj.free = tj3Free;
 #endif
-                       ok = tj.init && tj.destroy && tj.error && tj.header && tj.get && tj.transform && tj.free;
+                       ok = (tj.init || tj.init_version) && tj.destroy && tj.error && tj.header && tj.get && tj.transform && tj.free;
                    });
     return ok ? &tj : nullptr;
 }
@@ -174,7 +182,8 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         plan.why_not = "it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)";
         return plan;
     }
-    tjhandle handle = tj->init(TJINIT_TRANSFORM);
+    // The 3.0 API version: what this file uses.
+    tjhandle handle = tj->init ? tj->init(TJINIT_TRANSFORM) : tj->init_version(TJINIT_TRANSFORM, 3000000);
     if (!handle)
     {
         plan.why_not = "the lossless JPEG transform isn't available";
