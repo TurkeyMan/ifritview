@@ -1540,6 +1540,18 @@ void App::on_loaded(Loader::Result& r)
     status_message_ = image_->is_preview() && image_->is_raw ? "Developing…" : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
+    // Come back to, it's as it was opened: an exposure set before leaving
+    // goes back to as shot (or its sidecar's).
+    if (from_cache)
+    {
+        const double opened = cfg_.apply_xmp_edits && image_->xmp.present ? image_->xmp.exposure : 0.0;
+        if (image_->exposure_edit != opened)
+        {
+            image_->exposure_edit = opened;
+            if (image_->tonable())
+                image_->retone(opened);
+        }
+    }
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
     view_->set_image(image_);
