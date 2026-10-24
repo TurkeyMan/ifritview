@@ -44,6 +44,19 @@ namespace plugins
 namespace
 {
 
+// A plugin's exports: their types from the header's declarations, and the
+// names they're found by.
+using info_fn = decltype(&ifrit_plugin_info);
+using decode_fn = decltype(&ifrit_decode);
+using sniff_fn = decltype(&ifrit_sniff);
+using preview_fn = decltype(&ifrit_decode_preview);
+using encode_fn = decltype(&ifrit_encode);
+const std::string kInfoName = "ifrit_plugin_info";
+const std::string kDecodeName = "ifrit_decode";
+const std::string kSniffName = "ifrit_sniff";
+const std::string kPreviewName = "ifrit_decode_preview";
+const std::string kEncodeName = "ifrit_encode";
+
 // -- the libraries ------------------------------------------------------------
 
 #ifdef _WIN32
@@ -163,10 +176,10 @@ struct Format
 struct Plugin
 {
     void* module = nullptr;
-    ifrit_decode_fn decode = nullptr;
-    ifrit_sniff_fn sniff = nullptr;
-    ifrit_decode_preview_fn preview = nullptr;
-    ifrit_encode_fn encode = nullptr;
+    decode_fn decode = nullptr;
+    sniff_fn sniff = nullptr;
+    preview_fn preview = nullptr;
+    encode_fn encode = nullptr;
     PluginSummary summary;
     std::vector<std::unique_ptr<Format>> formats;
 };
@@ -429,7 +442,7 @@ void finish_metadata(DecodeCall& call)
     out.info = call.info;
 }
 
-bool run_decode(const Format& f, ifrit_decode_fn fn, const std::string& path, Image& out, std::string& error)
+bool run_decode(const Format& f, decode_fn fn, const std::string& path, Image& out, std::string& error)
 {
     const uint8_t* data = nullptr;
     size_t size = 0;
@@ -846,21 +859,21 @@ std::unique_ptr<Plugin> load_plugin(const std::string& path, std::string& why)
         close_module(module);
         return nullptr;
     };
-    auto info = reinterpret_cast<ifrit_plugin_info_fn>(symbol(module, IFRIT_PLUGIN_INFO_SYMBOL));
-    p->decode = reinterpret_cast<ifrit_decode_fn>(symbol(module, IFRIT_DECODE_SYMBOL));
+    auto info = reinterpret_cast<info_fn>(symbol(module, kInfoName.c_str()));
+    p->decode = reinterpret_cast<decode_fn>(symbol(module, kDecodeName.c_str()));
     if (!info)
-        return fail("not an IfritView plugin (no " IFRIT_PLUGIN_INFO_SYMBOL ")");
+        return fail("not an IfritView plugin (no " + kInfoName + ")");
     if (!p->decode)
-        return fail("required export " IFRIT_DECODE_SYMBOL " is missing");
-    p->sniff = reinterpret_cast<ifrit_sniff_fn>(symbol(module, IFRIT_SNIFF_SYMBOL));
-    p->preview = reinterpret_cast<ifrit_decode_preview_fn>(symbol(module, IFRIT_DECODE_PREVIEW_SYMBOL));
-    p->encode = reinterpret_cast<ifrit_encode_fn>(symbol(module, IFRIT_ENCODE_SYMBOL));
+        return fail("required export " + kDecodeName + " is missing");
+    p->sniff = reinterpret_cast<sniff_fn>(symbol(module, kSniffName.c_str()));
+    p->preview = reinterpret_cast<preview_fn>(symbol(module, kPreviewName.c_str()));
+    p->encode = reinterpret_cast<encode_fn>(symbol(module, kEncodeName.c_str()));
     p->summary.sniff = p->sniff != nullptr;
     p->summary.preview = p->preview != nullptr;
 
     const ifrit_plugin* raw = info(IFRIT_PLUGIN_API_VERSION);
     if (!raw)
-        return fail(IFRIT_PLUGIN_INFO_SYMBOL " declined to load (it may need a newer IfritView)");
+        return fail(kInfoName + " declined to load (it may need a newer IfritView)");
     const ifrit_plugin d = read_struct<ifrit_plugin>(raw);
     if (d.struct_size < offsetof(ifrit_plugin, api_version) + sizeof d.api_version)
         return fail("plugin description too short");

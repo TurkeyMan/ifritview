@@ -58,8 +58,9 @@
  *   ifrit_encode          writes an image; needed for a format to appear in
  *                         Save As and `ifritview --convert`
  *
- * Export them with the IFRIT_EXPORT macro below, which also gives them C
- * linkage when the plugin is C++. They are found by these exact names.
+ * They're declared at the end of this header, exported and with C linkage
+ * (IFRIT_EXPORT), so a definition that doesn't match fails to compile.
+ * IfritView finds them by these exact names.
  *
  *
  * LIFETIME
@@ -448,8 +449,10 @@ typedef struct ifrit_encode_host
 /* -------------------------------------------------------------------------
  * The exports
  *
- * `format` is always the index of a format in ifrit_plugin.formats. Each
- * function is also given as a pointer type, for loaders written in C.
+ * What a plugin defines, by these names and with exactly these signatures:
+ * declared here, so the compiler checks the plugin's definitions against
+ * them. The optional ones are left undefined when a plugin has no use for
+ * them. `format` is always the index of a format in ifrit_plugin.formats.
  * ------------------------------------------------------------------------- */
 
 /* REQUIRED. Describes the plugin. Called once, after loading, before anything
@@ -457,8 +460,7 @@ typedef struct ifrit_encode_host
    with; a plugin that needs a newer IfritView may return NULL to decline
    loading. The returned plugin, and everything it points to, must stay valid
    and unchanged while the library is loaded (static data is simplest). */
-typedef const ifrit_plugin* (IFRIT_CALL *ifrit_plugin_info_fn)(uint32_t host_api_version);
-#define IFRIT_PLUGIN_INFO_SYMBOL "ifrit_plugin_info"
+IFRIT_EXPORT const ifrit_plugin* IFRIT_CALL ifrit_plugin_info(uint32_t host_api_version);
 
 /* REQUIRED. Decodes a whole file, given as `size` bytes at `data` (read-only;
    valid for the call; not zero-terminated). Gets the buffer from
@@ -467,9 +469,8 @@ typedef const ifrit_plugin* (IFRIT_CALL *ifrit_plugin_info_fn)(uint32_t host_api
 
    A file with several images (pages, frames, mipmaps, faces) shows its first,
    or main, one. */
-typedef ifrit_result (IFRIT_CALL *ifrit_decode_fn)(uint32_t format, const uint8_t* data, size_t size,
-                                                   const ifrit_decode_host* host);
-#define IFRIT_DECODE_SYMBOL "ifrit_decode"
+IFRIT_EXPORT ifrit_result IFRIT_CALL ifrit_decode(uint32_t format, const uint8_t* data, size_t size,
+                                                  const ifrit_decode_host* host);
 
 /* OPTIONAL. Whether a file is in `format`, from its first `size` bytes:
    at least 64 of them, unless the file is shorter. Return nonzero to claim
@@ -477,8 +478,7 @@ typedef ifrit_result (IFRIT_CALL *ifrit_decode_fn)(uint32_t format, const uint8_
    with one of the format's extensions are decoded without asking. Keep it
    cheap and specific (check a magic number); it's asked about files of every
    kind no built-in decoder recognised. */
-typedef int32_t (IFRIT_CALL *ifrit_sniff_fn)(uint32_t format, const uint8_t* head, size_t size);
-#define IFRIT_SNIFF_SYMBOL "ifrit_sniff"
+IFRIT_EXPORT int32_t IFRIT_CALL ifrit_sniff(uint32_t format, const uint8_t* head, size_t size);
 
 /* OPTIONAL. A quick stand-in for a file whose full decode is slow: an
    embedded thumbnail or preview, a first low-resolution pass. Exactly like
@@ -486,17 +486,15 @@ typedef int32_t (IFRIT_CALL *ifrit_sniff_fn)(uint32_t format, const uint8_t* hea
    ifrit_decode runs, then replaces it. Return IFRIT_UNSUPPORTED when this file
    has nothing quicker to offer. The stand-in may be smaller than the image;
    it is shown scaled to the image's size. */
-typedef ifrit_result (IFRIT_CALL *ifrit_decode_preview_fn)(uint32_t format, const uint8_t* data, size_t size,
-                                                           const ifrit_decode_host* host);
-#define IFRIT_DECODE_PREVIEW_SYMBOL "ifrit_decode_preview"
+IFRIT_EXPORT ifrit_result IFRIT_CALL ifrit_decode_preview(uint32_t format, const uint8_t* data, size_t size,
+                                                          const ifrit_decode_host* host);
 
 /* OPTIONAL. Writes `image` in `format` through host->write. `settings` holds
    one value per entry in the format's settings, in the same order
    (`setting_count` of them; each within its setting's range). Called only for
    formats with IFRIT_FORMAT_ENCODE. */
-typedef ifrit_result (IFRIT_CALL *ifrit_encode_fn)(uint32_t format, const ifrit_encode_image* image, const int32_t* settings,
-                                                   uint32_t setting_count, const ifrit_encode_host* host);
-#define IFRIT_ENCODE_SYMBOL "ifrit_encode"
+IFRIT_EXPORT ifrit_result IFRIT_CALL ifrit_encode(uint32_t format, const ifrit_encode_image* image, const int32_t* settings,
+                                                  uint32_t setting_count, const ifrit_encode_host* host);
 
 #ifdef __cplusplus
 }
