@@ -3,6 +3,7 @@
 // mono, 2/4-plane EGA (16 colours from the header palette), 8-bit palette
 // and 24-bit (three 8-bit planes).
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 
 #include <cstdio>
@@ -138,11 +139,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     if (rle)
         out.pixel_format.notes.push_back("RLE");
-    out.add("PCX", "Version", std::to_string(version));
-    out.add("PCX", "Planes × bits", std::to_string(planes) + " × " + std::to_string(bpp));
+    out.add(N_("PCX"), N_("Version"), std::to_string(version));
+    out.add(N_("PCX"), N_("Planes × bits"), std::to_string(planes) + " × " + std::to_string(bpp));
     const int hdpi = le16(d.data() + 12), vdpi = le16(d.data() + 14);
     if (hdpi && vdpi)
-        out.add("PCX", "Resolution", std::to_string(hdpi) + " × " + std::to_string(vdpi) + " dpi");
+        out.add(N_("PCX"), N_("Resolution"), std::to_string(hdpi) + " × " + std::to_string(vdpi) + " dpi");
     return true;
 }
 

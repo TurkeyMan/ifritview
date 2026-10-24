@@ -184,6 +184,7 @@ void Config::load()
     overlay_font_pt = std::clamp(get_int(kf, kOverlay, "font_pt", overlay_font_pt), 6, 40);
     save_metadata = get_string(kf, kSave, "metadata", save_metadata);
     map_url = get_string(kf, kMaps, "url", map_url);
+    language = get_string(kf, kInterfaceGroup, "language", language);
     geocoder_url = get_string(kf, kMaps, "geocoder_url", geocoder_url);
     if (!geocoder_url.empty() && (geocoder_url.find("{lat}") == std::string::npos || geocoder_url.find("{lon}") == std::string::npos))
         geocoder_url.clear();
@@ -252,6 +253,7 @@ bool Config::save() const
     }
     g_key_file_set_string(kf, kSave, "metadata", save_metadata.c_str());
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
+    g_key_file_set_string(kf, kInterfaceGroup, "language", language.c_str());
     g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
     g_key_file_set_boolean(kf, kOverlay, "enabled", overlay_enabled);
     g_key_file_set_boolean(kf, kOverlay, "file", overlay_file);

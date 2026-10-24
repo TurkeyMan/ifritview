@@ -7,6 +7,7 @@
 // that order); CSM2 is linear. PS2 alpha runs 0-128, 128 opaque. The first
 // picture's largest mipmap is shown.
 #include "decoder.h"
+#include "../i18n.h"
 #include "texel.h"
 #include "../bytes.h"
 
@@ -200,26 +201,26 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.bits_per_sample = 8;
         out.pixel_format = PixelFormat::packed(M::RGB, image_type == kRGB32 ? "RGBA" : "RGB", 8);
     }
-    out.add("TIM2", "Version", std::to_string(version));
-    out.add("TIM2", "Image type", type_name(image_type));
+    out.add(N_("TIM2"), N_("Version"), std::to_string(version));
+    out.add(N_("TIM2"), N_("Image type"), type_name(image_type));
     if (indexed)
     {
         if (clut_bytes && clut_colours > 0 && size_t(clut_colours) * clut_bytes <= clut_size)
         {
             const size_t cluts = clut_size / (size_t(clut_colours) * clut_bytes);
-            out.add("TIM2", "CLUT",
+            out.add(N_("TIM2"), N_("CLUT"),
                     std::to_string(clut_colours) + " × " + std::to_string(clut_bytes * 8) + "-bit, " + (csm2 ? "CSM2" : "CSM1") +
                         (cluts > 1 ? ", " + std::to_string(cluts) + " CLUTs, the first used" : ""));
         }
         else
-            out.add("TIM2", "CLUT", "none, shown in grey");
+            out.add(N_("TIM2"), N_("CLUT"), "none, shown in grey");
     }
     if (has_alpha_channel && all_clear)
-        out.add("TIM2", "Alpha", "zero throughout, shown opaque");
+        out.add(N_("TIM2"), N_("Alpha"), "zero throughout, shown opaque");
     if (pictures > 1)
-        out.add("TIM2", "Pictures", std::to_string(pictures) + ", the first shown");
+        out.add(N_("TIM2"), N_("Pictures"), std::to_string(pictures) + ", the first shown");
     if (mipmaps > 1)
-        out.add("TIM2", "Mipmaps", std::to_string(mipmaps));
+        out.add(N_("TIM2"), N_("Mipmaps"), std::to_string(mipmaps));
     return true;
 }
 

@@ -229,6 +229,9 @@ private:
     std::string image_path_;
     uint64_t file_size_ = 0;
     std::string status_message_;
+    // A status saying work is under way (loading, developing, saving): the
+    // view shows it's busy while the status is still this message.
+    std::string busy_message_;
     rap::subscription refit_timer_;
     std::shared_ptr<SaveDialog> save_dialog_;
     std::shared_ptr<Image> preview_image_;  // the latest preview, compared while its toggle is on

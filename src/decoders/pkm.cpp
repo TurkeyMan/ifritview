@@ -3,6 +3,7 @@
 // the size padded to whole blocks and the size proper), then one surface of
 // blocks, decoded through etc.cpp.
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "etc.h"
 
@@ -70,8 +71,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.format = "PKM";
     out.bits_per_sample = *format >= Etc::EAC_R11 ? 11 : 8;
     out.pixel_format = etc_pixel_format(*format);
-    out.add("PKM", "Format", etc_name(*format));
-    out.add("PKM", "Version", v1 ? "1.0" : "2.0");
+    out.add(N_("PKM"), N_("Format"), etc_name(*format));
+    out.add(N_("PKM"), N_("Version"), v1 ? "1.0" : "2.0");
     return true;
 }
 

@@ -52,6 +52,9 @@ Copy-Item "$build\Release\ifritview.exe" "$stage\"
 # Format plugins go in plugins, beside the exe; the interface they're written to waits there.
 Copy-Item include\ifritview_plugin.h "$stage\plugins\"
 Copy-Item README.md, LICENSE $stage
+# Translations, IfritView's and rapport's, in i18n beside the exe.
+New-Item -ItemType Directory -Force "$stage\i18n" | Out-Null
+Get-ChildItem i18n\*.po, third_party\rapport\i18n\*.po -ErrorAction SilentlyContinue | Copy-Item -Destination "$stage\i18n\"
 # The licence notices of everything built into the exe: the bundled code and
 # each vcpkg library linked (third-party-notices.py lists them).
 $installed = (Select-String -Path "$build\CMakeCache.txt" -Pattern '^_VCPKG_INSTALLED_DIR:PATH=(.*)').Matches[0].Groups[1].Value

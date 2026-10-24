@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "decoders/decoder.h"
 #include "geocode.h"
+#include "i18n.h"
 #include "integration.h"
 #include "platform.h"
 #include "plugins.h"
@@ -106,7 +107,7 @@ std::vector<std::string> labels(const std::vector<Action>& actions)
 {
     std::vector<std::string> out;
     for (Action a : actions)
-        out.push_back(action_info(a).label);
+        out.push_back(tr_ifrit(action_info(a).label));
     return out;
 }
 
@@ -127,7 +128,8 @@ struct State
 
     rap::check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
     rap::spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
-    rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr;
+    rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
+    std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
     rap::check *smooth_upscale = nullptr, *smooth_downscale = nullptr, *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
@@ -166,6 +168,8 @@ struct State
 
     void apply_general()
     {
+        if (const int i = language->current(); i >= 0 && size_t(i) < language_tags.size())
+            cfg.language = language_tags[size_t(i)];
         cfg.fit_window_to_image = fit_window->checked();
         cfg.min_window_width = int(min_width->value());
         cfg.min_window_height = int(min_height->value());
@@ -241,9 +245,9 @@ rap::node general_page(const Config& cfg, State& st)
         if (cfg.map_url == kMapProviders[i].url)
             map_index = int(i);
     }
-    maps.push_back("Custom");
+    maps.push_back(_("Custom"));
 
-    std::vector<std::string> geos{"Off"};
+    std::vector<std::string> geos{_("Off")};
     st.geo_urls = {"off"};
     size_t n = 0;
     const Geocoder::Provider* providers = Geocoder::providers(n);
@@ -255,7 +259,7 @@ rap::node general_page(const Config& cfg, State& st)
         if (cfg.geocoder_url == providers[i].url)
             geo_index = int(i + 1);
     }
-    geos.push_back("Custom");
+    geos.push_back(_("Custom"));
     st.geo_urls.push_back("");
     if (geo_index < 0)
         geo_index = int(geos.size() - 1);
@@ -265,33 +269,53 @@ rap::node general_page(const Config& cfg, State& st)
         if (cfg.raw_mode == kRawModes[i])
             raw_index = i;
 
+    // The translations there are, by their own names; English is the source.
+    std::vector<std::string> languages{_("Automatic (the system's)"), "English"};
+    st.language_tags = {"", "en"};
+    if (const std::filesystem::path dir = translations_folder("ifritview"); !dir.empty())
+        for (const rap::i18n::language& l : rap::i18n::available("ifritview", dir))
+            if (l.tag != "en")
+            {
+                languages.push_back(l.name);
+                st.language_tags.push_back(l.tag);
+            }
+    int language_index = 0;
+    for (size_t i = 0; i < st.language_tags.size(); ++i)
+        if (st.language_tags[i] == cfg.language)
+            language_index = int(i);
+
     State* s = &st;
     return L::scroll{L::vbox{
-        L::group{"Window",
+        L::group{_("Language"),
                  L::form{
-                     {"", L::check{"Resize the window to fit each image", cfg.fit_window_to_image}.bind(st.fit_window)},
-                     {"Min window width", L::spin{200, 8192, double(cfg.min_window_width), 10}.bind(st.min_width)},
-                     {"Min window height", L::spin{150, 8192, double(cfg.min_window_height), 10}.bind(st.min_height)},
+                     {_("Language"), L::drop_down{languages, language_index}.bind(st.language)},
+                     {"", L::label{_("Takes effect when IfritView next starts.")}},
                  }},
-        L::group{"Browsing",
+        L::group{_("Window"),
                  L::form{
-                     {"", L::check{"Wrap around at the end of the folder", cfg.wrap_around}.bind(st.wrap_around)},
-                     {"", L::check{"Include hidden files", cfg.show_hidden}.bind(st.show_hidden)},
-                     {"Preload images ahead", L::spin{0, 16, double(cfg.prefetch_ahead)}.bind(st.prefetch_ahead)},
-                     {"Preload images behind", L::spin{0, 16, double(cfg.prefetch_behind)}.bind(st.prefetch_behind)},
-                     {"Image cache (MB, 0 = auto)",
-                      L::spin{0, 65536, double(cfg.cache_megabytes), 256}.tooltip("0 = automatic: a quarter of the memory free at startup").bind(st.cache_mb)},
+                     {"", L::check{_("Resize the window to fit each image"), cfg.fit_window_to_image}.bind(st.fit_window)},
+                     {_("Min window width"), L::spin{200, 8192, double(cfg.min_window_width), 10}.bind(st.min_width)},
+                     {_("Min window height"), L::spin{150, 8192, double(cfg.min_window_height), 10}.bind(st.min_height)},
                  }},
-        L::group{"Camera RAW",
+        L::group{_("Browsing"),
                  L::form{
-                     {"Decode", L::drop_down{{"Full resolution", "Half size (fast, bins 2×2 photosites)", "Embedded JPEG only (never develop)"}, raw_index}.bind(
+                     {"", L::check{_("Wrap around at the end of the folder"), cfg.wrap_around}.bind(st.wrap_around)},
+                     {"", L::check{_("Include hidden files"), cfg.show_hidden}.bind(st.show_hidden)},
+                     {_("Preload images ahead"), L::spin{0, 16, double(cfg.prefetch_ahead)}.bind(st.prefetch_ahead)},
+                     {_("Preload images behind"), L::spin{0, 16, double(cfg.prefetch_behind)}.bind(st.prefetch_behind)},
+                     {_("Image cache (MB, 0 = auto)"),
+                      L::spin{0, 65536, double(cfg.cache_megabytes), 256}.tooltip(_("0 = automatic: a quarter of the memory free at startup")).bind(st.cache_mb)},
+                 }},
+        L::group{_("Camera RAW"),
+                 L::form{
+                     {_("Decode"), L::drop_down{{_("Full resolution"), _("Half size (fast, bins 2×2 photosites)"), _("Embedded JPEG only (never develop)")}, raw_index}.bind(
                                     st.raw_mode)},
-                     {"", L::check{"Frame as the camera did (crop the sensor margins the camera never shows)", cfg.raw_camera_crop}.bind(st.raw_crop)},
-                     {"", L::check{"Apply edits from XMP sidecars (exposure, crop, rotation)", cfg.apply_xmp_edits}.bind(st.apply_xmp)},
+                     {"", L::check{_("Frame as the camera did (crop the sensor margins the camera never shows)"), cfg.raw_camera_crop}.bind(st.raw_crop)},
+                     {"", L::check{_("Apply edits from XMP sidecars (exposure, crop, rotation)"), cfg.apply_xmp_edits}.bind(st.apply_xmp)},
                  }},
-        L::group{"Maps",
+        L::group{_("Maps"),
                  L::form{
-                     {"Open locations in", L::drop_down{maps, map_index}
+                     {_("Open locations in"), L::drop_down{maps, map_index}
                                                .on_changed(
                                                    [s](int i)
                                                    {
@@ -301,13 +325,13 @@ rap::node general_page(const Config& cfg, State& st)
                                                        s->map_url->set_enabled(custom);
                                                    })
                                                .bind(st.map_provider)},
-                     {"URL template",
+                     {_("URL template"),
                       L::entry{cfg.map_url}
-                          .tooltip("URL template; {lat} and {lon} are replaced with the coordinates")
+                          .tooltip(_("URL template; {lat} and {lon} are replaced with the coordinates"))
                           .enabled(map_index >= int(std::size(kMapProviders)))
                           .bind(st.map_url)
                           .width(chars(44))},
-                     {"Look up place names with", L::drop_down{geos, geo_index}
+                     {_("Look up place names with"), L::drop_down{geos, geo_index}
                                                       .on_changed(
                                                           [s](int i)
                                                           {
@@ -321,8 +345,8 @@ rap::node general_page(const Config& cfg, State& st)
                                                               s->geo_url->set_enabled(url.empty());
                                                           })
                                                       .bind(st.geo_provider)},
-                     {"Lookup URL template", L::entry{cfg.geocoder_url}
-                                                 .tooltip("Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced")
+                     {_("Lookup URL template"), L::entry{cfg.geocoder_url}
+                                                 .tooltip(_("Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced"))
                                                  .enabled(st.geo_urls[size_t(geo_index)].empty())
                                                  .bind(st.geo_url)
                                                  .width(chars(44))},
@@ -334,47 +358,47 @@ rap::node viewing_page(const Config& cfg, State& st)
 {
     State* s = &st;
     return L::scroll{L::vbox{
-        L::group{"Scaling",
+        L::group{_("Scaling"),
                  L::form{
-                     {"", L::check{"Smooth when zoomed in", cfg.smooth_upscale}.bind(st.smooth_upscale)},
-                     {"", L::check{"Smooth when zoomed out", cfg.smooth_downscale}.bind(st.smooth_downscale)},
-                     {"", L::check{"In fullscreen, enlarge small images to fill the screen", cfg.fullscreen_upscale}.bind(st.fullscreen_upscale)},
+                     {"", L::check{_("Smooth when zoomed in"), cfg.smooth_upscale}.bind(st.smooth_upscale)},
+                     {"", L::check{_("Smooth when zoomed out"), cfg.smooth_downscale}.bind(st.smooth_downscale)},
+                     {"", L::check{_("In fullscreen, enlarge small images to fill the screen"), cfg.fullscreen_upscale}.bind(st.fullscreen_upscale)},
                  }},
-        L::group{"Background",
+        L::group{_("Background"),
                  L::form{
-                     {"Window", L::color_button{parse_colour(cfg.background), "Window background"}.bind(st.background)},
-                     {"Fullscreen", L::color_button{parse_colour(cfg.fullscreen_background), "Fullscreen background"}.bind(st.fullscreen_background)},
-                     {"", L::check{"Show transparency as a checkerboard", cfg.checkerboard}.bind(st.checkerboard)},
-                     {"", L::check{"Play animated GIF and WebP (A toggles)", cfg.animate}.bind(st.animate)},
+                     {_("Window"), L::color_button{parse_colour(cfg.background), _("Window background")}.bind(st.background)},
+                     {_("Fullscreen"), L::color_button{parse_colour(cfg.fullscreen_background), _("Fullscreen background")}.bind(st.fullscreen_background)},
+                     {"", L::check{_("Show transparency as a checkerboard"), cfg.checkerboard}.bind(st.checkerboard)},
+                     {"", L::check{_("Play animated GIF and WebP (A toggles)"), cfg.animate}.bind(st.animate)},
                  }},
-        L::group{"Video",
+        L::group{_("Video"),
                  L::form{
-                     {"", L::check{"Play videos as soon as they are shown (Space toggles)", cfg.video_autoplay}.bind(st.video_autoplay)},
-                     {"", L::check{"Start muted (M toggles)", cfg.video_muted}.bind(st.video_muted)},
-                     {"", L::check{"Loop", cfg.video_loop}.bind(st.video_loop)},
+                     {"", L::check{_("Play videos as soon as they are shown (Space toggles)"), cfg.video_autoplay}.bind(st.video_autoplay)},
+                     {"", L::check{_("Start muted (M toggles)"), cfg.video_muted}.bind(st.video_muted)},
+                     {"", L::check{_("Loop"), cfg.video_loop}.bind(st.video_loop)},
                  }},
-        L::group{"Slideshow",
+        L::group{_("Slideshow"),
                  L::form{
-                     {"Seconds per image", L::spin{0.5, 600, cfg.slideshow_seconds, 0.5, 1}.bind(st.ss_seconds)},
-                     {"", L::check{"Gentle pan and zoom on each image", cfg.slideshow_motion}.bind(st.ss_motion)},
-                     {"Motion amount (%)", L::spin{0, 50, cfg.slideshow_zoom * 100}.bind(st.ss_zoom)},
-                     {"", L::check{"Shuffle", cfg.slideshow_shuffle}.bind(st.ss_shuffle)},
-                     {"Cross-fade (ms, 0 = cut)", L::spin{0, 5000, double(cfg.slideshow_crossfade_ms), 100}.bind(st.ss_fade)},
+                     {_("Seconds per image"), L::spin{0.5, 600, cfg.slideshow_seconds, 0.5, 1}.bind(st.ss_seconds)},
+                     {"", L::check{_("Gentle pan and zoom on each image"), cfg.slideshow_motion}.bind(st.ss_motion)},
+                     {_("Motion amount (%)"), L::spin{0, 50, cfg.slideshow_zoom * 100}.bind(st.ss_zoom)},
+                     {"", L::check{_("Shuffle"), cfg.slideshow_shuffle}.bind(st.ss_shuffle)},
+                     {_("Cross-fade (ms, 0 = cut)"), L::spin{0, 5000, double(cfg.slideshow_crossfade_ms), 100}.bind(st.ss_fade)},
                  }},
-        L::group{"Fullscreen info overlay",
+        L::group{_("Fullscreen info overlay"),
                  L::vbox{
-                     L::check{"Show the overlay (I toggles it in fullscreen)", cfg.overlay_enabled}
+                     L::check{_("Show the overlay (I toggles it in fullscreen)"), cfg.overlay_enabled}
                          .on_toggled([s](bool on) { s->overlay_details->set_enabled(on); })
                          .bind(st.ov_enabled),
                      L::form{
-                         {"", L::check{"File: name, position in folder, size, date", cfg.overlay_file}.bind(st.ov_file)},
-                         {"", L::check{"Format: dimensions, depth, codec details, colour profile", cfg.overlay_format}.bind(st.ov_format)},
-                         {"", L::check{"Shot: camera, lens, aperture, shutter, ISO, focal length", cfg.overlay_shot}.bind(st.ov_shot)},
-                         {"", L::check{"Location", cfg.overlay_location}.bind(st.ov_location)},
-                         {"", L::check{"View: zoom, raw state, exposure", cfg.overlay_view}.bind(st.ov_view)},
-                         {"", L::check{"Also show in the window, not only in fullscreen", cfg.overlay_windowed}.bind(st.ov_windowed)},
-                         {"Text colour", L::color_button{parse_colour(cfg.overlay_color), "Overlay text"}.bind(st.ov_color)},
-                         {"Text size (pt)", L::spin{6, 40, double(cfg.overlay_font_pt)}.bind(st.ov_font)},
+                         {"", L::check{_("File: name, position in folder, size, date"), cfg.overlay_file}.bind(st.ov_file)},
+                         {"", L::check{_("Format: dimensions, depth, codec details, colour profile"), cfg.overlay_format}.bind(st.ov_format)},
+                         {"", L::check{_("Shot: camera, lens, aperture, shutter, ISO, focal length"), cfg.overlay_shot}.bind(st.ov_shot)},
+                         {"", L::check{_("Location"), cfg.overlay_location}.bind(st.ov_location)},
+                         {"", L::check{_("View: zoom, raw state, exposure"), cfg.overlay_view}.bind(st.ov_view)},
+                         {"", L::check{_("Also show in the window, not only in fullscreen"), cfg.overlay_windowed}.bind(st.ov_windowed)},
+                         {_("Text colour"), L::color_button{parse_colour(cfg.overlay_color), _("Overlay text")}.bind(st.ov_color)},
+                         {_("Text size (pt)"), L::spin{6, 40, double(cfg.overlay_font_pt)}.bind(st.ov_font)},
                      }
                          .enabled(cfg.overlay_enabled)
                          .handle(st.overlay_details),
@@ -393,12 +417,12 @@ rap::node controls_page(const Config& cfg, State& st)
     // Wide enough for the longest action: GTK widens a drop-down to fit its
     // choices, so a narrower one would push the second column out of line.
     constexpr float column = 36;
-    rows.push_back(L::hbox{L::label{"Windowed"}.width(chars(column)), L::label{"Fullscreen"}});
+    rows.push_back(L::hbox{L::label{_("Windowed")}.width(chars(column)), L::label{_("Fullscreen")}});
     for (const ControlInfo& c : kControls)
     {
         const std::vector<Action> acts = actions_for(c.kind);
         const std::vector<std::string> items = labels(acts);
-        form_labels.push_back(c.label);
+        form_labels.push_back(tr_ifrit(c.label));
         rows.push_back(L::hbox{
             L::drop_down{items, index_of(acts, cfg.control(c.id, false))}.bind(st.controls[size_t(c.id)]).width(chars(column)),
             L::drop_down{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(column)),
@@ -408,10 +432,10 @@ rap::node controls_page(const Config& cfg, State& st)
     State* s = &st;
     return L::scroll{L::vbox{
         rap::node{form, {}},
-        L::label{"While selecting a region, hold Shift for a square or Ctrl for the image's own shape."},
+        L::label{_("While selecting a region, hold Shift for a square or Ctrl for the image's own shape.")},
         L::hbox{
             L::spacer{},
-            L::button{"Reset to defaults"}.on_click(
+            L::button{_("Reset to defaults")}.on_click(
                 [s]
                 {
                     const Bindings d = default_bindings(), f = default_fullscreen_bindings();
@@ -430,7 +454,7 @@ rap::node controls_page(const Config& cfg, State& st)
 std::string plugin_list()
 {
     if (!plugins::ready())
-        return "Format plugins: still loading.";
+        return _("Format plugins: still loading.");
     std::string text;
     for (const plugins::PluginSummary& p : plugins::loaded())
     {
@@ -442,46 +466,48 @@ std::string plugin_list()
     }
     const size_t failed = plugins::failures().size();
     if (text.empty())
-        text = "none";
+        text = _("none");
     if (failed)
-        text += "; " + std::to_string(failed) + " not loaded (see ifritview --plugins)";
-    return "Format plugins: " + text + ".";
+        text += "; " + rap::i18n::format(P_("{0} not loaded (see ifritview --plugins)", "{0} not loaded (see ifritview --plugins)", failed), failed);
+    return rap::i18n::format(_("Format plugins: {0}."), text);
 }
 
 rap::node file_types_page(const Config& cfg, State& st)
 {
     State* s = &st;
     return L::vbox{
-        L::label{"File extensions to include when browsing a folder, separated by spaces:"},
+        L::label{_("File extensions to include when browsing a folder, separated by spaces:")},
         L::text_view{join_extensions(cfg.extensions)}.monospace().bind(st.extensions).stretch(),
         L::hbox{
-            L::button{"Make IfritView the default viewer for these types"}.on_click(
+            L::button{_("Make IfritView the default viewer for these types")}.on_click(
                 [s]
                 {
                     std::vector<std::string> skipped;
                     std::string error;
                     const bool videos = s->default_videos->checked(), documents = s->default_documents->checked();
                     const int n = set_default_for_extensions(parse_extensions(s->extensions->text()), videos, documents, skipped, error);
-                    std::string msg = n ? "IfritView is now the default for " + std::to_string(n) + " file types." : "No file types were set.";
+                    std::string msg = n ? rap::i18n::format(P_("IfritView is now the default for {0} file type.",
+                                                                 "IfritView is now the default for {0} file types.", n), n)
+                                        : std::string(_("No file types were set."));
                     if (!videos)
-                        msg += " Videos were left alone.";
+                        msg += std::string(" ") + _("Videos were left alone.");
                     if (!skipped.empty())
                     {
-                        msg += " Unknown to the system: ";
+                        std::string names;
                         for (size_t i = 0; i < skipped.size(); ++i)
-                            msg += (i ? ", " : "") + skipped[i];
-                        msg += ".";
+                            names += (i ? ", " : "") + skipped[i];
+                        msg += " " + rap::i18n::format(_("Unknown to the system: {0}."), names);
                     }
                     if (!error.empty())
-                        msg += " Error: " + error;
+                        msg += " " + rap::i18n::format(_("Error: {0}"), error);
                     s->default_result->set_text(msg);
                 }),
             L::spacer{},
-            L::button{"Reset to all supported formats"}.on_click([s] { s->extensions->set_text(join_extensions(default_extensions())); }),
+            L::button{_("Reset to all supported formats")}.on_click([s] { s->extensions->set_text(join_extensions(default_extensions())); }),
         },
         L::hbox{
-            L::check{"Also for videos"}.tooltip("Leave unticked to keep your current video player for mp4, mov, mkv…").bind(st.default_videos),
-            L::check{"Also for PDFs"}.tooltip("Leave unticked to keep your current PDF reader").bind(st.default_documents),
+            L::check{_("Also for videos")}.tooltip(_("Leave unticked to keep your current video player for mp4, mov, mkv…")).bind(st.default_videos),
+            L::check{_("Also for PDFs")}.tooltip(_("Leave unticked to keep your current PDF reader")).bind(st.default_documents),
         },
         L::label{""}.bind(st.default_result),
         L::label{plugin_list()},
@@ -567,14 +593,14 @@ rap::node about_page()
 {
     rap::nodes items = {
         L::label{std::string("IfritView ") + IFRIT_VERSION},
-        L::label{"A fast image viewer, for photos and camera raws, and the texture formats of games."},
-        L::label{"Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later."},
-        L::label{"Project page and source"}.icon(github_icon()).link([] { platform::open_uri(kProjectUrl); }),
-        L::label{"The licence (GPL 3.0)"}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
+        L::label{_("A fast image viewer, for photos and camera raws, and the texture formats of games.")},
+        L::label{_("Copyright © 2026 Manu Evans. Free software, under the GNU General Public License, version 3 or later.")},
+        L::label{_("Project page and source")}.icon(github_icon()).link([] { platform::open_uri(kProjectUrl); }),
+        L::label{_("The licence (GPL 3.0)")}.link([] { platform::open_uri("https://www.gnu.org/licenses/gpl-3.0.html"); }),
     };
     // The code it carries from elsewhere, and the licences that come with it.
     if (const std::string notices = notices_path(); !notices.empty())
-        items.push_back(L::label{"Third-party notices"}.link(
+        items.push_back(L::label{_("Third-party notices")}.link(
             [notices]
             {
                 if (gchar* uri = g_filename_to_uri(notices.c_str(), nullptr, nullptr))
@@ -604,14 +630,14 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
     // Each page is built the first time it's shown (the window owns them and
     // goes before the state does).
     State* s = st.get();
-    st->window = ui.create(L::dialog{"Settings",
+    st->window = ui.create(L::dialog{_("Settings"),
                                      {L::vbox{
                                          L::tabs{
-                                             {"General", L::lazy{[&cfg, s] { return general_page(cfg, *s); }}},
-                                             {"Viewing", L::lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
-                                             {"Controls", L::lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
-                                             {"File Types", L::lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
-                                             {"About", L::lazy{[] { return about_page(); }}},
+                                             {_("General"), L::lazy{[&cfg, s] { return general_page(cfg, *s); }}},
+                                             {_("Viewing"), L::lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
+                                             {_("Controls"), L::lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
+                                             {_("File Types"), L::lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
+                                             {_("About"), L::lazy{[] { return about_page(); }}},
                                          }
                                              .sidebar()
                                              .bind(st->tabs)

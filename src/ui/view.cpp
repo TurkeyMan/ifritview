@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "view.h"
 
 #include "config.h"
@@ -523,7 +524,7 @@ void View::draw_compare(rap::painter& p, float alpha)
             if (difference_shown())
             {
                 draw_layer(p, c.difference_layer, alpha);
-                tag("Difference ×" + std::to_string(c.gain), left, false);
+                tag(rap::i18n::format(_("Difference ×{0}"), c.gain), left, false);
             }
             else
                 draw_layer(p, c.b, alpha, rel_b);  // not worked out yet

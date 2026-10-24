@@ -5,6 +5,7 @@
 // shows its first slice when its blocks are 2D, and isn't supported when
 // they're 3D.
 #include "astc.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "decoder.h"
 
@@ -45,10 +46,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.format = "ASTC";
     const std::string footprint = std::to_string(bw) + "x" + std::to_string(bh);
     out.pixel_format = astc_pixel_format(bw, bh, out.bits_per_sample > 8);
-    out.add("ASTC", "Block size", footprint);
-    out.add("ASTC", "Profile", out.bits_per_sample > 8 ? "HDR" : "LDR");
+    out.add(N_("ASTC"), N_("Block size"), footprint);
+    out.add(N_("ASTC"), N_("Profile"), out.bits_per_sample > 8 ? "HDR" : "LDR");
     if (depth > 1)
-        out.add("ASTC", "Volume", std::to_string(depth) + " slices, the first shown");
+        out.add(N_("ASTC"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
     return true;
 }
 

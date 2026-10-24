@@ -49,6 +49,7 @@ endif()
 add_library(ifrit_core STATIC
   src/color_space.cpp
   src/config.cpp
+  src/i18n.cpp
   src/folder.cpp
   src/image.cpp
   src/decoders/decoder.cpp
@@ -98,7 +99,7 @@ target_compile_definitions(ifrit_core PUBLIC IFRIT_VERSION="${IFRIT_VERSION}")
 target_include_directories(ifrit_core PUBLIC src include ${CMAKE_BINARY_DIR}/generated)
 # zlib: compressed metadata in PNG (profiles, XMP). It comes with libpng anyway.
 pkg_check_modules(ZLIB_PC REQUIRED IMPORTED_TARGET zlib)
-target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE PkgConfig::ZLIB_PC ${CMAKE_DL_LIBS})
+target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE PkgConfig::ZLIB_PC rapport::rapport ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
 # bc7enc and rgbcx (third_party/bc7enc): the block compressors DDS saving
 # uses. Built as they come, their warnings not ours; bc7enc.c as C++, the
@@ -423,6 +424,18 @@ endif()
 # Where About finds them: installed, or in the source when run from a build.
 set_property(SOURCE src/ui/settings.cpp APPEND PROPERTY COMPILE_DEFINITIONS
   IFRIT_DOC_DIR="${CMAKE_INSTALL_FULL_DOCDIR}" IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# Translations (gettext .po files, read as they are): IfritView's and
+# rapport's, beside the exe on Windows, in share/ifritview/i18n elsewhere;
+# from the source tree when run from a build.
+file(GLOB IFRIT_PO i18n/*.po ${IFRIT_RAPPORT_DIR}/i18n/*.po)
+if(WIN32)
+  set(IFRIT_I18N_DIR i18n)
+else()
+  set(IFRIT_I18N_DIR ${CMAKE_INSTALL_DATADIR}/ifritview/i18n)
+endif()
+install(FILES ${IFRIT_PO} DESTINATION ${IFRIT_I18N_DIR})
+set_property(SOURCE src/i18n.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+  IFRIT_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/ifritview" IFRIT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # The 256 px icon as C bytes, for a bare executable's own desktop entry.
 file(READ data/icons/hicolor/256x256/apps/ifritview.png IFRIT_ICON_HEX HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," IFRIT_ICON_PNG "${IFRIT_ICON_HEX}")

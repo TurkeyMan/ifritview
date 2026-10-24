@@ -5,6 +5,7 @@
 // first is shown. ".pbm" is also Deluxe Paint's chunky IFF, which the ILBM
 // decoder takes: the two are told apart by their first bytes.
 #include "decoder.h"
+#include "../i18n.h"
 
 #include <algorithm>
 #include <cctype>
@@ -224,9 +225,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.pixel_format = PixelFormat::packed(colour ? M::RGB : M::L, colour ? (alpha ? "RGBA" : "RGB") : (alpha ? "LA" : "L"), bits);
     out.pixel_format.notes.push_back(raw ? "binary" : "plain text");
     if (!bitmap && maxval != 255 && maxval != 65535)
-        out.add("Netpbm", "Maximum value", std::to_string(maxval));
+        out.add(N_("Netpbm"), N_("Maximum value"), std::to_string(maxval));
     if (!tupltype.empty())
-        out.add("Netpbm", "Tuple type", tupltype);
+        out.add(N_("Netpbm"), N_("Tuple type"), tupltype);
     return true;
 }
 

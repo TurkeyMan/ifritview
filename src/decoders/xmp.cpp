@@ -2,6 +2,7 @@
 // style sidecar beside it (IMG.xmp or IMG.ext.xmp). Everything is listed
 // under its schema prefix; crs:* are Camera Raw's edit parameters.
 #include "decoder.h"
+#include "../i18n.h"
 
 #include <exempi/xmp.h>
 
@@ -129,7 +130,7 @@ bool read_sidecar(const std::string& sidecar, Image& out)
     if (ok)
     {
         gchar* base = g_path_get_basename(sidecar.c_str());
-        out.add("XMP sidecar", "File", base);
+        out.add(N_("XMP sidecar"), N_("File"), base);
         g_free(base);
         collect(xmp, "XMP sidecar", out);
         collect_develop(xmp, out);

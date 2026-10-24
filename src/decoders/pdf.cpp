@@ -7,6 +7,7 @@
 // rather than linked (it drags in a few dozen packages). Without it, PDFs
 // aren't part of the series.
 #include "decoder.h"
+#include "../i18n.h"
 
 #include "../platform.h"
 
@@ -199,11 +200,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
     add_info(out, "Creator", poppler_document_get_creator(doc));
     add_info(out, "Producer", poppler_document_get_producer(doc));
     add_info(out, "PDF version", poppler_document_get_pdf_version_string(doc));
-    out.add("Document", "Pages", std::to_string(pages));
+    out.add(N_("Document"), N_("Pages"), std::to_string(pages));
     char buf[64];
     std::snprintf(buf, sizeof buf, "%.1f × %.1f mm", pw * 25.4 / 72, ph * 25.4 / 72);
-    out.add("Document", "Page size", buf);
-    out.add("Document", "Rendered at", std::to_string(int(std::lround(dpi))) + " dpi");
+    out.add(N_("Document"), N_("Page size"), buf);
+    out.add(N_("Document"), N_("Rendered at"), std::to_string(int(std::lround(dpi))) + " dpi");
     out.vector = std::make_shared<PdfPage>(doc, page, dpi);  // keeps them
     return true;
 }

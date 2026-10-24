@@ -9,6 +9,7 @@
 // Big-endian files (PS3) are read the same way with their words swapped.
 // The first picture's first frame and level is shown.
 #include "bcn.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "decoder.h"
 #include "texel.h"
@@ -363,7 +364,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         }
         out.bits_per_sample = fmt == kRGBA4444 ? 4 : fmt <= kRGBA5551 ? 5 : indexed ? std::min(format_bits(fmt), 8) : 8;
         if (indexed)
-            out.add("GIM", "Palette", palette_format >= 0 ? std::to_string(palette.size()) + " × " + format_name(palette_format) : "none, shown in grey");
+            out.add(N_("GIM"), N_("Palette"), palette_format >= 0 ? std::to_string(palette.size()) + " × " + format_name(palette_format) : "none, shown in grey");
     }
     if (fmt >= kDXT1)
     {
@@ -375,16 +376,16 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.pixel_format.notes.push_back("swizzled");
 
     out.format = "GIM";
-    out.add("GIM", "Format", format_name(fmt));
-    out.add("GIM", "Pixel order", img.order == 1 ? "faster (swizzled)" : "normal");
+    out.add(N_("GIM"), N_("Format"), format_name(fmt));
+    out.add(N_("GIM"), N_("Pixel order"), img.order == 1 ? "faster (swizzled)" : "normal");
     const bool ps3 = std::memcmp(d + 8, "PS3", 3) == 0 || std::memcmp(d + 9, "PS3", 3) == 0;
-    out.add("GIM", "Platform", std::string(ps3 ? "PS3" : "PSP") + (f.big ? ", big-endian" : ""));
+    out.add(N_("GIM"), N_("Platform"), std::string(ps3 ? "PS3" : "PSP") + (f.big ? ", big-endian" : ""));
     if (t.pictures > 1)
-        out.add("GIM", "Pictures", std::to_string(t.pictures) + ", the first shown");
+        out.add(N_("GIM"), N_("Pictures"), std::to_string(t.pictures) + ", the first shown");
     if (img.levels > 1)
-        out.add("GIM", "Mipmaps", std::to_string(img.levels));
+        out.add(N_("GIM"), N_("Mipmaps"), std::to_string(img.levels));
     if (img.frames > 1)
-        out.add("GIM", "Frames", std::to_string(img.frames) + ", the first shown");
+        out.add(N_("GIM"), N_("Frames"), std::to_string(img.frames) + ", the first shown");
     if (t.info.ok)
     {
         // Four NUL-terminated strings: project, user, date saved, the tool.

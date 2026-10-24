@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "save.h"
 
 #include <algorithm>
@@ -10,8 +11,8 @@ namespace
 
 // The presets, in the drop-down's order, as parse_metadata_choice names them.
 const char* const kPresets[] = {"all", "no-location", "private", "copyright", "none"};
-const char* const kPresetNames[] = {"Keep all", "All but location", "All but location and personal details", "Copyright and contact only",
-                                    "None", "Custom"};
+const char* const kPresetNames[] = {N_("Keep all"), N_("All but location"), N_("All but location and personal details"),
+                                    N_("Copyright and contact only"), N_("None"), N_("Custom")};
 
 // The groups' check boxes, in order, and the choice's flag for each.
 struct GroupBox
@@ -20,12 +21,12 @@ struct GroupBox
     bool MetadataChoice::*flag;
 };
 const GroupBox kGroups[] = {
-    {"Location", &MetadataChoice::location},
-    {"Serial numbers and owner", &MetadataChoice::personal},
-    {"Author and copyright", &MetadataChoice::author},
-    {"Title, caption and keywords", &MetadataChoice::description},
-    {"Camera and exposure", &MetadataChoice::capture},
-    {"Software and edit history", &MetadataChoice::history},
+    {N_("Location"), &MetadataChoice::location},
+    {N_("Serial numbers and owner"), &MetadataChoice::personal},
+    {N_("Author and copyright"), &MetadataChoice::author},
+    {N_("Title, caption and keywords"), &MetadataChoice::description},
+    {N_("Camera and exposure"), &MetadataChoice::capture},
+    {N_("Software and edit history"), &MetadataChoice::history},
 };
 
 int preset_index(const MetadataChoice& c)
@@ -73,13 +74,13 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
     for (Page& p : d->pages_)
         pages.push_back(d->page_node(p));
     SaveDialog* s = d.get();
-    d->window_ = ui.create(L::dialog{"Save Image As",
+    d->window_ = ui.create(L::dialog{_("Save Image As"),
                                      {L::vbox{
                                          // The preview's file size and its toggle sit with the format,
                                          // in the same place whatever the format's settings.
-                                         L::form{{"Format", L::hbox{L::drop_down{names, initial}.on_changed([s](int i) { s->show_format(i); }).bind(s->format_),
+                                         L::form{{_("Format"), L::hbox{L::drop_down{names, initial}.on_changed([s](int i) { s->show_format(i); }).bind(s->format_),
                                                                     L::label{""}.bind(s->info_).width(rap::extent{8, rap::extent::unit::chars}),
-                                                                    L::check{"Preview", true}
+                                                                    L::check{_("Preview"), true}
                                                                         .on_toggled(
                                                                             [s](bool on)
                                                                             {
@@ -92,7 +93,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
                                          L::spacer{},
                                          L::separator{},
                                          d->metadata_node(metadata),
-                                         L::buttons{L::ok("_Save…"), L::cancel},
+                                         L::buttons{L::ok(_("_Save…")), L::cancel},
                                      }}}
                                .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(11 + 2.2 * double(most)), rap::extent::unit::lines})
                                .modeless()
@@ -123,11 +124,11 @@ rap::node SaveDialog::page_node(Page& page)
         if (auto it = own_settings_.find(set.key); it != own_settings_.end() && own_extension_ == e.extension)
             value = std::clamp(it->second, set.min, set.max);
         Control& c = page.controls[i];
-        rap::node beside = L::label{set.note ? set.note : ""}.bind(c.note);  // a few words
+        rap::node beside = L::label{set.note ? tr_ifrit(set.note) : ""}.bind(c.note);  // a few words
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
-                rows.push_back({set.label, L::hbox{L::slider{double(set.min), double(set.max), double(value)}
+                rows.push_back({tr_ifrit(set.label), L::hbox{L::slider{double(set.min), double(set.max), double(value)}
                                                        .step(1, std::max(1, (set.max - set.min) / 10))
                                                        .show_value(0)
                                                        .on_changed([s](double) { s->report(); })
@@ -136,7 +137,7 @@ rap::node SaveDialog::page_node(Page& page)
                                                    beside}});
                 break;
             case EncodeSetting::Kind::Toggle:
-                rows.push_back({"", L::hbox{L::check{set.label, value != 0}
+                rows.push_back({"", L::hbox{L::check{tr_ifrit(set.label), value != 0}
                                                 .on_toggled(
                                                     [s, p](bool)
                                                     {
@@ -148,8 +149,10 @@ rap::node SaveDialog::page_node(Page& page)
                 break;
             case EncodeSetting::Kind::Choice:
             {
-                std::vector<std::string> choices(set.choices.begin(), set.choices.end());
-                rows.push_back({set.label, L::hbox{L::drop_down{choices, value}.on_changed([s](int) { s->report(); }).bind(c.choice), beside}});
+                std::vector<std::string> choices;
+                for (const char* choice : set.choices)
+                    choices.push_back(tr_ifrit(choice));
+                rows.push_back({tr_ifrit(set.label), L::hbox{L::drop_down{choices, value}.on_changed([s](int) { s->report(); }).bind(c.choice), beside}});
                 break;
             }
         }
@@ -157,7 +160,7 @@ rap::node SaveDialog::page_node(Page& page)
     // JPEG to JPEG: the original's compressed data turned and cropped, not
     // re-encoded. Greyed until the app has worked out whether it can be done.
     if (e.lossless_transform)
-        rows.insert(rows.begin(), {"", L::vbox{L::check{"Lossless: turn and crop the original, no re-encoding"}
+        rows.insert(rows.begin(), {"", L::vbox{L::check{_("Lossless: turn and crop the original, no re-encoding")}
                                                    .on_toggled(
                                                        [s, p](bool)
                                                        {
@@ -166,7 +169,7 @@ rap::node SaveDialog::page_node(Page& page)
                                                        })
                                                    .enabled(false)
                                                    .bind(page.lossless),
-                                               L::label{"Checking…"}.ellipsize().bind(lossless_note_)}});
+                                               L::label{_("Checking…")}.ellipsize().bind(lossless_note_)}});
     if (rows.empty())
         rows.push_back({"", L::label{std::string(e.name) + " has no settings."}});
     rap::spec::form form;
@@ -185,13 +188,15 @@ rap::node SaveDialog::page_node(Page& page)
 rap::node SaveDialog::metadata_node(const MetadataChoice& initial)
 {
     SaveDialog* s = this;
-    std::vector<std::string> presets(std::begin(kPresetNames), std::end(kPresetNames));
+    std::vector<std::string> presets;
+    for (const char* name : kPresetNames)
+        presets.push_back(tr_ifrit(name));
     groups_.assign(std::size(kGroups), nullptr);
     rap::nodes columns[2];
     for (size_t i = 0; i < std::size(kGroups); ++i)
-        columns[i % 2].push_back(L::check{kGroups[i].label, initial.*kGroups[i].flag}.on_toggled([s](bool) { s->group_toggled(); }).bind(groups_[i]));
+        columns[i % 2].push_back(L::check{tr_ifrit(kGroups[i].label), initial.*kGroups[i].flag}.on_toggled([s](bool) { s->group_toggled(); }).bind(groups_[i]));
     return L::vbox{
-        L::form{{"Metadata", L::drop_down{presets, preset_index(initial)}.on_changed([s](int i) { s->preset_chosen(i); }).bind(preset_)}},
+        L::form{{_("Metadata"), L::drop_down{presets, preset_index(initial)}.on_changed([s](int i) { s->preset_chosen(i); }).bind(preset_)}},
         L::hbox{rap::node{rap::spec::box{rap::orientation::vertical, columns[0], false, {}}, {}}, rap::node{rap::spec::box{rap::orientation::vertical, columns[1], false, {}}, {}}},
         L::label{""}.bind(metadata_note_),
     };
@@ -245,11 +250,11 @@ void SaveDialog::update_metadata()
     for (size_t g = 0; g < groups_.size(); ++g)
         groups_[g]->set_enabled(on && !none && present_.*kGroups[g].flag);
     if (!present_.keep)
-        metadata_note_->set_text("This image has no metadata to keep.");
+        metadata_note_->set_text(_("This image has no metadata to keep."));
     else if (!holds)
         metadata_note_->set_text(std::string(pages_[size_t(i)].encoder->name) + " files can't hold metadata.");
     else
-        metadata_note_->set_text("The colour profile is always kept.");
+        metadata_note_->set_text(_("The colour profile is always kept."));
 }
 
 void SaveDialog::finish(bool save)

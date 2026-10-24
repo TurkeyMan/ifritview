@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 #include "icc.h"
 
 #include <webp/decode.h>
@@ -105,9 +106,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
             out.pixel_format.channels.push_back({'A', 8});
         out.pixel_format.notes.push_back("lossy");
     }
-    out.add("WebP", "Coding", features.format == 2 ? "lossless" : features.format == 1 ? "lossy" : "mixed/undefined");
+    out.add(N_("WebP"), N_("Coding"), features.format == 2 ? "lossless" : features.format == 1 ? "lossy" : "mixed/undefined");
     if (features.has_animation)
-        out.add("WebP", "Frames", std::to_string(info.frame_count));
+        out.add(N_("WebP"), N_("Frames"), std::to_string(info.frame_count));
     if (WebPDemuxer* demux = WebPDemux(&data))
     {
         WebPChunkIterator it;

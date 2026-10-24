@@ -4,6 +4,7 @@
 // described by bit masks (legacy) or a DXGI format, or is 16/32-bit float.
 // A cube map, array or volume shows its first face or slice.
 #include "bcn.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "texel.h"
 #include "decoder.h"
@@ -328,7 +329,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.pixel_format.model = masks->luminance || masks->alpha_only ? M::L : M::RGB;
         out.pixel_format.bits_per_pixel = masks->bytes * 8;
     }
-    out.add("DDS", "Format", format);
+    out.add(N_("DDS"), N_("Format"), format);
     // Saved again, as it is: its format, its mipmaps, its header and, where
     // the format says, whether it's sRGB.
     out.encoded_as = "dds";
@@ -341,13 +342,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
     else if (offset != 128 && std::find(std::begin(kLinear), std::end(kLinear), as_dxgi) != std::end(kLinear))
         out.encoding["srgb"] = 0;
     if (mips > 1)
-        out.add("DDS", "Mipmaps", std::to_string(mips));
+        out.add(N_("DDS"), N_("Mipmaps"), std::to_string(mips));
     if (caps2 & 0x200)
-        out.add("DDS", "Cube map", "first face shown");
+        out.add(N_("DDS"), N_("Cube map"), "first face shown");
     if (caps2 & 0x200000 && depth > 1)
-        out.add("DDS", "Volume", std::to_string(depth) + " slices, the first shown");
+        out.add(N_("DDS"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
     if (array_size > 1)
-        out.add("DDS", "Array", std::to_string(array_size) + " textures, the first shown");
+        out.add(N_("DDS"), N_("Array"), std::to_string(array_size) + " textures, the first shown");
     return true;
 }
 

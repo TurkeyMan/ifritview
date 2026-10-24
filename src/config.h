@@ -63,6 +63,9 @@ struct Config
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;
     // Reverse geocoding provider, {lat}/{lon} template; empty = off.
+    // The interface's language, a tag such as "de"; empty for the system's.
+    // Takes effect when IfritView next starts.
+    std::string language;
     std::string geocoder_url = "https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=jsonv2&zoom=14";
 
     // Mouse: one binding set for windowed mode, another for fullscreen.
@@ -71,6 +74,9 @@ struct Config
     Action control(Control c, bool fullscreen = false) const { return (fullscreen ? fullscreen_controls : controls)[size_t(c)]; }
 
     static std::string path();
+    // The settings file's group with the interface's language (read alone at
+    // startup, before the rest: saved_language() in i18n.cpp).
+    static constexpr const char* kInterfaceGroup = "window";
     void load();  // missing file or keys leave the defaults
     bool save() const;
     void reset_extensions();

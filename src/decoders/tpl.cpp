@@ -13,6 +13,7 @@
 // when sampling, but that is a use of the texel, not stored transparency.
 // The first image of a TPL and the largest mipmap are shown.
 #include "decoder.h"
+#include "../i18n.h"
 #include "texel.h"
 #include "../bytes.h"
 
@@ -368,7 +369,7 @@ bool tpl_decode(const std::string& path, Image& out, std::string& error)
         return false;
     describe(out, "TPL", format, palette_format, palette.size(), max_lod > min_lod ? max_lod - min_lod + 1 : 1);
     if (count > 1)
-        out.add("TPL", "Images", std::to_string(count) + ", the first shown");
+        out.add(N_("TPL"), N_("Images"), std::to_string(count) + ", the first shown");
     return true;
 }
 

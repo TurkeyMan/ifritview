@@ -1,5 +1,7 @@
 #pragma once
 
+#include "i18n.h"
+
 #include <array>
 #include <string>
 
@@ -69,36 +71,36 @@ struct ActionInfo
 };
 
 constexpr std::array<ControlInfo, size_t(Control::Count)> kControls = {{
-    {Control::LeftClick, "left_click", "Left click", Kind::Click},
-    {Control::LeftDouble, "left_double_click", "Left double-click", Kind::Click},
-    {Control::LeftDrag, "left_drag", "Left drag", Kind::Drag},
-    {Control::MiddleClick, "middle_click", "Middle click", Kind::Click},
-    {Control::MiddleDouble, "middle_double_click", "Middle double-click", Kind::Click},
-    {Control::MiddleDrag, "middle_drag", "Middle drag", Kind::Drag},
-    {Control::RightClick, "right_click", "Right click", Kind::Click},
-    {Control::RightDouble, "right_double_click", "Right double-click", Kind::Click},
-    {Control::RightDrag, "right_drag", "Right drag", Kind::Drag},
-    {Control::Wheel, "wheel", "Wheel", Kind::Wheel},
-    {Control::CtrlWheel, "ctrl_wheel", "Ctrl + wheel", Kind::Wheel},
-    {Control::ShiftWheel, "shift_wheel", "Shift + wheel", Kind::Wheel},
+    {Control::LeftClick, "left_click", N_("Left click"), Kind::Click},
+    {Control::LeftDouble, "left_double_click", N_("Left double-click"), Kind::Click},
+    {Control::LeftDrag, "left_drag", N_("Left drag"), Kind::Drag},
+    {Control::MiddleClick, "middle_click", N_("Middle click"), Kind::Click},
+    {Control::MiddleDouble, "middle_double_click", N_("Middle double-click"), Kind::Click},
+    {Control::MiddleDrag, "middle_drag", N_("Middle drag"), Kind::Drag},
+    {Control::RightClick, "right_click", N_("Right click"), Kind::Click},
+    {Control::RightDouble, "right_double_click", N_("Right double-click"), Kind::Click},
+    {Control::RightDrag, "right_drag", N_("Right drag"), Kind::Drag},
+    {Control::Wheel, "wheel", N_("Wheel"), Kind::Wheel},
+    {Control::CtrlWheel, "ctrl_wheel", N_("Ctrl + wheel"), Kind::Wheel},
+    {Control::ShiftWheel, "shift_wheel", N_("Shift + wheel"), Kind::Wheel},
 }};
 
 constexpr std::array<ActionInfo, 15> kActions = {{
-    {Action::None, "none", "Nothing", Kind::Click},
-    {Action::ZoomSelection, "zoom-selection", "Zoom to selection / reset zoom", Kind::Click},
-    {Action::ToggleFullscreen, "fullscreen", "Toggle fullscreen", Kind::Click},
-    {Action::ZoomFit, "zoom-fit", "Fit to window", Kind::Click},
-    {Action::ZoomOriginal, "zoom-original", "Actual pixels", Kind::Click},
-    {Action::NextImage, "next", "Next image", Kind::Click},
-    {Action::PrevImage, "prev", "Previous image", Kind::Click},
-    {Action::OpenFile, "open", "Open file…", Kind::Click},
-    {Action::Settings, "settings", "Settings…", Kind::Click},
-    {Action::Quit, "quit", "Quit", Kind::Click},
-    {Action::Pan, "pan", "Pan the image", Kind::Drag},
-    {Action::Select, "select", "Select a region", Kind::Drag},
-    {Action::Navigate, "navigate", "Previous / next image", Kind::Wheel},
-    {Action::Zoom, "zoom", "Zoom in / out", Kind::Wheel},
-    {Action::Scroll, "scroll", "Scroll the image", Kind::Wheel},
+    {Action::None, "none", N_("Nothing"), Kind::Click},
+    {Action::ZoomSelection, "zoom-selection", N_("Zoom to selection / reset zoom"), Kind::Click},
+    {Action::ToggleFullscreen, "fullscreen", N_("Toggle fullscreen"), Kind::Click},
+    {Action::ZoomFit, "zoom-fit", N_("Fit to window"), Kind::Click},
+    {Action::ZoomOriginal, "zoom-original", N_("Actual pixels"), Kind::Click},
+    {Action::NextImage, "next", N_("Next image"), Kind::Click},
+    {Action::PrevImage, "prev", N_("Previous image"), Kind::Click},
+    {Action::OpenFile, "open", N_("Open file…"), Kind::Click},
+    {Action::Settings, "settings", N_("Settings…"), Kind::Click},
+    {Action::Quit, "quit", N_("Quit"), Kind::Click},
+    {Action::Pan, "pan", N_("Pan the image"), Kind::Drag},
+    {Action::Select, "select", N_("Select a region"), Kind::Drag},
+    {Action::Navigate, "navigate", N_("Previous / next image"), Kind::Wheel},
+    {Action::Zoom, "zoom", N_("Zoom in / out"), Kind::Wheel},
+    {Action::Scroll, "scroll", N_("Scroll the image"), Kind::Wheel},
 }};
 
 using Bindings = std::array<Action, size_t(Control::Count)>;

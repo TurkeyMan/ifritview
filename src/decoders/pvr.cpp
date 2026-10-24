@@ -16,6 +16,7 @@
 // are shown; PVRTC isn't decoded.
 // The first surface and face, largest mipmap, is shown.
 #include "astc.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "bcn.h"
 #include "decoder.h"
@@ -447,20 +448,20 @@ bool dreamcast_decode(const std::string& path, const uint8_t* d, size_t size, Im
     out.pixel_format.notes.push_back(layout_name(layout));
     if (is_vq(layout))
         out.pixel_format.bits_per_pixel = 2;
-    out.add("PVR", "Format", std::string(bitmap || is_palette(layout) ? "" : std::string(pixel_name(pixel)) + ", ") + layout_name(layout));
+    out.add(N_("PVR"), N_("Format"), std::string(bitmap || is_palette(layout) ? "" : std::string(pixel_name(pixel)) + ", ") + layout_name(layout));
     if (global_index)
-        out.add("PVR", "Global index", std::to_string(*global_index));
+        out.add(N_("PVR"), N_("Global index"), std::to_string(*global_index));
     if (is_vq(layout))
-        out.add("PVR", "Codebook", std::to_string(codebook.size() / 4) + " entries");
+        out.add(N_("PVR"), N_("Codebook"), std::to_string(codebook.size() / 4) + " entries");
     if (is_palette(layout))
-        out.add("PVR", "Palette", palette.empty() ? "no .pvp beside it: indices shown grey"
+        out.add(N_("PVR"), N_("Palette"), palette.empty() ? "no .pvp beside it: indices shown grey"
                                                   : ".pvp, " + std::to_string(palette.size()) + " " + palette_format + " entries");
     if (has_mips(layout))
     {
         int levels = 1;
         while ((1 << (levels - 1)) < w)
             ++levels;
-        out.add("PVR", "Mipmaps", std::to_string(levels) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(levels) + ", the largest shown");
     }
     return true;
 }
@@ -789,14 +790,14 @@ bool v2_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         return false;
     if (flags & 0x10000)  // stored bottom up
         flip_rows(out);
-    out.add("PVR", "Version", "PowerVR SDK v2");
-    out.add("PVR", "Format", blocks.any() ? blocks.name() : channels_name(*channels));
+    out.add(N_("PVR"), N_("Version"), "PowerVR SDK v2");
+    out.add(N_("PVR"), N_("Format"), blocks.any() ? blocks.name() : channels_name(*channels));
     if (flags & 0x100 && mips > 0)
-        out.add("PVR", "Mipmaps", std::to_string(mips + 1) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips + 1) + ", the largest shown");
     if (flags & 0x1000)
-        out.add("PVR", "Cube map", "first face shown");
+        out.add(N_("PVR"), N_("Cube map"), "first face shown");
     if (surfaces > 1 && !(flags & 0x1000))
-        out.add("PVR", "Surfaces", std::to_string(surfaces) + ", the first shown");
+        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces) + ", the first shown");
     return true;
 }
 
@@ -876,20 +877,20 @@ bool v3_decode(const uint8_t* d, size_t size, Image& out, std::string& error)
         flip_rows(out);
     if (flip_x)
         flip_columns(out);
-    out.add("PVR", "Version", "PowerVR SDK v3");
-    out.add("PVR", "Format", blocks.any() ? blocks.name() : channels_name(*channels));
+    out.add(N_("PVR"), N_("Version"), "PowerVR SDK v3");
+    out.add(N_("PVR"), N_("Format"), blocks.any() ? blocks.name() : channels_name(*channels));
     if (colour_space == 1)
-        out.add("PVR", "Colour space", "sRGB");
+        out.add(N_("PVR"), N_("Colour space"), "sRGB");
     if (premultiplied)
-        out.add("PVR", "Alpha", "premultiplied");
+        out.add(N_("PVR"), N_("Alpha"), "premultiplied");
     if (mips > 1)
-        out.add("PVR", "Mipmaps", std::to_string(mips) + ", the largest shown");
+        out.add(N_("PVR"), N_("Mipmaps"), std::to_string(mips) + ", the largest shown");
     if (faces > 1)
-        out.add("PVR", "Faces", std::to_string(faces) + ", the first shown");
+        out.add(N_("PVR"), N_("Faces"), std::to_string(faces) + ", the first shown");
     if (surfaces > 1)
-        out.add("PVR", "Surfaces", std::to_string(surfaces) + ", the first shown");
+        out.add(N_("PVR"), N_("Surfaces"), std::to_string(surfaces) + ", the first shown");
     if (depth > 1)
-        out.add("PVR", "Depth", std::to_string(depth) + " slices, the first shown");
+        out.add(N_("PVR"), N_("Depth"), std::to_string(depth) + " slices, the first shown");
     return true;
 }
 

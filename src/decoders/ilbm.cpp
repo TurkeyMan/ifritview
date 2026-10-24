@@ -3,6 +3,7 @@
 // compressed BODY. Handles 1–8 planes with a palette, EHB, HAM6/HAM8,
 // 24-bit and 32-bit direct colour, and a mask plane.
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 
 #include <cstdio>
@@ -220,19 +221,19 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.pixel_format.notes.push_back("mask plane");
     if (compression == 1)
         out.pixel_format.notes.push_back("ByteRun1");
-    out.add("IFF", "Bitplanes", std::to_string(planes));
+    out.add(N_("IFF"), N_("Bitplanes"), std::to_string(planes));
     if (!cmap.empty())
-        out.add("IFF", "Palette", std::to_string(cmap.size()) + " colours");
+        out.add(N_("IFF"), N_("Palette"), std::to_string(cmap.size()) + " colours");
     if (camg)
     {
         char buf[16];
         std::snprintf(buf, sizeof buf, "0x%X", camg);
-        out.add("IFF", "CAMG view mode", buf);
+        out.add(N_("IFF"), N_("CAMG view mode"), buf);
     }
     if (x_aspect && y_aspect && x_aspect != y_aspect)
-        out.add("IFF", "Pixel aspect", std::to_string(x_aspect) + ":" + std::to_string(y_aspect));
+        out.add(N_("IFF"), N_("Pixel aspect"), std::to_string(x_aspect) + ":" + std::to_string(y_aspect));
     if (masking)
-        out.add("IFF", "Masking", masking == 1 ? "mask plane" : masking == 2 ? "transparent colour " + std::to_string(transparent) : "lasso");
+        out.add(N_("IFF"), N_("Masking"), masking == 1 ? "mask plane" : masking == 2 ? "transparent colour " + std::to_string(transparent) : "lasso");
     return true;
 }
 

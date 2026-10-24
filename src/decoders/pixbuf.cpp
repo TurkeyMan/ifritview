@@ -1,6 +1,7 @@
 // Catch-all through gdk-pixbuf, which ships with GTK: BMP, GIF, ICO, XPM,
 // XBM, ANI, SVG and whatever loaders the distro has installed.
 #include "decoder.h"
+#include "../i18n.h"
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
@@ -147,8 +148,8 @@ void gif_header_info(const std::string& path, Image& out, int& frames)
         out.pixel_format.notes.push_back("interlaced");
     if (transparent)
         out.pixel_format.notes.push_back("transparency key");
-    out.add("GIF", "Version", std::string(reinterpret_cast<const char*>(d.data() + 3), 3));
-    out.add("GIF", "Frames", std::to_string(frames));
+    out.add(N_("GIF"), N_("Version"), std::string(reinterpret_cast<const char*>(d.data() + 3), 3));
+    out.add(N_("GIF"), N_("Frames"), std::to_string(frames));
 }
 
 // Copy a pixbuf into ARGB32; GIF frames are composed canvases from the loader.

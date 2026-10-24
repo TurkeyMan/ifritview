@@ -4,6 +4,8 @@
 // dds.cpp.
 #include "encoder.h"
 
+#include "../i18n.h"
+
 #include "reduce.h"
 
 #include "../platform.h"
@@ -720,14 +722,14 @@ bool encode_tga(const Image& image, const std::string& path, const EncodeOptions
 // The formats and the settings each offers when saving.
 using Kind = EncodeSetting::Kind;
 
-const EncodeSetting kQuality{"quality", "Quality", Kind::Range, 1, 100, 90, {}, nullptr, "lossless"};
-const EncodeSetting kLossless{"lossless", "Lossless", Kind::Toggle, 0, 1, 0, {}, "exact"};
+const EncodeSetting kQuality{"quality", N_("Quality"), Kind::Range, 1, 100, 90, {}, nullptr, "lossless"};
+const EncodeSetting kLossless{"lossless", N_("Lossless"), Kind::Toggle, 0, 1, 0, {}, N_("exact")};
 
 #ifdef HAVE_PNG
 const Encoder& png_encoder()
 {
     static const Encoder e{"PNG", "png",
-                           {{"interlaced", "Interlaced", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine; a little larger"}},
+                           {{"interlaced", N_("Interlaced"), Kind::Toggle, 0, 1, 0, {}, N_("loads coarse to fine; a little larger")}},
                            encode_png};
     return e;
 }
@@ -738,10 +740,10 @@ const Encoder& jpeg_encoder()
     static const Encoder e = []
     {
         Encoder j{"JPEG", "jpg",
-                  {{"quality", "Quality", Kind::Range, 1, 100, 90},
-                   {"subsampling", "Colour detail", Kind::Choice, 0, 3, 0,
-                    {"Automatic (full at quality 90 and above)", "Full (4:4:4)", "Half across (4:2:2)", "Quarter (4:2:0, smallest)"}},
-                   {"progressive", "Progressive", Kind::Toggle, 0, 1, 0, {}, "loads coarse to fine"}},
+                  {{"quality", N_("Quality"), Kind::Range, 1, 100, 90},
+                   {"subsampling", N_("Colour detail"), Kind::Choice, 0, 3, 0,
+                    {N_("Automatic (full at quality 90 and above)"), N_("Full (4:4:4)"), N_("Half across (4:2:2)"), N_("Quarter (4:2:0, smallest)")}},
+                   {"progressive", N_("Progressive"), Kind::Toggle, 0, 1, 0, {}, N_("loads coarse to fine")}},
                   encode_jpeg};
         j.lossless_transform = true;  // jpeg_lossless.h
         return j;
@@ -752,7 +754,7 @@ const Encoder& jpeg_encoder()
 #ifdef HAVE_TIFF
 const Encoder& tiff_encoder()
 {
-    static const Encoder e{"TIFF", "tif", {{"compression", "Compression", Kind::Choice, 0, 2, 0, {"Deflate (ZIP)", "LZW", "None"}}},
+    static const Encoder e{"TIFF", "tif", {{"compression", N_("Compression"), Kind::Choice, 0, 2, 0, {N_("Deflate (ZIP)"), N_("LZW"), N_("None")}}},
                            encode_tiff};
     return e;
 }
@@ -760,12 +762,12 @@ const Encoder& tiff_encoder()
 const Encoder& bmp_encoder()
 {
     static const Encoder e{"BMP", "bmp",
-                           {{"format", "Pixel format", Kind::Choice, 0, 6, 0,
-                             {"Automatic (32-bit with alpha, else 24-bit)", "32-bit BGRA", "24-bit BGR", "16-bit RGB 565", "16-bit ARGB 1555",
-                              "16-bit ARGB 4444", "8-bit indexed (256 colours)"}},
-                            {"dither", "Dither", Kind::Toggle, 0, 1, 1, {}, "16-bit and indexed"},
-                            {"srgb", "sRGB colour space tag", Kind::Toggle, 0, 1, 1},
-                            {"topdown", "Top-down rows", Kind::Toggle, 0, 1, 0}},
+                           {{"format", N_("Pixel format"), Kind::Choice, 0, 6, 0,
+                             {N_("Automatic (32-bit with alpha, else 24-bit)"), N_("32-bit BGRA"), N_("24-bit BGR"), N_("16-bit RGB 565"), N_("16-bit ARGB 1555"),
+                              N_("16-bit ARGB 4444"), N_("8-bit indexed (256 colours)")}},
+                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed")},
+                            {"srgb", N_("sRGB colour space tag"), Kind::Toggle, 0, 1, 1},
+                            {"topdown", N_("Top-down rows"), Kind::Toggle, 0, 1, 0}},
                            encode_bmp,
                            [](const EncodeOptions& o) { return o.get("format", 0) >= 3; },
                            false};
@@ -774,11 +776,11 @@ const Encoder& bmp_encoder()
 const Encoder& tga_encoder()
 {
     static const Encoder e{"Targa", "tga",
-                           {{"format", "Pixel format", Kind::Choice, 0, 4, 0,
-                             {"Automatic (32-bit with alpha, else 24-bit)", "32-bit BGRA", "24-bit BGR", "16-bit ARGB 1555", "8-bit indexed (256 colours)"}},
-                            {"dither", "Dither", Kind::Toggle, 0, 1, 1, {}, "16-bit and indexed"},
-                            {"rle", "RLE compression", Kind::Toggle, 0, 1, 0},
-                            {"topleft", "Top-left origin", Kind::Toggle, 0, 1, 0}},
+                           {{"format", N_("Pixel format"), Kind::Choice, 0, 4, 0,
+                             {N_("Automatic (32-bit with alpha, else 24-bit)"), N_("32-bit BGRA"), N_("24-bit BGR"), N_("16-bit ARGB 1555"), N_("8-bit indexed (256 colours)")}},
+                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed")},
+                            {"rle", N_("RLE compression"), Kind::Toggle, 0, 1, 0},
+                            {"topleft", N_("Top-left origin"), Kind::Toggle, 0, 1, 0}},
                            encode_tga,
                            [](const EncodeOptions& o) { return o.get("format", 0) >= 3; },
                            false};

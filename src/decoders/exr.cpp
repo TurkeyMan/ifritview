@@ -14,6 +14,7 @@
 // A are shown, unprefixed by preference, else from the first layer that has
 // them ("diffuse.R"); Y alone is grey. Other channels are listed only.
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "../half.h"
 
@@ -1585,7 +1586,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.declared_space = space.with_transfer(ColorSpace::Transfer::SRGB);
     }
 
-    out.add("EXR", "Compression", compression_name(part.compression));
+    out.add(N_("EXR"), N_("Compression"), compression_name(part.compression));
     {
         // "half" when they're all one type, else each channel's.
         bool uniform = true;
@@ -1599,35 +1600,35 @@ bool decode(const std::string& path, Image& out, std::string& error)
             if (ch.xs != 1 || ch.ys != 1)
                 list += " (" + std::to_string(ch.xs) + "×" + std::to_string(ch.ys) + " sampling)";
         }
-        out.add("EXR", "Pixel types", uniform ? type_name(part.channels[0].type) : types);
-        out.add("EXR", "Channels", list);
+        out.add(N_("EXR"), N_("Pixel types"), uniform ? type_name(part.channels[0].type) : types);
+        out.add(N_("EXR"), N_("Channels"), list);
     }
     if (!layers.empty())
     {
         std::string text;
         for (const std::string& l : layers)
             text += (text.empty() ? "" : ", ") + l;
-        out.add("EXR", "Layers", text);
+        out.add(N_("EXR"), N_("Layers"), text);
     }
     if (!sel.shown.empty())
-        out.add("EXR", "Shown", sel.shown);
+        out.add(N_("EXR"), N_("Shown"), sel.shown);
     if (part.has_display_window && !(part.display_window == dw))
     {
-        out.add("EXR", "Data window", box_text(dw));
-        out.add("EXR", "Display window", box_text(part.display_window));
+        out.add(N_("EXR"), N_("Data window"), box_text(dw));
+        out.add(N_("EXR"), N_("Display window"), box_text(part.display_window));
     }
     else
-        out.add("EXR", "Window", box_text(dw));
+        out.add(N_("EXR"), N_("Window"), box_text(dw));
     static const char* const orders[] = {"increasing y", "decreasing y", "random y"};
-    out.add("EXR", "Line order", part.line_order >= 0 && part.line_order < 3 ? orders[part.line_order] : std::to_string(part.line_order));
+    out.add(N_("EXR"), N_("Line order"), part.line_order >= 0 && part.line_order < 3 ? orders[part.line_order] : std::to_string(part.line_order));
     if (part.tiled)
     {
         static const char* const modes[] = {"one level", "mipmap, level 0 shown", "ripmap, level 0 shown"};
-        out.add("EXR", "Tiles", std::to_string(part.tile_w) + "×" + std::to_string(part.tile_h) + ", " +
+        out.add(N_("EXR"), N_("Tiles"), std::to_string(part.tile_w) + "×" + std::to_string(part.tile_h) + ", " +
                                     (part.level_mode < 3 ? modes[part.level_mode] : "unknown levels"));
     }
     else
-        out.add("EXR", "Storage", "scanlines");
+        out.add(N_("EXR"), N_("Storage"), "scanlines");
     if (multipart)
     {
         std::string names;
@@ -1636,8 +1637,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
             const std::string n = parts[i].name.empty() ? "unnamed" : parts[i].name;
             names += (i ? ", " : "") + n + (parts[i].type == "deepscanline" || parts[i].type == "deeptile" ? " (deep)" : "");
         }
-        out.add("EXR", "Parts", std::to_string(parts.size()) + ": " + names);
-        out.add("EXR", "Part shown", part.name.empty() ? std::to_string(chosen + 1) : part.name);
+        out.add(N_("EXR"), N_("Parts"), std::to_string(parts.size()) + ": " + names);
+        out.add(N_("EXR"), N_("Part shown"), part.name.empty() ? std::to_string(chosen + 1) : part.name);
     }
     if (part.has_chromaticities)
     {
@@ -1645,7 +1646,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         char s[200];
         std::snprintf(s, sizeof s, "red %.4g, %.4g · green %.4g, %.4g · blue %.4g, %.4g · white %.4g, %.4g", double(c[0]), double(c[1]), double(c[2]),
                       double(c[3]), double(c[4]), double(c[5]), double(c[6]), double(c[7]));
-        out.add("EXR", "Chromaticities", s);
+        out.add(N_("EXR"), N_("Chromaticities"), s);
     }
     for (MetadataItem& m : part.attributes)
         out.add("EXR", std::move(m.key), std::move(m.value));

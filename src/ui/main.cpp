@@ -1,6 +1,7 @@
 #include "app.h"
 #include "platform.h"
 #include "first_image.h"
+#include "i18n.h"
 #include "pipeline.h"
 #include "plugins.h"
 #include "probe.h"
@@ -191,6 +192,10 @@ int main(int argc, char** argv)
         return process(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--formats") == 0)
         return formats_report();
+
+    // The language first: the toolkit takes it as it starts.
+    start_translations(saved_language());
+    platform::trace("translations loaded");
 
     rap::load_options options;
 #ifdef IFRIT_PLUGIN_DIR

@@ -11,6 +11,7 @@
 // Index 255 is transparent in both games' pictures (Quake 2's renderer
 // gives every 8-bit image that); conchars uses index 0 instead.
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 
 #include "../platform.h"
@@ -158,10 +159,10 @@ bool decode_wal(const std::string& path, Image& out, std::string& error)
     const std::string name = text(0, 32), next = text(56, 32);
     const uint32_t flags = le32(d + 88), contents = le32(d + 92), value = le32(d + 96);
     if (!name.empty())
-        out.add("WAL", "Name", name);
+        out.add(N_("WAL"), N_("Name"), name);
     note_palette("WAL", found, out);
     if (!next.empty())
-        out.add("WAL", "Next frame", next);
+        out.add(N_("WAL"), N_("Next frame"), next);
     static const char* flag_names[] = {"light", "slick", "sky", "warp", "trans33", "trans66", "flowing", "nodraw"};
     std::string list;
     for (int i = 0; i < 8; ++i)
@@ -170,15 +171,15 @@ bool decode_wal(const std::string& path, Image& out, std::string& error)
     if (flags & ~0xFFu)
         list += (list.empty() ? "" : ", ") + std::string("others");
     if (!list.empty())
-        out.add("WAL", "Surface flags", list);
+        out.add(N_("WAL"), N_("Surface flags"), list);
     if (contents)
     {
         char hex[16];
         std::snprintf(hex, sizeof hex, "0x%X", contents);
-        out.add("WAL", "Contents", hex);
+        out.add(N_("WAL"), N_("Contents"), hex);
     }
     if (value)
-        out.add("WAL", "Light value", std::to_string(value));
+        out.add(N_("WAL"), N_("Light value"), std::to_string(value));
     return true;
 }
 
@@ -216,7 +217,7 @@ bool decode_lmp(const std::string& path, Image& out, std::string& error)
         out.bits_per_sample = 8;
         out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, "RGB", 8);
         out.format = "Quake palette";
-        out.add("LMP", "Contents", "palette, 256 colours");
+        out.add(N_("LMP"), N_("Contents"), "palette, 256 colours");
         return true;
     }
     // The lighting table: 64 shades of each colour, plus a stray byte.
@@ -228,7 +229,7 @@ bool decode_lmp(const std::string& path, Image& out, std::string& error)
         const int cw = colormap ? 256 : 128, ch = colormap ? 64 : 128;
         put_indexed(d, cw, ch, found.empty() ? nullptr : palette, conchars ? 0 : -1, out);
         out.format = "Quake LMP";
-        out.add("LMP", "Contents", colormap ? "colormap, 64 light levels" : "console font");
+        out.add(N_("LMP"), N_("Contents"), colormap ? "colormap, 64 light levels" : "console font");
         note_palette("LMP", found, out);
         return true;
     }

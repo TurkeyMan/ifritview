@@ -1,4 +1,5 @@
 // Save As: the dialog, the preview of what would be saved, lossless JPEG. Part of App (app.h).
+#include "i18n.h"
 #include "app.h"
 #include "app_util.h"
 #include "platform.h"
@@ -31,7 +32,7 @@ void App::save_as()
     save_source_ = diff_session_ ? view_->difference_shown() : image_;
     if (!save_source_)
     {
-        status_message_ = "No difference image to save: the images are different sizes";
+        status_message_ = _("No difference image to save: the images are different sizes");
         update_status();
         return;
     }
@@ -109,7 +110,7 @@ void App::show_save_preview(bool on)
         }
         else
         {
-            view_->begin_compare(image_, preview_image_, "Original", "Saved", preview_difference_, View::Compare::B);
+            view_->begin_compare(image_, preview_image_, _("Original"), _("Saved"), preview_difference_, View::Compare::B);
             view_->set_compare_gain(int(gain_->value() + 0.5));  // the gain stays as last set
         }
     }
@@ -172,7 +173,7 @@ void App::preview_lossless()
             std::shared_ptr<Image> saved = lossless_preview(*image, *plan);
             const auto difference = std::make_shared<ImageDifference>(compare_images(*image, *saved));
             // Every difference is the strips dropped: say that, not a PSNR.
-            difference->summary = "lossless, " + plan->differs;
+            difference->summary = rap::i18n::format(_("lossless, {0}"), plan->differs);
             platform::post_main(
                 [this, generation, saved, difference, state]
                 {
@@ -254,7 +255,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
                     if (!ok)
                     {
                         save_dialog_->set_info("failed");
-                        status_message_ = "Preview failed: " + error;
+                        status_message_ = rap::i18n::format(_("Preview failed: {0}"), error);
                         update_status();
                         return;
                     }
@@ -280,7 +281,7 @@ void App::plan_lossless()
         return;
     if (save_source_ != image_)
     {
-        save_dialog_->set_lossless(false, "Lossless: only the original image can be saved this way");
+        save_dialog_->set_lossless(false, _("Lossless: only the original image can be saved this way"));
         return;
     }
     const uint64_t generation = ++lossless_generation_;
@@ -295,11 +296,11 @@ void App::plan_lossless()
                         return;
                     lossless_plan_ = plan;
                     if (!plan->why_not.empty())
-                        save_dialog_->set_lossless(false, "Not possible: " + plan->why_not);
+                        save_dialog_->set_lossless(false, rap::i18n::format(_("Not possible: {0}"), plan->why_not));
                     else if (plan->differs.empty())
-                        save_dialog_->set_lossless(true, "Exactly the image as shown, not one pixel re-encoded");
+                        save_dialog_->set_lossless(true, _("Exactly the image as shown, not one pixel re-encoded"));
                     else
-                        save_dialog_->set_lossless(true, "With JPEG's blocks: " + plan->differs + " than shown");
+                        save_dialog_->set_lossless(true, rap::i18n::format(_("With JPEG's blocks: {0} than shown"), plan->differs));
                 });
         })
         .detach();
@@ -311,7 +312,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
         return;
     rap::file_dialog_spec spec;
     spec.mode = rap::file_dialog_spec::mode::save;
-    spec.title = std::string("Save as ") + e.name;
+    spec.title = rap::i18n::format(_("Save as {0}"), e.name);
     std::string stem = std::filesystem::path(diff_session_ ? image_path_ : folder_.current_name()).stem().string();
     if (diff_session_)
         stem += "-difference";
@@ -330,7 +331,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                         // On a thread: some formats take seconds to encode (AVIF, BC7
                         // with its mipmaps), and the window keeps working meanwhile.
                         const std::string name = std::filesystem::path(path).filename().string();
-                        status_message_ = "Saving " + name + "…";
+                        status_message_ = busy_message_ = rap::i18n::format(_("Saving {0}…"), name);
                         update_status();
                         std::thread(
                             [this, enc, o, source, lossless, path, name]
@@ -340,7 +341,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                                 platform::post_main(
                                     [this, ok, error, name]
                                     {
-                                        status_message_ = ok ? "Saved " + name : "Save failed: " + error;
+                                        status_message_ = ok ? rap::i18n::format(_("Saved {0}"), name) : rap::i18n::format(_("Save failed: {0}"), error);
                                         if (ok)
                                             folder_.rescan(cfg_);  // the new file may now be part of the folder
                                         update_status();

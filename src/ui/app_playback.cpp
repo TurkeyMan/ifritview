@@ -1,4 +1,5 @@
 // What moves: the slideshow, video and audio, animated images. Part of App (app.h).
+#include "i18n.h"
 #include "app.h"
 #include "app_util.h"
 #include "platform.h"
@@ -281,7 +282,7 @@ void App::toggle_animation()
     if (animation_playing_)
     {
         stop_animation();
-        status_message_ = "Animation paused";
+        status_message_ = _("Animation paused");
     }
     else
     {

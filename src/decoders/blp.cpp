@@ -6,6 +6,7 @@
 // (World of Warcraft) is a palette with 0, 1, 4 or 8-bit alpha, DXT1/3/5
 // (through bcn.cpp), or plain BGRA.
 #include "bcn.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "decoder.h"
 #include "texel.h"
@@ -241,11 +242,11 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
     out.format = "BLP";
     out.bits_per_sample = 8;
-    out.add("BLP", "Version", blp2 ? "BLP2" : "BLP1");
-    out.add("BLP", "Compression", kind);
-    out.add("BLP", "Alpha", alpha_bits ? std::to_string(alpha_bits) + "-bit" : "none");
+    out.add(N_("BLP"), N_("Version"), blp2 ? "BLP2" : "BLP1");
+    out.add(N_("BLP"), N_("Compression"), kind);
+    out.add(N_("BLP"), N_("Alpha"), alpha_bits ? std::to_string(alpha_bits) + "-bit" : "none");
     if (mips > 1)
-        out.add("BLP", "Mipmaps", std::to_string(mips));
+        out.add(N_("BLP"), N_("Mipmaps"), std::to_string(mips));
     return true;
 }
 

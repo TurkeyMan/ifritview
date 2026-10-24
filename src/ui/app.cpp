@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include "app.h"
 #include "app_util.h"
 
@@ -237,7 +238,7 @@ void App::build_ui()
     // Exposure, in stops around the camera's compensation; raw only.
     rap::node exposure =
         hbox{
-            L::label{"EV"},
+            L::label{_("EV")},
             L::slider{-3.0, 3.0, 0.0}
                 .step(0.1, 1.0)
                 .show_value(2)
@@ -245,8 +246,8 @@ void App::build_ui()
                 .on_changed([this](double) { retone(); })
                 .bind(exposure_)
                 .width(rap::extent{24, rap::extent::unit::chars})
-                .tooltip("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
-                         "Greyed while the embedded preview stands in for the raw"),
+                .tooltip(_("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
+                         "Greyed while the embedded preview stands in for the raw")),
         }
             .handle(exposure_box_);
 
@@ -256,15 +257,15 @@ void App::build_ui()
         {vbox{
             L::toolbar{
                 // Always: open and save, zoom, fullscreen.
-                tool_button("document-open-symbolic", "Open… (Ctrl+O)", &App::open_dialog),
-                tool_button("media-floppy-symbolic", "Save as… (Ctrl+S); comparing, saves the difference shown", &App::save_as),
-                tool_button("document-print-symbolic", "Print… (Ctrl+P); a selection prints alone", &App::print_image),
+                tool_button("document-open-symbolic", _("Open… (Ctrl+O)"), &App::open_dialog),
+                tool_button("media-floppy-symbolic", _("Save as… (Ctrl+S); comparing, saves the difference shown"), &App::save_as),
+                tool_button("document-print-symbolic", _("Print… (Ctrl+P); a selection prints alone"), &App::print_image),
                 separator{},
-                tool_button("zoom-out-symbolic", "Zoom out (-, Ctrl+wheel)", &App::zoom_out),
-                tool_button("zoom-in-symbolic", "Zoom in (+, Ctrl+wheel)", &App::zoom_in),
-                tool_button("zoom-original-symbolic", "Actual pixels (1)", &App::zoom_original),
-                tool_button("zoom-fit-best-symbolic", "Fit to window (F)", &App::zoom_fit),
-                L::tool_button{rap::icon::named("view-grid-symbolic"), "Smooth when zoomed in (off shows crisp pixels)"}
+                tool_button("zoom-out-symbolic", _("Zoom out (-, Ctrl+wheel)"), &App::zoom_out),
+                tool_button("zoom-in-symbolic", _("Zoom in (+, Ctrl+wheel)"), &App::zoom_in),
+                tool_button("zoom-original-symbolic", _("Actual pixels (1)"), &App::zoom_original),
+                tool_button("zoom-fit-best-symbolic", _("Fit to window (F)"), &App::zoom_fit),
+                L::tool_button{rap::icon::named("view-grid-symbolic"), _("Smooth when zoomed in (off shows crisp pixels)")}
                     .toggle(cfg_.smooth_upscale)
                     .on_toggled(
                         [this](bool on)
@@ -274,35 +275,35 @@ void App::build_ui()
                             view_->config_changed();
                         })
                     .bind(smooth_toggle_),
-                tool_button("view-fullscreen-symbolic", "Fullscreen (Enter, double-click)", &App::toggle_fullscreen),
+                tool_button("view-fullscreen-symbolic", _("Fullscreen (Enter, double-click)"), &App::toggle_fullscreen),
                 separator{},
                 // Browsing: through the folder, and what's done to an image.
-                L::tool_button{rap::icon::named("go-previous-symbolic"), "Previous image (Left, wheel up)"}
+                L::tool_button{rap::icon::named("go-previous-symbolic"), _("Previous image (Left, wheel up)")}
                     .on_click([this] { navigate(-1); })
                     .handle(browse_widgets_[0]),
-                L::tool_button{rap::icon::named("go-next-symbolic"), "Next image (Right, wheel down)"}
+                L::tool_button{rap::icon::named("go-next-symbolic"), _("Next image (Right, wheel down)")}
                     .on_click([this] { navigate(+1); })
                     .handle(browse_widgets_[1]),
                 separator{}.handle(browse_widgets_[2]),
-                L::tool_button{rap::icon::named("media-playback-start-symbolic"), "Slideshow (S): fullscreen, timed, with gentle motion"}
+                L::tool_button{rap::icon::named("media-playback-start-symbolic"), _("Slideshow (S): fullscreen, timed, with gentle motion")}
                     .on_click([this] { toggle_slideshow(); })
                     .handle(browse_widgets_[3]),
-                L::tool_button{rap::icon::named("edit-cut-symbolic"), "Crop to selection (Ctrl+Y)"}
+                L::tool_button{rap::icon::named("edit-cut-symbolic"), _("Crop to selection (Ctrl+Y)")}
                     .on_click([this] { crop_to_selection(); })
                     .bind(crop_button_)
                     .handle(browse_widgets_[4]),
-                L::tool_button{rap::icon::named("document-edit-symbolic"), "Apply edits from XMP sidecars (exposure, crop, rotation)"}
+                L::tool_button{rap::icon::named("document-edit-symbolic"), _("Apply edits from XMP sidecars (exposure, crop, rotation)")}
                     .toggle(cfg_.apply_xmp_edits)
                     .on_toggled([this](bool) { toggle_xmp(); })
                     .bind(xmp_toggle_)
                     .handle(browse_widgets_[5]),
                 // Comparing two images, in place of browsing.
-                compare_button(a_icon(), "Show A (Tab flips A and B)", View::Compare::A),
-                compare_button(b_icon(), "Show B (Tab flips A and B)", View::Compare::B),
-                compare_button(swipe_icon(), "Swipe: A left of the divider, B right of it (drag the divider)", View::Compare::Swipe),
-                compare_button(difference_icon(), "Difference: where A and B differ, amplified", View::Compare::Difference),
-                L::tool_button{swap_icon(), "Swap A and B"}.on_click([this] { swap_compare(); }).handle(diff_widgets_[0]),
-                L::tool_button{side_by_side_icon(), "Side by side: B in a second pane, beside A"}
+                compare_button(a_icon(), _("Show A (Tab flips A and B)"), View::Compare::A),
+                compare_button(b_icon(), _("Show B (Tab flips A and B)"), View::Compare::B),
+                compare_button(swipe_icon(), _("Swipe: A left of the divider, B right of it (drag the divider)"), View::Compare::Swipe),
+                compare_button(difference_icon(), _("Difference: where A and B differ, amplified"), View::Compare::Difference),
+                L::tool_button{swap_icon(), _("Swap A and B")}.on_click([this] { swap_compare(); }).handle(diff_widgets_[0]),
+                L::tool_button{side_by_side_icon(), _("Side by side: B in a second pane, beside A")}
                     .toggle(false)
                     .on_toggled([this](bool on) { set_side_by_side(on); })
                     .bind(side_button_)
@@ -310,7 +311,7 @@ void App::build_ui()
                 spacer{},
                 exposure,
                 hbox{
-                    L::label{"Gain"},
+                    L::label{_("Gain")},
                     L::slider{1.0, 32.0, 8.0}
                         .step(1.0, 4.0)
                         // No value shown: the view's tag has it ("Difference ×8"), and
@@ -318,11 +319,11 @@ void App::build_ui()
                         .on_changed([this](double v) { view_->set_compare_gain(int(v + 0.5)); })
                         .bind(gain_)
                         .width(rap::extent{14, rap::extent::unit::chars})
-                        .tooltip("How much the difference is amplified"),
+                        .tooltip(_("How much the difference is amplified")),
                 }
                     .handle(diff_widgets_[2]),
-                tool_button("dialog-information-symbolic", "Metadata / EXIF (I)", &App::toggle_metadata),
-                tool_button("preferences-system-symbolic", "Settings (Ctrl+,)", &App::open_settings),
+                tool_button("dialog-information-symbolic", _("Metadata / EXIF (I)"), &App::toggle_metadata),
+                tool_button("preferences-system-symbolic", _("Settings (Ctrl+,)"), &App::open_settings),
             }
                 .handle(toolbar_),
             L::splitter{
@@ -335,7 +336,7 @@ void App::build_ui()
                 // Hidden at first, so made once the window is up and idle.
                 L::deferred{[this]
                             {
-                                return L::list{{{"Tag", rap::extent{14, rap::extent::unit::chars}}, {"Value", {}, true}},
+                                return L::list{{{_("Tag"), rap::extent{14, rap::extent::unit::chars}}, {_("Value"), {}, true}},
                                                &metadata_model_}
                                     .selection(rap::selection_mode::single)
                                     .on_activate(
@@ -406,7 +407,7 @@ void App::build_ui()
     crop_button_->set_enabled(false);
     update_toolbar();
     status_location_->set_visible(false);
-    status_location_->set_tooltip("Open in maps");
+    status_location_->set_tooltip(_("Open in maps"));
 
     view_->on_action = [this](Action a)
     {
@@ -517,7 +518,7 @@ void App::copy_to_clipboard()
     const Image region = view_->selection(x, y, w, h) ? image_->crop(x, y, w, h) : *image_;
     ui_.set_clipboard_image(region.width, region.height, APixelFormat::bgra8_premultiplied, region.pixels.data(), region.stride);
     view_->clear_selection();
-    status_message_ = "Copied " + std::to_string(region.width) + " × " + std::to_string(region.height) + " to clipboard";
+    status_message_ = rap::i18n::format(_("Copied {0} × {1} to clipboard"), region.width, region.height);
     update_status();
 }
 
@@ -725,7 +726,7 @@ void App::load_current()
         save_dialog_->close();  // it was saving (and previewing) the image going away
     if (path.empty())
     {
-        status_message_ = folder_.directory().empty() ? "No image open" : "No images in " + folder_.directory();
+        status_message_ = folder_.directory().empty() ? std::string(_("No image open")) : rap::i18n::format(_("No images in {0}"), folder_.directory());
         update_status();
         update_title();
         return;
@@ -740,7 +741,7 @@ void App::load_current()
         on_loaded(r);
         return;
     }
-    status_message_ = "Loading " + folder_.current_name() + "…";
+    status_message_ = busy_message_ = rap::i18n::format(_("Loading {0}…"), folder_.current_name());
     update_status();
     loader_.request(load_generation_, path);
 }
@@ -890,7 +891,7 @@ void App::on_loaded(Loader::Result& r)
         image_.reset();
         image_path_ = r.path;
         view_->set_image(nullptr);
-        status_message_ = "Cannot load " + folder_.current_name() + ": " + r.error;
+        status_message_ = rap::i18n::format(_("Cannot load {0}: {1}"), folder_.current_name(), r.error);
         update_status();
         update_title();
         image_presented();
@@ -903,7 +904,7 @@ void App::on_loaded(Loader::Result& r)
     file_size_ = std::filesystem::file_size(r.path, ec);
     if (ec)
         file_size_ = 0;
-    status_message_ = image_->is_preview() && image_->is_raw ? "Developing…" : "";
+    status_message_ = busy_message_ = image_->is_preview() && image_->is_raw ? _("Developing…") : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
     // Come back to, it's as it was opened: an exposure set before leaving
@@ -984,7 +985,7 @@ void App::crop_to_selection()
     *image_ = image_->crop(x, y, w, h);  // same object: the view and pane keep their pointer
     if (image_->tonable())
         image_->retone(image_->exposure_edit);
-    image_->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
+    image_->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + _("cropped");
     view_->clear_selection();  // it was the image's own shape a moment ago
     view_->image_changed();
     fit_window_to_image();
@@ -1052,7 +1053,7 @@ void App::ensure_developed()
         return;
     if (image_->is_raw)
     {
-        status_message_ = "Developing…";
+        status_message_ = busy_message_ = _("Developing…");
         update_status();
     }
     loader_.request_develop(load_generation_, folder_.current());
@@ -1238,12 +1239,12 @@ void App::open_dialog()
 {
     rap::file_dialog_spec spec;
     spec.mode = rap::file_dialog_spec::mode::open;
-    spec.title = "Open Image";
+    spec.title = _("Open Image");
     spec.initial_path = folder_.directory();
     std::string patterns;
     for (const std::string& e : cfg_.extensions)
         patterns += (patterns.empty() ? "*." : ";*.") + e;
-    spec.filters = {{"Images", patterns}, {"All files", "*"}};
+    spec.filters = {{_("Images"), patterns}, {_("All files"), "*"}};
     ui_.choose_files(window_.get(), spec,
                     [this](std::vector<std::string> files)
                     {
@@ -1329,7 +1330,7 @@ void App::update_status()
         if (!image_->info.empty() && !image_->is_video)
             center += "  ·  " + image_->info;
         if (image_->is_preview() && status_message_.empty())
-            center += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
+            center += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
         // Against 1:1, which for a page is its actual size.
         const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
         right = std::to_string(int(std::lround(shown * 100.0))) + "%";
@@ -1342,25 +1343,29 @@ void App::update_status()
                 std::snprintf(buf, sizeof buf, "%d:%02d", v / 60, v % 60);
                 return std::string(buf);
             };
-            right = clock(video_.position()) + " / " + clock(video_.duration()) + (cfg_.video_muted && image_->has_audio ? "  ·  muted" : "") + "  ·  " + right;
+            right = clock(video_.position()) + " / " + clock(video_.duration()) + (cfg_.video_muted && image_->has_audio ? std::string("  ·  ") + _("muted") : std::string()) + "  ·  " + right;
         }
         if (view_->zoom_mode() == View::ZoomMode::Fit && view_->zoom() < 1.0)
-            right += " (fit)";
+            right += std::string(" ") + _("(fit)");
         if (int x, y, w, h; view_->selection(x, y, w, h))
-            right = "selection " + std::to_string(w) + " × " + std::to_string(h) + " at " + std::to_string(x) + ", " + std::to_string(y) + "  ·  " + right;
+            right = rap::i18n::format(_("selection {0} × {1} at {2}, {3}"), w, h, x, y) + "  ·  " + right;
         if (const std::shared_ptr<Image> b = view_->compare_image(true); b && (b->width != image_->width || b->height != image_->height))
-            center += "  ·  B " + std::to_string(b->width) + " × " + std::to_string(b->height) + ", scaled to match";
+            center += "  ·  " + rap::i18n::format(_("B {0} × {1}, scaled to match"), b->width, b->height);
         if (const ImageDifference* d = view_->compare_difference())
         {
-            char buf[160];
+            std::string text;
             if (!d->summary.empty())
-                std::snprintf(buf, sizeof buf, "%s", d->summary.c_str());
+                text = d->summary;
             else if (d->max_error == 0)
-                std::snprintf(buf, sizeof buf, "identical");
+                text = _("identical");
             else
-                std::snprintf(buf, sizeof buf, "PSNR %.1f dB  ·  largest error %d  ·  %.1f%% changed", d->psnr,
-                              d->max_error, d->changed * 100.0);
-            center += std::string("  ·  ") + buf;
+            {
+                char psnr[32], changed[32];
+                std::snprintf(psnr, sizeof psnr, "%.1f", d->psnr);
+                std::snprintf(changed, sizeof changed, "%.1f", d->changed * 100.0);
+                text = rap::i18n::format(_("PSNR {0} dB  ·  largest error {1}  ·  {2}% changed"), psnr, d->max_error, changed);
+            }
+            center += "  ·  " + text;
         }
     }
     if (image_ && image_->has_location)
@@ -1374,7 +1379,7 @@ void App::update_status()
     {
         status_location_->set_visible(false);
     }
-    const bool busy = status_message_.rfind("Loading", 0) == 0 || status_message_.rfind("Developing", 0) == 0 || status_message_.rfind("Saving", 0) == 0;
+    const bool busy = !busy_message_.empty() && status_message_ == busy_message_;
     view_->set_busy(busy);
     view_->set_overlay(overlay_sections());
     status_left_->set_text(left);

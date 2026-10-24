@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 #include "icc.h"
 
 #include <jpeglib.h>
@@ -141,16 +142,16 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
             out.pixel_format = PixelFormat::ycbcr(cinfo.data_precision, cinfo.comp_info[0].h_samp_factor, cinfo.comp_info[0].v_samp_factor);
         out.pixel_format.notes.push_back(progressive ? "progressive" : "baseline");
     }
-    out.add("JPEG", "Coding", progressive ? "progressive" : "baseline");
-    out.add("JPEG", "Components", std::to_string(cinfo.num_components));
+    out.add(N_("JPEG"), N_("Coding"), progressive ? "progressive" : "baseline");
+    out.add(N_("JPEG"), N_("Components"), std::to_string(cinfo.num_components));
     if (quality)
-        out.add("JPEG", "Quality (estimated)", std::to_string(quality));
+        out.add(N_("JPEG"), N_("Quality (estimated)"), std::to_string(quality));
     if (cinfo.num_components == 3)
-        out.add("JPEG", "Chroma subsampling", subsampling);
+        out.add(N_("JPEG"), N_("Chroma subsampling"), subsampling);
     if (cinfo.saw_JFIF_marker)
-        out.add("JPEG", "JFIF", std::to_string(cinfo.JFIF_major_version) + "." + std::to_string(cinfo.JFIF_minor_version));
+        out.add(N_("JPEG"), N_("JFIF"), std::to_string(cinfo.JFIF_major_version) + "." + std::to_string(cinfo.JFIF_minor_version));
     if (cinfo.saw_Adobe_marker)
-        out.add("JPEG", "Adobe transform", std::to_string(cinfo.Adobe_transform));
+        out.add(N_("JPEG"), N_("Adobe transform"), std::to_string(cinfo.Adobe_transform));
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     out.format = progressive ? "JPEG (progressive)" : "JPEG";

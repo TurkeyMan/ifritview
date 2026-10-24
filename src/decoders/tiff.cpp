@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 #include "../platform.h"
 
 #include "icc.h"
@@ -226,18 +227,18 @@ bool decode(const std::string& path, Image& out, std::string& error)
         if (TIFFGetField(tif, TIFFTAG_ICCPROFILE, &icc_len, &icc) && icc && icc_len)
             out.color_space = icc_profile_description(static_cast<const uint8_t*>(icc), icc_len);
     }
-    out.add("TIFF", "Bits per sample", std::to_string(bps));
-    out.add("TIFF", "Samples per pixel", std::to_string(spp));
-    out.add("TIFF", "Compression", out.format.size() > 4 ? out.format.substr(6) : "none");
+    out.add(N_("TIFF"), N_("Bits per sample"), std::to_string(bps));
+    out.add(N_("TIFF"), N_("Samples per pixel"), std::to_string(spp));
+    out.add(N_("TIFF"), N_("Compression"), out.format.size() > 4 ? out.format.substr(6) : "none");
     float xres = 0;
     uint16_t unit = RESUNIT_INCH;
     if (TIFFGetField(tif, TIFFTAG_XRESOLUTION, &xres) && xres > 0)
     {
         TIFFGetFieldDefaulted(tif, TIFFTAG_RESOLUTIONUNIT, &unit);
-        out.add("TIFF", "Resolution", std::to_string(int(unit == RESUNIT_CENTIMETER ? xres * 2.54 : xres)) + " dpi");
+        out.add(N_("TIFF"), N_("Resolution"), std::to_string(int(unit == RESUNIT_CENTIMETER ? xres * 2.54 : xres)) + " dpi");
     }
     if (pages > 1)
-        out.add("TIFF", "Pages", std::to_string(pages));
+        out.add(N_("TIFF"), N_("Pages"), std::to_string(pages));
     FileMetadata stored;  // as the file has it, for saving
     {
         uint32_t len = 0;
@@ -271,19 +272,19 @@ bool decode(const std::string& path, Image& out, std::string& error)
         char* sv = nullptr;
         float fv = 0;
         if (TIFFGetField(tif, EXIFTAG_DATETIMEORIGINAL, &sv) && sv)
-            out.add("EXIF", "Date/time original", sv);
+            out.add(N_("EXIF"), N_("Date/time original"), sv);
         if (TIFFGetField(tif, EXIFTAG_EXPOSURETIME, &fv))
-            out.add("EXIF", "Exposure time", fv >= 1 ? std::to_string(fv).substr(0, 4) + " s" : "1/" + std::to_string(int(1 / fv + 0.5)) + " s");
+            out.add(N_("EXIF"), N_("Exposure time"), fv >= 1 ? std::to_string(fv).substr(0, 4) + " s" : "1/" + std::to_string(int(1 / fv + 0.5)) + " s");
         if (TIFFGetField(tif, EXIFTAG_FNUMBER, &fv))
-            out.add("EXIF", "F-number", "f/" + std::to_string(fv).substr(0, 4));
+            out.add(N_("EXIF"), N_("F-number"), "f/" + std::to_string(fv).substr(0, 4));
         if (TIFFGetField(tif, EXIFTAG_FOCALLENGTH, &fv))
-            out.add("EXIF", "Focal length", std::to_string(fv).substr(0, 5) + " mm");
+            out.add(N_("EXIF"), N_("Focal length"), std::to_string(fv).substr(0, 5) + " mm");
         uint16_t count = 0;
         uint16_t* iso = nullptr;
         if (TIFFGetField(tif, EXIFTAG_ISOSPEEDRATINGS, &count, &iso) && count > 0)
-            out.add("EXIF", "ISO", std::to_string(iso[0]));
+            out.add(N_("EXIF"), N_("ISO"), std::to_string(iso[0]));
         if (TIFFGetField(tif, EXIFTAG_LENSMODEL, &sv) && sv)
-            out.add("EXIF", "Lens", sv);
+            out.add(N_("EXIF"), N_("Lens"), sv);
     }
     TIFFClose(tif);
     return true;

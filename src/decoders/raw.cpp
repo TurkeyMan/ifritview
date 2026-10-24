@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 
 #include <libraw/libraw.h>
 
@@ -244,7 +245,7 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     if (framed)
     {
         const auto& c = raw.imgdata.sizes.raw_inset_crops[0];
-        out.add("Raw", "Camera framing",
+        out.add(N_("Raw"), N_("Camera framing"),
                 std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " + std::to_string(c.ctop) + ")");
     }
     return true;
@@ -360,44 +361,44 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
         return std::string(buf);
     };
-    out.add("Camera", "Make", id.make);
-    out.add("Camera", "Model", id.model);
+    out.add(N_("Camera"), N_("Make"), id.make);
+    out.add(N_("Camera"), N_("Model"), id.model);
     if (id.software[0])
-        out.add("Camera", "Firmware", id.software);
+        out.add(N_("Camera"), N_("Firmware"), id.software);
     if (lens.Lens[0])
-        out.add("Camera", "Lens", lens.Lens);
+        out.add(N_("Camera"), N_("Lens"), lens.Lens);
     else if (lens.LensMake[0])
-        out.add("Camera", "Lens make", lens.LensMake);
+        out.add(N_("Camera"), N_("Lens make"), lens.LensMake);
     if (other.iso_speed > 0)
-        out.add("Camera", "ISO", std::to_string(int(other.iso_speed)));
+        out.add(N_("Camera"), N_("ISO"), std::to_string(int(other.iso_speed)));
     if (other.shutter > 0)
-        out.add("Camera", "Shutter", other.shutter >= 1 ? fmt(other.shutter, 1) + " s" : "1/" + std::to_string(int(1 / other.shutter + 0.5)) + " s");
+        out.add(N_("Camera"), N_("Shutter"), other.shutter >= 1 ? fmt(other.shutter, 1) + " s" : "1/" + std::to_string(int(1 / other.shutter + 0.5)) + " s");
     if (other.aperture > 0)
-        out.add("Camera", "Aperture", "f/" + fmt(other.aperture, 1));
+        out.add(N_("Camera"), N_("Aperture"), "f/" + fmt(other.aperture, 1));
     if (other.focal_len > 0)
-        out.add("Camera", "Focal length", fmt(other.focal_len, 0) + " mm");
+        out.add(N_("Camera"), N_("Focal length"), fmt(other.focal_len, 0) + " mm");
     out.exposure_bias = bias;
     if (bias != 0)
-        out.add("Camera", "Exposure compensation", (bias > 0 ? "+" : "") + fmt(bias, 2) + " EV");
+        out.add(N_("Camera"), N_("Exposure compensation"), (bias > 0 ? "+" : "") + fmt(bias, 2) + " EV");
     if (other.timestamp)
     {
         char buf[64];
         std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", std::localtime(&other.timestamp));
-        out.add("Camera", "Taken", buf);
+        out.add(N_("Camera"), N_("Taken"), buf);
     }
     if (other.shot_order)
-        out.add("Camera", "Shot number", std::to_string(other.shot_order));
+        out.add(N_("Camera"), N_("Shot number"), std::to_string(other.shot_order));
     if (other.artist[0])
-        out.add("Camera", "Artist", other.artist);
+        out.add(N_("Camera"), N_("Artist"), other.artist);
     if (other.desc[0])
-        out.add("Camera", "Description", other.desc);
-    out.add("Raw", "Sensor size", std::to_string(raw.imgdata.sizes.raw_width) + " × " + std::to_string(raw.imgdata.sizes.raw_height));
-    out.add("Raw", "Output size", std::to_string(out.width) + " × " + std::to_string(out.height) + " (" + mode + ")");
+        out.add(N_("Camera"), N_("Description"), other.desc);
+    out.add(N_("Raw"), N_("Sensor size"), std::to_string(raw.imgdata.sizes.raw_width) + " × " + std::to_string(raw.imgdata.sizes.raw_height));
+    out.add(N_("Raw"), N_("Output size"), std::to_string(out.width) + " × " + std::to_string(out.height) + " (" + mode + ")");
     if (raw.imgdata.color.raw_bps)
-        out.add("Raw", "Bits per sample", std::to_string(raw.imgdata.color.raw_bps));
-    out.add("Raw", "Colour channels", std::to_string(id.colors) + " (" + id.cdesc + ")");
+        out.add(N_("Raw"), N_("Bits per sample"), std::to_string(raw.imgdata.color.raw_bps));
+    out.add(N_("Raw"), N_("Colour channels"), std::to_string(id.colors) + " (" + id.cdesc + ")");
     if (id.dng_version)
-        out.add("Raw", "DNG version", std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
+        out.add(N_("Raw"), N_("DNG version"), std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
     {
         const int bits = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
         if (id.filters == 9)
@@ -420,16 +421,16 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         }
     }
     if (id.filters == 9)
-        out.add("Raw", "Mosaic", "X-Trans");
+        out.add(N_("Raw"), N_("Mosaic"), "X-Trans");
     else if (id.filters)
-        out.add("Raw", "Mosaic", "Bayer");
+        out.add(N_("Raw"), N_("Mosaic"), "Bayer");
     else
-        out.add("Raw", "Mosaic", "none (linear)");
+        out.add(N_("Raw"), N_("Mosaic"), "none (linear)");
     const float* wb = raw.imgdata.color.cam_mul;
     if (wb[0] > 0 && wb[1] > 0)
-        out.add("Raw", "Camera white balance", fmt(wb[0] / wb[1], 3) + " / 1 / " + fmt(wb[2] / wb[1], 3));
+        out.add(N_("Raw"), N_("Camera white balance"), fmt(wb[0] / wb[1], 3) + " / 1 / " + fmt(wb[2] / wb[1], 3));
     if (out.linear)
-        out.add("Raw", "Auto exposure gain", fmt(std::log2(out.linear->auto_gain), 2) + " EV");
+        out.add(N_("Raw"), N_("Auto exposure gain"), fmt(std::log2(out.linear->auto_gain), 2) + " EV");
     return true;
 }
 

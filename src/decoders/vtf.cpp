@@ -7,6 +7,7 @@
 // uncompressed formats are 8-bit channels in various orders, packed 16-bit
 // pixels, 16-bit integer or half-float and 32-bit float (clipped to 0..1).
 #include "bcn.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "decoder.h"
 #include "texel.h"
@@ -301,20 +302,20 @@ bool decode(const std::string& path, Image& out, std::string& error)
             out.pixel_format.sample = PixelFormat::Sample::Float;
     }
 
-    out.add("VTF", "Version", "7." + std::to_string(minor));
-    out.add("VTF", "Format", f->name);
+    out.add(N_("VTF"), N_("Version"), "7." + std::to_string(minor));
+    out.add(N_("VTF"), N_("Format"), f->name);
     if (mips > 1)
-        out.add("VTF", "Mipmaps", std::to_string(mips));
+        out.add(N_("VTF"), N_("Mipmaps"), std::to_string(mips));
     if (frames > 1)
-        out.add("VTF", "Frames", std::to_string(frames) + ", the first shown");
+        out.add(N_("VTF"), N_("Frames"), std::to_string(frames) + ", the first shown");
     if (faces > 1)
-        out.add("VTF", "Cube map", std::to_string(faces) + " faces, the first shown");
+        out.add(N_("VTF"), N_("Cube map"), std::to_string(faces) + " faces, the first shown");
     if (depth > 1)
-        out.add("VTF", "Volume", std::to_string(depth) + " slices, the first shown");
+        out.add(N_("VTF"), N_("Volume"), std::to_string(depth) + " slices, the first shown");
     if (flags & kFlagNormal)
-        out.add("VTF", "Normal map", "yes");
+        out.add(N_("VTF"), N_("Normal map"), "yes");
     if (flags & kFlagSrgb)
-        out.add("VTF", "sRGB", "yes");
+        out.add(N_("VTF"), N_("sRGB"), "yes");
     return true;
 }
 

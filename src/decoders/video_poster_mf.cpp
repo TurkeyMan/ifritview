@@ -3,6 +3,7 @@
 // Foundation reads the file itself, so this decoder is marked streaming and
 // gets no preload.
 #include "../mf.h"
+#include "../i18n.h"
 #include "../platform.h"
 #include "../video.h"
 #include "decoder.h"
@@ -172,7 +173,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     {
         char fps[32];
         std::snprintf(fps, sizeof fps, "%.3g fps", double(num) / den);
-        out.add("Video", "Frame rate", fps);
+        out.add(N_("Video"), N_("Frame rate"), fps);
     }
     PROPVARIANT var;
     PropVariantInit(&var);
@@ -190,10 +191,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     const std::string vcodec = video_codec(vsub);
     out.format = "Video, " + vcodec;
-    out.add("Video", "Duration", out.duration > 0 ? clock_text(out.duration) : "unknown");
-    out.add("Video", "Size", std::to_string(out.width) + " × " + std::to_string(out.height));
-    out.add("Video", "Codec", vcodec);
-    out.add("Video", "Audio", out.has_audio ? acodec : "none");
+    out.add(N_("Video"), N_("Duration"), out.duration > 0 ? clock_text(out.duration) : "unknown");
+    out.add(N_("Video"), N_("Size"), std::to_string(out.width) + " × " + std::to_string(out.height));
+    out.add(N_("Video"), N_("Codec"), vcodec);
+    out.add(N_("Video"), N_("Audio"), out.has_audio ? acodec : "none");
     out.pixel_format.notes.push_back(vcodec);
     return true;
 }

@@ -1,4 +1,5 @@
 // The info pane and the fullscreen overlay: what's known about the image. Part of App (app.h).
+#include "i18n.h"
 #include "app.h"
 #include "app_util.h"
 #include "platform.h"
@@ -95,25 +96,25 @@ std::vector<MetadataGroup> App::collect_metadata() const
     std::vector<MetadataGroup> groups;
     if (!image_)
         return groups;
-    MetadataGroup file{"File", {}};
-    file.items.push_back({"Name", folder_.current_name()});
-    file.items.push_back({"Folder", folder_.directory()});
+    MetadataGroup file{N_("File"), {}};
+    file.items.push_back({N_("Name"), folder_.current_name()});
+    file.items.push_back({N_("Folder"), folder_.directory()});
     if (file_size_)
-        file.items.push_back({"Size", human_size(file_size_) + " (" + std::to_string(file_size_) + " bytes)"});
+        file.items.push_back({N_("Size"), rap::i18n::format(P_("{0} ({1} byte)", "{0} ({1} bytes)", file_size_), human_size(file_size_), file_size_)});
     if (const std::string t = file_time(image_path_, "%Y-%m-%d %H:%M:%S"); !t.empty())
-        file.items.push_back({"Modified", t});
+        file.items.push_back({N_("Modified"), t});
     groups.push_back(std::move(file));
-    MetadataGroup img{"Image", {}};
-    img.items.push_back({"Dimensions", std::to_string(image_->width) + " × " + std::to_string(image_->height)});
-    img.items.push_back({"Format", image_->format});
+    MetadataGroup img{N_("Image"), {}};
+    img.items.push_back({N_("Dimensions"), std::to_string(image_->width) + " × " + std::to_string(image_->height)});
+    img.items.push_back({N_("Format"), image_->format});
     if (!image_->pixel_format.empty())
-        img.items.push_back({"Pixel format", image_->pixel_format.describe(image_->width, image_->height)});
+        img.items.push_back({N_("Pixel format"), image_->pixel_format.describe(image_->width, image_->height)});
     if (!image_->color_space.empty())
-        img.items.push_back({"Colour space", image_->color_space});
-    img.items.push_back({"Source depth", std::to_string(image_->bits_per_sample) + " bits per sample"});
-    img.items.push_back({"Alpha", image_->has_alpha ? "yes" : "no"});
+        img.items.push_back({N_("Colour space"), image_->color_space});
+    img.items.push_back({N_("Source depth"), rap::i18n::format(P_("{0} bit per sample", "{0} bits per sample", image_->bits_per_sample), image_->bits_per_sample)});
+    img.items.push_back({N_("Alpha"), image_->has_alpha ? _("yes") : _("no")});
     if (!image_->info.empty())
-        img.items.push_back({"Notes", image_->info});
+        img.items.push_back({N_("Notes"), image_->info});
     groups.push_back(std::move(img));
     for (const MetadataGroup& g : image_->metadata)
         groups.push_back(g);
@@ -129,7 +130,7 @@ std::vector<MetadataGroup> App::collect_metadata() const
             gps = &groups.back();
         }
         if (!image_->place.empty() && image_->place != " ")
-            gps->items.insert(gps->items.begin(), {"Place", image_->place});
+            gps->items.insert(gps->items.begin(), {N_("Place"), image_->place});
     }
     return groups;
 }
@@ -175,7 +176,7 @@ View::OverlaySections App::overlay_sections() const
             lines.push_back(image_->pixel_format.describe(image_->width, image_->height) + (image_->color_space.empty() ? "" : "  ·  " + image_->color_space));
         const std::string compression = find({"TIFF"}, {"Compression"});
         if (!compression.empty())
-            lines.push_back("compression " + compression);
+            lines.push_back(rap::i18n::format(_("compression {0}"), compression));
     }
     flush();
     if (cfg_.overlay_shot)
@@ -219,15 +220,15 @@ View::OverlaySections App::overlay_sections() const
     flush();
     if (cfg_.overlay_view)
     {
-        const double shown = image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom();
+        const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
         std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
         if (image_->is_preview())
-            line += image_->is_raw ? "  ·  embedded preview" : "  ·  preview";
+            line += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
         else if (image_->tonable())
         {
             char ev[32];
             std::snprintf(ev, sizeof ev, "%+.2f EV", exposure_->value());
-            line += std::string(image_->linear ? "  ·  developed  ·  " : "  ·  HDR  ·  ") + ev;
+            line += std::string("  ·  ") + (image_->linear ? _("developed") : "HDR") + "  ·  " + ev;
         }
         lines.push_back(line);
     }

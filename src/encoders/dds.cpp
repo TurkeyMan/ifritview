@@ -4,6 +4,8 @@
 // tag), else the one every tool reads, if asked for. Not BC6H yet.
 #include "encoder.h"
 
+#include "../i18n.h"
+
 #include "reduce.h"
 
 #include "../decoders/texel.h"
@@ -62,21 +64,21 @@ constexpr uint32_t fourcc(const char (&s)[5])
 
 // In the Format setting's order, after Automatic.
 const Format kFormats[] = {
-    {Layout::BC1, "BC1 (DXT1): colour, 4 bits a pixel", 71, 72, fourcc("DXT1"), 4, {}, true, true, true},
-    {Layout::BC2, "BC2 (DXT3): colour, sharp alpha", 74, 75, fourcc("DXT3"), 8, {}, true, true, true},
-    {Layout::BC3, "BC3 (DXT5): colour, smooth alpha", 77, 78, fourcc("DXT5"), 8, {}, true, true, true},
-    {Layout::BC4, "BC4: one channel (red)", 80, 0, fourcc("ATI1"), 4, {}, true, false, true},
-    {Layout::BC5, "BC5: two channels (normal maps)", 83, 0, fourcc("ATI2"), 8, {}, true, false, true},
-    {Layout::BC7, "BC7: colour and alpha, best", 98, 99, 0, 8, {}, true, true, true},
-    {Layout::RGBA8, "RGBA 8-bit, uncompressed", 28, 29, 0, 32, {0xFF, 0xFF00, 0xFF0000, 0xFF000000u}, false, true, false},
-    {Layout::BGRA8, "BGRA 8-bit, uncompressed", 87, 91, 0, 32, {0xFF0000, 0xFF00, 0xFF, 0xFF000000u}, false, true, false},
-    {Layout::B5G6R5, "RGB 565 (16-bit)", 85, 0, 0, 16, {0xF800, 0x07E0, 0x001F, 0}, false, false, true},
-    {Layout::B5G5R5A1, "ARGB 1555 (16-bit)", 86, 0, 0, 16, {0x7C00, 0x03E0, 0x001F, 0x8000}, false, true, true},
-    {Layout::B4G4R4A4, "ARGB 4444 (16-bit)", 115, 0, 0, 16, {0x0F00, 0x00F0, 0x000F, 0xF000}, false, true, true},
-    {Layout::R8, "R8: one channel", 61, 0, 0, 8, {0xFF, 0, 0, 0}, false, false, true},
-    {Layout::RG8, "RG8: two channels", 49, 0, 0, 16, {0xFF, 0xFF00, 0, 0}, false, false, true},
-    {Layout::RGBA16F, "RGBA half float (HDR)", 10, 0, 113, 64, {}, false, true, false},
-    {Layout::RGBA32F, "RGBA float (HDR)", 2, 0, 116, 128, {}, false, true, false},
+    {Layout::BC1, N_("BC1 (DXT1): colour, 4 bits a pixel"), 71, 72, fourcc("DXT1"), 4, {}, true, true, true},
+    {Layout::BC2, N_("BC2 (DXT3): colour, sharp alpha"), 74, 75, fourcc("DXT3"), 8, {}, true, true, true},
+    {Layout::BC3, N_("BC3 (DXT5): colour, smooth alpha"), 77, 78, fourcc("DXT5"), 8, {}, true, true, true},
+    {Layout::BC4, N_("BC4: one channel (red)"), 80, 0, fourcc("ATI1"), 4, {}, true, false, true},
+    {Layout::BC5, N_("BC5: two channels (normal maps)"), 83, 0, fourcc("ATI2"), 8, {}, true, false, true},
+    {Layout::BC7, N_("BC7: colour and alpha, best"), 98, 99, 0, 8, {}, true, true, true},
+    {Layout::RGBA8, N_("RGBA 8-bit, uncompressed"), 28, 29, 0, 32, {0xFF, 0xFF00, 0xFF0000, 0xFF000000u}, false, true, false},
+    {Layout::BGRA8, N_("BGRA 8-bit, uncompressed"), 87, 91, 0, 32, {0xFF0000, 0xFF00, 0xFF, 0xFF000000u}, false, true, false},
+    {Layout::B5G6R5, N_("RGB 565 (16-bit)"), 85, 0, 0, 16, {0xF800, 0x07E0, 0x001F, 0}, false, false, true},
+    {Layout::B5G5R5A1, N_("ARGB 1555 (16-bit)"), 86, 0, 0, 16, {0x7C00, 0x03E0, 0x001F, 0x8000}, false, true, true},
+    {Layout::B4G4R4A4, N_("ARGB 4444 (16-bit)"), 115, 0, 0, 16, {0x0F00, 0x00F0, 0x000F, 0xF000}, false, true, true},
+    {Layout::R8, N_("R8: one channel"), 61, 0, 0, 8, {0xFF, 0, 0, 0}, false, false, true},
+    {Layout::RG8, N_("RG8: two channels"), 49, 0, 0, 16, {0xFF, 0xFF00, 0, 0}, false, false, true},
+    {Layout::RGBA16F, N_("RGBA half float (HDR)"), 10, 0, 113, 64, {}, false, true, false},
+    {Layout::RGBA32F, N_("RGBA float (HDR)"), 2, 0, 116, 128, {}, false, true, false},
 };
 constexpr int kFormatCount = int(std::size(kFormats));
 
@@ -517,16 +519,16 @@ const Encoder& dds_encoder()
     static const Encoder e = []
     {
         using Kind = EncodeSetting::Kind;
-        std::vector<const char*> formats{"Automatic (BC7; half float for HDR)"};
+        std::vector<const char*> formats{N_("Automatic (BC7; half float for HDR)")};
         for (const Format& f : kFormats)
             formats.push_back(f.label);
         Encoder d{"DDS", "dds",
-                  {{"format", "Format", Kind::Choice, 0, kFormatCount, 0, formats},
-                   {"effort", "Effort", Kind::Choice, 0, 2, 1, {"Fast", "Balanced", "Best (slow)"}, "block-compressed formats"},
-                   {"mipmaps", "Mipmaps", Kind::Toggle, 0, 1, 1, {}, "each half the size, down to 1 px"},
-                   {"srgb", "sRGB colour", Kind::Toggle, 0, 1, 1, {}, "off for data: normal maps, masks", "legacy"},
-                   {"dither", "Dither", Kind::Toggle, 0, 1, 1, {}, "16-bit formats"},
-                   {"legacy", "Old-style header", Kind::Toggle, 0, 1, 0, {}, "for tools before DirectX 10"}},
+                  {{"format", N_("Format"), Kind::Choice, 0, kFormatCount, 0, formats},
+                   {"effort", N_("Effort"), Kind::Choice, 0, 2, 1, {N_("Fast"), N_("Balanced"), N_("Best (slow)")}, N_("block-compressed formats")},
+                   {"mipmaps", N_("Mipmaps"), Kind::Toggle, 0, 1, 1, {}, N_("each half the size, down to 1 px")},
+                   {"srgb", N_("sRGB colour"), Kind::Toggle, 0, 1, 1, {}, N_("off for data: normal maps, masks"), "legacy"},
+                   {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit formats")},
+                   {"legacy", N_("Old-style header"), Kind::Toggle, 0, 1, 0, {}, N_("for tools before DirectX 10")}},
                   encode_dds};
         d.reduces = lossy;
         d.metadata = false;

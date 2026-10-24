@@ -1,5 +1,6 @@
 // Print: the image as shown (or the selection), fitted to the paper and
 // centred, through the platform's print dialog. Part of App (app.h).
+#include "i18n.h"
 #include "app.h"
 #include "scale.h"
 
@@ -42,9 +43,14 @@ void App::print_image()
     job.done = [this](bool printed, std::string error)
     {
         if (printed)
-            status_message_ = "Printed";
+            status_message_ = _("Printed");
         else if (!error.empty())
-            status_message_ = "Print failed: " + error;
+        {
+            // The reason is the message ("printing isn't available..."), as a sentence.
+            status_message_ = error;
+            if (status_message_[0] >= 'a' && status_message_[0] <= 'z')
+                status_message_[0] = char(status_message_[0] - 'a' + 'A');
+        }
         update_status();
     };
     ui_.print(window_.get(), std::move(job));

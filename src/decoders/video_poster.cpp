@@ -2,6 +2,7 @@
 // the image; the player takes over once it's on screen. GStreamer reads the
 // file itself, so this decoder is marked streaming and gets no preload.
 #include "../video.h"
+#include "../i18n.h"
 #include "decoder.h"
 
 #include "../gst_api.h"
@@ -79,7 +80,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
             {
                 char fps[32];
                 std::snprintf(fps, sizeof fps, "%.3g fps", double(GST_VIDEO_INFO_FPS_N(&info)) / GST_VIDEO_INFO_FPS_D(&info));
-                out.add("Video", "Frame rate", fps);
+                out.add(N_("Video"), N_("Frame rate"), fps);
             }
             ok = true;
         }
@@ -101,12 +102,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
         const std::string vcodec = tag_string(vtags, GST_TAG_VIDEO_CODEC);
         const std::string acodec = tag_string(atags, GST_TAG_AUDIO_CODEC);
         out.format = vcodec.empty() ? "Video" : "Video, " + vcodec;
-        out.add("Video", "Duration", out.duration > 0 ? clock_text(out.duration) : "unknown");
-        out.add("Video", "Size", std::to_string(out.width) + " × " + std::to_string(out.height));
-        out.add("Video", "Codec", vcodec);
-        out.add("Video", "Audio", acodec.empty() ? (atags ? "yes" : "none") : acodec);
+        out.add(N_("Video"), N_("Duration"), out.duration > 0 ? clock_text(out.duration) : "unknown");
+        out.add(N_("Video"), N_("Size"), std::to_string(out.width) + " × " + std::to_string(out.height));
+        out.add(N_("Video"), N_("Codec"), vcodec);
+        out.add(N_("Video"), N_("Audio"), acodec.empty() ? (atags ? "yes" : "none") : acodec);
         const std::string container = tag_string(vtags, GST_TAG_CONTAINER_FORMAT);
-        out.add("Video", "Container", container);
+        out.add(N_("Video"), N_("Container"), container);
         out.pixel_format.notes.push_back(vcodec.empty() ? "video" : vcodec);
         if (vtags)
             gst_tag_list_unref(vtags);

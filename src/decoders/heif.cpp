@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 #include "icc.h"
 
 #include <libheif/heif.h>
@@ -115,8 +116,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
             }
         }
     }
-    out.add("HEIF", "Bits per pixel", std::to_string(out.bits_per_sample));
-    out.add("HEIF", "Alpha channel", alpha ? "yes" : "no");
+    out.add(N_("HEIF"), N_("Bits per pixel"), std::to_string(out.bits_per_sample));
+    out.add(N_("HEIF"), N_("Alpha channel"), alpha ? "yes" : "no");
     heif_item_id ids[4];
     const int n = heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", ids, 4);
     for (int i = 0; i < n; ++i)

@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "../i18n.h"
 #include "icc.h"
 
 #include <png.h>
@@ -116,8 +117,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
         if (interlace != PNG_INTERLACE_NONE)
             out.pixel_format.notes.push_back("interlaced");
     }
-    out.add("PNG", "Bit depth", std::to_string(depth));
-    out.add("PNG", "Color type",
+    out.add(N_("PNG"), N_("Bit depth"), std::to_string(depth));
+    out.add(N_("PNG"), N_("Color type"),
             color == PNG_COLOR_TYPE_PALETTE      ? "palette"
             : color == PNG_COLOR_TYPE_GRAY       ? "grayscale"
             : color == PNG_COLOR_TYPE_GRAY_ALPHA ? "grayscale + alpha"
@@ -126,20 +127,20 @@ bool decode(const std::string& path, Image& out, std::string& error)
     png_uint_32 xres = 0, yres = 0;
     int unit = 0;
     if (png_get_pHYs(png, info, &xres, &yres, &unit) && unit == PNG_RESOLUTION_METER)
-        out.add("PNG", "Resolution", std::to_string(int(xres * 0.0254 + 0.5)) + " dpi");
+        out.add(N_("PNG"), N_("Resolution"), std::to_string(int(xres * 0.0254 + 0.5)) + " dpi");
     double gamma = 0;
     if (png_get_gAMA(png, info, &gamma))
-        out.add("PNG", "Gamma", std::to_string(gamma).substr(0, 6));
+        out.add(N_("PNG"), N_("Gamma"), std::to_string(gamma).substr(0, 6));
     int intent = 0;
     if (png_get_sRGB(png, info, &intent))
-        out.add("PNG", "sRGB", "yes");
+        out.add(N_("PNG"), N_("sRGB"), "yes");
     png_charp icc_name = nullptr;
     png_bytep icc = nullptr;
     png_uint_32 icc_len = 0;
     int comp = 0;
     if (png_get_iCCP(png, info, &icc_name, &comp, &icc, &icc_len) && icc_name)
     {
-        out.add("PNG", "ICC profile", icc_name);
+        out.add(N_("PNG"), N_("ICC profile"), icc_name);
         out.color_space = icc_profile_description(icc, icc_len);
         if (out.color_space.empty())
             out.color_space = icc_name;

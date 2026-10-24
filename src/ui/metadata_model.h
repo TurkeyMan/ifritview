@@ -1,5 +1,7 @@
 #pragma once
 
+#include "i18n.h"
+
 #include "image.h"
 
 #include <rapport/rapport.h>
@@ -20,11 +22,13 @@ public:
         {
             if (!rows_.empty())
                 rows_.push_back({"", "", Kind::Gap, ""});
-            rows_.push_back({g.name, "", Kind::Heading, ""});
+            // Names are kept in English (they're looked up by them) and
+            // shown in the user's language where there's a translation.
+            rows_.push_back({tr_ifrit(g.name.c_str()), "", Kind::Heading, ""});
             if (g.name == "GPS" && image && image->has_location)
-                rows_.push_back({"Location", image->location_text(), Kind::Link, map_url});
+                rows_.push_back({_("Location"), image->location_text(), Kind::Link, map_url});
             for (const MetadataItem& item : g.items)
-                rows_.push_back({item.key, item.value, Kind::Item, ""});
+                rows_.push_back({tr_ifrit(item.key.c_str()), item.value, Kind::Item, ""});
         }
         notify_reset();
     }

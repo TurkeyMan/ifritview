@@ -3,6 +3,7 @@
 // position. 16-bit colours are BGR 5-5-5 with an STP (semi-transparency)
 // bit; colour 0x0000 is fully transparent, 0x8000 opaque black.
 #include "decoder.h"
+#include "../i18n.h"
 #include "../bytes.h"
 
 #include <cstdio>
@@ -75,7 +76,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
             bool stp;
             clut.push_back(colour15(le16(d.data() + pos + 12 + i * 2), stp));
         }
-        out.add("TIM", "CLUT",
+        out.add(N_("TIM"), N_("CLUT"),
                 std::to_string(clut_entries) + " entries × " + std::to_string(clut_count) + (clut_count == 1 ? " palette" : " palettes") + ", VRAM (" +
                     std::to_string(cx) + ", " + std::to_string(cy) + ")");
         pos += size;
@@ -147,10 +148,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
     }
     else
         out.pixel_format = PixelFormat::packed(M::RGB, "RGB", 8);
-    out.add("TIM", "Mode", mode == 0 ? "4-bit CLUT" : mode == 1 ? "8-bit CLUT" : mode == 2 ? "16-bit direct" : mode == 3 ? "24-bit direct" : "mixed");
-    out.add("TIM", "VRAM position", "(" + std::to_string(ix) + ", " + std::to_string(iy) + ")");
+    out.add(N_("TIM"), N_("Mode"), mode == 0 ? "4-bit CLUT" : mode == 1 ? "8-bit CLUT" : mode == 2 ? "16-bit direct" : mode == 3 ? "24-bit direct" : "mixed");
+    out.add(N_("TIM"), N_("VRAM position"), "(" + std::to_string(ix) + ", " + std::to_string(iy) + ")");
     if (any_stp)
-        out.add("TIM", "Semi-transparent pixels", "yes");
+        out.add(N_("TIM"), N_("Semi-transparent pixels"), "yes");
     return true;
 }
 

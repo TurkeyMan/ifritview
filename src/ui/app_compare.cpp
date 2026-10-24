@@ -1,4 +1,5 @@
 // Comparing two images: A and B, swipe, difference, side by side, --diff. Part of App (app.h).
+#include "i18n.h"
 #include "app.h"
 #include "app_util.h"
 #include "platform.h"
@@ -136,7 +137,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
     if (slideshow_)
         stop_slideshow();
     stop_video();
-    status_message_ = "Comparing…";
+    status_message_ = busy_message_ = _("Comparing…");
     update_status();
     const uint64_t generation = ++load_generation_;
     ++preview_->running;  // waited for on exit, as a save preview is
@@ -166,7 +167,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
                         return;
                     if (!ok)
                     {
-                        status_message_ = "Can't compare: " + error;
+                        status_message_ = rap::i18n::format(_("Can't compare: {0}"), error);
                         update_status();
                         return;
                     }

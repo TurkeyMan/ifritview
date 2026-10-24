@@ -9,6 +9,7 @@
 // and UASTC need its transcoder and aren't supported, nor is zlib.
 // KTXorientation is honoured, so a bottom-up texture shows the right way up.
 #include "astc.h"
+#include "../i18n.h"
 #include "../bytes.h"
 #include "bcn.h"
 #include "decoder.h"
@@ -582,9 +583,9 @@ bool decode1(const std::string& path, Image& out, std::string& error)
         return false;
 
     out.format = "KTX";
-    out.add("KTX", "Format", t->name);
+    out.add(N_("KTX"), N_("Format"), t->name);
     if (be)
-        out.add("KTX", "Byte order", "big-endian");
+        out.add(N_("KTX"), N_("Byte order"), "big-endian");
     add_layout(out, "KTX", levels, layers, faces, depth);
     add_metadata(out, "KTX", key_values(d + 64, kvd, be));
     return true;
@@ -713,11 +714,11 @@ bool decode2(const std::string& path, Image& out, std::string& error)
         return false;
 
     out.format = "KTX2";
-    out.add("KTX2", "Format", t->name);
+    out.add(N_("KTX2"), N_("Format"), t->name);
     if (supercompression)
-        out.add("KTX2", "Supercompression", supercompression);
+        out.add(N_("KTX2"), N_("Supercompression"), supercompression);
     if (premultiplied)
-        out.add("KTX2", "Alpha", "premultiplied");
+        out.add(N_("KTX2"), N_("Alpha"), "premultiplied");
     add_layout(out, "KTX2", levels, layers, faces, depth);
     if (kvd_offset <= size && kvd_length <= size - kvd_offset)
         add_metadata(out, "KTX2", key_values(d + kvd_offset, kvd_length, false));
