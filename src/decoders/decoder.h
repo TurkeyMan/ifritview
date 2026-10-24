@@ -89,6 +89,7 @@ const Decoder& video_decoder();
 const Decoder& ilbm_decoder();
 const Decoder& pcx_decoder();
 const Decoder& netpbm_decoder();
+const Decoder& dds_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.

@@ -197,6 +197,7 @@ const std::vector<const Decoder*>& decoders()
         v.push_back(&ilbm_decoder());
         v.push_back(&pcx_decoder());
         v.push_back(&netpbm_decoder());
+        v.push_back(&dds_decoder());
         v.push_back(&stb_decoder());
         v.push_back(&pixbuf_decoder());  // catch-all, must stay last
         return v;

@@ -10,7 +10,6 @@
 #define STBI_ONLY_BMP
 #define STBI_ONLY_PIC
 #define STBI_ONLY_HDR
-#define STBI_ONLY_PNM
 #define STBI_NO_FAILURE_STRINGS
 #include "../../third_party/stb_image.h"
 
