@@ -51,6 +51,10 @@ std::string metadata_preset(const MetadataChoice& choice);
 // The choice in words parse_metadata_choice reads: its preset, else "only:...".
 std::string metadata_choice_text(const MetadataChoice& choice);
 
+// Which groups the metadata has anything in (as MetadataChoice's flags;
+// `keep` says whether there's any metadata at all, the profile aside).
+MetadataChoice metadata_present(const FileMetadata& m);
+
 // The file being written, so the metadata can be made to describe it.
 struct SaveTarget
 {

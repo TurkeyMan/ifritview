@@ -40,12 +40,12 @@ int preset_index(const MetadataChoice& c)
 }  // namespace
 
 std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
-                                             std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata, bool has_metadata,
-                                             Callbacks callbacks)
+                                             std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata,
+                                             const MetadataChoice& present, Callbacks callbacks)
 {
     auto d = std::shared_ptr<SaveDialog>(new SaveDialog);
     d->self_ = d;
-    d->has_metadata_ = has_metadata;
+    d->present_ = present;
     d->ui_ = &ui;
     d->remembered_ = &remembered;
     d->callbacks_ = std::move(callbacks);
@@ -222,12 +222,13 @@ void SaveDialog::update_metadata()
 {
     const int i = format_ ? format_->current() : -1;
     const bool holds = i >= 0 && pages_[size_t(i)].encoder->metadata;
-    const bool on = holds && has_metadata_;
+    const bool on = holds && present_.keep;
     preset_->set_enabled(on);
     const bool none = preset_->current() == 4;
-    for (rap::check* g : groups_)
-        g->set_enabled(on && !none);
-    if (!has_metadata_)
+    // A group the image has nothing in is greyed: there's nothing to keep or strip.
+    for (size_t g = 0; g < groups_.size(); ++g)
+        groups_[g]->set_enabled(on && !none && present_.*kGroups[g].flag);
+    if (!present_.keep)
         metadata_note_->set_text("This image has no metadata to keep.");
     else if (!holds)
         metadata_note_->set_text(std::string(pages_[size_t(i)].encoder->name) + " files can't hold metadata.");

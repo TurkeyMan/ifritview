@@ -33,11 +33,11 @@ public:
     // `own_extension` (lower case, "jpg" for JPEG) is preselected when
     // there's an encoder for it. `remembered` keeps each format's settings
     // between saves; it must outlive the dialog.
-    // `metadata` is the choice to start from; `has_metadata` whether the
-    // image has any (else that part is greyed).
+    // `metadata` is the choice to start from; `present` which groups the
+    // image has anything in (metadata_present: the rest are greyed).
     static std::shared_ptr<SaveDialog> open(rap::ui& ui, rap::window* parent, const std::string& own_extension,
-                                            std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata, bool has_metadata,
-                                            Callbacks callbacks);
+                                            std::map<std::string, EncodeOptions>& remembered, const MetadataChoice& metadata,
+                                            const MetadataChoice& present, Callbacks callbacks);
     MetadataChoice metadata() const;  // as chosen
 
     void set_info(const std::string& text);  // beside the format: the preview's file size
@@ -84,6 +84,6 @@ private:
     rap::drop_down* preset_ = nullptr;
     std::vector<rap::check*> groups_;
     rap::label* metadata_note_ = nullptr;
-    bool has_metadata_ = false;
+    MetadataChoice present_;
     bool syncing_ = false;
 };

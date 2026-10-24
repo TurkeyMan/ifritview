@@ -1568,10 +1568,12 @@ void App::save_as()
     MetadataChoice metadata;
     std::string ignored;
     parse_metadata_choice(cfg_.save_metadata, metadata, ignored);  // an unreadable setting keeps everything
-    const bool has_metadata =
-        save_source_ == image_ && image_->stored && !(image_->stored->exif.empty() && image_->stored->xmp.empty() && image_->stored->iptc.empty());
+    MetadataChoice present;
+    present.keep = false;  // nothing, unless the image's own
+    if (save_source_ == image_ && image_->stored)
+        present = metadata_present(*image_->stored);
     save_dialog_ = SaveDialog::open(ui_, window_.get(), diff_session_ ? std::string("png") : lower_extension(image_path_), save_options_, metadata,
-                                    has_metadata, std::move(cb));
+                                    present, std::move(cb));
     update_toolbar();
 }
 

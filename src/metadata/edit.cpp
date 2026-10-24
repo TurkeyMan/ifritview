@@ -653,6 +653,32 @@ struct XmpEdit
     }
 };
 
+// Notes the group of every top-level property, without changing anything.
+void note_groups(const Node& n, Prefixes p, const std::function<void(Group)>& seen, bool in_description = false)
+{
+    if (n.kind != Node::element)
+        return;
+    declare(n, p);
+    std::string uri, local;
+    if (in_description)
+    {
+        if (resolve(n.name, p, uri, local) && uri != ns::rdf)
+            seen(xmp_group(uri, local));
+        return;
+    }
+    if (resolve(n.name, p, uri, local) && uri == ns::rdf && local == "Description")
+    {
+        for (const auto& [k, v] : n.attrs)
+            if (k.rfind("xmlns", 0) != 0 && resolve(k, p, uri, local) && uri != ns::rdf)
+                seen(xmp_group(uri, local));
+        for (const Node& c : n.children)
+            note_groups(c, p, seen, true);
+        return;
+    }
+    for (const Node& c : n.children)
+        note_groups(c, p, seen);
+}
+
 // -- IPTC ---------------------------------------------------------------------
 
 Group iptc_group(uint8_t record, uint8_t dataset)
@@ -839,6 +865,66 @@ std::string metadata_preset(const MetadataChoice& c)
             return name;
     }
     return "";
+}
+
+MetadataChoice metadata_present(const FileMetadata& m)
+{
+    MetadataChoice present;
+    present.location = present.personal = present.author = present.description = present.capture = present.history = false;
+    const auto seen = [&](Group g)
+    {
+        switch (g)
+        {
+            case Group::location: present.location = true; break;
+            case Group::personal: present.personal = true; break;
+            case Group::author: present.author = true; break;
+            case Group::description: present.description = true; break;
+            case Group::capture: present.capture = true; break;
+            case Group::history: present.history = true; break;
+            case Group::always: break;
+        }
+    };
+    TiffEditor t(m.exif);
+    if (t.valid())
+    {
+        const uint32_t ifd0 = t.ifd0();
+        for (int i = 0; i < t.entries(ifd0); ++i)
+        {
+            const size_t e = t.entry(ifd0, i);
+            const uint16_t tag = t.u16(e);
+            if (tag == kGpsIfd)
+            {
+                // Some cameras write a GPS directory with only its version: no position.
+                const uint32_t gps = t.u32(e + 8);
+                for (int k = 0; k < t.entries(gps); ++k)
+                    if (t.u16(t.entry(gps, k)) != 0)
+                        present.location = true;
+                continue;
+            }
+            seen(ifd0_group(tag));
+        }
+        if (const size_t e = t.find(ifd0, kExifIfd))
+            for (int i = 0; i < t.entries(t.u32(e + 8)); ++i)
+                seen(exif_group(t.u16(t.entry(t.u32(e + 8), i))));
+    }
+    if (!m.xmp.empty())
+    {
+        const std::string text(m.xmp.begin(), m.xmp.end());
+        std::vector<Node> nodes;
+        if (XmlParser(text).parse(nodes))
+            for (const Node& n : nodes)
+                note_groups(n, {}, seen);
+    }
+    for (size_t p = 0; p + 5 <= m.iptc.size() && m.iptc[p] == 0x1C;)
+    {
+        seen(iptc_group(m.iptc[p + 1], m.iptc[p + 2]));
+        const size_t len = size_t(m.iptc[p + 3]) << 8 | m.iptc[p + 4];
+        if (len & 0x8000)
+            break;  // extended lengths are rare; enough has been seen
+        p += 5 + len;
+    }
+    present.keep = !(m.exif.empty() && m.xmp.empty() && m.iptc.empty());
+    return present;
 }
 
 std::vector<std::pair<uint16_t, std::string>> exif_strings(const std::vector<uint8_t>& tiff)
