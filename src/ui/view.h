@@ -109,7 +109,7 @@ public:
         present_image_ = image;
     }
 
-    int scale_factor() const;
+    double scale_factor() const;  // device pixels per logical one
     void view_size(int& w, int& h) const;  // device pixels
 
     bool selection(int& x, int& y, int& w, int& h) const;

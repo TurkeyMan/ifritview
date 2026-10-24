@@ -157,17 +157,19 @@ void View::set_label(std::string label)
     invalidate();
 }
 
-int View::scale_factor() const
+double View::scale_factor() const
 {
-    return canvas_ ? std::max(1, int(std::lround(canvas_->device_scale()))) : 1;
+    // Fractional where the toolkit is (Windows at 125%, GTK 4 at 150%):
+    // device pixels are what the image's pixels map to at 100%.
+    return canvas_ ? std::max(1.0, double(canvas_->device_scale())) : 1.0;
 }
 
 void View::view_size(int& w, int& h) const
 {
-    const int scale = scale_factor();
+    const double scale = scale_factor();
     const rap::size_f s = canvas_ ? canvas_->size() : rap::size_f{};
-    w = int(s.w) * scale;
-    h = int(s.h) * scale;
+    w = int(std::lround(s.w * scale));
+    h = int(std::lround(s.h * scale));
 }
 
 void View::cancel_deferred_click()
@@ -832,7 +834,7 @@ rap::image* View::checker_image(int w, int h)
 {
     if (checker_ && checker_->width() == w && checker_->height() == h)
         return checker_.get();
-    const int s = 8 * scale_factor();
+    const int s = int(std::lround(8 * scale_factor()));
     std::vector<uint8_t> px(size_t(w) * h * 4);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
@@ -1223,7 +1225,7 @@ void View::draw_video_controls(rap::painter& p)
 // -- input --------------------------------------------------------------------
 void View::to_image(double x, double y, double& ix, double& iy) const
 {
-    const int scale = scale_factor();
+    const double scale = scale_factor();
     ix = (x * scale - pan_x_) / zoom_;
     iy = (y * scale - pan_y_) / zoom_;
 }
@@ -1252,7 +1254,7 @@ View::Grab View::grab_at(double x, double y) const
 {
     if (!has_selection_)
         return Grab::None;
-    const int scale = scale_factor();
+    const double scale = scale_factor();
     const double dx = x * scale, dy = y * scale, reach = 6.0 * scale;
     const double l = pan_x_ + sel_x0_ * zoom_, r = pan_x_ + sel_x1_ * zoom_;
     const double t = pan_y_ + sel_y0_ * zoom_, b = pan_y_ + sel_y1_ * zoom_;
@@ -1384,7 +1386,7 @@ void View::drag_to(Action a, double x, double y)
     }
     else if (a == Action::Pan)
     {
-        const int scale = scale_factor();
+        const double scale = scale_factor();
         pan_x_ += (x - drag_x_) * scale;
         pan_y_ += (y - drag_y_) * scale;
         clamp_pan();
@@ -1396,7 +1398,7 @@ void View::drag_to(Action a, double x, double y)
 
 void View::run_wheel(Action a, int direction, double x, double y)
 {
-    const int scale = scale_factor();
+    const double scale = scale_factor();
     switch (a)
     {
         case Action::Zoom:
@@ -1439,7 +1441,7 @@ void View::update_volume_hover(double dx, double dy)
 bool View::pointer(const rap::pointer_event& e)
 {
     using T = rap::pointer_event_type;
-    const int s = scale_factor();
+    const double s = scale_factor();
     const double ex = e.pos.x, ey = e.pos.y;
     const double dx = ex * s, dy = ey * s;
 
@@ -1624,7 +1626,7 @@ bool View::scroll(const rap::scroll_event& e)
     // Over the speaker or the volume line, the wheel is the volume.
     if (video_ && video_audio_ && controls_visible())
     {
-        const int s = scale_factor();
+        const double s = scale_factor();
         update_volume_hover(e.pos.x * s, e.pos.y * s);
         if (volume_hover_)
         {

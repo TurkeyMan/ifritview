@@ -603,6 +603,8 @@ void App::build_ui()
     {
         if (refit_after_layout_)
             refit_after_pane_toggle();
+        else if (refit_when_laid_out_)
+            fit_window_to_image();  // measured now: clears the flag
         settle_side_by_side();
     };
     view_->on_video_toggle = [this] { toggle_video(); };
@@ -2178,6 +2180,9 @@ void App::fit_window_to_image()
     const int images = side_by_side_ ? 2 : 1;  // side by side, B's pane is as wide as A's
     const float chrome_w = vw > 0 ? std::max(0.f, cur.w - images * float(vw / scale) - pane_w) : 0.f;
     const float chrome_h = vh > 0 ? std::max(0.f, cur.h - float(vh / scale)) : 80.f;
+    // Not laid out yet (GTK sizes nothing before the window shows): the
+    // chrome was guessed, so fit again once the view has a size.
+    refit_when_laid_out_ = vw <= 0 || vh <= 0;
 
     // Leave room for the title bar and a little air around the window.
     const float max_w = work.w - 24, max_h = work.h - 72;

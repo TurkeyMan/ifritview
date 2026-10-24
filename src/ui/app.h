@@ -242,6 +242,7 @@ private:
     };
     std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
     bool refit_after_layout_ = false;
+    bool refit_when_laid_out_ = false;  // a fit guessed the chrome: fit again once laid out
     bool first_presented_ = false;
     std::string deferred_scan_;  // the folder of the first image, listed once it's painted
     void take_first_image(class FirstImage& first, const std::string& file, uint64_t generation);
