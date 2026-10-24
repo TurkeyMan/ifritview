@@ -301,7 +301,10 @@ void SaveDialog::update_enabled(Page& page)
 {
     const Encoder& e = *page.encoder;
     const EncodeOptions o = options(page);
-    const bool lossless = o.get("lossless", 0) != 0;  // nothing is encoded: no settings apply
+    // JPEG's Lossless (not a setting of its own): nothing is encoded, so no
+    // settings apply. A format's own Lossless setting (WebP's) greys what
+    // names it in off_when instead, never itself.
+    const bool lossless = page.lossless && page.lossless->checked();
     for (size_t i = 0; i < e.settings.size(); ++i)
     {
         // Every one, every time: lossless unchecked gives them all back.

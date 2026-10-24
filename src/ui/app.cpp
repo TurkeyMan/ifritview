@@ -1872,13 +1872,16 @@ void App::preview_lossless()
     preview_image_.reset();
     preview_difference_.reset();
     const std::shared_ptr<const LosslessJpeg> plan = lossless_plan_;
+    // Also called while the dialog is still opening, before save_dialog_ is set.
     if (!plan || !plan->why_not.empty() || save_source_ != image_)
     {
         show_save_preview(false);
-        save_dialog_->set_info("");
+        if (save_dialog_)
+            save_dialog_->set_info("");
         return;
     }
-    save_dialog_->set_info(human_bytes(plan->data.size()));  // the metadata comes on top
+    if (save_dialog_)
+        save_dialog_->set_info(human_bytes(plan->data.size()));  // the metadata comes on top
     if (plan->differs.empty())
     {
         show_save_preview(false);  // exactly the image as shown
@@ -1912,7 +1915,9 @@ void App::preview_lossless()
 
 void App::preview_save(const Encoder& e, const EncodeOptions& o)
 {
-    if (o.get("lossless", 0))
+    // JPEG's Lossless is the original's own data, transformed; another
+    // format's lossless setting is an encode like any other.
+    if (std::string(e.extension) == "jpg" && o.get("lossless", 0))
     {
         preview_lossless();
         return;
