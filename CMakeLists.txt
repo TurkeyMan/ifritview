@@ -73,6 +73,8 @@ add_library(ifrit_core STATIC
   src/decoders/quake.cpp
   src/decoders/etc.cpp
   src/decoders/pkm.cpp
+  src/decoders/astc.cpp
+  src/decoders/astc_file.cpp
   src/decoders/pixbuf.cpp
 )
 target_compile_options(ifrit_core PRIVATE ${IFRIT_WARNINGS})

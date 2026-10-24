@@ -101,6 +101,7 @@ const Decoder& lmp_decoder();
 // False if the file has none. (Quake 2 keeps its palette in colormap.pcx.)
 bool pcx_vga_palette(const uint8_t* data, size_t size, uint32_t palette[256]);
 const Decoder& pkm_decoder();
+const Decoder& astc_decoder();
 
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews.
