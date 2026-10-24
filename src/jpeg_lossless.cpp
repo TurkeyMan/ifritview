@@ -236,15 +236,16 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
         default: break;                                         // transpose keeps them at right and bottom
     }
     const int full_w = (turned ? H : W) - trim_left, full_h = (turned ? W : H) - trim_top;
-    // The crop in the transform's coordinates, its corner out to a block's.
+    // The crop in the transform's coordinates, its corner in to the next
+    // block's: the result never has what the crop left out.
     const int block_w = turned ? tjMCUHeight[subsamp] : tjMCUWidth[subsamp];
     const int block_h = turned ? tjMCUWidth[subsamp] : tjMCUHeight[subsamp];
     const int cx = std::max(0, x - trim_left), cy = std::max(0, y - trim_top);
-    const int x0 = cx / block_w * block_w, y0 = cy / block_h * block_h;
+    const int x0 = (cx + block_w - 1) / block_w * block_w, y0 = (cy + block_h - 1) / block_h * block_h;
     const int x1 = std::min(full_w, x + w - trim_left), y1 = std::min(full_h, y + h - trim_top);
     if (x1 <= x0 || y1 <= y0)
     {
-        plan.why_not = "the crop lies in the edge blocks a lossless turn has to drop";
+        plan.why_not = "the crop is within one block of JPEG's grid, or in edge blocks a turn has to drop";
         return plan;
     }
     static const int kOps[] = {TJXOP_NONE, TJXOP_NONE, TJXOP_HFLIP, TJXOP_ROT180, TJXOP_VFLIP, TJXOP_TRANSPOSE, TJXOP_ROT90, TJXOP_TRANSVERSE, TJXOP_ROT270};
@@ -277,6 +278,8 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     // Against the image as shown, in the turned image's coordinates: the
     // result starts at the trimmed strip plus the block corner.
     const int start_x = trim_left + x0, start_y = trim_top + y0;
+    plan.x = start_x - x;
+    plan.y = start_y - y;
     plan.differs = describe(x - start_x, y - start_y, start_x + plan.width - (x + w), start_y + plan.height - (y + h));
     return plan;
 #endif

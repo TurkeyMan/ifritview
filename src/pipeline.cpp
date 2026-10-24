@@ -422,9 +422,9 @@ SAVE SETTINGS (KEY=VALUE after save:OUT, comma separated)
                      compressed data instead of re-encoding, so no quality is lost.
                        no      re-encode (the default)
                        yes     lossless; JPEG's 8 or 16 px blocks may make the result
-                               differ slightly: a crop's top-left moves out to a block
-                               corner, and a turn can drop a partial edge block. Any
-                               difference is reported on stderr.
+                               a little smaller: a crop's top-left moves in to the next
+                               block corner, and a turn can drop a partial edge block.
+                               Never more than asked; what's lost is reported on stderr.
                        exact   lossless, and fail unless the result is exactly as asked
                        auto    lossless if exact, otherwise re-encode
                      Only turns, flips and crops can be done losslessly; exposure can't.

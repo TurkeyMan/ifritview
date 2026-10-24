@@ -1740,10 +1740,73 @@ void App::show_save_preview(bool on)
 
 // Encodes the image as it would save, decodes that back and shows it in the
 // view, with the file size, a moment after the settings stop changing.
-void App::preview_save(const Encoder& e, const EncodeOptions& o)
+// JPEG's Lossless as it will save: the image as shown, with the edge strips
+// the plan drops cleared (it's never more than the image).
+static std::shared_ptr<Image> lossless_preview(const Image& image, const LosslessJpeg& plan)
+{
+    auto saved = std::make_shared<Image>();
+    saved->allocate(image.width, image.height);
+    std::fill(saved->pixels.begin(), saved->pixels.end(), 0);
+    saved->has_alpha = true;
+    const int right = std::min(image.width, plan.x + plan.width), bottom = std::min(image.height, plan.y + plan.height);
+    for (int y = plan.y; y < bottom; ++y)
+        std::memcpy(saved->row(y) + plan.x, image.row(y) + plan.x, size_t(right - plan.x) * 4);
+    return saved;
+}
+
+void App::preview_lossless()
 {
     const uint64_t generation = ++preview_->generation;
-    if (!save_source_ || !e.lossy(o) || o.get("lossless", 0))  // lossless: nothing re-encoded to preview
+    preview_image_.reset();
+    preview_difference_.reset();
+    const std::shared_ptr<const LosslessJpeg> plan = lossless_plan_;
+    if (!plan || !plan->why_not.empty() || save_source_ != image_)
+    {
+        show_save_preview(false);
+        save_dialog_->set_info("");
+        return;
+    }
+    save_dialog_->set_info(human_bytes(plan->data.size()));  // the metadata comes on top
+    if (plan->differs.empty())
+    {
+        show_save_preview(false);  // exactly the image as shown
+        return;
+    }
+    ++preview_->running;
+    std::thread(
+        [this, generation, image = image_, plan, state = preview_]
+        {
+            struct Done
+            {
+                PreviewState& s;
+                ~Done() { --s.running; }
+            } done{*state};
+            platform::lower_thread_priority();
+            std::shared_ptr<Image> saved = lossless_preview(*image, *plan);
+            const auto difference = std::make_shared<ImageDifference>(compare_images(*image, *saved));
+            platform::post_main(
+                [this, generation, saved, difference, state]
+                {
+                    if (state->generation.load() != generation || !save_dialog_)
+                        return;
+                    preview_image_ = saved;
+                    preview_difference_ = difference;
+                    if (save_dialog_->preview_shown())
+                        show_save_preview(true);
+                });
+        })
+        .detach();
+}
+
+void App::preview_save(const Encoder& e, const EncodeOptions& o)
+{
+    if (o.get("lossless", 0))
+    {
+        preview_lossless();
+        return;
+    }
+    const uint64_t generation = ++preview_->generation;
+    if (!save_source_ || !e.lossy(o))
     {
         preview_image_.reset();
         preview_difference_.reset();

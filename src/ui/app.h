@@ -63,6 +63,7 @@ public:
     void crop_to_selection();
     void save_as();
     void preview_save(const Encoder& e, const EncodeOptions& o);
+    void preview_lossless();
     void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source, std::shared_ptr<const struct LosslessJpeg> lossless);
     void plan_lossless();
     void toggle_metadata();
