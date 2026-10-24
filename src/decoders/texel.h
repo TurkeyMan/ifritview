@@ -53,6 +53,11 @@ inline uint32_t unit_to_byte(float v)
 {
     return std::isnan(v) ? 0 : uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
+// sRGB's curve to linear light.
+inline float srgb_to_linear(float v)
+{
+    return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+}
 // Linear light to sRGB's curve, clipped to 0..1; NaN is 0.
 inline float linear_to_srgb(float linear)
 {

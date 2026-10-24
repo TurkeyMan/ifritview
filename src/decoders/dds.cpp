@@ -7,6 +7,7 @@
 #include "../bytes.h"
 #include "texel.h"
 #include "decoder.h"
+#include "../encoders/encoder.h"
 
 
 #include <algorithm>
@@ -150,6 +151,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     std::optional<WideTexels> wide;
     bool premultiplied = false, rxgb = false;
     std::string format;
+    uint32_t as_dxgi = 0;  // the DXGI format it is, or its legacy one's equivalent: what saving it again keeps
     uint32_t array_size = 1;
     if ((pf_flags & kFourCC) && cc == fourcc("DX10"))
     {
@@ -159,6 +161,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
             return false;
         }
         const uint32_t f = le32(d + 128);
+        as_dxgi = f;
         array_size = std::max(1u, le32(d + 140));
         offset = 148;
         const auto x = dxgi(f);
@@ -206,6 +209,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 return false;
             }
         }
+        if (bcn && !premultiplied && !rxgb)
+            as_dxgi = *bcn == Bcn::BC1 ? 71 : *bcn == Bcn::BC2 ? 74 : *bcn == Bcn::BC3 ? 77 : *bcn == Bcn::BC4 ? 80 : *bcn == Bcn::BC5 ? 83 : 0;
+        else if (wide && wide->channels == 4 && wide->floating())
+            as_dxgi = wide->kind == WideTexels::Kind::Half ? 10 : 2;
         if (bcn)
             format = std::string(bcn_name(*bcn)) + (premultiplied ? ", premultiplied" : "") + (rxgb ? ", RXGB" : "");
         else
@@ -255,6 +262,18 @@ bool decode(const std::string& path, Image& out, std::string& error)
         if (m.alpha_only && ((m.a & ~fits) || !m.a))
             m.a = fits;
         masks = m;
+        // The layouts DDS saves, by their masks.
+        static const struct
+        {
+            uint32_t bits, r, g, b, a, dxgi;
+        } kSaved[] = {{32, 0xFF, 0xFF00, 0xFF0000, 0xFF000000u, 28}, {32, 0xFF0000, 0xFF00, 0xFF, 0xFF000000u, 87},
+                      {16, 0xF800, 0x07E0, 0x001F, 0, 85},           {16, 0x7C00, 0x03E0, 0x001F, 0x8000, 86},
+                      {16, 0x0F00, 0x00F0, 0x000F, 0xF000, 115},     {16, 0xFF, 0xFF00, 0, 0, 49}};
+        for (const auto& k : kSaved)
+            if (!m.luminance && !m.alpha_only && k.bits == bits && k.r == m.r && k.g == m.g && k.b == m.b && k.a == m.a)
+                as_dxgi = k.dxgi;
+        if (m.luminance && bits == 8 && !m.a)
+            as_dxgi = 61;
         format = std::to_string(bits) + "-bit " + (m.alpha_only ? "alpha" : m.luminance ? "luminance" : "RGB");
     }
     else
@@ -310,6 +329,17 @@ bool decode(const std::string& path, Image& out, std::string& error)
         out.pixel_format.bits_per_pixel = masks->bytes * 8;
     }
     out.add("DDS", "Format", format);
+    // Saved again, as it is: its format, its mipmaps, its header and, where
+    // the format says, whether it's sRGB.
+    out.encoded_as = "dds";
+    out.encoding["format"] = dds_save_format(as_dxgi);
+    out.encoding["mipmaps"] = mips > 1;
+    out.encoding["legacy"] = offset == 128;
+    static const uint32_t kSrgb[] = {72, 75, 78, 99, 29, 91}, kLinear[] = {71, 74, 77, 98, 28, 87};
+    if (std::find(std::begin(kSrgb), std::end(kSrgb), as_dxgi) != std::end(kSrgb))
+        out.encoding["srgb"] = 1;
+    else if (offset != 128 && std::find(std::begin(kLinear), std::end(kLinear), as_dxgi) != std::end(kLinear))
+        out.encoding["srgb"] = 0;
     if (mips > 1)
         out.add("DDS", "Mipmaps", std::to_string(mips));
     if (caps2 & 0x200)

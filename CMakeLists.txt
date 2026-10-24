@@ -54,6 +54,7 @@ add_library(ifrit_core STATIC
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
   src/encoders/encoder.cpp
+  src/encoders/dds.cpp
   src/encoders/reduce.cpp
   src/cache.cpp
   src/geocode.cpp
@@ -99,6 +100,13 @@ target_include_directories(ifrit_core PUBLIC src include ${CMAKE_BINARY_DIR}/gen
 pkg_check_modules(ZLIB_PC REQUIRED IMPORTED_TARGET zlib)
 target_link_libraries(ifrit_core PUBLIC PkgConfig::CORE PkgConfig::ZLIB_PC ${CMAKE_DL_LIBS})
 set_source_files_properties(src/decoders/stb.cpp PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
+# bc7enc and rgbcx (third_party/bc7enc): the block compressors DDS saving
+# uses. Built as they come, their warnings not ours; bc7enc.c as C++, the
+# project's one language.
+add_library(ifrit_bc7enc STATIC third_party/bc7enc/bc7enc.c src/encoders/rgbcx.cpp)
+set_source_files_properties(third_party/bc7enc/bc7enc.c PROPERTIES LANGUAGE CXX)
+target_compile_options(ifrit_bc7enc PRIVATE "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
+target_link_libraries(ifrit_core PRIVATE ifrit_bc7enc)
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
   target_link_libraries(ifrit_core PUBLIC shell32 advapi32)

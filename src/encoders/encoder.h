@@ -86,6 +86,16 @@ const std::vector<const Encoder*>& encoders();
 // its other spellings included (jpeg, jpe, jfif, tiff); null if none.
 const Encoder* encoder_for_extension(const std::string& ext);
 
+// The built-in encoders with files of their own.
+const Encoder& dds_encoder();
+// DDS's Format setting for a DXGI format a DDS file is in (its legacy ones
+// as their DXGI equivalents), so saving one keeps it; 0 (automatic) if it
+// isn't one DDS saves.
+int dds_save_format(uint32_t dxgi);
+
+// The whole of `data` as the file at `path`.
+bool write_file(const std::string& path, const void* data, size_t size, std::string& error);
+
 // Straight-alpha RGBA8 or RGB8 rows from the premultiplied ARGB32 buffer,
 // which is what every encoder wants.
 std::vector<uint8_t> to_rgba8(const Image& image);

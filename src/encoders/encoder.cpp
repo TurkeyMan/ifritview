@@ -1,6 +1,7 @@
 // Image writers for the formats worth saving to: PNG, JPEG, TIFF, BMP,
 // Targa, WebP, JPEG XL and AVIF. Each library-backed one sits behind the
-// same HAVE_* define as its decoder; BMP and Targa are written here.
+// same HAVE_* define as its decoder; BMP and Targa are written here, DDS in
+// dds.cpp.
 #include "encoder.h"
 
 #include "reduce.h"
@@ -77,6 +78,21 @@ std::vector<uint8_t> to_rgb8(const Image& image)
         }
     }
     return out;
+}
+
+bool write_file(const std::string& path, const void* data, size_t size, std::string& error)
+{
+    FILE* f = platform::fopen(path, "wb");
+    if (!f)
+    {
+        error = "cannot create file";
+        return false;
+    }
+    const bool ok = std::fwrite(data, 1, size, f) == size;
+    std::fclose(f);
+    if (!ok)
+        error = "write failed";
+    return ok;
 }
 
 namespace
@@ -289,21 +305,6 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
     return ok;
 }
 #endif
-
-bool write_file(const std::string& path, const void* data, size_t size, std::string& error)
-{
-    FILE* f = platform::fopen(path, "wb");
-    if (!f)
-    {
-        error = "cannot create file";
-        return false;
-    }
-    const bool ok = std::fwrite(data, 1, size, f) == size;
-    std::fclose(f);
-    if (!ok)
-        error = "write failed";
-    return ok;
-}
 
 #ifdef HAVE_WEBP
 const Encoder& webp_encoder();
@@ -827,6 +828,7 @@ const std::vector<const Encoder*>& encoders()
 #endif
         v.push_back(&bmp_encoder());
         v.push_back(&tga_encoder());
+        v.push_back(&dds_encoder());
 #ifdef HAVE_WEBP
         v.push_back(&webp_encoder());
 #endif
