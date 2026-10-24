@@ -373,6 +373,7 @@ void App::update_toolbar()
 
 void App::build_ui()
 {
+    platform::trace("ui: building");
     view_ = std::make_unique<View>(ui_, cfg_);
     side_view_ = std::make_unique<View>(ui_, cfg_);
     namespace L = rap::layout;
@@ -398,6 +399,7 @@ void App::build_ui()
         }
             .handle(exposure_box_);
 
+    platform::trace("ui: creating the window");
     window_ = ui_.create(L::window{
         "IfritView",
         {vbox{
@@ -478,19 +480,22 @@ void App::build_ui()
                     vbox{side_view_->node()}.stretch().handle(side_pane_),
                 }
                     .stretch(),
-                vbox{
-                    L::list{{{"Tag", rap::extent{14, rap::extent::unit::chars}}, {"Value", {}, true}}, &metadata_model_}
-                        .selection(rap::selection_mode::single)
-                        .on_activate(
-                            [this](size_t row)
+                // Hidden at first, so made once the window is up and idle.
+                L::deferred{[this]
                             {
-                                const std::string url = metadata_model_.url(row);
-                                if (!url.empty())
-                                    open_url(url);
-                            })
-                        .bind(metadata_list_)
-                        .stretch(),
-                }
+                                return L::list{{{"Tag", rap::extent{14, rap::extent::unit::chars}}, {"Value", {}, true}},
+                                               &metadata_model_}
+                                    .selection(rap::selection_mode::single)
+                                    .on_activate(
+                                        [this](size_t row)
+                                        {
+                                            const std::string url = metadata_model_.url(row);
+                                            if (!url.empty())
+                                                open_url(url);
+                                        })
+                                    .bind(metadata_list_)
+                                    .stretch();
+                            }}
                     .handle(metadata_pane_),
             }
                 .bind(splitter_)
@@ -506,6 +511,7 @@ void App::build_ui()
                 .handle(footer_),
         }}}.size(rap::extent{float(cfg_.min_window_width), rap::extent::unit::px}, rap::extent{float(cfg_.min_window_height), rap::extent::unit::px})
                              .margins(false));
+    platform::trace("ui: window created");
     view_->attach(view_->canvas());
     side_view_->attach(side_view_->canvas());
     side_pane_->set_visible(false);
