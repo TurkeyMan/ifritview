@@ -114,6 +114,8 @@ public:
     void view_size(int& w, int& h) const;  // device pixels
 
     bool selection(int& x, int& y, int& w, int& h) const;
+    // Pointer input as if from the canvas (IFRIT_SCRIPT's press/move/release).
+    bool feed_pointer(const rap::pointer_event& e) { return pointer(e); }
     void clear_selection();
 
     std::function<void()> on_zoom_changed;
@@ -273,6 +275,25 @@ private:
     double press_x_ = 0, press_y_ = 0;  // logical px
     double drag_x_ = 0, drag_y_ = 0;
     double sel_anchor_x_ = 0, sel_anchor_y_ = 0;
+    // A drag on an existing selection adjusts it: an edge, a corner (from
+    // the opposite one, which becomes the anchor), or the whole of it.
+    enum class Grab
+    {
+        None,
+        Move,
+        Left,
+        Right,
+        Top,
+        Bottom,
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight,
+    };
+    Grab grab_ = Grab::None;
+    double grab_dx_ = 0, grab_dy_ = 0;  // Move: the pointer against the selection's corner, image px
+    Grab grab_at(double x, double y) const;  // logical px
+    void adjust_selection(double x, double y);
     unsigned drag_modifiers_ = 0;  // rap::mod_*, from the latest pointer event
     bool has_selection_ = false;
     double sel_x0_ = 0, sel_y0_ = 0, sel_x1_ = 0, sel_y1_ = 0;

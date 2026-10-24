@@ -92,6 +92,25 @@ void run_step(App& app, const std::string& step)
         if (!app.ui().save_snapshot(step.substr(5)))
             std::fprintf(stderr, "script: no snapshot saved to %s\n", step.substr(5).c_str());
     }
+    else if (step.rfind("press:", 0) == 0 || step.rfind("move:", 0) == 0 || step.rfind("release:", 0) == 0)
+    {
+        // The left button in the view, at x,y in its logical pixels (a
+        // trailing ",shift" or ",ctrl" holds that key): the mouse untouched.
+        using T = rap::pointer_event_type;
+        const size_t colon = step.find(':');
+        const std::string kind = step.substr(0, colon);
+        rap::pointer_event e;
+        e.type = kind == "press" ? T::press : kind == "release" ? T::release : T::move;
+        e.button = 1;
+        float x = 0, y = 0;
+        std::sscanf(step.c_str() + colon + 1, "%f,%f", &x, &y);
+        e.pos = {x, y};
+        if (step.find(",shift") != std::string::npos)
+            e.modifiers |= rap::mod_shift;
+        if (step.find(",ctrl") != std::string::npos)
+            e.modifiers |= rap::mod_ctrl;
+        app.script_pointer(e);
+    }
     else if (step == "close-dialog")
         app.script_end_dialog(false);
     else if (step == "accept-dialog")

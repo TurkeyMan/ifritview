@@ -648,6 +648,7 @@ void App::build_ui()
     {
         int x, y, w, h;
         crop_button_->set_enabled(view_->selection(x, y, w, h));
+        update_status();
     };
     update_status();
 }
@@ -1043,7 +1044,7 @@ void App::toggle_metadata()
     // the old width first would show its divider mid-image for a frame.
     pane_toggled_from_ = 0;
     if (pane_extra_ <= 0)
-        pane_extra_ = float(cfg_.metadata_pane_width) + 6;  // until measured: the pane and a divider
+        pane_extra_ = float(cfg_.metadata_pane_width) + splitter_->divider();  // until measured: the pane and its divider
     if (image_ && !fullscreen_ && cfg_.fit_window_to_image)
     {
         float w = before.w + (metadata_visible_ ? pane_extra_ : -pane_extra_);
@@ -2290,6 +2291,8 @@ void App::update_status()
         }
         if (view_->zoom_mode() == View::ZoomMode::Fit && view_->zoom() < 1.0)
             right += " (fit)";
+        if (int x, y, w, h; view_->selection(x, y, w, h))
+            right = "selection " + std::to_string(w) + " × " + std::to_string(h) + " at " + std::to_string(x) + ", " + std::to_string(y) + "  ·  " + right;
         if (const std::shared_ptr<Image> b = view_->compare_image(true); b && (b->width != image_->width || b->height != image_->height))
             center += "  ·  B " + std::to_string(b->width) + " × " + std::to_string(b->height) + ", scaled to match";
         if (const ImageDifference* d = view_->compare_difference())

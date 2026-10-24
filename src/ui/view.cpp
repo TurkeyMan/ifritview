@@ -189,12 +189,22 @@ void View::update_cursor(double x, double y)
     {
         want = rap::cursor::grabbing;
     }
-    else if (has_selection_ && image_ && !pressed_button_)
+    else if (has_selection_ && image_ && (!pressed_button_ || grab_ != Grab::None))
     {
-        double ix, iy;
-        to_image(x, y, ix, iy);
-        if (ix >= sel_x0_ && ix < sel_x1_ && iy >= sel_y0_ && iy < sel_y1_)
-            want = rap::cursor::zoom_in;
+        // Over a handle (or holding one): how it moves; inside, a click zooms.
+        switch (pressed_button_ ? grab_ : grab_at(x, y))
+        {
+            case Grab::Left:
+            case Grab::Right: want = rap::cursor::resize_ew; break;
+            case Grab::Top:
+            case Grab::Bottom: want = rap::cursor::resize_ns; break;
+            case Grab::TopLeft:
+            case Grab::BottomRight: want = rap::cursor::resize_nwse; break;
+            case Grab::TopRight:
+            case Grab::BottomLeft: want = rap::cursor::resize_nesw; break;
+            case Grab::Move: want = pressed_button_ ? rap::cursor::move : rap::cursor::zoom_in; break;
+            case Grab::None: break;
+        }
     }
     if (want == cursor_ || !canvas_)
         return;
@@ -987,6 +997,35 @@ void View::paint(rap::painter& p, rap::size_f)
         dashes(x + w, y, x + w, y + h);
         dashes(x + w, y + h, x, y + h);
         dashes(x, y + h, x, y);
+        // Handles at the corners and the middles of the edges, while it isn't being drawn.
+        const bool drawing = drag_active_ && grab_ == Grab::None;
+        if (!drawing)
+        {
+            const double hs = 3.0 * scale;
+            for (const double hx : {x, x + w / 2, x + w})
+                for (const double hy : {y, y + h / 2, y + h})
+                    if (hx != x + w / 2 || hy != y + h / 2)
+                        p.rect({L(hx - hs), L(hy - hs), L(2 * hs), L(2 * hs)}, 0, rap::color{255, 255, 255}, rap::color{0, 0, 0});
+        }
+        // Where it is and its size, in image pixels, while it's drawn or adjusted.
+        if (drag_active_)
+        {
+            int sx, sy, sw, sh;
+            selection(sx, sy, sw, sh);
+            const std::string text = std::to_string(sx) + ", " + std::to_string(sy) + "   " + std::to_string(sw) + " × " + std::to_string(sh);
+            rap::text_style style;
+            style.fg = rap::paint{rap::color{255, 255, 255}};
+            const rap::size_f size = p.measure(text, style);
+            const double pad = 4 * scale, tw = size.w * scale + 2 * pad, th = size.h * scale + 2 * pad;
+            // Below the selection's bottom-right, else inside it: kept in the view.
+            double tx = x + w - tw, ty = y + h + 4 * scale;
+            if (ty + th > vh)
+                ty = y + h - th - 4 * scale;
+            tx = std::clamp(tx, 0.0, std::max(0.0, vw - tw));
+            ty = std::clamp(ty, 0.0, std::max(0.0, vh - th));
+            p.rect({L(tx), L(ty), L(tw), L(th)}, 3, rgba(0, 0, 0, 0.7), std::nullopt);
+            p.text({L(tx + pad), L(ty + pad)}, text, style);
+        }
     }
 }
 
@@ -1205,6 +1244,60 @@ void View::update_selection(double x, double y)
     invalidate();
 }
 
+View::Grab View::grab_at(double x, double y) const
+{
+    if (!has_selection_)
+        return Grab::None;
+    const int scale = scale_factor();
+    const double dx = x * scale, dy = y * scale, reach = 6.0 * scale;
+    const double l = pan_x_ + sel_x0_ * zoom_, r = pan_x_ + sel_x1_ * zoom_;
+    const double t = pan_y_ + sel_y0_ * zoom_, b = pan_y_ + sel_y1_ * zoom_;
+    if (dx < l - reach || dx > r + reach || dy < t - reach || dy > b + reach)
+        return Grab::None;
+    const bool at_l = std::fabs(dx - l) <= reach, at_r = !at_l && std::fabs(dx - r) <= reach;
+    const bool at_t = std::fabs(dy - t) <= reach, at_b = !at_t && std::fabs(dy - b) <= reach;
+    if (at_t)
+        return at_l ? Grab::TopLeft : at_r ? Grab::TopRight : Grab::Top;
+    if (at_b)
+        return at_l ? Grab::BottomLeft : at_r ? Grab::BottomRight : Grab::Bottom;
+    if (at_l)
+        return Grab::Left;
+    if (at_r)
+        return Grab::Right;
+    return Grab::Move;
+}
+
+void View::adjust_selection(double x, double y)
+{
+    double ix, iy;
+    to_image(x, y, ix, iy);
+    const double w = image_->width, h = image_->height;
+    ix = std::clamp(std::round(ix), 0.0, w);
+    iy = std::clamp(std::round(iy), 0.0, h);
+    switch (grab_)
+    {
+        case Grab::Move:
+        {
+            // The same size, kept on the image.
+            const double sw = sel_x1_ - sel_x0_, sh = sel_y1_ - sel_y0_;
+            double px, py;
+            to_image(x, y, px, py);
+            sel_x0_ = std::clamp(std::round(px - grab_dx_), 0.0, w - sw);
+            sel_y0_ = std::clamp(std::round(py - grab_dy_), 0.0, h - sh);
+            sel_x1_ = sel_x0_ + sw;
+            sel_y1_ = sel_y0_ + sh;
+            break;
+        }
+        // An edge stops a pixel short of the opposite one.
+        case Grab::Left: sel_x0_ = std::min(ix, sel_x1_ - 1); break;
+        case Grab::Right: sel_x1_ = std::max(ix, sel_x0_ + 1); break;
+        case Grab::Top: sel_y0_ = std::min(iy, sel_y1_ - 1); break;
+        case Grab::Bottom: sel_y1_ = std::max(iy, sel_y0_ + 1); break;
+        default: update_selection(x, y); return;  // a corner: drawn again from the opposite one, Shift and Ctrl as ever
+    }
+    invalidate();
+}
+
 void View::zoom_to_selection()
 {
     int vw, vh;
@@ -1260,6 +1353,18 @@ void View::begin_drag(Action a, double x, double y)
     {
         double ix, iy;
         to_image(x, y, ix, iy);
+        // On a selection's handle, or inside it: that one's adjusted.
+        grab_ = has_selection_ ? grab_at(x, y) : Grab::None;
+        switch (grab_)
+        {
+            case Grab::TopLeft: sel_anchor_x_ = sel_x1_, sel_anchor_y_ = sel_y1_; return;
+            case Grab::TopRight: sel_anchor_x_ = sel_x0_, sel_anchor_y_ = sel_y1_; return;
+            case Grab::BottomLeft: sel_anchor_x_ = sel_x1_, sel_anchor_y_ = sel_y0_; return;
+            case Grab::BottomRight: sel_anchor_x_ = sel_x0_, sel_anchor_y_ = sel_y0_; return;
+            case Grab::Move: grab_dx_ = ix - sel_x0_, grab_dy_ = iy - sel_y0_; return;
+            case Grab::None: break;
+            default: return;  // an edge
+        }
         sel_anchor_x_ = std::clamp(ix, 0.0, double(image_->width));
         sel_anchor_y_ = std::clamp(iy, 0.0, double(image_->height));
         has_selection_ = false;
@@ -1271,7 +1376,7 @@ void View::drag_to(Action a, double x, double y)
     if (a == Action::Select)
     {
         if (image_)
-            update_selection(x, y);
+            grab_ == Grab::None ? update_selection(x, y) : adjust_selection(x, y);
     }
     else if (a == Action::Pan)
     {
@@ -1501,6 +1606,8 @@ bool View::pointer(const rap::pointer_event& e)
         else if (!suppress_click_)
             run_click(cfg_.control(click_control(button, false), fullscreen_), ex, ey);
         drag_active_ = false;
+        grab_ = Grab::None;
+        invalidate();  // the handles come back, the size label goes
         update_cursor(ex, ey);
         if (on_selection_changed)
             on_selection_changed();
