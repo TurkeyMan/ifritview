@@ -24,6 +24,8 @@
 #include <csetjmp>
 #endif
 #ifdef HAVE_TIFF
+#include "../metadata/tiff_exif.h"
+
 #include <tiffio.h>
 #endif
 #ifdef HAVE_WEBP
@@ -267,6 +269,10 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
     TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, uint16_t(spp));
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, uint16_t(8));
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+    // Baseline TIFF requires a resolution; 72 dpi, as cameras write it.
+    TIFFSetField(tif, TIFFTAG_XRESOLUTION, 72.0f);
+    TIFFSetField(tif, TIFFTAG_YRESOLUTION, 72.0f);
+    TIFFSetField(tif, TIFFTAG_RESOLUTIONUNIT, uint16_t(RESUNIT_INCH));
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
     TIFFSetField(tif, TIFFTAG_COMPRESSION, kCompression[compression]);
@@ -279,7 +285,8 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
         TIFFSetField(tif, TIFFTAG_EXTRASAMPLES, 1, extra);
     }
     // The profile, XMP and IPTC as tags; EXIF's descriptive fields as the
-    // baseline tags that hold them (its Exif directory isn't carried yet).
+    // baseline tags that hold them, and its own directories (exposure,
+    // dates, GPS...) added once libtiff has written the file.
     if (const FileMetadata* m = options.metadata.get())
     {
         if (!m->icc.empty())
@@ -303,8 +310,13 @@ bool encode_tiff(const Image& image, const std::string& path, const EncodeOption
         ok = TIFFWriteScanline(tif, pixels.data() + size_t(y) * image.width * spp, y, 0) >= 0;
     TIFFClose(tif);
     if (!ok)
+    {
         error = "TIFF write failed";
-    return ok;
+        return false;
+    }
+    if (const FileMetadata* m = options.metadata.get(); m && !m->exif.empty())
+        return attach_exif_directories(path, m->exif, error);
+    return true;
 }
 #endif
 

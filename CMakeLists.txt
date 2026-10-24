@@ -66,6 +66,7 @@ add_library(ifrit_core STATIC
   src/compare.cpp
   src/metadata/extract.cpp
   src/metadata/edit.cpp
+  src/metadata/tiff_exif.cpp
   src/jpeg_lossless.cpp
   src/pipeline.cpp
   src/first_image.cpp
