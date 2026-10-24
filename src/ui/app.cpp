@@ -1331,8 +1331,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
                     const auto name = [same](const std::filesystem::path& p)
                     { return same ? (p.parent_path().filename() / p.filename()).string() : p.filename().string(); };
                     end_comparing();
-                    if (image_ && !image_path_.empty())
-                        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
+                    leave_image();
                     image_ = a;
                     image_path_ = a_path;
                     std::error_code ec;
@@ -1366,11 +1365,8 @@ void App::load_current()
         update_title();
         return;
     }
-    // Leaving an image: keep it (edits included) so coming back shows exactly
-    // what was left, which is what flipping between the shots of a burst wants.
     stop_video();
-    if (image_ && !image_path_.empty())
-        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
+    leave_image();
     ++load_generation_;
     ImageCache::Entry hit;
     if (cache_.get(path, hit))
@@ -1590,15 +1586,28 @@ void App::set_exposure(double ev)
 
 // Replaces the displayed image with the selected region. Nothing is written
 // to disk; F5 reloads the original.
+// Leaving an image: kept for coming back, unless it was cropped or turned:
+// then it's read afresh, as the file is.
+void App::leave_image()
+{
+    if (!image_ || image_path_.empty())
+        return;
+    if (image_->edited)
+        cache_.erase(image_path_);
+    else
+        cache_.put(image_path_, {image_, ImageCache::file_mtime(image_path_)});
+}
+
 void App::crop_to_selection()
 {
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h))
         return;
-    *image_ = image_->crop(x, y, w, h);  // same object: the view, cache and pane keep their pointer
+    *image_ = image_->crop(x, y, w, h);  // same object: the view and pane keep their pointer
     if (image_->tonable())
         image_->retone(image_->exposure_edit);
     image_->info = (image_->info.empty() ? "" : image_->info + "  ·  ") + "cropped";
+    view_->clear_selection();  // it was the image's own shape a moment ago
     view_->image_changed();
     fit_window_to_image();
     update_status();

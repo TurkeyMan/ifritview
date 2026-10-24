@@ -111,6 +111,8 @@ void run_step(App& app, const std::string& step)
             e.modifiers |= rap::mod_ctrl;
         app.script_pointer(e);
     }
+    else if (step == "crop")
+        app.crop_to_selection();
     else if (step == "close-dialog")
         app.script_end_dialog(false);
     else if (step == "accept-dialog")
