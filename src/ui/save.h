@@ -61,6 +61,7 @@ private:
         rap::check* toggle = nullptr;
         rap::drop_down* choice = nullptr;
         rap::label* note = nullptr;  // greyed with it
+        int kept = -1;               // a toggle's own value while it doesn't apply (it shows off)
     };
     struct Page
     {

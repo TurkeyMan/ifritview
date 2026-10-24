@@ -1,5 +1,7 @@
 #include "image.h"
 
+#include "i18n.h"
+
 #include <stdexcept>
 
 #include "half.h"
@@ -201,7 +203,7 @@ void Image::retone(double ev)
     if (!linear && !(source && source->linear))
         return;
     if (ev != 0)
-        break_transform("the exposure was changed");
+        break_transform(_("the exposure was changed"));
     pixels = retone_buffer(ev);
     mips.clear();
 }

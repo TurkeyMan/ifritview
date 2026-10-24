@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+struct EncodeOptions;
+
 // One setting a format offers when saving; the save dialog shows a format's
 // settings when it's chosen.
 struct EncodeSetting
@@ -25,6 +27,10 @@ struct EncodeSetting
     std::vector<const char*> choices = {};
     const char* note = nullptr;      // a few words beside the setting
     const char* off_when = nullptr;  // greyed while this toggle is on ("quality" under "lossless")
+    // Whether it means anything with the other settings as they are (dither
+    // only for the formats with few bits); greyed, a toggle shown off, when
+    // not. Unset: always.
+    bool (*applies)(const EncodeOptions& options) = nullptr;
 };
 
 // Values by setting key; a missing one is the setting's initial value.

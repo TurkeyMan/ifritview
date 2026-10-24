@@ -1,0 +1,1846 @@
+# German translation of IfritView.
+# This file is distributed under the same licence as IfritView (GPL 3.0 or later).
+msgid ""
+msgstr ""
+"Project-Id-Version: IfritView\n"
+"Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
+"POT-Creation-Date: 2026-10-24 17:08+0000\n"
+"PO-Revision-Date: 2026-10-25 12:00+0000\n"
+"Language-Team: German\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/controls.h:74
+msgid "Left click"
+msgstr "Linksklick"
+
+#: src/controls.h:75
+msgid "Left double-click"
+msgstr "Links-Doppelklick"
+
+#: src/controls.h:76
+msgid "Left drag"
+msgstr "Ziehen mit links"
+
+#: src/controls.h:77
+msgid "Middle click"
+msgstr "Mittelklick"
+
+#: src/controls.h:78
+msgid "Middle double-click"
+msgstr "Mittel-Doppelklick"
+
+#: src/controls.h:79
+msgid "Middle drag"
+msgstr "Ziehen mit Mitteltaste"
+
+#: src/controls.h:80
+msgid "Right click"
+msgstr "Rechtsklick"
+
+#: src/controls.h:81
+msgid "Right double-click"
+msgstr "Rechts-Doppelklick"
+
+#: src/controls.h:82
+msgid "Right drag"
+msgstr "Ziehen mit rechts"
+
+#: src/controls.h:83
+msgid "Wheel"
+msgstr "Mausrad"
+
+#: src/controls.h:84
+msgid "Ctrl + wheel"
+msgstr "Strg + Mausrad"
+
+#: src/controls.h:85
+msgid "Shift + wheel"
+msgstr "Umschalt + Mausrad"
+
+#: src/controls.h:89
+msgid "Nothing"
+msgstr "Nichts"
+
+#: src/controls.h:90
+msgid "Zoom to selection / reset zoom"
+msgstr "Auf Auswahl zoomen / Zoom zurücksetzen"
+
+#: src/controls.h:91
+msgid "Toggle fullscreen"
+msgstr "Vollbild ein/aus"
+
+#: src/controls.h:92
+msgid "Fit to window"
+msgstr "An Fenster anpassen"
+
+#: src/controls.h:93
+msgid "Actual pixels"
+msgstr "Originalgröße"
+
+#: src/controls.h:94
+msgid "Next image"
+msgstr "Nächstes Bild"
+
+#: src/controls.h:95
+msgid "Previous image"
+msgstr "Vorheriges Bild"
+
+#: src/controls.h:96
+msgid "Open file…"
+msgstr "Datei öffnen…"
+
+#: src/controls.h:97
+msgid "Settings…"
+msgstr "Einstellungen…"
+
+#: src/controls.h:98
+msgid "Quit"
+msgstr "Beenden"
+
+#: src/controls.h:99
+msgid "Pan the image"
+msgstr "Bild verschieben"
+
+#: src/controls.h:100
+msgid "Select a region"
+msgstr "Bereich auswählen"
+
+#: src/controls.h:101
+msgid "Previous / next image"
+msgstr "Vorheriges / nächstes Bild"
+
+#: src/controls.h:102
+msgid "Zoom in / out"
+msgstr "Vergrößern / verkleinern"
+
+#: src/controls.h:103
+msgid "Scroll the image"
+msgstr "Bild scrollen"
+
+#: src/decoders/astc_file.cpp:49 src/decoders/astc_file.cpp:50
+#: src/decoders/astc_file.cpp:52
+msgid "ASTC"
+msgstr "ASTC"
+
+#: src/decoders/astc_file.cpp:49
+msgid "Block size"
+msgstr "Blockgröße"
+
+#: src/decoders/astc_file.cpp:50
+msgid "Profile"
+msgstr "Profil"
+
+#: src/decoders/astc_file.cpp:52 src/decoders/dds.cpp:349
+#: src/decoders/vtf.cpp:314
+msgid "Volume"
+msgstr "Volumen"
+
+#: src/decoders/blp.cpp:245 src/decoders/blp.cpp:246 src/decoders/blp.cpp:247
+#: src/decoders/blp.cpp:249
+msgid "BLP"
+msgstr "BLP"
+
+#: src/decoders/blp.cpp:245 src/decoders/pcx.cpp:142
+#: src/decoders/pixbuf.cpp:151 src/decoders/pkm.cpp:75 src/decoders/pvr.cpp:793
+#: src/decoders/pvr.cpp:880 src/decoders/tim2.cpp:204 src/decoders/vtf.cpp:305
+msgid "Version"
+msgstr "Version"
+
+#: src/decoders/blp.cpp:246 src/decoders/exr.cpp:1589 src/decoders/tiff.cpp:232
+#: src/encoders/encoder.cpp:757
+msgid "Compression"
+msgstr "Komprimierung"
+
+#: src/decoders/blp.cpp:247 src/decoders/ktx.cpp:721 src/decoders/pvr.cpp:885
+#: src/decoders/tim2.cpp:219 src/ui/app_metadata.cpp:115
+msgid "Alpha"
+msgstr "Alpha"
+
+#: src/decoders/blp.cpp:249 src/decoders/dds.cpp:345 src/decoders/gim.cpp:386
+#: src/decoders/pvr.cpp:464 src/decoders/pvr.cpp:796 src/decoders/pvr.cpp:887
+#: src/decoders/tim2.cpp:223 src/decoders/vtf.cpp:308 src/encoders/dds.cpp:536
+msgid "Mipmaps"
+msgstr "Mipmaps"
+
+#: src/decoders/dds.cpp:332 src/decoders/dds.cpp:345 src/decoders/dds.cpp:347
+#: src/decoders/dds.cpp:349 src/decoders/dds.cpp:351
+msgid "DDS"
+msgstr "DDS"
+
+#: src/decoders/dds.cpp:332 src/decoders/gim.cpp:379 src/decoders/ktx.cpp:586
+#: src/decoders/ktx.cpp:717 src/decoders/pkm.cpp:74 src/decoders/pvr.cpp:451
+#: src/decoders/pvr.cpp:794 src/decoders/pvr.cpp:881 src/decoders/vtf.cpp:306
+#: src/encoders/dds.cpp:533 src/ui/app_metadata.cpp:109 src/ui/save.cpp:81
+msgid "Format"
+msgstr "Format"
+
+#: src/decoders/dds.cpp:347 src/decoders/pvr.cpp:798 src/decoders/vtf.cpp:312
+msgid "Cube map"
+msgstr "Cube-Map"
+
+#: src/decoders/dds.cpp:351
+msgid "Array"
+msgstr "Array"
+
+#: src/decoders/exr.cpp:1589 src/decoders/exr.cpp:1603
+#: src/decoders/exr.cpp:1604 src/decoders/exr.cpp:1611
+#: src/decoders/exr.cpp:1614 src/decoders/exr.cpp:1617
+#: src/decoders/exr.cpp:1618 src/decoders/exr.cpp:1621
+#: src/decoders/exr.cpp:1623 src/decoders/exr.cpp:1627
+#: src/decoders/exr.cpp:1631 src/decoders/exr.cpp:1640
+#: src/decoders/exr.cpp:1641 src/decoders/exr.cpp:1649
+msgid "EXR"
+msgstr "EXR"
+
+#: src/decoders/exr.cpp:1603
+msgid "Pixel types"
+msgstr "Pixeltypen"
+
+#: src/decoders/exr.cpp:1604
+msgid "Channels"
+msgstr "Kanäle"
+
+#: src/decoders/exr.cpp:1611
+msgid "Layers"
+msgstr "Ebenen"
+
+#: src/decoders/exr.cpp:1614
+msgid "Shown"
+msgstr "Angezeigt"
+
+#: src/decoders/exr.cpp:1617
+msgid "Data window"
+msgstr "Datenfenster"
+
+#: src/decoders/exr.cpp:1618
+msgid "Display window"
+msgstr "Anzeigefenster"
+
+#: src/decoders/exr.cpp:1621 src/ui/settings.cpp:294 src/ui/settings.cpp:369
+msgid "Window"
+msgstr "Fenster"
+
+#: src/decoders/exr.cpp:1623
+msgid "Line order"
+msgstr "Zeilenreihenfolge"
+
+#: src/decoders/exr.cpp:1627
+msgid "Tiles"
+msgstr "Kacheln"
+
+#: src/decoders/exr.cpp:1631
+msgid "Storage"
+msgstr "Speicherung"
+
+#: src/decoders/exr.cpp:1640
+msgid "Parts"
+msgstr "Teile"
+
+#: src/decoders/exr.cpp:1641
+msgid "Part shown"
+msgstr "Angezeigter Teil"
+
+#: src/decoders/exr.cpp:1649
+msgid "Chromaticities"
+msgstr "Chromatizitäten"
+
+#: src/decoders/gim.cpp:367 src/decoders/gim.cpp:379 src/decoders/gim.cpp:380
+#: src/decoders/gim.cpp:382 src/decoders/gim.cpp:384 src/decoders/gim.cpp:386
+#: src/decoders/gim.cpp:388
+msgid "GIM"
+msgstr "GIM"
+
+#: src/decoders/gim.cpp:367 src/decoders/ilbm.cpp:226 src/decoders/pvr.cpp:457
+msgid "Palette"
+msgstr "Palette"
+
+#: src/decoders/gim.cpp:380
+msgid "Pixel order"
+msgstr "Pixelreihenfolge"
+
+#: src/decoders/gim.cpp:382
+msgid "Platform"
+msgstr "Plattform"
+
+#: src/decoders/gim.cpp:384 src/decoders/tim2.cpp:221
+msgid "Pictures"
+msgstr "Bilder"
+
+#: src/decoders/gim.cpp:388 src/decoders/pixbuf.cpp:152
+#: src/decoders/vtf.cpp:310 src/decoders/webp.cpp:111
+msgid "Frames"
+msgstr "Einzelbilder"
+
+#: src/decoders/heif.cpp:119
+msgid "Bits per pixel"
+msgstr "Bits pro Pixel"
+
+#: src/decoders/heif.cpp:119 src/decoders/heif.cpp:120
+msgid "HEIF"
+msgstr "HEIF"
+
+#: src/decoders/heif.cpp:120
+msgid "Alpha channel"
+msgstr "Alphakanal"
+
+#: src/decoders/ilbm.cpp:224
+msgid "Bitplanes"
+msgstr "Bitebenen"
+
+#: src/decoders/ilbm.cpp:224 src/decoders/ilbm.cpp:226
+#: src/decoders/ilbm.cpp:231 src/decoders/ilbm.cpp:234
+#: src/decoders/ilbm.cpp:236
+msgid "IFF"
+msgstr "IFF"
+
+#: src/decoders/ilbm.cpp:231
+msgid "CAMG view mode"
+msgstr "CAMG-Anzeigemodus"
+
+#: src/decoders/ilbm.cpp:234
+msgid "Pixel aspect"
+msgstr "Pixel-Seitenverhältnis"
+
+#: src/decoders/ilbm.cpp:236
+msgid "Masking"
+msgstr "Maskierung"
+
+#: src/decoders/jpeg.cpp:145 src/decoders/webp.cpp:109
+msgid "Coding"
+msgstr "Kodierung"
+
+#: src/decoders/jpeg.cpp:145 src/decoders/jpeg.cpp:146
+#: src/decoders/jpeg.cpp:148 src/decoders/jpeg.cpp:150
+#: src/decoders/jpeg.cpp:152 src/decoders/jpeg.cpp:154
+msgid "JPEG"
+msgstr "JPEG"
+
+#: src/decoders/jpeg.cpp:146
+msgid "Components"
+msgstr "Komponenten"
+
+#: src/decoders/jpeg.cpp:148
+msgid "Quality (estimated)"
+msgstr "Qualität (geschätzt)"
+
+#: src/decoders/jpeg.cpp:150
+msgid "Chroma subsampling"
+msgstr "Chroma-Unterabtastung"
+
+#: src/decoders/jpeg.cpp:152
+msgid "JFIF"
+msgstr "JFIF"
+
+#: src/decoders/jpeg.cpp:154
+msgid "Adobe transform"
+msgstr "Adobe-Transformation"
+
+#: src/decoders/ktx.cpp:586 src/decoders/ktx.cpp:588
+msgid "KTX"
+msgstr "KTX"
+
+#: src/decoders/ktx.cpp:588
+msgid "Byte order"
+msgstr "Bytereihenfolge"
+
+#: src/decoders/ktx.cpp:717 src/decoders/ktx.cpp:719 src/decoders/ktx.cpp:721
+msgid "KTX2"
+msgstr "KTX2"
+
+#: src/decoders/ktx.cpp:719
+msgid "Supercompression"
+msgstr "Superkompression"
+
+#: src/decoders/netpbm.cpp:228
+msgid "Maximum value"
+msgstr "Maximalwert"
+
+#: src/decoders/netpbm.cpp:228 src/decoders/netpbm.cpp:230
+msgid "Netpbm"
+msgstr "Netpbm"
+
+#: src/decoders/netpbm.cpp:230
+msgid "Tuple type"
+msgstr "Tupeltyp"
+
+#: src/decoders/pcx.cpp:142 src/decoders/pcx.cpp:143 src/decoders/pcx.cpp:146
+msgid "PCX"
+msgstr "PCX"
+
+#: src/decoders/pcx.cpp:143
+msgid "Planes × bits"
+msgstr "Ebenen × Bits"
+
+#: src/decoders/pcx.cpp:146 src/decoders/png.cpp:130 src/decoders/tiff.cpp:238
+msgid "Resolution"
+msgstr "Auflösung"
+
+#: src/decoders/pdf.cpp:203 src/decoders/pdf.cpp:206 src/decoders/pdf.cpp:207
+msgid "Document"
+msgstr "Dokument"
+
+#: src/decoders/pdf.cpp:203 src/decoders/tiff.cpp:241
+msgid "Pages"
+msgstr "Seiten"
+
+#: src/decoders/pdf.cpp:206
+msgid "Page size"
+msgstr "Seitengröße"
+
+#: src/decoders/pdf.cpp:207
+msgid "Rendered at"
+msgstr "Gerendert mit"
+
+#: src/decoders/pixbuf.cpp:151 src/decoders/pixbuf.cpp:152
+msgid "GIF"
+msgstr "GIF"
+
+#: src/decoders/pkm.cpp:74 src/decoders/pkm.cpp:75
+msgid "PKM"
+msgstr "PKM"
+
+#: src/decoders/png.cpp:120
+msgid "Bit depth"
+msgstr "Bittiefe"
+
+#: src/decoders/png.cpp:120 src/decoders/png.cpp:121 src/decoders/png.cpp:130
+#: src/decoders/png.cpp:133 src/decoders/png.cpp:136 src/decoders/png.cpp:143
+msgid "PNG"
+msgstr "PNG"
+
+#: src/decoders/png.cpp:121
+msgid "Color type"
+msgstr "Farbtyp"
+
+#: src/decoders/png.cpp:133
+msgid "Gamma"
+msgstr "Gamma"
+
+#: src/decoders/png.cpp:136 src/decoders/vtf.cpp:318
+msgid "sRGB"
+msgstr "sRGB"
+
+#: src/decoders/png.cpp:143
+msgid "ICC profile"
+msgstr "ICC-Profil"
+
+#: src/decoders/pvr.cpp:451 src/decoders/pvr.cpp:453 src/decoders/pvr.cpp:455
+#: src/decoders/pvr.cpp:457 src/decoders/pvr.cpp:464 src/decoders/pvr.cpp:793
+#: src/decoders/pvr.cpp:794 src/decoders/pvr.cpp:796 src/decoders/pvr.cpp:798
+#: src/decoders/pvr.cpp:800 src/decoders/pvr.cpp:880 src/decoders/pvr.cpp:881
+#: src/decoders/pvr.cpp:883 src/decoders/pvr.cpp:885 src/decoders/pvr.cpp:887
+#: src/decoders/pvr.cpp:889 src/decoders/pvr.cpp:891 src/decoders/pvr.cpp:893
+msgid "PVR"
+msgstr "PVR"
+
+#: src/decoders/pvr.cpp:453
+msgid "Global index"
+msgstr "Globaler Index"
+
+#: src/decoders/pvr.cpp:455
+msgid "Codebook"
+msgstr "Codebuch"
+
+#: src/decoders/pvr.cpp:800 src/decoders/pvr.cpp:891
+msgid "Surfaces"
+msgstr "Oberflächen"
+
+#: src/decoders/pvr.cpp:883 src/ui/app_metadata.cpp:113
+msgid "Colour space"
+msgstr "Farbraum"
+
+#: src/decoders/pvr.cpp:889
+msgid "Faces"
+msgstr "Flächen"
+
+#: src/decoders/pvr.cpp:893
+msgid "Depth"
+msgstr "Tiefe"
+
+#: src/decoders/quake.cpp:162 src/ui/app_metadata.cpp:100
+msgid "Name"
+msgstr "Name"
+
+#: src/decoders/quake.cpp:162 src/decoders/quake.cpp:165
+#: src/decoders/quake.cpp:174 src/decoders/quake.cpp:179
+#: src/decoders/quake.cpp:182
+msgid "WAL"
+msgstr "WAL"
+
+#: src/decoders/quake.cpp:165
+msgid "Next frame"
+msgstr "Nächstes Einzelbild"
+
+#: src/decoders/quake.cpp:174
+msgid "Surface flags"
+msgstr "Oberflächen-Flags"
+
+#: src/decoders/quake.cpp:179 src/decoders/quake.cpp:220
+#: src/decoders/quake.cpp:232
+msgid "Contents"
+msgstr "Inhalt"
+
+#: src/decoders/quake.cpp:182
+msgid "Light value"
+msgstr "Lichtwert"
+
+#: src/decoders/quake.cpp:220 src/decoders/quake.cpp:232
+msgid "LMP"
+msgstr "LMP"
+
+#: src/decoders/raw.cpp:248
+msgid "Camera framing"
+msgstr "Kamera-Bildausschnitt"
+
+#: src/decoders/raw.cpp:248 src/decoders/raw.cpp:395 src/decoders/raw.cpp:396
+#: src/decoders/raw.cpp:398 src/decoders/raw.cpp:399 src/decoders/raw.cpp:401
+#: src/decoders/raw.cpp:424 src/decoders/raw.cpp:426 src/decoders/raw.cpp:428
+#: src/decoders/raw.cpp:431 src/decoders/raw.cpp:433
+msgid "Raw"
+msgstr "Raw"
+
+#: src/decoders/raw.cpp:364 src/decoders/raw.cpp:365 src/decoders/raw.cpp:367
+#: src/decoders/raw.cpp:369 src/decoders/raw.cpp:371 src/decoders/raw.cpp:373
+#: src/decoders/raw.cpp:375 src/decoders/raw.cpp:377 src/decoders/raw.cpp:379
+#: src/decoders/raw.cpp:382 src/decoders/raw.cpp:387 src/decoders/raw.cpp:390
+#: src/decoders/raw.cpp:392 src/decoders/raw.cpp:394
+msgid "Camera"
+msgstr "Kamera"
+
+#: src/decoders/raw.cpp:364
+msgid "Make"
+msgstr "Hersteller"
+
+#: src/decoders/raw.cpp:365
+msgid "Model"
+msgstr "Modell"
+
+#: src/decoders/raw.cpp:367
+msgid "Firmware"
+msgstr "Firmware"
+
+#: src/decoders/raw.cpp:369 src/decoders/tiff.cpp:287
+msgid "Lens"
+msgstr "Objektiv"
+
+#: src/decoders/raw.cpp:371
+msgid "Lens make"
+msgstr "Objektivhersteller"
+
+#: src/decoders/raw.cpp:373 src/decoders/tiff.cpp:285
+msgid "ISO"
+msgstr "ISO"
+
+#: src/decoders/raw.cpp:375
+msgid "Shutter"
+msgstr "Verschlusszeit"
+
+#: src/decoders/raw.cpp:377
+msgid "Aperture"
+msgstr "Blende"
+
+#: src/decoders/raw.cpp:379 src/decoders/tiff.cpp:281
+msgid "Focal length"
+msgstr "Brennweite"
+
+#: src/decoders/raw.cpp:382
+msgid "Exposure compensation"
+msgstr "Belichtungskorrektur"
+
+#: src/decoders/raw.cpp:387
+msgid "Taken"
+msgstr "Aufgenommen"
+
+#: src/decoders/raw.cpp:390
+msgid "Shot number"
+msgstr "Aufnahmenummer"
+
+#: src/decoders/raw.cpp:392
+msgid "Artist"
+msgstr "Urheber"
+
+#: src/decoders/raw.cpp:394
+msgid "Description"
+msgstr "Beschreibung"
+
+#: src/decoders/raw.cpp:395
+msgid "Sensor size"
+msgstr "Sensorgröße"
+
+#: src/decoders/raw.cpp:396
+msgid "Output size"
+msgstr "Ausgabegröße"
+
+#: src/decoders/raw.cpp:398 src/decoders/tiff.cpp:230
+msgid "Bits per sample"
+msgstr "Bits pro Sample"
+
+#: src/decoders/raw.cpp:399
+msgid "Colour channels"
+msgstr "Farbkanäle"
+
+#: src/decoders/raw.cpp:401
+msgid "DNG version"
+msgstr "DNG-Version"
+
+#: src/decoders/raw.cpp:424 src/decoders/raw.cpp:426 src/decoders/raw.cpp:428
+msgid "Mosaic"
+msgstr "Mosaik"
+
+#: src/decoders/raw.cpp:431
+msgid "Camera white balance"
+msgstr "Kamera-Weißabgleich"
+
+#: src/decoders/raw.cpp:433
+msgid "Auto exposure gain"
+msgstr "Automatische Belichtungsverstärkung"
+
+#: src/decoders/tiff.cpp:230 src/decoders/tiff.cpp:231
+#: src/decoders/tiff.cpp:232 src/decoders/tiff.cpp:238
+#: src/decoders/tiff.cpp:241
+msgid "TIFF"
+msgstr "TIFF"
+
+#: src/decoders/tiff.cpp:231
+msgid "Samples per pixel"
+msgstr "Samples pro Pixel"
+
+#: src/decoders/tiff.cpp:275
+msgid "Date/time original"
+msgstr "Aufnahmezeitpunkt"
+
+#: src/decoders/tiff.cpp:275 src/decoders/tiff.cpp:277
+#: src/decoders/tiff.cpp:279 src/decoders/tiff.cpp:281
+#: src/decoders/tiff.cpp:285 src/decoders/tiff.cpp:287
+msgid "EXIF"
+msgstr "EXIF"
+
+#: src/decoders/tiff.cpp:277
+msgid "Exposure time"
+msgstr "Belichtungszeit"
+
+#: src/decoders/tiff.cpp:279
+msgid "F-number"
+msgstr "Blendenzahl"
+
+#: src/decoders/tim.cpp:79 src/decoders/tim2.cpp:211 src/decoders/tim2.cpp:216
+msgid "CLUT"
+msgstr "CLUT"
+
+#: src/decoders/tim.cpp:79 src/decoders/tim.cpp:151 src/decoders/tim.cpp:152
+#: src/decoders/tim.cpp:154
+msgid "TIM"
+msgstr "TIM"
+
+#: src/decoders/tim.cpp:151
+msgid "Mode"
+msgstr "Modus"
+
+#: src/decoders/tim.cpp:152
+msgid "VRAM position"
+msgstr "VRAM-Position"
+
+#: src/decoders/tim.cpp:154
+msgid "Semi-transparent pixels"
+msgstr "Halbtransparente Pixel"
+
+#: src/decoders/tim2.cpp:204 src/decoders/tim2.cpp:205
+#: src/decoders/tim2.cpp:211 src/decoders/tim2.cpp:216
+#: src/decoders/tim2.cpp:219 src/decoders/tim2.cpp:221
+#: src/decoders/tim2.cpp:223
+msgid "TIM2"
+msgstr "TIM2"
+
+#: src/decoders/tim2.cpp:205
+msgid "Image type"
+msgstr "Bildtyp"
+
+#: src/decoders/tpl.cpp:372 src/ui/app.cpp:1247
+msgid "Images"
+msgstr "Bilder"
+
+#: src/decoders/tpl.cpp:372
+msgid "TPL"
+msgstr "TPL"
+
+#: src/decoders/video_poster.cpp:83 src/decoders/video_poster_mf.cpp:176
+msgid "Frame rate"
+msgstr "Bildrate"
+
+#: src/decoders/video_poster.cpp:83 src/decoders/video_poster.cpp:105
+#: src/decoders/video_poster.cpp:106 src/decoders/video_poster.cpp:107
+#: src/decoders/video_poster.cpp:108 src/decoders/video_poster.cpp:110
+#: src/decoders/video_poster_mf.cpp:176 src/decoders/video_poster_mf.cpp:194
+#: src/decoders/video_poster_mf.cpp:195 src/decoders/video_poster_mf.cpp:196
+#: src/decoders/video_poster_mf.cpp:197 src/ui/settings.cpp:374
+msgid "Video"
+msgstr "Video"
+
+#: src/decoders/video_poster.cpp:105 src/decoders/video_poster_mf.cpp:194
+msgid "Duration"
+msgstr "Dauer"
+
+#: src/decoders/video_poster.cpp:106 src/decoders/video_poster_mf.cpp:195
+#: src/ui/app_metadata.cpp:103
+msgid "Size"
+msgstr "Größe"
+
+#: src/decoders/video_poster.cpp:107 src/decoders/video_poster_mf.cpp:196
+msgid "Codec"
+msgstr "Codec"
+
+#: src/decoders/video_poster.cpp:108 src/decoders/video_poster_mf.cpp:197
+msgid "Audio"
+msgstr "Audio"
+
+#: src/decoders/video_poster.cpp:110
+msgid "Container"
+msgstr "Container"
+
+#: src/decoders/vtf.cpp:305 src/decoders/vtf.cpp:306 src/decoders/vtf.cpp:308
+#: src/decoders/vtf.cpp:310 src/decoders/vtf.cpp:312 src/decoders/vtf.cpp:314
+#: src/decoders/vtf.cpp:316 src/decoders/vtf.cpp:318
+msgid "VTF"
+msgstr "VTF"
+
+#: src/decoders/vtf.cpp:316
+msgid "Normal map"
+msgstr "Normal-Map"
+
+#: src/decoders/webp.cpp:109 src/decoders/webp.cpp:111
+msgid "WebP"
+msgstr "WebP"
+
+#: src/decoders/xmp.cpp:133 src/ui/app_metadata.cpp:99
+msgid "File"
+msgstr "Datei"
+
+#: src/decoders/xmp.cpp:133
+msgid "XMP sidecar"
+msgstr "XMP-Filialdatei"
+
+#: src/encoders/dds.cpp:67
+msgid "BC1 (DXT1): colour, 4 bits a pixel"
+msgstr "BC1 (DXT1): Farbe, 4 Bit pro Pixel"
+
+#: src/encoders/dds.cpp:68
+msgid "BC2 (DXT3): colour, sharp alpha"
+msgstr "BC2 (DXT3): Farbe, hartes Alpha"
+
+#: src/encoders/dds.cpp:69
+msgid "BC3 (DXT5): colour, smooth alpha"
+msgstr "BC3 (DXT5): Farbe, weiches Alpha"
+
+#: src/encoders/dds.cpp:70
+msgid "BC4: one channel (red)"
+msgstr "BC4: ein Kanal (Rot)"
+
+#: src/encoders/dds.cpp:71
+msgid "BC5: two channels (normal maps)"
+msgstr "BC5: zwei Kanäle (Normal-Maps)"
+
+#: src/encoders/dds.cpp:72
+msgid "BC7: colour and alpha, best"
+msgstr "BC7: Farbe und Alpha, beste Qualität"
+
+#: src/encoders/dds.cpp:73
+msgid "RGBA 8-bit, uncompressed"
+msgstr "RGBA 8-Bit, unkomprimiert"
+
+#: src/encoders/dds.cpp:74
+msgid "BGRA 8-bit, uncompressed"
+msgstr "BGRA 8-Bit, unkomprimiert"
+
+#: src/encoders/dds.cpp:75
+msgid "RGB 565 (16-bit)"
+msgstr "RGB 565 (16-Bit)"
+
+#: src/encoders/dds.cpp:76
+msgid "ARGB 1555 (16-bit)"
+msgstr "ARGB 1555 (16-Bit)"
+
+#: src/encoders/dds.cpp:77
+msgid "ARGB 4444 (16-bit)"
+msgstr "ARGB 4444 (16-Bit)"
+
+#: src/encoders/dds.cpp:78
+msgid "R8: one channel"
+msgstr "R8: ein Kanal"
+
+#: src/encoders/dds.cpp:79
+msgid "RG8: two channels"
+msgstr "RG8: zwei Kanäle"
+
+#: src/encoders/dds.cpp:80
+msgid "RGBA half float (HDR)"
+msgstr "RGBA Half-Float (HDR)"
+
+#: src/encoders/dds.cpp:81
+msgid "RGBA float (HDR)"
+msgstr "RGBA Float (HDR)"
+
+#: src/encoders/dds.cpp:529
+msgid "Automatic (BC7; half float for HDR)"
+msgstr "Automatisch (BC7; Half-Float für HDR)"
+
+#: src/encoders/dds.cpp:534
+msgid "Balanced"
+msgstr "Ausgewogen"
+
+#: src/encoders/dds.cpp:534
+msgid "Best (slow)"
+msgstr "Beste (langsam)"
+
+#: src/encoders/dds.cpp:534
+msgid "Effort"
+msgstr "Aufwand"
+
+#: src/encoders/dds.cpp:534
+msgid "Fast"
+msgstr "Schnell"
+
+#: src/encoders/dds.cpp:534
+msgid "block-compressed formats"
+msgstr "blockkomprimierte Formate"
+
+#: src/encoders/dds.cpp:536
+msgid "each half the size, down to 1 px"
+msgstr "jeweils halbe Größe, bis hinab zu 1 px"
+
+#: src/encoders/dds.cpp:539
+msgid "off for data: normal maps, masks"
+msgstr "aus für Daten: Normal-Maps, Masken"
+
+#: src/encoders/dds.cpp:539
+msgid "sRGB colour"
+msgstr "sRGB-Farbe"
+
+#: src/encoders/dds.cpp:541
+msgid "16-bit formats"
+msgstr "16-Bit-Formate"
+
+#: src/encoders/dds.cpp:541 src/encoders/encoder.cpp:768
+#: src/encoders/encoder.cpp:782
+msgid "Dither"
+msgstr "Dithering"
+
+#: src/encoders/dds.cpp:543
+msgid "Old-style header"
+msgstr "Header im alten Stil"
+
+#: src/encoders/dds.cpp:543
+msgid "for tools before DirectX 10"
+msgstr "für Programme vor DirectX 10"
+
+#: src/encoders/encoder.cpp:725 src/encoders/encoder.cpp:743
+msgid "Quality"
+msgstr "Qualität"
+
+#: src/encoders/encoder.cpp:726
+msgid "Lossless"
+msgstr "Verlustfrei"
+
+#: src/encoders/encoder.cpp:726
+msgid "exact"
+msgstr "exakt"
+
+#: src/encoders/encoder.cpp:732
+msgid "Interlaced"
+msgstr "Interlacing"
+
+#: src/encoders/encoder.cpp:732
+msgid "loads coarse to fine; a little larger"
+msgstr "lädt von grob nach fein; etwas größer"
+
+#: src/encoders/encoder.cpp:744
+msgid "Colour detail"
+msgstr "Farbdetails"
+
+#: src/encoders/encoder.cpp:745
+msgid "Automatic (full at quality 90 and above)"
+msgstr "Automatisch (voll ab Qualität 90)"
+
+#: src/encoders/encoder.cpp:745
+msgid "Full (4:4:4)"
+msgstr "Voll (4:4:4)"
+
+#: src/encoders/encoder.cpp:745
+msgid "Half across (4:2:2)"
+msgstr "Horizontal halbiert (4:2:2)"
+
+#: src/encoders/encoder.cpp:745
+msgid "Quarter (4:2:0, smallest)"
+msgstr "Geviertelt (4:2:0, am kleinsten)"
+
+#: src/encoders/encoder.cpp:746
+msgid "Progressive"
+msgstr "Progressiv"
+
+#: src/encoders/encoder.cpp:746
+msgid "loads coarse to fine"
+msgstr "lädt von grob nach fein"
+
+#: src/encoders/encoder.cpp:757
+msgid "Deflate (ZIP)"
+msgstr "Deflate (ZIP)"
+
+#: src/encoders/encoder.cpp:757
+msgid "LZW"
+msgstr "LZW"
+
+#: src/encoders/encoder.cpp:757 src/ui/save.cpp:15
+msgid "None"
+msgstr "Keine"
+
+#: src/encoders/encoder.cpp:765 src/encoders/encoder.cpp:780
+#: src/ui/app_metadata.cpp:111
+msgid "Pixel format"
+msgstr "Pixelformat"
+
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+msgid "16-bit ARGB 1555"
+msgstr "16-Bit ARGB 1555"
+
+#: src/encoders/encoder.cpp:766
+msgid "16-bit RGB 565"
+msgstr "16-Bit RGB 565"
+
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+msgid "24-bit BGR"
+msgstr "24-Bit BGR"
+
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+msgid "32-bit BGRA"
+msgstr "32-Bit BGRA"
+
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
+msgid "Automatic (32-bit with alpha, else 24-bit)"
+msgstr "Automatisch (32-Bit mit Alpha, sonst 24-Bit)"
+
+#: src/encoders/encoder.cpp:767
+msgid "16-bit ARGB 4444"
+msgstr "16-Bit ARGB 4444"
+
+#: src/encoders/encoder.cpp:767 src/encoders/encoder.cpp:781
+msgid "8-bit indexed (256 colours)"
+msgstr "8-Bit indiziert (256 Farben)"
+
+#: src/encoders/encoder.cpp:768 src/encoders/encoder.cpp:782
+msgid "16-bit and indexed"
+msgstr "16-Bit und indiziert"
+
+#: src/encoders/encoder.cpp:770
+msgid "sRGB colour space tag"
+msgstr "sRGB-Farbraum-Tag"
+
+#: src/encoders/encoder.cpp:771
+msgid "Top-down rows"
+msgstr "Zeilen von oben nach unten"
+
+#: src/encoders/encoder.cpp:784
+msgid "RLE compression"
+msgstr "RLE-Komprimierung"
+
+#: src/encoders/encoder.cpp:785
+msgid "Top-left origin"
+msgstr "Ursprung oben links"
+
+#: src/image.cpp:206 src/ui/app.cpp:1094
+msgid "the exposure was changed"
+msgstr "die Belichtung wurde geändert"
+
+#: src/jpeg_lossless.cpp:92
+#, c++-format
+msgid "{0} px fewer on the left"
+msgstr "links {0} px weniger"
+
+#: src/jpeg_lossless.cpp:92
+#, c++-format
+msgid "{0} px more on the left"
+msgstr "links {0} px mehr"
+
+#: src/jpeg_lossless.cpp:93
+#, c++-format
+msgid "{0} px fewer at the top"
+msgstr "oben {0} px weniger"
+
+#: src/jpeg_lossless.cpp:93
+#, c++-format
+msgid "{0} px more at the top"
+msgstr "oben {0} px mehr"
+
+#: src/jpeg_lossless.cpp:94
+#, c++-format
+msgid "{0} px fewer on the right"
+msgstr "rechts {0} px weniger"
+
+#: src/jpeg_lossless.cpp:94
+#, c++-format
+msgid "{0} px more on the right"
+msgstr "rechts {0} px mehr"
+
+#: src/jpeg_lossless.cpp:95
+#, c++-format
+msgid "{0} px fewer at the bottom"
+msgstr "unten {0} px weniger"
+
+#: src/jpeg_lossless.cpp:95
+#, c++-format
+msgid "{0} px more at the bottom"
+msgstr "unten {0} px mehr"
+
+#: src/jpeg_lossless.cpp:98
+#, c++-format
+msgid "{0} and {1}"
+msgstr "{0} und {1}"
+
+#: src/jpeg_lossless.cpp:110
+msgid "this build has no lossless JPEG transform"
+msgstr "dieser Build enthält keine verlustfreie JPEG-Umwandlung"
+
+#: src/jpeg_lossless.cpp:121
+msgid "the original isn't a JPEG"
+msgstr "das Original ist kein JPEG"
+
+#: src/jpeg_lossless.cpp:127
+msgid "the original file can't be read"
+msgstr "die Originaldatei kann nicht gelesen werden"
+
+#: src/jpeg_lossless.cpp:132
+msgid "the original is too large for the transform"
+msgstr "das Original ist für die Umwandlung zu groß"
+
+#: src/jpeg_lossless.cpp:138
+msgid "it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)"
+msgstr "dafür wird die TurboJPEG-Bibliothek benötigt (Paket libturbojpeg0 oder turbojpeg)"
+
+#: src/jpeg_lossless.cpp:144
+msgid "the lossless JPEG transform isn't available"
+msgstr "die verlustfreie JPEG-Umwandlung ist nicht verfügbar"
+
+#: src/jpeg_lossless.cpp:156
+#, c++-format
+msgid "the original can't be read: {0}"
+msgstr "das Original kann nicht gelesen werden: {0}"
+
+#: src/jpeg_lossless.cpp:167
+msgid "the original file has changed since it was opened"
+msgstr "die Originaldatei hat sich seit dem Öffnen geändert"
+
+#: src/jpeg_lossless.cpp:174
+msgid "the original's chroma subsampling isn't one the transform handles"
+msgstr "die Farbunterabtastung des Originals wird von der Umwandlung nicht unterstützt"
+
+#: src/jpeg_lossless.cpp:203
+msgid ""
+"the crop is within one block of JPEG's grid, or in edge blocks a turn has to "
+"drop"
+msgstr ""
+"der Zuschnitt liegt innerhalb eines Blocks des JPEG-Rasters oder in "
+"Randblöcken, die eine Drehung verwerfen muss"
+
+#: src/jpeg_lossless.cpp:219
+#, c++-format
+msgid "the transform failed: {0}"
+msgstr "die Umwandlung ist fehlgeschlagen: {0}"
+
+#: src/jpeg_lossless.cpp:228
+msgid "the transform's result can't be read"
+msgstr "das Ergebnis der Umwandlung kann nicht gelesen werden"
+
+#: src/ui/app.cpp:241
+msgid "EV"
+msgstr "EV"
+
+#: src/ui/app.cpp:249
+msgid ""
+"Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
+"Greyed while the embedded preview stands in for the raw"
+msgstr ""
+"Belichtung (EV). Ausgangswert ist die Belichtungskorrektur der Kamera, also "
+"wie aufgenommen.\n"
+"Ausgegraut, solange die eingebettete Vorschau anstelle des Raws angezeigt "
+"wird"
+
+#: src/ui/app.cpp:260
+msgid "Open… (Ctrl+O)"
+msgstr "Öffnen… (Strg+O)"
+
+#: src/ui/app.cpp:261
+msgid "Save as… (Ctrl+S); comparing, saves the difference shown"
+msgstr ""
+"Speichern unter… (Strg+S); beim Vergleichen wird die angezeigte Differenz "
+"gespeichert"
+
+#: src/ui/app.cpp:262
+msgid "Print… (Ctrl+P); a selection prints alone"
+msgstr "Drucken… (Strg+P); eine Auswahl wird allein gedruckt"
+
+#: src/ui/app.cpp:264
+msgid "Zoom out (-, Ctrl+wheel)"
+msgstr "Verkleinern (-, Strg+Mausrad)"
+
+#: src/ui/app.cpp:265
+msgid "Zoom in (+, Ctrl+wheel)"
+msgstr "Vergrößern (+, Strg+Mausrad)"
+
+#: src/ui/app.cpp:266
+msgid "Actual pixels (1)"
+msgstr "Originalgröße (1)"
+
+#: src/ui/app.cpp:267
+msgid "Fit to window (F)"
+msgstr "An Fenster anpassen (F)"
+
+#: src/ui/app.cpp:268
+msgid "Smooth when zoomed in (off shows crisp pixels)"
+msgstr "Beim Vergrößern glätten (aus zeigt scharfe Pixel)"
+
+#: src/ui/app.cpp:278
+msgid "Fullscreen (Enter, double-click)"
+msgstr "Vollbild (Eingabe, Doppelklick)"
+
+#: src/ui/app.cpp:281
+msgid "Previous image (Left, wheel up)"
+msgstr "Vorheriges Bild (Links, Mausrad nach oben)"
+
+#: src/ui/app.cpp:284
+msgid "Next image (Right, wheel down)"
+msgstr "Nächstes Bild (Rechts, Mausrad nach unten)"
+
+#: src/ui/app.cpp:288
+msgid "Slideshow (S): fullscreen, timed, with gentle motion"
+msgstr "Diashow (S): Vollbild, zeitgesteuert, mit sanfter Bewegung"
+
+#: src/ui/app.cpp:291
+msgid "Crop to selection (Ctrl+Y)"
+msgstr "Auf Auswahl zuschneiden (Strg+Y)"
+
+#: src/ui/app.cpp:295 src/ui/settings.cpp:314
+msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
+msgstr ""
+"Bearbeitungen aus XMP-Filialdateien übernehmen (Belichtung, Zuschnitt, "
+"Drehung)"
+
+#: src/ui/app.cpp:301
+msgid "Show A (Tab flips A and B)"
+msgstr "A anzeigen (Tab wechselt zwischen A und B)"
+
+#: src/ui/app.cpp:302
+msgid "Show B (Tab flips A and B)"
+msgstr "B anzeigen (Tab wechselt zwischen A und B)"
+
+#: src/ui/app.cpp:303
+msgid "Swipe: A left of the divider, B right of it (drag the divider)"
+msgstr "Wischen: A links der Trennlinie, B rechts davon (Trennlinie ziehen)"
+
+#: src/ui/app.cpp:304
+msgid "Difference: where A and B differ, amplified"
+msgstr "Differenz: wo sich A und B unterscheiden, verstärkt"
+
+#: src/ui/app.cpp:305
+msgid "Swap A and B"
+msgstr "A und B tauschen"
+
+#: src/ui/app.cpp:306
+msgid "Side by side: B in a second pane, beside A"
+msgstr "Nebeneinander: B in einem zweiten Bereich neben A"
+
+#: src/ui/app.cpp:314
+msgid "Gain"
+msgstr "Verstärkung"
+
+#: src/ui/app.cpp:322
+msgid "How much the difference is amplified"
+msgstr "Wie stark die Differenz verstärkt wird"
+
+#: src/ui/app.cpp:325
+msgid "Metadata / EXIF (I)"
+msgstr "Metadaten / EXIF (I)"
+
+#: src/ui/app.cpp:326
+msgid "Settings (Ctrl+,)"
+msgstr "Einstellungen (Strg+,)"
+
+#: src/ui/app.cpp:339
+msgid "Tag"
+msgstr "Eigenschaft"
+
+#: src/ui/app.cpp:339
+msgid "Value"
+msgstr "Wert"
+
+#: src/ui/app.cpp:410
+msgid "Open in maps"
+msgstr "In Karten öffnen"
+
+#: src/ui/app.cpp:521
+#, c++-format
+msgid "Copied {0} × {1} to clipboard"
+msgstr "{0} × {1} in die Zwischenablage kopiert"
+
+#: src/ui/app.cpp:729
+msgid "No image open"
+msgstr "Kein Bild geöffnet"
+
+#: src/ui/app.cpp:729
+#, c++-format
+msgid "No images in {0}"
+msgstr "Keine Bilder in {0}"
+
+#: src/ui/app.cpp:744
+#, c++-format
+msgid "Loading {0}…"
+msgstr "{0} wird geladen…"
+
+#: src/ui/app.cpp:894
+#, c++-format
+msgid "Cannot load {0}: {1}"
+msgstr "{0} kann nicht geladen werden: {1}"
+
+#: src/ui/app.cpp:907 src/ui/app.cpp:1056
+msgid "Developing…"
+msgstr "Wird entwickelt…"
+
+#: src/ui/app.cpp:988
+msgid "cropped"
+msgstr "zugeschnitten"
+
+#: src/ui/app.cpp:1242
+msgid "Open Image"
+msgstr "Bild öffnen"
+
+#: src/ui/app.cpp:1247
+msgid "All files"
+msgstr "Alle Dateien"
+
+#: src/ui/app.cpp:1333 src/ui/app_metadata.cpp:226
+msgid "embedded preview"
+msgstr "eingebettete Vorschau"
+
+#: src/ui/app.cpp:1333 src/ui/app_metadata.cpp:226
+msgid "preview"
+msgstr "Vorschau"
+
+#: src/ui/app.cpp:1346
+msgid "muted"
+msgstr "stumm"
+
+#: src/ui/app.cpp:1349
+msgid "(fit)"
+msgstr "(eingepasst)"
+
+#: src/ui/app.cpp:1351
+#, c++-format
+msgid "selection {0} × {1} at {2}, {3}"
+msgstr "Auswahl {0} × {1} bei {2}, {3}"
+
+#: src/ui/app.cpp:1353
+#, c++-format
+msgid "B {0} × {1}, scaled to match"
+msgstr "B {0} × {1}, passend skaliert"
+
+#: src/ui/app.cpp:1360
+msgid "identical"
+msgstr "identisch"
+
+#: src/ui/app.cpp:1367
+#, no-c-format, c++-format
+msgid "PSNR {0} dB  ·  largest error {1}  ·  {2}% changed"
+msgstr "PSNR {0} dB  ·  größter Fehler {1}  ·  {2} % geändert"
+
+#: src/ui/app_compare.cpp:140
+msgid "Comparing…"
+msgstr "Wird verglichen…"
+
+#: src/ui/app_compare.cpp:170
+#, c++-format
+msgid "Can't compare: {0}"
+msgstr "Vergleich nicht möglich: {0}"
+
+#: src/ui/app_metadata.cpp:101
+msgid "Folder"
+msgstr "Ordner"
+
+#: src/ui/app_metadata.cpp:103
+#, c++-format
+msgid "{0} ({1} byte)"
+msgid_plural "{0} ({1} bytes)"
+msgstr[0] "{0} ({1} Byte)"
+msgstr[1] "{0} ({1} Bytes)"
+
+#: src/ui/app_metadata.cpp:105
+msgid "Modified"
+msgstr "Geändert"
+
+#: src/ui/app_metadata.cpp:107
+msgid "Image"
+msgstr "Bild"
+
+#: src/ui/app_metadata.cpp:108
+msgid "Dimensions"
+msgstr "Abmessungen"
+
+#: src/ui/app_metadata.cpp:114
+msgid "Source depth"
+msgstr "Farbtiefe der Quelle"
+
+#: src/ui/app_metadata.cpp:114
+#, c++-format
+msgid "{0} bit per sample"
+msgid_plural "{0} bits per sample"
+msgstr[0] "{0} Bit pro Sample"
+msgstr[1] "{0} Bit pro Sample"
+
+#: src/ui/app_metadata.cpp:115
+msgid "no"
+msgstr "nein"
+
+#: src/ui/app_metadata.cpp:115
+msgid "yes"
+msgstr "ja"
+
+#: src/ui/app_metadata.cpp:117
+msgid "Notes"
+msgstr "Hinweise"
+
+#: src/ui/app_metadata.cpp:133
+msgid "Place"
+msgstr "Ort"
+
+#: src/ui/app_metadata.cpp:179
+#, c++-format
+msgid "compression {0}"
+msgstr "Komprimierung {0}"
+
+#: src/ui/app_metadata.cpp:231
+msgid "developed"
+msgstr "entwickelt"
+
+#: src/ui/app_playback.cpp:285
+msgid "Animation paused"
+msgstr "Animation angehalten"
+
+#: src/ui/app_print.cpp:46
+msgid "Printed"
+msgstr "Gedruckt"
+
+#: src/ui/app_save.cpp:35
+msgid "No difference image to save: the images are different sizes"
+msgstr "Kein Differenzbild zum Speichern: Die Bilder sind unterschiedlich groß"
+
+#: src/ui/app_save.cpp:113
+msgid "Original"
+msgstr "Original"
+
+#: src/ui/app_save.cpp:113
+msgid "Saved"
+msgstr "Gespeichert"
+
+#: src/ui/app_save.cpp:176
+#, c++-format
+msgid "lossless, {0}"
+msgstr "verlustfrei, {0}"
+
+#: src/ui/app_save.cpp:258
+#, c++-format
+msgid "Preview failed: {0}"
+msgstr "Vorschau fehlgeschlagen: {0}"
+
+#: src/ui/app_save.cpp:284
+msgid "Lossless: only the original image can be saved this way"
+msgstr "Verlustfrei: Nur das Originalbild kann so gespeichert werden"
+
+#: src/ui/app_save.cpp:299
+#, c++-format
+msgid "Not possible: {0}"
+msgstr "Nicht möglich: {0}"
+
+#: src/ui/app_save.cpp:301
+msgid "Exactly the image as shown, not one pixel re-encoded"
+msgstr "Genau das angezeigte Bild, kein einziges Pixel neu kodiert"
+
+#: src/ui/app_save.cpp:303
+#, c++-format
+msgid "With JPEG's blocks: {0} than shown"
+msgstr "An JPEG-Blöcken ausgerichtet: {0} als angezeigt"
+
+#: src/ui/app_save.cpp:315
+#, c++-format
+msgid "Save as {0}"
+msgstr "Als {0} speichern"
+
+#: src/ui/app_save.cpp:334
+#, c++-format
+msgid "Saving {0}…"
+msgstr "{0} wird gespeichert…"
+
+#: src/ui/app_save.cpp:344
+#, c++-format
+msgid "Save failed: {0}"
+msgstr "Speichern fehlgeschlagen: {0}"
+
+#: src/ui/app_save.cpp:344
+#, c++-format
+msgid "Saved {0}"
+msgstr "{0} gespeichert"
+
+#: src/ui/metadata_model.h:29 src/ui/save.cpp:24 src/ui/settings.cpp:397
+msgid "Location"
+msgstr "Standort"
+
+#: src/ui/save.cpp:14
+msgid "All but location"
+msgstr "Alle außer Standort"
+
+#: src/ui/save.cpp:14
+msgid "All but location and personal details"
+msgstr "Alle außer Standort und persönlichen Angaben"
+
+#: src/ui/save.cpp:14
+msgid "Keep all"
+msgstr "Alle behalten"
+
+#: src/ui/save.cpp:15
+msgid "Copyright and contact only"
+msgstr "Nur Copyright und Kontakt"
+
+#: src/ui/save.cpp:15 src/ui/settings.cpp:248 src/ui/settings.cpp:262
+msgid "Custom"
+msgstr "Benutzerdefiniert"
+
+#: src/ui/save.cpp:25
+msgid "Serial numbers and owner"
+msgstr "Seriennummern und Besitzer"
+
+#: src/ui/save.cpp:26
+msgid "Author and copyright"
+msgstr "Urheber und Copyright"
+
+#: src/ui/save.cpp:27
+msgid "Title, caption and keywords"
+msgstr "Titel, Bildunterschrift und Stichwörter"
+
+#: src/ui/save.cpp:28
+msgid "Camera and exposure"
+msgstr "Kamera und Belichtung"
+
+#: src/ui/save.cpp:29
+msgid "Software and edit history"
+msgstr "Software und Bearbeitungsverlauf"
+
+#: src/ui/save.cpp:77
+msgid "Save Image As"
+msgstr "Bild speichern unter"
+
+#: src/ui/save.cpp:83
+msgid "Preview"
+msgstr "Vorschau"
+
+#: src/ui/save.cpp:96
+msgid "_Save…"
+msgstr "_Speichern…"
+
+#: src/ui/save.cpp:171
+msgid "Lossless: turn and crop the original, no re-encoding"
+msgstr "Verlustfrei: Original drehen und zuschneiden, ohne Neukodierung"
+
+#: src/ui/save.cpp:180
+msgid "Checking…"
+msgstr "Wird geprüft…"
+
+#: src/ui/save.cpp:207
+msgid "Metadata"
+msgstr "Metadaten"
+
+#: src/ui/save.cpp:261
+msgid "This image has no metadata to keep."
+msgstr "Dieses Bild enthält keine Metadaten, die beibehalten werden könnten."
+
+#: src/ui/save.cpp:265
+msgid "The colour profile is always kept."
+msgstr "Das Farbprofil wird immer beibehalten."
+
+#: src/ui/settings.cpp:250
+msgid "Off"
+msgstr "Aus"
+
+#: src/ui/settings.cpp:273
+msgid "Automatic (the system's)"
+msgstr "Automatisch (Systemsprache)"
+
+#: src/ui/settings.cpp:289 src/ui/settings.cpp:291
+msgid "Language"
+msgstr "Sprache"
+
+#: src/ui/settings.cpp:292
+msgid "Takes effect when IfritView next starts."
+msgstr "Wird beim nächsten Start von IfritView wirksam."
+
+#: src/ui/settings.cpp:296
+msgid "Resize the window to fit each image"
+msgstr "Fenstergröße an jedes Bild anpassen"
+
+#: src/ui/settings.cpp:297
+msgid "Min window width"
+msgstr "Min. Fensterbreite"
+
+#: src/ui/settings.cpp:298
+msgid "Min window height"
+msgstr "Min. Fensterhöhe"
+
+#: src/ui/settings.cpp:300
+msgid "Browsing"
+msgstr "Durchblättern"
+
+#: src/ui/settings.cpp:302
+msgid "Wrap around at the end of the folder"
+msgstr "Am Ende des Ordners wieder von vorn beginnen"
+
+#: src/ui/settings.cpp:303
+msgid "Include hidden files"
+msgstr "Versteckte Dateien einbeziehen"
+
+#: src/ui/settings.cpp:304
+msgid "Preload images ahead"
+msgstr "Folgende Bilder vorausladen"
+
+#: src/ui/settings.cpp:305
+msgid "Preload images behind"
+msgstr "Vorherige Bilder vorausladen"
+
+#: src/ui/settings.cpp:306
+msgid "Image cache (MB, 0 = auto)"
+msgstr "Bildcache (MB, 0 = automatisch)"
+
+#: src/ui/settings.cpp:307
+msgid "0 = automatic: a quarter of the memory free at startup"
+msgstr "0 = automatisch: ein Viertel des beim Start freien Arbeitsspeichers"
+
+#: src/ui/settings.cpp:309
+msgid "Camera RAW"
+msgstr "Kamera-RAW"
+
+#: src/ui/settings.cpp:311
+msgid "Decode"
+msgstr "Dekodieren"
+
+#: src/ui/settings.cpp:311
+msgid "Embedded JPEG only (never develop)"
+msgstr "Nur eingebettetes JPEG (nie entwickeln)"
+
+#: src/ui/settings.cpp:311
+msgid "Full resolution"
+msgstr "Volle Auflösung"
+
+#: src/ui/settings.cpp:311
+msgid "Half size (fast, bins 2×2 photosites)"
+msgstr "Halbe Größe (schnell, fasst 2×2 Sensorpixel zusammen)"
+
+#: src/ui/settings.cpp:313
+msgid ""
+"Frame as the camera did (crop the sensor margins the camera never shows)"
+msgstr ""
+"Bildausschnitt wie die Kamera (Sensorränder abschneiden, die die Kamera nie "
+"zeigt)"
+
+#: src/ui/settings.cpp:316
+msgid "Maps"
+msgstr "Karten"
+
+#: src/ui/settings.cpp:318
+msgid "Open locations in"
+msgstr "Standorte öffnen in"
+
+#: src/ui/settings.cpp:328
+msgid "URL template"
+msgstr "URL-Vorlage"
+
+#: src/ui/settings.cpp:330
+msgid "URL template; {lat} and {lon} are replaced with the coordinates"
+msgstr "URL-Vorlage; {lat} und {lon} werden durch die Koordinaten ersetzt"
+
+#: src/ui/settings.cpp:334
+msgid "Look up place names with"
+msgstr "Ortsnamen nachschlagen mit"
+
+#: src/ui/settings.cpp:348
+msgid "Lookup URL template"
+msgstr "URL-Vorlage für die Ortssuche"
+
+#: src/ui/settings.cpp:349
+msgid ""
+"Reverse-geocoding URL template returning JSON; {lat} and {lon} are replaced"
+msgstr ""
+"URL-Vorlage für Reverse-Geocoding, die JSON liefert; {lat} und {lon} werden "
+"ersetzt"
+
+#: src/ui/settings.cpp:361
+msgid "Scaling"
+msgstr "Skalierung"
+
+#: src/ui/settings.cpp:363
+msgid "Smooth when zoomed in"
+msgstr "Beim Vergrößern glätten"
+
+#: src/ui/settings.cpp:364
+msgid "Smooth when zoomed out"
+msgstr "Beim Verkleinern glätten"
+
+#: src/ui/settings.cpp:365
+msgid "In fullscreen, enlarge small images to fill the screen"
+msgstr "Im Vollbild kleine Bilder bildschirmfüllend vergrößern"
+
+#: src/ui/settings.cpp:367
+msgid "Background"
+msgstr "Hintergrund"
+
+#: src/ui/settings.cpp:369
+msgid "Window background"
+msgstr "Fensterhintergrund"
+
+#: src/ui/settings.cpp:370 src/ui/settings.cpp:420
+msgid "Fullscreen"
+msgstr "Vollbild"
+
+#: src/ui/settings.cpp:370
+msgid "Fullscreen background"
+msgstr "Vollbildhintergrund"
+
+#: src/ui/settings.cpp:371
+msgid "Show transparency as a checkerboard"
+msgstr "Transparenz als Schachbrettmuster anzeigen"
+
+#: src/ui/settings.cpp:372
+msgid "Play animated GIF and WebP (A toggles)"
+msgstr "Animierte GIF- und WebP-Bilder abspielen (A schaltet um)"
+
+#: src/ui/settings.cpp:376
+msgid "Play videos as soon as they are shown (Space toggles)"
+msgstr "Videos beim Anzeigen sofort abspielen (Leertaste schaltet um)"
+
+#: src/ui/settings.cpp:377
+msgid "Start muted (M toggles)"
+msgstr "Stumm starten (M schaltet um)"
+
+#: src/ui/settings.cpp:378
+msgid "Loop"
+msgstr "Endlos wiederholen"
+
+#: src/ui/settings.cpp:380
+msgid "Slideshow"
+msgstr "Diashow"
+
+#: src/ui/settings.cpp:382
+msgid "Seconds per image"
+msgstr "Sekunden pro Bild"
+
+#: src/ui/settings.cpp:383
+msgid "Gentle pan and zoom on each image"
+msgstr "Sanftes Schwenken und Zoomen bei jedem Bild"
+
+#: src/ui/settings.cpp:384
+msgid "Motion amount (%)"
+msgstr "Bewegungsstärke (%)"
+
+#: src/ui/settings.cpp:385
+msgid "Shuffle"
+msgstr "Zufällige Reihenfolge"
+
+#: src/ui/settings.cpp:386
+msgid "Cross-fade (ms, 0 = cut)"
+msgstr "Überblenden (ms, 0 = harter Schnitt)"
+
+#: src/ui/settings.cpp:388
+msgid "Fullscreen info overlay"
+msgstr "Info-Einblendung im Vollbild"
+
+#: src/ui/settings.cpp:390
+msgid "Show the overlay (I toggles it in fullscreen)"
+msgstr "Einblendung anzeigen (I schaltet sie im Vollbild um)"
+
+#: src/ui/settings.cpp:394
+msgid "File: name, position in folder, size, date"
+msgstr "Datei: Name, Position im Ordner, Größe, Datum"
+
+#: src/ui/settings.cpp:395
+msgid "Format: dimensions, depth, codec details, colour profile"
+msgstr "Format: Abmessungen, Farbtiefe, Codec-Details, Farbprofil"
+
+#: src/ui/settings.cpp:396
+msgid "Shot: camera, lens, aperture, shutter, ISO, focal length"
+msgstr "Aufnahme: Kamera, Objektiv, Blende, Verschlusszeit, ISO, Brennweite"
+
+#: src/ui/settings.cpp:398
+msgid "View: zoom, raw state, exposure"
+msgstr "Ansicht: Zoom, Raw-Status, Belichtung"
+
+#: src/ui/settings.cpp:399
+msgid "Also show in the window, not only in fullscreen"
+msgstr "Auch im Fenster anzeigen, nicht nur im Vollbild"
+
+#: src/ui/settings.cpp:400
+msgid "Overlay text"
+msgstr "Einblendungstext"
+
+#: src/ui/settings.cpp:400
+msgid "Text colour"
+msgstr "Textfarbe"
+
+#: src/ui/settings.cpp:401
+msgid "Text size (pt)"
+msgstr "Textgröße (pt)"
+
+#: src/ui/settings.cpp:420
+msgid "Windowed"
+msgstr "Im Fenster"
+
+#: src/ui/settings.cpp:435
+msgid ""
+"While selecting a region, hold Shift for a square or Ctrl for the image's "
+"own shape."
+msgstr ""
+"Beim Auswählen eines Bereichs Umschalt für ein Quadrat oder Strg für das "
+"Seitenverhältnis des Bildes gedrückt halten."
+
+#: src/ui/settings.cpp:438
+msgid "Reset to defaults"
+msgstr "Auf Standardwerte zurücksetzen"
+
+#: src/ui/settings.cpp:457
+msgid "Format plugins: still loading."
+msgstr "Format-Plugins: werden noch geladen."
+
+#: src/ui/settings.cpp:469
+msgid "none"
+msgstr "keine"
+
+#: src/ui/settings.cpp:471
+#, c++-format
+msgid "{0} not loaded (see ifritview --plugins)"
+msgid_plural "{0} not loaded (see ifritview --plugins)"
+msgstr[0] "{0} nicht geladen (siehe ifritview --plugins)"
+msgstr[1] "{0} nicht geladen (siehe ifritview --plugins)"
+
+#: src/ui/settings.cpp:472
+#, c++-format
+msgid "Format plugins: {0}."
+msgstr "Format-Plugins: {0}."
+
+#: src/ui/settings.cpp:479
+msgid "File extensions to include when browsing a folder, separated by spaces:"
+msgstr ""
+"Dateiendungen, die beim Durchblättern eines Ordners einbezogen werden, durch "
+"Leerzeichen getrennt:"
+
+#: src/ui/settings.cpp:482
+msgid "Make IfritView the default viewer for these types"
+msgstr "IfritView als Standardprogramm für diese Typen festlegen"
+
+#: src/ui/settings.cpp:489
+#, c++-format
+msgid "IfritView is now the default for {0} file type."
+msgid_plural "IfritView is now the default for {0} file types."
+msgstr[0] "IfritView ist jetzt Standardprogramm für {0} Dateityp."
+msgstr[1] "IfritView ist jetzt Standardprogramm für {0} Dateitypen."
+
+#: src/ui/settings.cpp:491
+msgid "No file types were set."
+msgstr "Es wurden keine Dateitypen festgelegt."
+
+#: src/ui/settings.cpp:493
+msgid "Videos were left alone."
+msgstr "Videos wurden nicht verändert."
+
+#: src/ui/settings.cpp:499
+#, c++-format
+msgid "Unknown to the system: {0}."
+msgstr "Dem System unbekannt: {0}."
+
+#: src/ui/settings.cpp:502
+#, c++-format
+msgid "Error: {0}"
+msgstr "Fehler: {0}"
+
+#: src/ui/settings.cpp:506
+msgid "Reset to all supported formats"
+msgstr "Auf alle unterstützten Formate zurücksetzen"
+
+#: src/ui/settings.cpp:509
+msgid "Also for videos"
+msgstr "Auch für Videos"
+
+#: src/ui/settings.cpp:509
+msgid "Leave unticked to keep your current video player for mp4, mov, mkv…"
+msgstr ""
+"Deaktiviert lassen, um den bisherigen Videoplayer für mp4, mov, mkv… "
+"beizubehalten"
+
+#: src/ui/settings.cpp:510
+msgid "Also for PDFs"
+msgstr "Auch für PDFs"
+
+#: src/ui/settings.cpp:510
+msgid "Leave unticked to keep your current PDF reader"
+msgstr "Deaktiviert lassen, um den bisherigen PDF-Reader beizubehalten"
+
+#: src/ui/settings.cpp:596
+msgid ""
+"A fast image viewer, for photos and camera raws, and the texture formats of "
+"games."
+msgstr ""
+"Ein schneller Bildbetrachter für Fotos und Kamera-Raws sowie die "
+"Texturformate von Spielen."
+
+#: src/ui/settings.cpp:597
+msgid ""
+"Copyright © 2026 Manu Evans. Free software, under the GNU General Public "
+"License, version 3 or later."
+msgstr ""
+"Copyright © 2026 Manu Evans. Freie Software unter der GNU General Public "
+"License, Version 3 oder neuer."
+
+#: src/ui/settings.cpp:598
+msgid "Project page and source"
+msgstr "Projektseite und Quellcode"
+
+#: src/ui/settings.cpp:599
+msgid "The licence (GPL 3.0)"
+msgstr "Die Lizenz (GPL 3.0)"
+
+#: src/ui/settings.cpp:603
+msgid "Third-party notices"
+msgstr "Hinweise zu Drittanbieter-Komponenten"
+
+#: src/ui/settings.cpp:633
+msgid "Settings"
+msgstr "Einstellungen"
+
+#: src/ui/settings.cpp:636
+msgid "General"
+msgstr "Allgemein"
+
+#: src/ui/settings.cpp:637
+msgid "Viewing"
+msgstr "Anzeige"
+
+#: src/ui/settings.cpp:638
+msgid "Controls"
+msgstr "Steuerung"
+
+#: src/ui/settings.cpp:639
+msgid "File Types"
+msgstr "Dateitypen"
+
+#: src/ui/settings.cpp:640
+msgid "About"
+msgstr "Über"
+
+#: src/ui/view.cpp:527
+#, c++-format
+msgid "Difference ×{0}"
+msgstr "Differenz ×{0}"

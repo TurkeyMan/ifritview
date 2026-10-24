@@ -1091,7 +1091,7 @@ void App::request_retone()
                     {
                         image->pixels = std::move(*result);
                         if (ev != 0)
-                            image->break_transform("the exposure was changed");
+                            image->break_transform(_("the exposure was changed"));
                         image->mips.clear();
                         if (image == image_)
                             view_->image_changed();
@@ -1363,6 +1363,7 @@ void App::update_status()
                 char psnr[32], changed[32];
                 std::snprintf(psnr, sizeof psnr, "%.1f", d->psnr);
                 std::snprintf(changed, sizeof changed, "%.1f", d->changed * 100.0);
+                // xgettext:no-c-format
                 text = rap::i18n::format(_("PSNR {0} dB  ·  largest error {1}  ·  {2}% changed"), psnr, d->max_error, changed);
             }
             center += "  ·  " + text;

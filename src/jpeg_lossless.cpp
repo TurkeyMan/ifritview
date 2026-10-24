@@ -1,5 +1,6 @@
 #include "jpeg_lossless.h"
 
+#include "i18n.h"
 #include "platform.h"
 
 #include <type_traits>
@@ -81,19 +82,20 @@ bool read_all(const std::string& path, std::vector<uint8_t>& out)
 // "4 px more on the left and 2 px fewer at the bottom".
 std::string describe(int left, int top, int right, int bottom)
 {
+    // Whole phrases, so each language words them its own way.
     std::vector<std::string> parts;
-    const auto part = [&](int px, const char* side)
+    const auto part = [&](int px, const char* more, const char* fewer)
     {
         if (px)
-            parts.push_back(std::to_string(std::abs(px)) + " px " + (px > 0 ? "more " : "fewer ") + side);
+            parts.push_back(rap::i18n::format(px > 0 ? more : fewer, std::abs(px)));
     };
-    part(left, "on the left");
-    part(top, "at the top");
-    part(right, "on the right");
-    part(bottom, "at the bottom");
-    std::string s;
-    for (size_t i = 0; i < parts.size(); ++i)
-        s += (i == 0 ? "" : i + 1 == parts.size() ? " and " : ", ") + parts[i];
+    part(left, _("{0} px more on the left"), _("{0} px fewer on the left"));
+    part(top, _("{0} px more at the top"), _("{0} px fewer at the top"));
+    part(right, _("{0} px more on the right"), _("{0} px fewer on the right"));
+    part(bottom, _("{0} px more at the bottom"), _("{0} px fewer at the bottom"));
+    std::string s = parts.empty() ? std::string() : parts.back();
+    for (size_t i = parts.size(); i-- > 1;)
+        s = i + 1 == parts.size() ? rap::i18n::format(_("{0} and {1}"), parts[i - 1], s) : parts[i - 1] + ", " + s;
     return s;
 }
 
@@ -105,7 +107,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
 #ifndef HAVE_TURBOJPEG
     (void)image;
     (void)path;
-    plan.why_not = "this build has no lossless JPEG transform";
+    plan.why_not = _("this build has no lossless JPEG transform");
     return plan;
 #else
     const Image::Transform& t = image.transform;
@@ -116,30 +118,30 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     }
     if (image.encoded_as != "jpg" || image.is_raw)  // as the decoder saw the file
     {
-        plan.why_not = "the original isn't a JPEG";
+        plan.why_not = _("the original isn't a JPEG");
         return plan;
     }
     std::vector<uint8_t> src;
     if (!read_all(path, src))
     {
-        plan.why_not = "the original file can't be read";
+        plan.why_not = _("the original file can't be read");
         return plan;
     }
     if (src.size() > std::numeric_limits<unsigned long>::max() / 2)  // the API's sizes, 32 bits on Windows
     {
-        plan.why_not = "the original is too large for the transform";
+        plan.why_not = _("the original is too large for the transform");
         return plan;
     }
     const TurboJpeg* tj = turbojpeg();
     if (!tj)
     {
-        plan.why_not = "it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)";
+        plan.why_not = _("it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)");
         return plan;
     }
     tjhandle handle = tj->init();
     if (!handle)
     {
-        plan.why_not = "the lossless JPEG transform isn't available";
+        plan.why_not = _("the lossless JPEG transform isn't available");
         return plan;
     }
     struct Done
@@ -151,7 +153,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     int W = 0, H = 0, subsamp = -1, colorspace = 0;
     if (tj->header(handle, src.data(), static_cast<unsigned long>(src.size()), &W, &H, &subsamp, &colorspace) != 0)
     {
-        plan.why_not = std::string("the original can't be read: ") + tj->error(handle);
+        plan.why_not = rap::i18n::format(_("the original can't be read: {0}"), tj->error(handle));
         return plan;
     }
     // Untouched since it was read, the image is the whole file upright.
@@ -162,14 +164,14 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     {
         if (t.width != W || t.height != H)
         {
-            plan.why_not = "the original file has changed since it was opened";
+            plan.why_not = _("the original file has changed since it was opened");
             return plan;
         }
         x = t.x, y = t.y, w = t.w, h = t.h;
     }
     if (subsamp < 0 || subsamp >= TJ_NUMSAMP)
     {
-        plan.why_not = "the original's chroma subsampling isn't one the transform handles";
+        plan.why_not = _("the original's chroma subsampling isn't one the transform handles");
         return plan;
     }
     // The original's partial blocks are at its right and bottom edges. A turn
@@ -198,7 +200,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     const int x1 = std::min(full_w, x + w - trim_left), y1 = std::min(full_h, y + h - trim_top);
     if (x1 <= x0 || y1 <= y0)
     {
-        plan.why_not = "the crop is within one block of JPEG's grid, or in edge blocks a turn has to drop";
+        plan.why_not = _("the crop is within one block of JPEG's grid, or in edge blocks a turn has to drop");
         return plan;
     }
     static const int kOps[] = {TJXOP_NONE, TJXOP_NONE, TJXOP_HFLIP, TJXOP_ROT180, TJXOP_VFLIP, TJXOP_TRANSPOSE, TJXOP_ROT90, TJXOP_TRANSVERSE, TJXOP_ROT270};
@@ -214,7 +216,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     unsigned long dst_size = 0;
     if (tj->transform(handle, src.data(), static_cast<unsigned long>(src.size()), 1, &dst, &dst_size, &xf, 0) != 0)
     {
-        plan.why_not = std::string("the transform failed: ") + tj->error(handle);
+        plan.why_not = rap::i18n::format(_("the transform failed: {0}"), tj->error(handle));
         tj->free(dst);
         return plan;
     }
@@ -223,7 +225,7 @@ LosslessJpeg plan_lossless_jpeg(const Image& image, const std::string& path)
     int out_subsamp = 0;
     if (tj->header(handle, plan.data.data(), static_cast<unsigned long>(plan.data.size()), &plan.width, &plan.height, &out_subsamp, &colorspace) != 0)
     {
-        plan.why_not = "the transform's result can't be read";
+        plan.why_not = _("the transform's result can't be read");
         plan.data.clear();
         return plan;
     }

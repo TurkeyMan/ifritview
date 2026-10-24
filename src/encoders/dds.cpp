@@ -506,6 +506,13 @@ bool encode_dds(const Image& image, const std::string& path, const EncodeOptions
     return write_file(path, out.data(), out.size(), error);
 }
 
+// The format chosen, or null for Automatic (BC7, or half floats).
+const Format* chosen(const EncodeOptions& options)
+{
+    const int choice = options.get("format", 0);
+    return choice >= 1 && choice <= kFormatCount ? &kFormats[choice - 1] : nullptr;
+}
+
 bool lossy(const EncodeOptions& options)
 {
     const int choice = dds_encoder().value(options, "format");
@@ -524,11 +531,17 @@ const Encoder& dds_encoder()
             formats.push_back(f.label);
         Encoder d{"DDS", "dds",
                   {{"format", N_("Format"), Kind::Choice, 0, kFormatCount, 0, formats},
-                   {"effort", N_("Effort"), Kind::Choice, 0, 2, 1, {N_("Fast"), N_("Balanced"), N_("Best (slow)")}, N_("block-compressed formats")},
+                   {"effort", N_("Effort"), Kind::Choice, 0, 2, 1, {N_("Fast"), N_("Balanced"), N_("Best (slow)")}, N_("block-compressed formats"),
+                    nullptr, [](const EncodeOptions& o) { return chosen(o) == nullptr || chosen(o)->compressed; }},
                    {"mipmaps", N_("Mipmaps"), Kind::Toggle, 0, 1, 1, {}, N_("each half the size, down to 1 px")},
-                   {"srgb", N_("sRGB colour"), Kind::Toggle, 0, 1, 1, {}, N_("off for data: normal maps, masks"), "legacy"},
-                   {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit formats")},
-                   {"legacy", N_("Old-style header"), Kind::Toggle, 0, 1, 0, {}, N_("for tools before DirectX 10")}},
+                   // Not only a tag: the mipmaps are averaged in linear light, and
+                   // block colours weighed as the eye does, when it's on.
+                   {"srgb", N_("sRGB colour"), Kind::Toggle, 0, 1, 1, {}, N_("off for data: normal maps, masks"), nullptr,
+                    [](const EncodeOptions& o) { return chosen(o) == nullptr || !floating(chosen(o)->layout); }},
+                   {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit formats"), nullptr,
+                    [](const EncodeOptions& o) { return chosen(o) != nullptr && chosen(o)->bits == 16 && !chosen(o)->compressed && chosen(o)->layout != Layout::RG8; }},
+                   {"legacy", N_("Old-style header"), Kind::Toggle, 0, 1, 0, {}, N_("for tools before DirectX 10"), nullptr,
+                    [](const EncodeOptions& o) { return chosen(o) != nullptr && (chosen(o)->fourcc || chosen(o)->masks[0]); }}},
                   encode_dds};
         d.reduces = lossy;
         d.metadata = false;

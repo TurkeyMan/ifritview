@@ -95,7 +95,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
                                          d->metadata_node(metadata),
                                          L::buttons{L::ok(_("_Save…")), L::cancel},
                                      }}}
-                               .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(11 + 2.2 * double(most)), rap::extent::unit::lines})
+                               .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(13 + 2.5 * double(most)), rap::extent::unit::lines})
                                .modeless()
                                .resizable(false),
                            parent);
@@ -124,7 +124,7 @@ rap::node SaveDialog::page_node(Page& page)
         if (auto it = own_settings_.find(set.key); it != own_settings_.end() && own_extension_ == e.extension)
             value = std::clamp(it->second, set.min, set.max);
         Control& c = page.controls[i];
-        rap::node beside = L::label{set.note ? tr_ifrit(set.note) : ""}.bind(c.note);  // a few words
+        rap::node beside = L::label{set.note ? tr_ifrit(set.note) : ""}.ellipsize().bind(c.note);  // a few words; shortened, never wrapped, so the dialog's height holds
         switch (set.kind)
         {
             case EncodeSetting::Kind::Range:
@@ -152,7 +152,15 @@ rap::node SaveDialog::page_node(Page& page)
                 std::vector<std::string> choices;
                 for (const char* choice : set.choices)
                     choices.push_back(tr_ifrit(choice));
-                rows.push_back({tr_ifrit(set.label), L::hbox{L::drop_down{choices, value}.on_changed([s](int) { s->report(); }).bind(c.choice), beside}});
+                rows.push_back({tr_ifrit(set.label), L::hbox{L::drop_down{choices, value}
+                                                                 .on_changed(
+                                                                     [s, p](int)
+                                                                     {
+                                                                         s->update_enabled(*p);  // what applies may change with it
+                                                                         s->report();
+                                                                     })
+                                                                 .bind(c.choice),
+                                                             beside}});
                 break;
             }
         }
@@ -198,7 +206,7 @@ rap::node SaveDialog::metadata_node(const MetadataChoice& initial)
     return L::vbox{
         L::form{{_("Metadata"), L::drop_down{presets, preset_index(initial)}.on_changed([s](int i) { s->preset_chosen(i); }).bind(preset_)}},
         L::hbox{rap::node{rap::spec::box{rap::orientation::vertical, columns[0], false, {}}, {}}, rap::node{rap::spec::box{rap::orientation::vertical, columns[1], false, {}}, {}}},
-        L::label{""}.bind(metadata_note_),
+        L::label{""}.ellipsize().bind(metadata_note_),
     };
 }
 
@@ -312,15 +320,29 @@ void SaveDialog::update_enabled(Page& page)
     for (size_t i = 0; i < e.settings.size(); ++i)
     {
         // Every one, every time: lossless unchecked gives them all back.
-        const char* off = e.settings[i].off_when;
-        const bool enabled = !lossless && (!off || o.get(off, 0) == 0);
-        const Control& c = page.controls[i];
+        const EncodeSetting& set = e.settings[i];
+        const bool applies = !set.applies || set.applies(o);
+        const bool enabled = !lossless && applies && (!set.off_when || o.get(set.off_when, 0) == 0);
+        Control& c = page.controls[i];
         if (c.range)
             c.range->set_enabled(enabled);
         if (c.choice)
             c.choice->set_enabled(enabled);
         if (c.toggle)
+        {
+            // One that means nothing here shows off, and has its own value back after.
+            if (!applies && c.kept < 0)
+            {
+                c.kept = c.toggle->checked();
+                c.toggle->set_checked(false);
+            }
+            else if (applies && c.kept >= 0)
+            {
+                c.toggle->set_checked(c.kept != 0);
+                c.kept = -1;
+            }
             c.toggle->set_enabled(enabled);
+        }
         if (c.note)
             c.note->set_enabled(enabled);
     }

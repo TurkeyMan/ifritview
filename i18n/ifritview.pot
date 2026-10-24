@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: IfritView\n"
 "Report-Msgid-Bugs-To: https://github.com/TurkeyMan/ifritview/issues\n"
-"POT-Creation-Date: 2026-10-24 16:54+0000\n"
+"POT-Creation-Date: 2026-10-24 17:08+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -167,7 +167,7 @@ msgstr ""
 
 #: src/decoders/blp.cpp:249 src/decoders/dds.cpp:345 src/decoders/gim.cpp:386
 #: src/decoders/pvr.cpp:464 src/decoders/pvr.cpp:796 src/decoders/pvr.cpp:887
-#: src/decoders/tim2.cpp:223 src/decoders/vtf.cpp:308 src/encoders/dds.cpp:528
+#: src/decoders/tim2.cpp:223 src/decoders/vtf.cpp:308 src/encoders/dds.cpp:536
 msgid "Mipmaps"
 msgstr ""
 
@@ -179,7 +179,7 @@ msgstr ""
 #: src/decoders/dds.cpp:332 src/decoders/gim.cpp:379 src/decoders/ktx.cpp:586
 #: src/decoders/ktx.cpp:717 src/decoders/pkm.cpp:74 src/decoders/pvr.cpp:451
 #: src/decoders/pvr.cpp:794 src/decoders/pvr.cpp:881 src/decoders/vtf.cpp:306
-#: src/encoders/dds.cpp:526 src/ui/app_metadata.cpp:109 src/ui/save.cpp:81
+#: src/encoders/dds.cpp:533 src/ui/app_metadata.cpp:109 src/ui/save.cpp:81
 msgid "Format"
 msgstr ""
 
@@ -788,56 +788,56 @@ msgstr ""
 msgid "RGBA float (HDR)"
 msgstr ""
 
-#: src/encoders/dds.cpp:522
+#: src/encoders/dds.cpp:529
 msgid "Automatic (BC7; half float for HDR)"
 msgstr ""
 
-#: src/encoders/dds.cpp:527
+#: src/encoders/dds.cpp:534
 msgid "Balanced"
 msgstr ""
 
-#: src/encoders/dds.cpp:527
+#: src/encoders/dds.cpp:534
 msgid "Best (slow)"
 msgstr ""
 
-#: src/encoders/dds.cpp:527
+#: src/encoders/dds.cpp:534
 msgid "Effort"
 msgstr ""
 
-#: src/encoders/dds.cpp:527
+#: src/encoders/dds.cpp:534
 msgid "Fast"
 msgstr ""
 
-#: src/encoders/dds.cpp:527
+#: src/encoders/dds.cpp:534
 msgid "block-compressed formats"
 msgstr ""
 
-#: src/encoders/dds.cpp:528
+#: src/encoders/dds.cpp:536
 msgid "each half the size, down to 1 px"
 msgstr ""
 
-#: src/encoders/dds.cpp:529
+#: src/encoders/dds.cpp:539
 msgid "off for data: normal maps, masks"
 msgstr ""
 
-#: src/encoders/dds.cpp:529
+#: src/encoders/dds.cpp:539
 msgid "sRGB colour"
 msgstr ""
 
-#: src/encoders/dds.cpp:530
+#: src/encoders/dds.cpp:541
 msgid "16-bit formats"
 msgstr ""
 
-#: src/encoders/dds.cpp:530 src/encoders/encoder.cpp:768
-#: src/encoders/encoder.cpp:781
+#: src/encoders/dds.cpp:541 src/encoders/encoder.cpp:768
+#: src/encoders/encoder.cpp:782
 msgid "Dither"
 msgstr ""
 
-#: src/encoders/dds.cpp:531
+#: src/encoders/dds.cpp:543
 msgid "Old-style header"
 msgstr ""
 
-#: src/encoders/dds.cpp:531
+#: src/encoders/dds.cpp:543
 msgid "for tools before DirectX 10"
 msgstr ""
 
@@ -901,12 +901,12 @@ msgstr ""
 msgid "None"
 msgstr ""
 
-#: src/encoders/encoder.cpp:765 src/encoders/encoder.cpp:779
+#: src/encoders/encoder.cpp:765 src/encoders/encoder.cpp:780
 #: src/ui/app_metadata.cpp:111
 msgid "Pixel format"
 msgstr ""
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
 msgid "16-bit ARGB 1555"
 msgstr ""
 
@@ -914,15 +914,15 @@ msgstr ""
 msgid "16-bit RGB 565"
 msgstr ""
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
 msgid "24-bit BGR"
 msgstr ""
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
 msgid "32-bit BGRA"
 msgstr ""
 
-#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:766 src/encoders/encoder.cpp:781
 msgid "Automatic (32-bit with alpha, else 24-bit)"
 msgstr ""
 
@@ -930,28 +930,129 @@ msgstr ""
 msgid "16-bit ARGB 4444"
 msgstr ""
 
-#: src/encoders/encoder.cpp:767 src/encoders/encoder.cpp:780
+#: src/encoders/encoder.cpp:767 src/encoders/encoder.cpp:781
 msgid "8-bit indexed (256 colours)"
 msgstr ""
 
-#: src/encoders/encoder.cpp:768 src/encoders/encoder.cpp:781
+#: src/encoders/encoder.cpp:768 src/encoders/encoder.cpp:782
 msgid "16-bit and indexed"
 msgstr ""
 
-#: src/encoders/encoder.cpp:769
+#: src/encoders/encoder.cpp:770
 msgid "sRGB colour space tag"
 msgstr ""
 
-#: src/encoders/encoder.cpp:770
+#: src/encoders/encoder.cpp:771
 msgid "Top-down rows"
 msgstr ""
 
-#: src/encoders/encoder.cpp:782
+#: src/encoders/encoder.cpp:784
 msgid "RLE compression"
 msgstr ""
 
-#: src/encoders/encoder.cpp:783
+#: src/encoders/encoder.cpp:785
 msgid "Top-left origin"
+msgstr ""
+
+#: src/image.cpp:206 src/ui/app.cpp:1094
+msgid "the exposure was changed"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:92
+#, c++-format
+msgid "{0} px fewer on the left"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:92
+#, c++-format
+msgid "{0} px more on the left"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:93
+#, c++-format
+msgid "{0} px fewer at the top"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:93
+#, c++-format
+msgid "{0} px more at the top"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:94
+#, c++-format
+msgid "{0} px fewer on the right"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:94
+#, c++-format
+msgid "{0} px more on the right"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:95
+#, c++-format
+msgid "{0} px fewer at the bottom"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:95
+#, c++-format
+msgid "{0} px more at the bottom"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:98
+#, c++-format
+msgid "{0} and {1}"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:110
+msgid "this build has no lossless JPEG transform"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:121
+msgid "the original isn't a JPEG"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:127
+msgid "the original file can't be read"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:132
+msgid "the original is too large for the transform"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:138
+msgid "it needs the TurboJPEG library (the libturbojpeg0 or turbojpeg package)"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:144
+msgid "the lossless JPEG transform isn't available"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:156
+#, c++-format
+msgid "the original can't be read: {0}"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:167
+msgid "the original file has changed since it was opened"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:174
+msgid "the original's chroma subsampling isn't one the transform handles"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:203
+msgid ""
+"the crop is within one block of JPEG's grid, or in edge blocks a turn has to "
+"drop"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:219
+#, c++-format
+msgid "the transform failed: {0}"
+msgstr ""
+
+#: src/jpeg_lossless.cpp:228
+msgid "the transform's result can't be read"
 msgstr ""
 
 #: src/ui/app.cpp:241
@@ -1142,8 +1243,8 @@ msgstr ""
 msgid "identical"
 msgstr ""
 
-#: src/ui/app.cpp:1366
-#, c-format, c++-format
+#: src/ui/app.cpp:1367
+#, no-c-format, c++-format
 msgid "PSNR {0} dB  ·  largest error {1}  ·  {2}% changed"
 msgstr ""
 
@@ -1339,23 +1440,23 @@ msgstr ""
 msgid "_Save…"
 msgstr ""
 
-#: src/ui/save.cpp:163
+#: src/ui/save.cpp:171
 msgid "Lossless: turn and crop the original, no re-encoding"
 msgstr ""
 
-#: src/ui/save.cpp:172
+#: src/ui/save.cpp:180
 msgid "Checking…"
 msgstr ""
 
-#: src/ui/save.cpp:199
+#: src/ui/save.cpp:207
 msgid "Metadata"
 msgstr ""
 
-#: src/ui/save.cpp:253
+#: src/ui/save.cpp:261
 msgid "This image has no metadata to keep."
 msgstr ""
 
-#: src/ui/save.cpp:257
+#: src/ui/save.cpp:265
 msgid "The colour profile is always kept."
 msgstr ""
 

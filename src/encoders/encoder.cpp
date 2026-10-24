@@ -765,7 +765,8 @@ const Encoder& bmp_encoder()
                            {{"format", N_("Pixel format"), Kind::Choice, 0, 6, 0,
                              {N_("Automatic (32-bit with alpha, else 24-bit)"), N_("32-bit BGRA"), N_("24-bit BGR"), N_("16-bit RGB 565"), N_("16-bit ARGB 1555"),
                               N_("16-bit ARGB 4444"), N_("8-bit indexed (256 colours)")}},
-                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed")},
+                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed"), nullptr,
+                             [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }},  // 565, 1555, 4444, indexed
                             {"srgb", N_("sRGB colour space tag"), Kind::Toggle, 0, 1, 1},
                             {"topdown", N_("Top-down rows"), Kind::Toggle, 0, 1, 0}},
                            encode_bmp,
@@ -778,7 +779,8 @@ const Encoder& tga_encoder()
     static const Encoder e{"Targa", "tga",
                            {{"format", N_("Pixel format"), Kind::Choice, 0, 4, 0,
                              {N_("Automatic (32-bit with alpha, else 24-bit)"), N_("32-bit BGRA"), N_("24-bit BGR"), N_("16-bit ARGB 1555"), N_("8-bit indexed (256 colours)")}},
-                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed")},
+                            {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit and indexed"), nullptr,
+                             [](const EncodeOptions& o) { return o.get("format", 0) >= 3; }},  // 1555, indexed
                             {"rle", N_("RLE compression"), Kind::Toggle, 0, 1, 0},
                             {"topleft", N_("Top-left origin"), Kind::Toggle, 0, 1, 0}},
                            encode_tga,
