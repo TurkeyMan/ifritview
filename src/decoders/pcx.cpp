@@ -71,10 +71,9 @@ bool decode(const std::string& path, Image& out, std::string& error)
     std::vector<uint32_t> palette;
     if (bits == 8)
     {
-        // VGA palette: 0x0C marker then 768 bytes at the end of the file.
-        if (d.size() >= 769 && d[d.size() - 769] == 0x0C)
-            for (size_t i = d.size() - 768; i + 2 < d.size(); i += 3)
-                palette.push_back(0xFF000000u | (uint32_t(d[i]) << 16) | (uint32_t(d[i + 1]) << 8) | d[i + 2]);
+        uint32_t vga[256];
+        if (pcx_vga_palette(d.data(), d.size(), vga))
+            palette.assign(vga, vga + 256);
         else
             for (int i = 0; i < 256; ++i)
                 palette.push_back(0xFF000000u | uint32_t(i) * 0x010101);  // grey ramp fallback
@@ -152,6 +151,16 @@ bool decode(const std::string& path, Image& out, std::string& error)
 }
 
 }  // namespace
+
+bool pcx_vga_palette(const uint8_t* d, size_t n, uint32_t palette[256])
+{
+    // A 0x0C marker then 768 bytes of RGB at the end of the file.
+    if (!sniff(d, n) || n < 128 + 769 || d[n - 769] != 0x0C)
+        return false;
+    for (size_t i = 0, at = n - 768; i < 256; ++i, at += 3)
+        palette[i] = 0xFF000000u | uint32_t(d[at]) << 16 | uint32_t(d[at + 1]) << 8 | d[at + 2];
+    return true;
+}
 
 const Decoder& pcx_decoder()
 {
