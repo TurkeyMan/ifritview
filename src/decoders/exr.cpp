@@ -1,9 +1,9 @@
 // OpenEXR: ILM's scene-linear high-dynamic-range format, written from the
 // specification. A version field, one header of attributes per part, a table
 // of chunk offsets per part, then the chunks: blocks of scanlines or tiles,
-// each compressed on its own. Single and multi-part files (the first image
-// part with colour is shown), scanlines and tiles (level 0 of a mipmap or
-// ripmap), pixel types half, float and uint, and the compressions none, RLE,
+// each compressed on its own. Single and multi-part files (each image part
+// a page, one with colour first), scanlines and tiles (a mipmap's levels, a
+// ripmap's diagonal ones), pixel types half, float and uint, and the compressions none, RLE,
 // ZIPS, ZIP, PIZ, PXR24, B44 and B44A. DWAA/DWAB, HTJ2K, LJ2K and ZSTD
 // aren't read, nor are deep parts or luminance/chroma (Y, RY, BY) images.
 // Chunks decode in parallel.
@@ -150,7 +150,8 @@ struct Part
     int line_order = 0;
     bool tiled = false;
     uint32_t tile_w = 0, tile_h = 0;
-    int level_mode = 0;
+    int level_mode = 0;   // one level, mipmap, ripmap
+    bool level_up = false;  // level sizes rounded up, not down
     int64_t chunk_count = -1;
     bool has_chromaticities = false;
     float chromaticities[8] = {};
@@ -384,6 +385,7 @@ bool parse_header(const uint8_t* d, size_t size, size_t& pos, Part& part, std::s
             part.tile_w = le32(v);
             part.tile_h = le32(v + 4);
             part.level_mode = v[8] & 0xF;
+            part.level_up = (v[8] >> 4) != 0;
         }
         else if (name == "chunkCount" && type == "int")
         {
@@ -1263,7 +1265,7 @@ ColorSpace colour_space(const float* c)
     return ColorSpace::from_primaries({c[0], c[1]}, {c[2], c[3]}, {c[4], c[5]}, {c[6], c[7]}, ColorSpace::Transfer::Linear, 1, "Linear, custom primaries");
 }
 
-bool decode(const std::string& path, Image& out, std::string& error)
+bool decode_part(const std::string& path, ImagePart want, Image& out, std::string& error)
 {
     const uint8_t* d = nullptr;
     size_t size = 0;
@@ -1340,9 +1342,67 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "EXR file has only deep data, which isn't supported";
         return false;
     }
+    // The image parts are the pages: that one first, so opening the file
+    // shows it, then the others in file order; each named by its name.
+    std::vector<int> images{chosen};
+    for (size_t i = 0; i < parts.size(); ++i)
+        if (int(i) != chosen && (parts[i].type.empty() || parts[i].type == "scanlineimage" || parts[i].type == "tiledimage"))
+            images.push_back(int(i));
+    out.page_count = int(images.size());
+    if (want.page >= out.page_count)
+    {
+        error = "the EXR has no such page or level";
+        return false;
+    }
+    chosen = images[size_t(want.page)];
     Part& part = parts[size_t(chosen)];
+    if (images.size() > 1 && !part.name.empty())
+        out.page_label = part.name;
     // Tiled by the version flag (one part) or by its type (several).
     part.tiled = multipart ? part.type == "tiledimage" : (version & kTiledFlag) != 0;
+
+    // A tiled part's mipmap levels, each in its own tiles after the larger
+    // ones' in the offset table; a ripmap's are its diagonal (both sides
+    // halving), the levels a mipmap would have. The level is decoded as
+    // though its data window were the part's.
+    const int full_w = part.data_window.width(), full_h = part.data_window.height();
+    const auto level_size = [&](int full, int l)
+    {
+        const int64_t n = part.level_up ? (int64_t(full) + (int64_t(1) << l) - 1) >> l : int64_t(full) >> l;
+        return int(std::max<int64_t>(1, n));
+    };
+    const auto levels_for = [&](int full)
+    {
+        int n = 1;
+        while (n < 32 && level_size(full, n - 1) > 1)
+            ++n;
+        return n;
+    };
+    const bool mipmap = part.tiled && part.level_mode == 1, ripmap = part.tiled && part.level_mode == 2;
+    const int levels_x = ripmap ? levels_for(full_w) : 1;
+    out.level_count = mipmap ? levels_for(std::max(full_w, full_h)) : ripmap ? std::min(levels_x, levels_for(full_h)) : 1;
+    if (want.level >= out.level_count)
+    {
+        error = "the EXR has no such page or level";
+        return false;
+    }
+    uint64_t skip_tiles = 0;  // the chunks before this level's
+    if (want.level > 0 && part.tile_w > 0 && part.tile_h > 0)
+    {
+        const auto tiles = [&](int lx, int ly)
+        {
+            return uint64_t((level_size(full_w, lx) + part.tile_w - 1) / part.tile_w) * uint64_t((level_size(full_h, ly) + part.tile_h - 1) / part.tile_h);
+        };
+        for (int ly = 0; ly <= want.level; ++ly)
+            for (int lx = 0; lx < (mipmap ? 1 : levels_x); ++lx)
+            {
+                const int x = mipmap ? ly : lx;
+                if (ly < want.level || x < want.level)
+                    skip_tiles += tiles(x, ly);
+            }
+        part.data_window.x1 = part.data_window.x0 + level_size(full_w, want.level) - 1;
+        part.data_window.y1 = part.data_window.y0 + level_size(full_h, want.level) - 1;
+    }
     if (part.channels.empty() || !part.has_data_window || part.compression < 0)
     {
         error = "EXR header lacks channels, data window or compression";
@@ -1411,6 +1471,12 @@ bool decode(const std::string& path, Image& out, std::string& error)
         }
         table += size_t(parts[size_t(i)].chunk_count) * 8;
     }
+    if (skip_tiles > (size - std::min(size, table)) / 8)
+    {
+        error = "EXR offset table is cut short";
+        return false;
+    }
+    table += size_t(skip_tiles) * 8;
     if (multipart && part.chunk_count < int64_t(chunks.size()))
     {
         error = "EXR part's chunk count is wrong";
@@ -1422,6 +1488,74 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
     }
     const size_t data_start = table + chunks.size() * 8;
+
+    // Where each chunk is. A table with gaps (a writer that never came back
+    // to fill it in, as exrmultipart's -combine does, or a file cut short)
+    // is rebuilt as OpenEXR's reader rebuilds it: by walking the chunks from
+    // the end of the tables, each saying which part and place it holds.
+    std::vector<uint64_t> offsets(chunks.size());
+    const auto missing = [&](uint64_t off) { return off < data_start || off >= size; };
+    bool gaps = false;
+    for (size_t i = 0; i < chunks.size(); ++i)
+        gaps |= missing(offsets[i] = le64(d + table + i * 8));
+    if (gaps)
+    {
+        // The tables' end: every part's chunk count, or one part's chunks
+        // (every level's tiles, for a tiled one).
+        uint64_t entries = 0;
+        if (multipart)
+            for (const Part& q : parts)
+                entries += uint64_t(std::max<int64_t>(0, q.chunk_count));
+        else if (!part.tiled)
+            entries = chunks.size();
+        else
+        {
+            const auto tiles = [&](int lx, int ly)
+            {
+                return uint64_t((level_size(full_w, lx) + part.tile_w - 1) / part.tile_w) *
+                       uint64_t((level_size(full_h, ly) + part.tile_h - 1) / part.tile_h);
+            };
+            const int nx = ripmap ? levels_x : mipmap ? levels_for(std::max(full_w, full_h)) : 1;
+            const int ny = ripmap ? levels_for(full_h) : 1;
+            for (int ly = 0; ly < ny; ++ly)
+                for (int lx = 0; lx < nx; ++lx)
+                    entries += tiles(lx, ripmap ? ly : lx);
+        }
+        const int lines = lines_per_chunk(part.compression);
+        const int64_t across = part.tiled ? (int64_t(dw.width()) + part.tile_w - 1) / part.tile_w : 1;
+        for (uint64_t at = pos + entries * 8; at < size;)
+        {
+            const uint8_t* p = d + at;
+            int number = chosen;
+            if (multipart)
+            {
+                if (size - at < 4 || (number = le32s(p)) < 0 || size_t(number) >= parts.size())
+                    break;
+                p += 4;
+            }
+            const Part& q = parts[size_t(number)];
+            if (multipart && !(q.type.empty() || q.type == "scanlineimage" || q.type == "tiledimage"))
+                break;  // deep chunks are laid out otherwise
+            const bool tiled = multipart ? q.type == "tiledimage" : part.tiled;
+            const size_t head = size_t(p - (d + at)) + (tiled ? 20 : 8);
+            if (size - at < head)
+                break;
+            const uint64_t n = le32(p + (tiled ? 16 : 4));
+            if (number == chosen)
+            {
+                int64_t i = -1;
+                if (tiled && le32s(p + 8) == want.level && le32s(p + 12) == want.level && le32s(p) >= 0 && le32s(p + 4) >= 0)
+                    i = int64_t(le32s(p + 4)) * across + le32s(p);
+                else if (!tiled && (int64_t(le32s(p)) - dw.y0) % lines == 0)
+                    i = (int64_t(le32s(p)) - dw.y0) / lines;
+                if (i >= 0 && uint64_t(i) < offsets.size() && missing(offsets[size_t(i)]))
+                    offsets[size_t(i)] = at;
+            }
+            if (n > size - at - head)
+                break;
+            at += head + n;
+        }
+    }
     // Each chunk's size, plain, must fit an int as the format's own do.
     {
         int64_t bytes_per_pixel = 0;
@@ -1443,7 +1577,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     for (size_t i = 0; i < chunks.size(); ++i)
     {
         Chunk& c = chunks[i];
-        const uint64_t off = le64(d + table + i * 8);
+        const uint64_t off = offsets[i];
         const size_t head = (multipart ? 4 : 0) + (part.tiled ? 20 : 8);
         if (off < data_start || off >= size || size - off < head)
         {
@@ -1462,8 +1596,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
         }
         if (part.tiled)
         {
-            if (int64_t(le32s(p)) * part.tile_w != c.box.x0 - dw.x0 || int64_t(le32s(p + 4)) * part.tile_h != c.box.y0 - dw.y0 || le32s(p + 8) ||
-                le32s(p + 12))
+            if (int64_t(le32s(p)) * part.tile_w != c.box.x0 - dw.x0 || int64_t(le32s(p + 4)) * part.tile_h != c.box.y0 - dw.y0 || le32s(p + 8) != want.level ||
+                le32s(p + 12) != want.level)
             {
                 error = "EXR tile is out of place";
                 return false;
@@ -1623,7 +1757,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.add(N_("EXR"), N_("Line order"), part.line_order >= 0 && part.line_order < 3 ? orders[part.line_order] : std::to_string(part.line_order));
     if (part.tiled)
     {
-        static const char* const modes[] = {"one level", "mipmap, level 0 shown", "ripmap, level 0 shown"};
+        static const char* const modes[] = {"one level", "mipmap", "ripmap (its diagonal levels shown)"};
         out.add(N_("EXR"), N_("Tiles"), std::to_string(part.tile_w) + "×" + std::to_string(part.tile_h) + ", " +
                                     (part.level_mode < 3 ? modes[part.level_mode] : "unknown levels"));
     }
@@ -1657,6 +1791,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 const Decoder& exr_decoder()
 {
-    static const Decoder d{"EXR", {"exr"}, sniff, decode};
+    static const Decoder d{"EXR", {"exr"}, sniff, [](const std::string& path, Image& out, std::string& error)
+                           { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
 }
