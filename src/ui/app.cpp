@@ -281,10 +281,12 @@ void App::build_ui()
                                     .on_changed([this](double) { white_balance_changed(); })
                                     .bind(wb_tint_)
                                     .tooltip(_("White balance: towards green (-) or magenta (+)"))},
-                    {"", L::button{_("As shot")}.on_click([this] { white_balance_as_shot(); })},
                 },
             }
                 .handle(wb_box_),
+            L::form{{"", L::button{_("As shot")}
+                             .on_click([this] { white_balance_as_shot(); })
+                             .tooltip(_("Back to the camera's exposure and white balance"))}},
         }
             .handle(exposure_box_);
 
@@ -1161,12 +1163,15 @@ void App::white_balance_changed()
     view_->redraw();
 }
 
+// Back to how the camera took it: its white balance and its exposure.
 void App::white_balance_as_shot()
 {
-    if (!image_ || !image_->mosaic)
+    if (!image_)
         return;
     image_->wb_kelvin = image_->wb_tint = 0;
     sync_white_balance();
+    if (exposure_applies())
+        set_exposure(image_->exposure_bias);  // the slider rests at the camera's compensation
     view_->redraw();
 }
 
