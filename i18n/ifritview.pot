@@ -1996,3 +1996,19 @@ msgstr ""
 #: src/ui/app.cpp
 msgid "This raw has no embedded JPEG"
 msgstr ""
+
+#: src/ui/app.cpp
+msgid "LibRaw's develop"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Developing with LibRaw…"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "LibRaw couldn't develop it: {0}"
+msgstr ""

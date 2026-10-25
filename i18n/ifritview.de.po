@@ -2021,3 +2021,19 @@ msgstr "Die Darstellung der Kamera zeigen, das im Raw eingebettete JPEG, statt d
 #: src/ui/app.cpp
 msgid "This raw has no embedded JPEG"
 msgstr "Dieses Raw enthält kein eingebettetes JPEG"
+
+#: src/ui/app.cpp
+msgid "LibRaw's develop"
+msgstr "LibRaws Entwicklung"
+
+#: src/ui/app.cpp
+msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
+msgstr "Das Raw so zeigen, wie LibRaw es auf der CPU entwickelt (langsamer), statt wie hier auf der GPU entwickelt"
+
+#: src/ui/app.cpp
+msgid "Developing with LibRaw…"
+msgstr "Entwicklung mit LibRaw…"
+
+#: src/ui/app.cpp
+msgid "LibRaw couldn't develop it: {0}"
+msgstr "LibRaw konnte es nicht entwickeln: {0}"

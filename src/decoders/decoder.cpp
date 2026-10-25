@@ -223,6 +223,16 @@ void release_file_bytes()
     t_file = FileBuffer{};
 }
 
+namespace
+{
+thread_local bool t_cpu_develop = false;
+}
+
+void develop_raws_on_cpu(bool on)
+{
+    t_cpu_develop = on;
+}
+
 void set_decode_options(const DecodeOptions& options)
 {
     std::lock_guard lock(g_options_mutex);
@@ -232,7 +242,10 @@ void set_decode_options(const DecodeOptions& options)
 DecodeOptions decode_options()
 {
     std::lock_guard lock(g_options_mutex);
-    return g_options;
+    DecodeOptions o = g_options;
+    if (t_cpu_develop)
+        o.gpu_develop = o.gpu_decode = false;
+    return o;
 }
 
 static const std::vector<const Decoder*>& builtin_decoders()

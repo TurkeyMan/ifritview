@@ -288,14 +288,13 @@ void App::build_ui()
                              .on_click([this] { white_balance_as_shot(); })
                              .tooltip(_("Back to the camera's exposure and white balance"))}},
             L::form{{"", L::check{_("Camera's JPEG")}
-                             .on_toggled(
-                                 [this](bool on)
-                                 {
-                                     show_camera_jpeg_ = on;
-                                     show_camera_jpeg();
-                                 })
+                             .on_toggled([this](bool on) { show_instead(on ? Instead::CameraJpeg : Instead::Nothing); })
                              .bind(camera_jpeg_check_)
-                             .tooltip(_("Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"))}},
+                             .tooltip(_("Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"))},
+                     {"", L::check{_("LibRaw's develop")}
+                              .on_toggled([this](bool on) { show_instead(on ? Instead::LibRaw : Instead::Nothing); })
+                              .bind(libraw_check_)
+                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))}},
         }
             .handle(exposure_box_);
 
@@ -727,8 +726,14 @@ void App::script_export(const std::string& path)
     pixels_for_cpu();
     std::string error;
     const Encoder* e = encoder_for_extension(file_extension(path));
-    if (!e || !e->encode(*image_, path, EncodeOptions{}, error))
+    const Image& shown = instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *image_;
+    if (!e || !e->encode(shown, path, EncodeOptions{}, error))
         std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), e ? error.c_str() : "no encoder for that extension");
+}
+
+void App::script_instead(const std::string& what)
+{
+    show_instead(what == "jpeg" ? Instead::CameraJpeg : what == "libraw" ? Instead::LibRaw : Instead::Nothing);
 }
 
 void App::script_compare(const std::string& how)
@@ -1084,7 +1089,7 @@ void App::on_loaded(Loader::Result& r)
         sync_exposure_slider();
         update_status();
         refresh_metadata();
-        show_camera_jpeg();  // developed: now the camera's JPEG can stand beside it
+        show_instead();  // developed: now what's compared with it can stand in
         return;
     }
     if (r.generation != load_generation_)
@@ -1160,8 +1165,8 @@ void App::on_loaded(Loader::Result& r)
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
     view_->set_image(image_);
-    camera_jpeg_.reset();
-    show_camera_jpeg();  // the camera's JPEG instead, while that's chosen
+    instead_image_.reset();
+    show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
     if (nav_stamp_us_)
         view_->stamp_present(nav_stamp_us_, image_.get());
     nav_stamp_us_ = 0;
@@ -1205,6 +1210,7 @@ void App::sync_white_balance()
     const bool raw = image_ && image_->mosaic && !image_->is_preview();
     wb_box_->set_visible(raw);
     camera_jpeg_check_->set_visible(image_ && image_->is_raw);
+    libraw_check_->set_visible(image_ && image_->is_raw);
     if (!raw)
         return;
     double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
@@ -1225,49 +1231,79 @@ void App::white_balance_changed()
     view_->redraw();
 }
 
-void App::show_camera_jpeg()
+void App::show_instead(Instead what)
 {
-    const bool wanted = show_camera_jpeg_ && image_ && image_->is_raw && !image_->is_preview();
+    if (syncing_instead_)
+        return;
+    instead_ = what;
+    syncing_instead_ = true;  // one at a time: the other check goes off
+    camera_jpeg_check_->set_checked(what == Instead::CameraJpeg);
+    libraw_check_->set_checked(what == Instead::LibRaw);
+    syncing_instead_ = false;
+    instead_image_.reset();
+    show_instead();
+}
+
+void App::show_instead()
+{
+    const bool wanted = instead_ != Instead::Nothing && image_ && image_->is_raw && !image_->is_preview();
     if (!wanted)
     {
-        camera_jpeg_.reset();
-        ++camera_jpeg_request_;
+        instead_image_.reset();
+        ++instead_request_;
         if (image_ && view_->image() != image_.get())
             view_->set_image(image_);
         return;
     }
-    if (camera_jpeg_ && view_->image() == camera_jpeg_.get())
+    if (instead_image_ && view_->image() == instead_image_.get())
         return;
-    // Decoded full size (the detail to compare) off this thread.
-    const uint64_t request = ++camera_jpeg_request_;
+    // Off this thread: the camera's JPEG full size (the detail to compare),
+    // or LibRaw's develop (seconds).
+    const uint64_t request = ++instead_request_;
+    const Instead what = instead_;
+    if (what == Instead::LibRaw)
+    {
+        status_message_ = busy_message_ = _("Developing with LibRaw…");
+        update_status();
+    }
     ++preview_->running;  // waited for on exit
     std::thread(
-        [this, request, path = image_path_, raw = image_, state = preview_]
+        [this, request, what, path = image_path_, raw = image_, state = preview_]
         {
             struct Done
             {
                 PreviewState& s;
                 ~Done() { --s.running; }
             } done{*state};
-            auto jpeg = std::make_shared<Image>();
-            if (decode_preview(path, *jpeg))
-                jpeg->build_mips();
+            auto other = std::make_shared<Image>();
+            std::string error;
+            bool ok;
+            if (what == Instead::CameraJpeg)
+                ok = decode_preview(path, *other);
             else
-                jpeg.reset();
+            {
+                develop_raws_on_cpu(true);
+                ok = decode_image(path, *other, error);
+            }
+            if (ok)
+                other->build_mips();
+            else
+                other.reset();
             release_file_bytes();
             platform::post_main(
-                [this, request, raw, jpeg]
+                [this, request, what, raw, other, error]
                 {
-                    if (request != camera_jpeg_request_ || image_ != raw)
+                    if (request != instead_request_ || image_ != raw)
                         return;
-                    if (!jpeg)
-                    {
-                        status_message_ = _("This raw has no embedded JPEG");
-                        update_status();
+                    status_message_ = busy_message_ = "";
+                    if (!other)
+                        status_message_ = what == Instead::CameraJpeg ? std::string(_("This raw has no embedded JPEG"))
+                                                                      : rap::i18n::format(_("LibRaw couldn't develop it: {0}"), error);
+                    update_status();
+                    if (!other)
                         return;
-                    }
-                    camera_jpeg_ = jpeg;
-                    view_->set_image(jpeg);
+                    instead_image_ = other;
+                    view_->set_image(other);
                 });
         })
         .detach();

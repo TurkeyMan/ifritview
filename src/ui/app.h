@@ -95,6 +95,7 @@ public:
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
     void script_export(const std::string& path);
+    void script_instead(const std::string& what);
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
     void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 
@@ -187,13 +188,23 @@ private:
     bool syncing_wb_ = false;
     void white_balance_changed();  // the sliders moved
     void white_balance_as_shot();  // back to the camera's
-    // The view: the raw as developed here, or (show_camera_jpeg_, the G
-    // panel's check) the camera's own rendering, the JPEG embedded in it.
-    void show_camera_jpeg();
+    // The view: the raw as developed here, or instead (the G panel's checks,
+    // for comparing) the camera's own rendering, the JPEG embedded in it, or
+    // LibRaw's develop on the CPU.
+    enum class Instead
+    {
+        Nothing,
+        CameraJpeg,
+        LibRaw,
+    };
+    void show_instead(Instead what);  // and keeps showing it while browsing
+    void show_instead();              // the image shown changed
     rap::check* camera_jpeg_check_ = nullptr;
-    bool show_camera_jpeg_ = false;
-    std::shared_ptr<Image> camera_jpeg_;  // the shown raw's, while it's shown instead
-    uint64_t camera_jpeg_request_ = 0;
+    rap::check* libraw_check_ = nullptr;
+    Instead instead_ = Instead::Nothing;
+    std::shared_ptr<Image> instead_image_;  // the shown raw's, while it's shown instead
+    uint64_t instead_request_ = 0;
+    bool syncing_instead_ = false;  // its checks set here, not by the user
     void sync_white_balance();     // the sliders to the image's
     rap::tool_button* smooth_toggle_ = nullptr;
     // The image's 8-bit pixels at its exposure, made again if the GPU's drawing

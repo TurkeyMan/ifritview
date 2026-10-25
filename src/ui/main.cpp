@@ -51,7 +51,8 @@ namespace
 // Development aid: IFRIT_SCRIPT="next;next;fullscreen;quit" drives the app
 // without a human, one step every IFRIT_SCRIPT_MS (default 400). Screenshots:
 // run with RAPPORT_SNAPSHOT=file.png (and RAPPORT_SNAPSHOT_DELAY) set; what a
-// GPU drew isn't in them, but export:file.png writes the image as saving would.
+// GPU drew isn't in them, but export:file.png writes the image as saving would
+// (instead:jpeg, instead:libraw, instead:none first: the G panel's checks).
 void run_step(App& app, const std::string& step)
 {
     std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
@@ -143,6 +144,8 @@ void run_step(App& app, const std::string& step)
         app.set_exposure(std::stod(step.substr(3)));
     else if (step == "save")
         app.save_as();
+    else if (step.rfind("instead:", 0) == 0)
+        app.script_instead(step.substr(8));
     else if (step.rfind("export:", 0) == 0)
         app.script_export(step.substr(7));
     else if (step.rfind("compare:", 0) == 0)

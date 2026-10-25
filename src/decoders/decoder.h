@@ -55,6 +55,9 @@ struct DecodeOptions
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();
+// This thread's decodes develop raws on the CPU (LibRaw's develop) whatever
+// the options say: for comparing the GPU's develop with it.
+void develop_raws_on_cpu(bool on);
 
 // The file being decoded, read once per decode on this thread. Every reader
 // (the decoder, EXIF, XMP, the format sniffers) takes its bytes from here
