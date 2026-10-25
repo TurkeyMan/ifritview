@@ -46,7 +46,8 @@ struct Config
     bool smooth_downscale() const { return shrink_filter != ScaleFilter::Nearest; }
     bool fullscreen_upscale = false;  // scale small images up to fill the screen in fullscreen
     bool checkerboard = true;         // show transparency over a checkerboard
-    bool histogram = false;           // the histogram panel over the image (G toggles)
+    bool histogram = false;           // the histogram over the image in fullscreen (G toggles)
+    int histogram_channels = 15;      // shown in it: bits 1 R, 2 G, 4 B, 8 luminance
     bool animate = true;
     bool video_autoplay = true;
     bool video_muted = true;

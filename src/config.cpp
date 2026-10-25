@@ -187,6 +187,7 @@ void Config::load()
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     histogram = get_bool(kf, kView, "histogram", histogram);
+    histogram_channels = get_int(kf, kView, "histogram_channels", histogram_channels) & 15;
     animate = get_bool(kf, kView, "animate", animate);
     video_autoplay = get_bool(kf, kView, "video_autoplay", video_autoplay);
     video_muted = get_bool(kf, kView, "video_muted", video_muted);
@@ -267,6 +268,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_boolean(kf, kView, "histogram", histogram);
+    g_key_file_set_integer(kf, kView, "histogram_channels", histogram_channels);
     g_key_file_set_boolean(kf, kView, "animate", animate);
     g_key_file_set_boolean(kf, kView, "video_autoplay", video_autoplay);
     g_key_file_set_boolean(kf, kView, "video_muted", video_muted);

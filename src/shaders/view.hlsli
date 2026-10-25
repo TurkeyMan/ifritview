@@ -31,7 +31,7 @@ cbuffer Params : register(b0)
     float2 display_g;
     float2 display_b;
     int show_histogram; // 1: the histogram panel, at `panel`
-    int unused;
+    uint histogram_channels;  // which (histogram.hlsli)
     float4 panel;       // x0, y0, x1, y1 in frame pixels
 };
 

@@ -167,6 +167,7 @@ private:
     rap::widget* exposure_box_ = nullptr;
     rap::slider* exposure_ = nullptr;
     rap::tool_button* smooth_toggle_ = nullptr;
+    rap::subscription retone_later_;  // the 8-bit pixels' new exposure, once the slider rests (the GPU shows it already)
     ScaleFilter smooth_enlarge_ = ScaleFilter::Lanczos3;  // what the toolbar toggle turns enlarging back on with
     rap::tool_button* xmp_toggle_ = nullptr;
     std::function<void(bool)> end_settings_;  // while Settings is open
@@ -212,6 +213,10 @@ private:
     void toggle_pane();          // the pane in or out, with the window following
     void show_pane_content();    // the info or the histogram in it
     void update_histogram();     // where the view draws its histogram
+    // The histogram's legend: R, G, B, L chips in its corner, each switching
+    // its channel (a hidden one's dim).
+    void paint_histogram_legend(rap::painter& p, rap::size_f size);
+    bool histogram_legend_click(const rap::pointer_event& e);
     bool metadata_visible_ = false;
     bool pane_before_fullscreen_ = false;
     std::string location_url_;

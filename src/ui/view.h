@@ -44,6 +44,10 @@ public:
     // the docked panel's canvas (null when it isn't showing). GPU only.
     void set_histogram(bool overlay, rap::canvas* panel);
     void histogram_panel_changed();  // the panel's canvas changed size: draw it again
+    // The GPU draws the image (from its own data): a new exposure is only a
+    // redraw, and its 8-bit pixels can wait.
+    bool drawn_on_gpu() const;
+    void redraw() { invalidate(); }
 #ifdef HAVE_GPU
     // The panel's numbers, on the UI thread, after each count.
     std::function<void(const GpuView::Details&)> on_histogram_details;
@@ -241,6 +245,7 @@ private:
         bool checkerboard = false;
         ScaleFilter enlarge = ScaleFilter::Nearest, shrink = ScaleFilter::Nearest;
         bool histogram = false, counting = false;
+        int channels = 0;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;

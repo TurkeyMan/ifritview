@@ -52,6 +52,7 @@ public:
         float sdr_white_nits = 203;  // PQ and scRGB: what SDR white is
         bool count_histogram = false;  // count what's shown, for the overlay or the docked panel
         bool histogram = false;        // draw it into the frame, at `panel` (device pixels: x, y, width, height)
+        int histogram_channels = 15;   // which: bits 1 R, 2 G, 4 B, 8 luminance
         int panel[4] = {};
     };
 
@@ -66,13 +67,14 @@ public:
     // The histogram counted by the last render() (count_histogram), drawn
     // into a `width` x `height` texture for the docked panel's canvas. False
     // while there's nothing counted.
-    bool draw_histogram(int width, int height, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready);
+    bool draw_histogram(int width, int height, int channels, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready);
 
     // The numbers the docked panel shows, read back (a few kilobytes) after
     // the last count: luminance of the scene as exposed (1 = SDR white), and
     // how much of what's shown is clipped.
     struct Details
     {
+        bool known = true;   // false: nothing measured (the image isn't drawn on the GPU)
         bool scene = false;  // raw or HDR: luminance means something past white
         float minimum = 0, maximum = 0, peak = 0, average = 0;
         float black = 0, white = 0;  // fractions of pixels shown at 0 and at 255 (any channel)

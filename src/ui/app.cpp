@@ -365,11 +365,14 @@ void App::build_ui()
                                     rap::text_style style;
                                     style.fg = rap::theme_color::placeholder_text;
                                     p.text({8, 8}, _("The histogram needs a GPU."), style);
+                                    return;
                                 }
-                                (void)size;
+                                paint_histogram_legend(p, size);
                             })
+                        .on_pointer([this](const rap::pointer_event& e) { return histogram_legend_click(e); })
                         .bind(histogram_canvas_)
                         .height(rap::extent{9, rap::extent::unit::lines}),
+
                     L::form{
                         {_("Peak"), L::label{""}.bind(hist_peak_)},
                         {_("Brightest"), L::label{""}.bind(hist_max_)},
@@ -417,6 +420,12 @@ void App::build_ui()
                 std::snprintf(buf, sizeof buf, "%.1f%%", double(v) * 100);
             return buf;
         };
+        if (!d.known)
+        {
+            for (rap::label* l : {hist_peak_, hist_max_, hist_min_, hist_average_, hist_clipped_})
+                l->set_text("–");
+            return;
+        }
         hist_peak_->set_text(level(d.peak));
         hist_max_->set_text(level(d.maximum));
         hist_min_->set_text(level(d.minimum));
@@ -1171,6 +1180,20 @@ void App::retone()
     if (!image_ || !image_->tonable())
         return;
     image_->exposure_edit = exposure_->value() - image_->exposure_bias;
+    if (view_->drawn_on_gpu())
+    {
+        // Drawn from the image's own data: the view shows the new exposure at
+        // once. The 8-bit pixels (for saving, comparing, the side view) catch
+        // up once the slider rests.
+        view_->redraw();
+        retone_later_ = ui_.timer(400, false,
+                                  [this]
+                                  {
+                                      retone_later_ = {};
+                                      request_retone();
+                                  });
+        return;
+    }
     request_retone();
 }
 

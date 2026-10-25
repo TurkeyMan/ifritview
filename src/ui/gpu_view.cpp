@@ -45,7 +45,8 @@ struct ComposeParams
     int32_t measured;
     float display_peak;
     float display_r[2], display_g[2], display_b[2];
-    int32_t show_histogram, unused;
+    int32_t show_histogram;
+    uint32_t histogram_channels;
     float panel[4];
 };
 static_assert(sizeof(ComposeParams) == 176, "as view.hlsli's cbuffer packs");
@@ -87,7 +88,7 @@ void GpuView::read_details(std::function<void(const Details&)> done)
         return;
     struct Read
     {
-        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1025 * 4);
+        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1028 * 4);
     };
     auto read = std::make_shared<Read>();
     const bool scene = tonable_;
@@ -136,7 +137,7 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                       });
 }
 
-bool GpuView::draw_histogram(int width, int height, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready)
+bool GpuView::draw_histogram(int width, int height, int channels, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready)
 {
     if (!histogram_generation_ || width <= 0 || height <= 0 || !histogram_view_)
         return false;
@@ -146,11 +147,15 @@ bool GpuView::draw_histogram(int width, int height, rap::gpu::texture_ptr& out, 
     if (!t)
         return false;
     next_panel_ ^= 1;
-    const float panel[4] = {0, 0, float(width), float(height)};
+    struct
+    {
+        float panel[4];
+        uint32_t channels, unused[3];
+    } params{{0, 0, float(width), float(height)}, uint32_t(channels), {}};
     rap::gpu::pass p;
     p.program = histogram_view_;
     p.buffers = {histogram_, histogram_};  // t8 unused, t9 the counts
-    p.uniforms = std::as_bytes(std::span(panel));
+    p.uniforms = std::as_bytes(std::span(&params, 1));
     p.target = t;
     ready = device_->run(std::span(&p, 1));
     out = t;
@@ -185,7 +190,7 @@ bool GpuView::programs(std::string& error)
         *program = r.program;
     }
     stats_ = device_->create_buffer(1100 * 4);
-    histogram_ = device_->create_buffer(1025 * 4);
+    histogram_ = device_->create_buffer(1028 * 4);
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
     if (!stats_ || !histogram_ || !blank_)
     {
@@ -417,6 +422,7 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     if (f.histogram)
     {
         cp.show_histogram = 1;
+        cp.histogram_channels = uint32_t(f.histogram_channels);
         cp.panel[0] = float(f.panel[0]), cp.panel[1] = float(f.panel[1]);
         cp.panel[2] = float(f.panel[0] + f.panel[2]), cp.panel[3] = float(f.panel[1] + f.panel[3]);
     }

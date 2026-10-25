@@ -1091,6 +1091,8 @@ bool View::draw_on_gpu(rap::color background)
         gpu_ = std::make_unique<GpuView>(device);
     if (!device)
     {
+        if (gpu_shown_ && histogram_panel_ && on_histogram_details)
+            on_histogram_details(GpuView::Details{.known = false});  // nothing measured for this one
         if (gpu_shown_)
         {
             canvas_->clear_frame();
@@ -1103,7 +1105,8 @@ bool View::draw_on_gpu(rap::color background)
     GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
-               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr};
+               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr,
+               cfg_.histogram_channels};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1120,6 +1123,7 @@ bool View::draw_on_gpu(rap::color background)
     f.enlarge = cfg_.enlarge_filter;
     f.shrink = cfg_.shrink_filter;
     f.count_histogram = histogram_overlay_ || histogram_panel_;
+    f.histogram_channels = cfg_.histogram_channels;
     f.histogram = histogram_overlay_;
     if (f.histogram)
     {
@@ -1169,6 +1173,15 @@ bool View::draw_on_gpu(rap::color background)
 }
 #endif
 
+bool View::drawn_on_gpu() const
+{
+#ifdef HAVE_GPU
+    return gpu_shown_;
+#else
+    return false;
+#endif
+}
+
 void View::set_histogram(bool overlay, rap::canvas* panel)
 {
     if (overlay == histogram_overlay_ && panel == histogram_panel_)
@@ -1192,7 +1205,7 @@ void View::draw_histogram_panel()
     const rap::frame_target t = histogram_panel_->target();
     rap::gpu::texture_ptr tex;
     rap::gpu::ticket ready;
-    if (gpu_->draw_histogram(t.width, t.height, tex, ready))
+    if (gpu_->draw_histogram(t.width, t.height, cfg_.histogram_channels, tex, ready))
         histogram_panel_->present(tex, ready);
 #endif
 }

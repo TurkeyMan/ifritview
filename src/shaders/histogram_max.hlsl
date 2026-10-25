@@ -1,13 +1,12 @@
-// The tallest histogram bin between the ends (bins 1..254 of every
-// channel), into word 1024, for the panel's scale.
+// Each channel's tallest bin between the ends (bins 1..254), into words
+// 1024..1027 (R, G, B, Y), for the panel's scale: the ends hold every
+// clipped pixel and would flatten the rest.
 RWByteAddressBuffer bins : register(u0);
 
 [numthreads(256, 1, 1)]
 void main(uint index : SV_GroupIndex)
 {
-    uint tallest = 0;
     if (index >= 1 && index <= 254)
         [unroll] for (uint ch = 0; ch < 4; ++ch)
-            tallest = max(tallest, bins.Load((ch * 256 + index) * 4));
-    bins.InterlockedMax(1024 * 4, tallest);
+            bins.InterlockedMax((1024 + ch) * 4, bins.Load((ch * 256 + index) * 4));
 }

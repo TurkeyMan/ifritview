@@ -92,7 +92,7 @@ float4 main(float4 position : SV_Position) : SV_Target
     // The histogram panel over it (sRGB-encoded colours, blended in linear).
     if (show_histogram && p.x >= panel.x && p.x < panel.z && p.y >= panel.y && p.y < panel.w)
     {
-        const float4 h = histogram_panel(float2(p) + 0.5, panel);
+        const float4 h = histogram_panel(float2(p) + 0.5, panel, histogram_channels);
         rgb = lerp(rgb, srgb_decode3(h.rgb), h.a);
     }
     if (output == 3)

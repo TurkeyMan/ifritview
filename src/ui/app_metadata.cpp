@@ -68,6 +68,60 @@ void App::toggle_histogram()
     toggle_pane();
 }
 
+namespace
+{
+struct LegendChip
+{
+    const char* letter;
+    int bit;
+    rap::color colour;
+};
+constexpr LegendChip kLegend[] = {
+    {"R", 1, {235, 70, 70}}, {"G", 2, {80, 200, 90}}, {"B", 4, {90, 130, 245}}, {"L", 8, {235, 235, 235}}};
+constexpr float kChip = 18, kChipGap = 4, kChipInset = 6;  // logical px
+
+rap::rect_f chip_rect(size_t i)
+{
+    return {kChipInset + float(i) * (kChip + kChipGap), kChipInset, kChip, kChip};
+}
+}  // namespace
+
+void App::paint_histogram_legend(rap::painter& p, rap::size_f)
+{
+    for (size_t i = 0; i < std::size(kLegend); ++i)
+    {
+        const LegendChip& c = kLegend[i];
+        const bool on = (cfg_.histogram_channels & c.bit) != 0;
+        const rap::rect_f r = chip_rect(i);
+        p.rect(r, 3, rap::color{0, 0, 0, uint8_t(on ? 170 : 110)},
+               rap::color{c.colour.r, c.colour.g, c.colour.b, uint8_t(on ? 255 : 90)});
+        rap::text_style style;
+        style.fg = rap::color{c.colour.r, c.colour.g, c.colour.b, uint8_t(on ? 255 : 90)};
+        const rap::size_f t = p.measure(c.letter, style);
+        p.text({r.x + (r.w - t.w) / 2, r.y + (r.h - t.h) / 2}, c.letter, style);
+    }
+}
+
+bool App::histogram_legend_click(const rap::pointer_event& e)
+{
+    if (e.type != rap::pointer_event_type::press || e.button != 1)
+        return false;
+    for (size_t i = 0; i < std::size(kLegend); ++i)
+    {
+        const rap::rect_f r = chip_rect(i);
+        if (e.pos.x >= r.x && e.pos.x < r.x + r.w && e.pos.y >= r.y && e.pos.y < r.y + r.h)
+        {
+            cfg_.histogram_channels ^= kLegend[i].bit;
+            cfg_.save();
+            view_->config_changed();           // the overlay
+            view_->histogram_panel_changed();  // the docked panel
+            histogram_canvas_->invalidate();   // the chips
+            return true;
+        }
+    }
+    return false;
+}
+
 void App::show_pane_content()
 {
     info_box_->set_visible(!pane_histogram_);
