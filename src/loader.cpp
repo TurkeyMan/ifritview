@@ -5,6 +5,18 @@
 #include <algorithm>
 #include <cmath>
 
+namespace
+{
+
+std::string base_name(const std::string& key)
+{
+    const std::string f = key_file(key);
+    const size_t slash = f.find_last_of("/\\");
+    return slash == std::string::npos ? f : f.substr(slash + 1);
+}
+
+}  // namespace
+
 // -- Loader -------------------------------------------------------------------
 Loader::Loader(Callback callback, Dispatch dispatch) : callback_(std::move(callback)), dispatch_(std::move(dispatch))
 {
@@ -13,7 +25,7 @@ Loader::Loader(Callback callback, Dispatch dispatch) : callback_(std::move(callb
     foreground_ = std::thread([this] { run_foreground(); });
     reader_ = std::thread([this] { run_reader(); });
     for (unsigned i = 0; i < workers_; ++i)
-        pool_.emplace_back([this] { run_worker(); });
+        pool_.emplace_back([this, i] { run_worker(i); });
 }
 
 Loader::~Loader()
@@ -89,6 +101,20 @@ void Loader::prefetch(std::vector<std::string> paths)
     reader_wake_.notify_one();
 }
 
+void Loader::cancel_develop(const std::string& path)
+{
+    std::lock_guard lock(mutex_);
+    if (develop_ && develop_->path == path)
+        develop_.reset();
+}
+
+void Loader::set_stand_in_fit(int width, int height)
+{
+    std::lock_guard lock(mutex_);
+    fit_w_ = width;
+    fit_h_ = height;
+}
+
 // Results for the image on screen jump the main loop's queue; prefetches
 // wait until the main thread is otherwise idle.
 void Loader::post(Result* r, Lane lane)
@@ -128,10 +154,14 @@ void Loader::run_foreground()
             job = *pending_;
             pending_.reset();
             job.file = take_read(job.path);  // the reader got to it first
+            set_preview_fit(fit_w_, fit_h_);
         }
         // Read here, not queued behind the reader: the image on screen always wins.
+        const gint64 t0 = g_get_monotonic_time();
+        const bool had = job.file != nullptr;
         if (!job.file)
             job.file = read_file(key_file(job.path));
+        platform::trace("loader: foreground %s, %s in %.1f ms", base_name(job.path).c_str(), had ? "read already" : "read", (g_get_monotonic_time() - t0) / 1000.0);
         provide_file_bytes(key_file(job.path), job.file);
         // A quick stand-in first (a raw's embedded JPEG); its develop goes to
         // the pool, ahead of any prefetching, with the file already read.
@@ -187,10 +217,15 @@ void Loader::run_reader()
             }
             reading_ = path;
         }
+        const gint64 t0 = g_get_monotonic_time();
         std::shared_ptr<const FileBlob> file = read_file(key_file(path));
+        const double ms = (g_get_monotonic_time() - t0) / 1000.0, mb = file->data.size() / 1048576.0;
         {
             std::lock_guard lock(mutex_);
             reading_.clear();
+            platform::trace("loader: read %s%s, %.1f MB in %.1f ms (%.0f MB/s); %zu read waiting, %zu decoding", base_name(path).c_str(),
+                            for_develop ? " (develop)" : "", mb, ms, ms > 0 ? mb / ms * 1000 : 0.0, read_.size() + (for_develop ? 0 : 1),
+                            in_flight_.size());
             if (for_develop)
             {
                 if (develop_ && develop_->path == path && !develop_->file)
@@ -203,7 +238,7 @@ void Loader::run_reader()
     }
 }
 
-void Loader::run_worker()
+void Loader::run_worker(unsigned index)
 {
     // Below the foreground worker and the UI when cores are contended.
     platform::lower_thread_priority();
@@ -239,6 +274,9 @@ void Loader::run_worker()
                 developing_.push_back(job.path);
         }
         reader_wake_.notify_one();  // room for another read
+        const gint64 started = g_get_monotonic_time();
+        platform::trace("loader: worker %u starts %s (%s)", index, base_name(job.path).c_str(),
+                        is_develop ? "develop" : full ? "prefetch, in full" : "prefetch, preview");
         provide_file_bytes(key_file(job.path), job.file);
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
         if (full)
@@ -255,6 +293,7 @@ void Loader::run_worker()
         }
         release_file_bytes();
         job.file.reset();
+        platform::trace("loader: worker %u done %s in %.0f ms", index, base_name(job.path).c_str(), (g_get_monotonic_time() - started) / 1000.0);
         {
             std::lock_guard lock(mutex_);
             in_flight_.erase(std::find(in_flight_.begin(), in_flight_.end(), job.path));

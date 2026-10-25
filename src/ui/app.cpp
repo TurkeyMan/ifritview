@@ -895,6 +895,9 @@ void App::load_current(const std::string& file)
     }
     status_message_ = busy_message_ = rap::i18n::format(_("Loading {0}…"), std::filesystem::path(path).filename().string());
     update_status();
+    int vw = 0, vh = 0;
+    view_->view_size(vw, vh);
+    loader_.set_stand_in_fit(vw, vh);
     loader_.request(load_generation_, key);
 }
 
@@ -1019,15 +1022,23 @@ void App::on_loaded(Loader::Result& r)
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_key_ && !cache_.contains(r.path))
             cache_.put(r.path, {r.image, ImageCache::file_mtime(key_file(r.path))});
-        if (r.image && r.path == current_key() && !image_)
-        {  // user moved onto it while it was decoding
+        if (r.image && r.path == current_key() && (!image_ || image_key_ != r.path))
+        {  // the user moved onto it while it was decoding: it's here before the stand-in
             r.generation = load_generation_;
             r.prefetch = false;
+            if (!r.image->is_preview())
+                loader_.cancel_develop(r.path);
         }
         else
         {
             return;
         }
+    }
+    // A stand-in for what's already shown in full (its prefetch got there first).
+    if (r.preview && image_ && image_key_ == r.path && !image_->is_preview())
+    {
+        loader_.cancel_develop(r.path);
+        return;
     }
     // A develop for the image on screen is adopted in place, even one
     // started before the user left it and came back (only one runs).
@@ -1274,8 +1285,10 @@ void App::schedule_prefetch()
         // Within half the cache, at what the image on screen takes.
         const size_t each = std::max<size_t>(image_ ? ImageCache::image_bytes(*image_) : 0, 32 << 20);
         const int room = int(cache_.budget() / 2 / each);
+        // And at least one for every worker, so they're all busy from the start.
         const int pace = int(nav_steps_.size());  // steps in the last second
-        ahead = std::clamp(pace * 3 / 2 + 2, cfg_.prefetch_ahead, std::max(cfg_.prefetch_ahead, std::min(32, room)));
+        const int wanted = std::max({pace * 3 / 2 + 2, int(loader_.workers()), cfg_.prefetch_ahead});
+        ahead = std::clamp(wanted, cfg_.prefetch_ahead, std::max(cfg_.prefetch_ahead, std::min(32, room)));
         behind = 0;
     }
     else if (!nav_steps_.empty())

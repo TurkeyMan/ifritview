@@ -85,6 +85,11 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
 
 // A quick stand-in for the file if its decoder offers one.
 bool decode_preview(const std::string& path, Image& out);
+// This thread's stand-ins (decode_preview) need cover only width x height
+// pixels, either way round: a JPEG one is decoded at 1/2, 1/4 or 1/8 size
+// when that still does. 0: full size.
+void set_preview_fit(int width, int height);
+void preview_fit(int& width, int& height);
 
 // Every extension handled by the decoders, in priority order.
 std::vector<std::string> default_extensions();
@@ -143,8 +148,10 @@ const Decoder& bti_decoder();
 const Decoder& pvr_decoder();
 
 #ifdef HAVE_JPEG
-// Used by the raw decoder for embedded JPEG previews.
-bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error);
+// Used by the raw decoder for embedded JPEG previews. `fit_w` x `fit_h`
+// (either way round), when given: decoded at 1/2, 1/4 or 1/8 size if that
+// still covers it.
+bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error, int fit_w = 0, int fit_h = 0);
 // The samples as stored, `components` bytes a pixel: four-component data
 // is left as it is (no CMYK or YCCK conversion; BLP1 keeps B, G, R, A
 // there), three-component data is converted to RGB as usual.

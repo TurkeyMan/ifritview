@@ -23,6 +23,7 @@ struct FileBuffer
     std::shared_ptr<const FileBlob> blob;
 };
 thread_local FileBuffer t_file;
+thread_local int t_fit_w = 0, t_fit_h = 0;  // set_preview_fit
 
 std::mutex g_options_mutex;
 DecodeOptions g_options;
@@ -203,6 +204,18 @@ FILE* open_file(const std::string& path)
         if (FILE* f = platform::fmemopen(data, size))
             return f;
     return platform::fopen(path, "rb");  // Windows: no fmemopen; the OS cache has the bytes anyway
+}
+
+void set_preview_fit(int width, int height)
+{
+    t_fit_w = width;
+    t_fit_h = height;
+}
+
+void preview_fit(int& width, int& height)
+{
+    width = t_fit_w;
+    height = t_fit_h;
 }
 
 void release_file_bytes()

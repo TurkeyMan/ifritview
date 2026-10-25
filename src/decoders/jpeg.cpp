@@ -60,7 +60,7 @@ int estimate_quality(const JQUANT_TBL& table)
 }
 
 // Shared body: the source is already attached to cinfo.
-bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, std::string& error)
+bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, std::string& error, int fit_w = 0, int fit_h = 0)
 {
     std::vector<uint8_t> cmyk_row;  // declared before setjmp so the error path can't skip its destructor
     bool progressive = false;
@@ -73,6 +73,18 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);  // keep the ICC profile
     jpeg_read_header(&cinfo, TRUE);
     progressive = cinfo.progressive_mode;
+    // As small as still covers the fit (long side to long side): the DCT
+    // scales for nearly nothing.
+    if (fit_w > 0 && fit_h > 0)
+    {
+        const unsigned long_side = std::max(cinfo.image_width, cinfo.image_height), short_side = std::min(cinfo.image_width, cinfo.image_height);
+        const unsigned fit_long = unsigned(std::max(fit_w, fit_h)), fit_short = unsigned(std::min(fit_w, fit_h));
+        unsigned denom = 1;
+        while (denom < 8 && long_side / (denom * 2) >= fit_long && short_side / (denom * 2) >= fit_short)
+            denom *= 2;
+        cinfo.scale_num = 1;
+        cinfo.scale_denom = denom;
+    }
     // As the save dialog's JPEG settings.
     out.encoded_as = "jpg";
     out.encoding["progressive"] = progressive;
@@ -197,13 +209,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error)
+bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error, int fit_w, int fit_h)
 {
     jpeg_decompress_struct cinfo;
     ErrorManager err{};
     setup(cinfo, err);
     jpeg_mem_src(&cinfo, data, static_cast<unsigned long>(size));
-    if (!decode_from(cinfo, err, out, error))
+    if (!decode_from(cinfo, err, out, error, fit_w, fit_h))
         return false;
 #ifdef HAVE_EXIF
     out.apply_camera_orientation(read_exif_blob(data, size, out).orientation);

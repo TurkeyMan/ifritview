@@ -51,11 +51,17 @@ public:
     void request_develop(uint64_t generation, const std::string& path);
     // Files to decode when idle, nearest first; replaces the previous list.
     void prefetch(std::vector<std::string> paths);
+    // The develop asked for `path` isn't needed after all (shown in full already).
+    void cancel_develop(const std::string& path);
+    // A stand-in (a raw's embedded JPEG) need only cover this many pixels:
+    // it's decoded smaller when it can be. 0: full size.
+    void set_stand_in_fit(int width, int height);
+    unsigned workers() const { return workers_; }
 
 private:
     void run_foreground();
     void run_reader();
-    void run_worker();
+    void run_worker(unsigned index);
     enum class Lane
     {
         Foreground,
@@ -89,6 +95,7 @@ private:
     std::vector<std::string> developing_;   // full decodes running (develops, and prefetches that go as far)
     std::vector<std::string> in_flight_;    // every decode the workers are running
     unsigned workers_ = 1;
+    int fit_w_ = 0, fit_h_ = 0;  // set_stand_in_fit
     bool stop_ = false;
     std::thread foreground_, reader_;
     std::vector<std::thread> pool_;

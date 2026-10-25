@@ -55,7 +55,7 @@ std::string camera_name(const LibRaw& raw)
     return make.empty() ? model : make + " " + model;
 }
 
-bool decode_preview(LibRaw& raw, Image& out, std::string& error)
+bool decode_preview(LibRaw& raw, Image& out, std::string& error, int fit_w = 0, int fit_h = 0)
 {
 #ifdef HAVE_JPEG
     int r = raw.unpack_thumb();
@@ -73,7 +73,7 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error)
     bool ok = false;
     if (thumb->type == LIBRAW_IMAGE_JPEG)
     {
-        ok = decode_jpeg_memory(thumb->data, thumb->data_size, out, error);
+        ok = decode_jpeg_memory(thumb->data, thumb->data_size, out, error, fit_w, fit_h);
         // Embedded previews are stored unrotated; apply the camera orientation.
         if (ok && out.width >= out.height)
             out.apply_camera_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
@@ -354,7 +354,9 @@ bool preview(const std::string& path, Image& out)
     if (!file_bytes(path, bytes, size) || raw.open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
     std::string error;
-    if (!decode_preview(raw, out, error))
+    int fit_w = 0, fit_h = 0;
+    preview_fit(fit_w, fit_h);
+    if (!decode_preview(raw, out, error, fit_w, fit_h))
         return false;
     out.format = "RAW preview";
     out.is_raw = true;
