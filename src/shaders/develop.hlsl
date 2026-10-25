@@ -1,12 +1,13 @@
 // A raw's level 0: its Bayer mosaic (RawMosaic, one photosite a texel)
 // developed. Each output pixel, in the image as shown (the camera's framing,
-// turned as it was held), comes from the photosite under it: black taken
-// off and scaled to saturation, the as-shot white balance applied (the
-// demosaic follows colour edges far better on balanced data), the two
-// missing colours from Malvar-He-Cutler's 5 x 5 kernels, clipped at
-// saturation (all channels at 1: highlights stay neutral), and the balance
-// taken off again. Linear camera RGB out; the frame's own white balance and
-// the camera's colour matrix are the view's, per frame.
+// turned as it was held), comes from the photosite under it (corrected
+// first, where the raw has its own corrections of its mosaic: CORRECT):
+// black taken off and scaled to saturation, the as-shot white balance
+// applied (the demosaic follows colour edges far better on balanced data),
+// the two missing colours from Malvar-He-Cutler's 5 x 5 kernels, clipped
+// at saturation (all channels at 1: highlights stay neutral), and the
+// balance taken off again. Linear camera RGB out; the frame's own white
+// balance and the camera's colour matrix are the view's, per frame.
 cbuffer Params : register(b0)
 {
     int4 colour;         // the filter over (row & 1, col & 1), row-major: 0 R, 1 G, 2 B
@@ -14,7 +15,7 @@ cbuffer Params : register(b0)
     float4 as_shot;      // R, G, B multipliers, the least 1; w: saturation in data units
     int4 map_x;          // photosite x = map_x.x * out.x + map_x.y * out.y + map_x.z
     int4 map_y;          // photosite y = map_y.x * out.x + map_y.y * out.y + map_y.z
-    int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels); w: a DNG's corrections
+    int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels); w: the raw's own corrections
     int4 filter;         // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G), as levels counts them
     int4 ycc;            // YCC: block height, formula, hue, luma offset (RawMosaic::Ycc)
     int4 ycc_at;         // YCC: the first block's x, y
@@ -118,77 +119,46 @@ float4 main(float4 position : SV_Position) : SV_Target
 }
 #else
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
-ByteAddressBuffer corrections : register(t9);  // a DNG's opcodes, as dng_opcodes.h lays them out
+ByteAddressBuffer corrections : register(t9);  // the raw's own (a DNG's opcodes, a Phase One's), as dng_opcodes.h lays them out
 
 static float4 black_level;
-static float4 shading;  // each photosite of the 2 x 2's lens shading gain, here (OpcodeList2)
+
+uint word(uint i)
+{
+    return corrections.Load(i * 4);
+}
 
 float word_f(uint i)
 {
-    return asfloat(corrections.Load(i * 4));
+    return asfloat(word(i));
 }
 
-// The gain map at word `d` (its 16 words) at photosite (x, y), plane `p`,
-// as the DNG SDK interpolates it: bilinear between its points, held at
-// the edges; 1 where it doesn't apply.
+// The gain map at word `d` (its 16 words) at photosite (x, y), plane `p`:
+// bilinear between its points, held at the edges; 1 where it doesn't
+// apply. Its grid in photosites from its area's corner, the first one's
+// centre at 0.5: the DNG SDK's (its grid relative to the area, scaled), and
+// LibRaw's Phase One flat fields (whole photosites apart, from one).
 float map_gain(uint d, int x, int y, uint p)
 {
     // top, left, bottom, right; plane, planes, row pitch, column pitch;
     // points down, across, planes in the map, where its gains start
-    const uint4 area = corrections.Load4(d * 4), h1 = corrections.Load4(d * 4 + 16), h2 = corrections.Load4(d * 4 + 32);
-    const float4 grid = asfloat(corrections.Load4(d * 4 + 48));  // spacing v, h, origin v, h
-    if (y < int(area.x) || x < int(area.y) || y >= int(area.z) || x >= int(area.w) || (uint(y) - area.x) % h1.z ||
-        (uint(x) - area.y) % h1.w || p < h1.x || p >= h1.x + h1.y)
+    const uint4 area = corrections.Load4(d * 4);
+    if (y < int(area.x) || x < int(area.y) || y >= int(area.z) || x >= int(area.w))
         return 1;
+    const uint4 h1 = corrections.Load4(d * 4 + 16), h2 = corrections.Load4(d * 4 + 32);
+    if ((uint(y) - area.x) % h1.z || (uint(x) - area.y) % h1.w || p < h1.x || p >= h1.x + h1.y)
+        return 1;
+    const float4 grid = asfloat(corrections.Load4(d * 4 + 48));  // spacing down, across, origin down, across
     const uint rows = h2.x, cols = h2.y, planes = h2.z;
     const uint q = min(p - h1.x, planes - 1);
-    const float fy = clamp(((y + 0.5 - area.x) / (area.z - area.x) - grid.z) / grid.x, 0, rows - 1);
-    const float fx = clamp(((x + 0.5 - area.y) / (area.w - area.y) - grid.w) / grid.y, 0, cols - 1);
+    const float fy = clamp((y - int(area.x) + 0.5 - grid.z) / grid.x, 0, rows - 1);
+    const float fx = clamp((x - int(area.y) + 0.5 - grid.w) / grid.y, 0, cols - 1);
     const uint r0 = uint(fy), c0 = uint(fx), r1 = min(r0 + 1, rows - 1), c1 = min(c0 + 1, cols - 1);
     const float ty = fy - r0, tx = fx - c0;
     const uint g = h2.w;
     const float a = word_f(g + (r0 * cols + c0) * planes + q), b = word_f(g + (r0 * cols + c1) * planes + q);
     const float c = word_f(g + (r1 * cols + c0) * planes + q), e = word_f(g + (r1 * cols + c1) * planes + q);
     return lerp(lerp(a, b, tx), lerp(c, e, tx), ty);
-}
-
-// OpcodeList2's maps multiplied, at photosite (x, y).
-float mosaic_gain(int x, int y)
-{
-    float g = 1;
-    const uint n = corrections.Load(0);
-    for (uint i = 0; i < n; ++i)
-        g *= map_gain(48 + i * 16, x, y, 0);
-    return g;
-}
-
-// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette.
-float3 rgb_gain(int x, int y)
-{
-    float3 g = 1;
-    const uint n2 = corrections.Load(0), n3 = corrections.Load(4);
-    for (uint i = 0; i < n3; ++i)
-    {
-        const uint d = 48 + (n2 + i) * 16;
-        g *= float3(map_gain(d, x, y, 0), map_gain(d, x, y, 1), map_gain(d, x, y, 2));
-    }
-    if (corrections.Load(8))
-    {
-        const float dx = x + 0.5 - word_f(9), dy = y + 0.5 - word_f(10);
-        const float r2 = (dx * dx + dy * dy) * word_f(11);
-        g *= 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
-    }
-    return g;
-}
-
-// The photosite at (x, y) as a balanced value, 1 = saturation.
-float site(int x, int y)
-{
-    x = clamp(x, 0, size.x - 1);
-    y = clamp(y, 0, size.y - 1);
-    const int i = (y & 1) * 2 + (x & 1), c = colour[i];
-    const float d = mosaic.Load(int3(x, y, 0)) * 65535;
-    return (d - black_level[i]) / (as_shot.w - black_level[i]) * shading[i] * (flags.x ? 1 : as_shot[c]);
 }
 
 // Each photosite of the 2 x 2's, as LibRaw's: measured where the sensor is
@@ -211,6 +181,217 @@ float4 black_levels()
     return black;
 }
 
+#ifdef CORRECT
+// The raw's own corrections of its mosaic, each photosite once, into a
+// mosaic of the same kind (unorm 16, its black still in) that the develop
+// then reads as it would the raw's: the readout's own (a Phase One's) and
+// the gain maps over the mosaic (OpcodeList2, a Phase One's flat fields),
+// exact at every photosite. Made in the develop the demosaic would make
+// them 13 times a pixel, once for each photosite it reads.
+
+// The `i`th of the 16-bit values from word `at` on, two a word, the first low.
+uint half_word(uint at, uint i)
+{
+    return word(at + i / 2) >> (i % 2 * 16) & 0xffff;
+}
+
+// OpcodeList2's maps multiplied (a Phase One's flat fields), at photosite (x, y).
+float mosaic_gain(int x, int y)
+{
+    float g = 1;
+    const uint n = word(0);
+    for (uint i = 0; i < n; ++i)
+        g *= map_gain(48 + i * 16, x, y, 0);
+    return g;
+}
+
+// The photosite at (x, y) less its black, data units. With the readout's
+// own corrections (a Phase One's: dng_opcodes.h's Readout), as LibRaw's
+// phase_one_subtract_black and phase_one_correct make them: its black less
+// its row's and its column's offsets, held at 0, then through its quarter's
+// curve.
+float level(int x, int y)
+{
+    const int i = (y & 1) * 2 + (x & 1);
+    const float d = mosaic.Load(int3(x, y, 0)) * 65535 - black_level[i];
+    if (!word(3))
+        return d;
+    const bool right = x >= int(word(42)), below = y >= int(word(43));
+    int v = int(round(d));
+    if (word(40))
+    {
+        const uint r = word(word(40) + y), c = word(word(41) + x);  // int16 pairs
+        v += (right ? int(r) >> 16 : int(r << 16) >> 16) + (below ? int(c) >> 16 : int(c << 16) >> 16);
+    }
+    v = clamp(v, 0, 65535);
+    if (word(44))
+        v = half_word(word(44), (uint(below) * 2 + uint(right)) * 65536 + v);
+    return v;
+}
+
+// Whether (x, y) is one of the readout's defects (each row's listed).
+bool defective(int x, int y)
+{
+    const uint rows = word(45);
+    if (!rows)
+        return false;
+    const uint end = word(rows + y + 1);
+    for (uint k = word(rows + y); k < end; ++k)
+        if (word(k) == uint(x))
+            return true;
+    return false;
+}
+
+// The photosite at (x, y) as level() has it; a defect, the rounded mean of
+// its neighbours' of its colour, as LibRaw's phase_one_correct has them: a
+// green's (LibRaw's colour 1's) four diagonal and four two away, others'
+// eight two away. (Column, row) offsets. Neighbours that are defects too
+// are left out: LibRaw takes those as it finds them, repaired if listed
+// before, as read if after (a column of them, in some backs' lists, each
+// photosite's below still as read).
+float repaired(int x, int y)
+{
+    if (!defective(x, y))
+        return level(x, y);
+    static const int2 around[12] = {int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1), int2(0, -2), int2(-2, 0),
+                                    int2(2, 0),   int2(0, 2),  int2(-2, -2), int2(2, -2), int2(-2, 2), int2(2, 2)};
+    const uint j = filter[(y & 1) * 2 + (x & 1)] != 1 ? 4 : 0;
+    uint sum = 0, n = 0;
+    for (uint k = j; k < j + 8; ++k)
+    {
+        const int2 p = int2(x, y) + around[k];
+        if (all(p >= 0) && all(p < size.xy) && !defective(p.x, p.y))
+        {
+            sum += uint(level(p.x, p.y));
+            ++n;
+        }
+    }
+    return n ? (sum + n / 2) / n : level(x, y);
+}
+
+// The photosite at (x, y): black off, defects repaired, through the gain
+// maps over the mosaic. Data units.
+float gained(int x, int y)
+{
+    return repaired(x, y) * mosaic_gain(x, y);
+}
+
+// gained() at (x, y), or where that's outside the mosaic at the nearest
+// photosite of its colour inside.
+float gained_near(int x, int y)
+{
+    x = x < 0 ? x & 1 : x >= size.x ? size.x - 2 + ((x - size.x) & 1) : x;
+    y = y < 0 ? y & 1 : y >= size.y ? size.y - 2 + ((y - size.y) & 1) : y;
+    return gained(x, y);
+}
+
+// A bad column's photosite, from the photosites around it once they're
+// gained (the DNG SDK's, as LibRaw's phase_one_correct has them, after its
+// flat fields). A column on its own: the mean of the estimates along the
+// smoothest of seven directions (phase_one_fix_pixel_grad), between its
+// row's two nearest of its colour. Others: the mean of the nearest of its
+// colour in the columns around (phase_one_fix_col_pixel_avg). (Row,
+// column) offsets, as LibRaw's.
+float column_fixed(int x, int y, bool alone)
+{
+    if (!alone)
+    {
+        static const int2 sets[3][8] = {
+            {int2(-2, -2), int2(-2, 2), int2(2, -2), int2(2, 2), int2(0, 0), int2(0, 0), int2(0, 0), int2(0, 0)},
+            {int2(-2, -4), int2(-4, -2), int2(2, -4), int2(4, -2), int2(-2, 4), int2(-4, 2), int2(2, 4), int2(4, 2)},
+            {int2(-4, -4), int2(-4, 4), int2(4, -4), int2(4, 4), int2(0, 0), int2(0, 0), int2(0, 0), int2(0, 0)}};
+        for (int s = 0; s < 3; ++s)
+        {
+            float total = 0, n = 0;
+            for (int i = 0; i < 8 && any(sets[s][i] != 0); ++i)
+            {
+                const int2 p = int2(x, y) + sets[s][i].yx;
+                if (all(p >= 0) && all(p < size.xy))
+                {
+                    total += gained(p.x, p.y);
+                    n += 1;
+                }
+            }
+            if (n)
+                return total / n;
+        }
+        return gained(x, y);
+    }
+    static const int2 grads[7][12] = {
+        {int2(-4, -2), int2(4, 2), int2(-3, -1), int2(1, 1), int2(-1, -1), int2(3, 1), int2(-4, -1), int2(0, 1), int2(-2, -1), int2(2, 1), int2(0, -1), int2(4, 1)},
+        {int2(-2, -2), int2(2, 2), int2(-3, -1), int2(-1, 1), int2(-1, -1), int2(1, 1), int2(1, -1), int2(3, 1), int2(-2, -1), int2(0, 1), int2(0, -1), int2(2, 1)},
+        {int2(-2, -4), int2(2, 4), int2(-1, -3), int2(1, 1), int2(-1, -1), int2(1, 3), int2(-2, -1), int2(0, 3), int2(-1, -2), int2(1, 2), int2(0, -3), int2(2, 1)},
+        {int2(0, -2), int2(0, 2), int2(-1, -1), int2(-1, 1), int2(1, -1), int2(1, 1), int2(-1, -2), int2(-1, 2), int2(0, -1), int2(0, -1), int2(1, -2), int2(1, 2)},
+        {int2(-2, 4), int2(2, -4), int2(-1, 3), int2(1, -1), int2(-1, 1), int2(1, -3), int2(-2, 1), int2(0, -3), int2(-1, 2), int2(1, -2), int2(0, 3), int2(2, -1)},
+        {int2(-2, 2), int2(2, -2), int2(-3, 1), int2(-1, -1), int2(-1, 1), int2(1, -1), int2(1, 1), int2(3, -1), int2(-2, 1), int2(0, -1), int2(0, 1), int2(2, -1)},
+        {int2(-4, 2), int2(4, -2), int2(-3, 1), int2(1, -1), int2(-1, 1), int2(3, -1), int2(-4, 1), int2(0, -1), int2(-2, 1), int2(2, -1), int2(0, 1), int2(4, -1)}};
+    float est[7], grad[7], least = 1e30;
+    for (int i = 0; i < 7; ++i)
+    {
+        float v[12];
+        for (int j = 0; j < 12; ++j)
+            v[j] = gained_near(x + grads[i][j].y, y + grads[i][j].x);
+        est[i] = v[0] + v[1];
+        grad[i] = 0;
+        for (int k = 0; k < 12; k += 2)
+            grad[i] += abs(v[k] - v[k + 1]);
+        least = min(least, grad[i]);
+    }
+    float total = 0, n = 0;
+    for (int i = 0; i < 7; ++i)
+        if (grad[i] <= least * 1.5)
+        {
+            total += est[i];
+            n += 2;
+        }
+    const float a = gained_near(x - 2, y), b = gained_near(x + 2, y);
+    return clamp(total / n, min(a, b), max(a, b));
+}
+
+// The photosite at (x, y) corrected: data units, black off.
+float corrected(int x, int y)
+{
+    const uint at = word(46);  // the bad columns' bits: 1 bad, 3 bad and on its own
+    const uint bad = at ? word(at + uint(x) / 16) >> (uint(x) % 16 * 2) & 3 : 0;
+    return bad ? column_fixed(x, y, bad == 3) : gained(x, y);
+}
+
+float4 main(float4 position : SV_Position) : SV_Target
+{
+    black_level = black_levels();
+    const int x = int(position.x), y = int(position.y);
+    return (corrected(x, y) + black_level[(y & 1) * 2 + (x & 1)]) / 65535;
+}
+#else
+// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette.
+float3 rgb_gain(int x, int y)
+{
+    float3 g = 1;
+    const uint n2 = word(0), n3 = word(1);
+    for (uint i = 0; i < n3; ++i)
+    {
+        const uint d = 48 + (n2 + i) * 16;
+        g *= float3(map_gain(d, x, y, 0), map_gain(d, x, y, 1), map_gain(d, x, y, 2));
+    }
+    if (word(2))
+    {
+        const float dx = x + 0.5 - word_f(9), dy = y + 0.5 - word_f(10);
+        const float r2 = (dx * dx + dy * dy) * word_f(11);
+        g *= 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
+    }
+    return g;
+}
+
+// The photosite at (x, y) as a balanced value, 1 = saturation.
+float site(int x, int y)
+{
+    x = clamp(x, 0, size.x - 1);
+    y = clamp(y, 0, size.y - 1);
+    const int i = (y & 1) * 2 + (x & 1), c = colour[i];
+    const float d = mosaic.Load(int3(x, y, 0)) * 65535;
+    return (d - black_level[i]) / (as_shot.w - black_level[i]) * (flags.x ? 1 : as_shot[c]);
+}
+
 int colour_at(int x, int y)
 {
     return colour[(y & 1) * 2 + (x & 1)];
@@ -222,12 +403,6 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int2 o = int2(position.xy);
     const int x = map_x.x * o.x + map_x.y * o.y + map_x.z;
     const int y = map_y.x * o.x + map_y.y * o.y + map_y.z;
-    // The lens shading barely changes over the few photosites the demosaic
-    // reads: each colour's, once, at its photosite in this 2 x 2.
-    shading = 1;
-    if (size.w)
-        for (int i = 0; i < 4; ++i)
-            shading[i] = mosaic_gain((x & ~1) + (i & 1), (y & ~1) + (i >> 1));
     const int c = colour_at(x, y);
     const float m = site(x, y);
     const float cross = site(x - 1, y) + site(x + 1, y) + site(x, y - 1) + site(x, y + 1);
@@ -255,4 +430,5 @@ float4 main(float4 position : SV_Position) : SV_Target
     rgb = clamp(rgb, 0, 1);
     return float4(rgb / as_shot.rgb, 1);
 }
+#endif
 #endif

@@ -4,6 +4,7 @@
 #include "decoder.h"
 #include "dng_opcodes.h"
 #include "ljpeg.h"
+#include "phase_one.h"
 #include "rawblocks.h"
 #include "rawpacked.h"
 
@@ -275,11 +276,40 @@ public:
         libraw_decoder_info_t info{};
         return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name ? info.decoder_name : "";
     }
-    // A compressed Phase One's black (its level, less each row's and
-    // column's offset) and its flat-field corrections, which LibRaw makes
-    // in raw2image, not as it unpacks: into a buffer of their own that
-    // raw_image then points at, until phase_one_done(). False when it isn't one.
-    bool phase_one_prepare()
+    using LibRaw::is_phaseone_compressed;  // any of Phase One's loaders, compressed or not
+    // A Phase One's (its loaders') black and corrections of its readout,
+    // which LibRaw makes in raw2image, not as it unpacks: for the develop
+    // to make (phase_one.h). Once unpacked; empty for others.
+    dng::Corrections phase_one_corrections(const uint8_t* file, size_t size)
+    {
+        if (!is_phaseone_compressed() || !imgdata.rawdata.raw_image)
+            return {};
+        const auto& sz = imgdata.sizes;
+        const auto& ph1 = imgdata.color.phase_one_data;
+        phase_one::Sensor s;
+        s.file = file, s.size = size;
+        s.meta = size_t(libraw_internal_data.unpacker_data.meta_offset), s.meta_length = size_t(libraw_internal_data.unpacker_data.meta_length);
+        s.raw_w = sz.raw_width, s.raw_h = sz.raw_height;
+        s.left = sz.left_margin, s.top = sz.top_margin, s.width = sz.width, s.height = sz.height;
+        s.split[0] = ph1.split_col, s.split[1] = ph1.split_row;
+        s.temperature = ph1.tag_210;
+        s.row_black = imgdata.rawdata.ph1_cblack, s.column_black = imgdata.rawdata.ph1_rblack;
+        for (int i = 0; i < 4; ++i)
+            s.filter[i] = int(imgdata.idata.filters >> (((i >> 1 << 1 & 14) | (i & 1)) << 1) & 3);  // FC(row, col)
+        // LibRaw's own spline, into its curve (put back after).
+        std::vector<ushort> kept(imgdata.color.curve, imgdata.color.curve + 0x10000);
+        s.spline = [this](const int* x, const int* y, int n, uint16_t table[65536])
+        {
+            cubic_spline(x, y, n);
+            std::copy_n(imgdata.color.curve, 0x10000, table);
+        };
+        dng::Corrections c = phase_one::corrections(s);
+        std::copy(kept.begin(), kept.end(), imgdata.color.curve);
+        return c;
+    }
+    // IFRIT_GPU_CORRECTIONS_CHECK: a Phase One's active area as LibRaw
+    // corrects it (raw2image's first steps), once unpacked.
+    bool phase_one_corrected(std::vector<uint16_t>& out)
     {
         if (!is_phaseone_compressed() || !imgdata.rawdata.raw_alloc)
             return false;
@@ -287,14 +317,17 @@ public:
         int rc = phase_one_subtract_black(static_cast<ushort*>(imgdata.rawdata.raw_alloc), imgdata.rawdata.raw_image);
         if (rc == 0 && imgdata.params.use_p1_correction)
             rc = phase_one_correct();
-        if (rc != 0)
+        const auto& sz = imgdata.sizes;
+        if (rc == 0)
         {
-            phase_one_free_tempbuffer();
-            return false;
+            out.resize(size_t(sz.width) * sz.height);
+            for (unsigned y = 0; y < sz.height; ++y)
+                std::memcpy(out.data() + size_t(y) * sz.width, imgdata.rawdata.raw_image + size_t(y + sz.top_margin) * sz.raw_width + sz.left_margin,
+                            size_t(sz.width) * 2);
         }
-        return true;
+        phase_one_free_tempbuffer();
+        return rc == 0;
     }
-    void phase_one_done() { phase_one_free_tempbuffer(); }
     // A Nikon NEF's compressed readout as LibRaw's nikon_load_raw reads it:
     // the version, the tree for it and its depth, the first rows' starting
     // samples, the curve. False for others, and for a stream that changes
@@ -790,6 +823,22 @@ void check_unpack(const uint8_t* file, size_t size, const std::string& path)
                      a.cblack[0], a.cblack[1], a.cblack[2], a.cblack[3], b.cblack[0], b.cblack[1], b.cblack[2], b.cblack[3]);
 }
 
+// IFRIT_GPU_CORRECTIONS_CHECK: a Phase One's active area as LibRaw
+// corrects it (RawMosaic::corrected), and how long it took.
+std::shared_ptr<const std::vector<uint16_t>> libraw_corrected(const uint8_t* file, size_t size)
+{
+    auto raw = std::make_unique<RawAccess>();  // on the heap: hundreds of KB
+    auto out = std::make_shared<std::vector<uint16_t>>();
+    const int64_t t0 = g_get_monotonic_time();
+    if (raw->open_buffer(file, size) != LIBRAW_SUCCESS || raw->unpack() != LIBRAW_SUCCESS)
+        return nullptr;
+    const int64_t t1 = g_get_monotonic_time();
+    if (!raw->phase_one_corrected(*out))
+        return nullptr;
+    std::fprintf(stderr, "raw: LibRaw unpacked it in %.0f ms, corrected it in %.0f ms\n", (t1 - t0) / 1000.0, (g_get_monotonic_time() - t1) / 1000.0);
+    return out;
+}
+
 bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out);
 
 // Three colours a photosite already (a linear DNG, Canon's sRAW and mRAW):
@@ -877,7 +926,6 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     std::string ours_error;
     const ushort* src = nullptr;
     size_t pitch = 0;
-    bool phase_one = false;  // its black taken off first (RawAccess::phase_one_prepare)
     std::shared_ptr<RawMosaic::Stream> stream;
     uint32_t offset, length;
     unsigned slices[3], tile[3];
@@ -941,7 +989,6 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             error = libraw_strerror(r);
             return false;
         }
-        phase_one = raw.phase_one_prepare();
         src = raw.imgdata.rawdata.raw_image;
         pitch = raw.imgdata.sizes.raw_pitch / 2;
     }
@@ -962,8 +1009,6 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
                  { std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * pitch + sz.left_margin, size_t(m->width) * 2); });
         m->data = std::move(data);
     }
-    if (phase_one)
-        raw.phase_one_done();
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "raw: %s in %.0f ms, active area copied in %.0f ms\n",
                      m->stream ? "prepared for the GPU" : readout.empty() ? "unpacked by LibRaw" : "unpacked here", (t1 - t0) / 1000.0,
@@ -1188,21 +1233,36 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     }
     if (!ok)
         return false;
-    // A DNG's own lens shading and vignetting, applied as it's developed.
+    // A raw's own corrections, made as it's developed: a DNG's lens shading
+    // and vignetting; a Phase One's black and its sensor's corrections.
     static const bool corrections = !std::getenv("IFRIT_NO_DNG_CORRECTIONS");
-    if (corrections && out.mosaic && out.mosaic->channels == 1 && !out.mosaic->ycc.block_h && raw.imgdata.idata.dng_version)
+    const bool phase_one = raw.is_phaseone_compressed();
+    if (out.mosaic && out.mosaic->channels == 1 && !out.mosaic->ycc.block_h && (phase_one || (corrections && raw.imgdata.idata.dng_version)))
     {
-        dng::Corrections c = dng::corrections(bytes, size, raw.imgdata.sizes.raw_width, raw.imgdata.sizes.raw_height,
-                                                       raw.imgdata.sizes.width, raw.imgdata.sizes.height);
+        const int64_t t0 = g_get_monotonic_time();
+        dng::Corrections c = phase_one ? raw.phase_one_corrections(bytes, size)
+                                       : dng::corrections(bytes, size, raw.imgdata.sizes.raw_width, raw.imgdata.sizes.raw_height,
+                                                          raw.imgdata.sizes.width, raw.imgdata.sizes.height);
         if (!c.summary.empty())
         {
-            out.add(N_("Raw"), N_("DNG corrections"), c.summary);
-            platform::trace("raw: DNG corrections %s", c.summary.c_str());
+            out.add(N_("Raw"), phase_one ? N_("Phase One corrections") : N_("DNG corrections"), c.summary);
+            platform::trace("raw: %s corrections %s, read in %.1f ms", phase_one ? "Phase One" : "DNG", c.summary.c_str(),
+                            (g_get_monotonic_time() - t0) / 1000.0);
         }
         if (!c.empty())
         {
             auto m = std::make_shared<RawMosaic>(*out.mosaic);
             m->corrections = std::make_shared<const std::vector<uint32_t>>(std::move(c.words));
+            if (phase_one)
+            {
+                // Its black comes off as it's developed, saturation where LibRaw has it after.
+                const float black = float(raw.imgdata.color.phase_one_data.t_black);
+                for (float& b : m->black)
+                    b += black;
+                m->white += black;
+            }
+            if (phase_one && std::getenv("IFRIT_GPU_CORRECTIONS_CHECK"))
+                m->corrected = libraw_corrected(bytes, size);
             out.mosaic = std::move(m);
         }
     }

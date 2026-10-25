@@ -1,11 +1,12 @@
 #pragma once
-// A DNG's own corrections for its lens and sensor (its opcode lists),
-// for the develop to apply as the DNG SDK does: the lens shading phones
-// store as gain maps over each colour of the mosaic (OpcodeList2), and the
-// vignetting and per-colour gain maps applied once it has three colours
-// (OpcodeList3). LibRaw applies none of them. What's here is what the GPU
-// reads (develop.hlsl's `corrections`); geometry (WarpRectilinear) isn't
-// among them yet.
+// A raw's own corrections for its lens and sensor, for the develop to
+// apply: a DNG's opcode lists, as the DNG SDK applies them (the lens
+// shading phones store as gain maps over each colour of the mosaic,
+// OpcodeList2; the vignetting and per-colour gain maps applied once it has
+// three colours, OpcodeList3), and a Phase One's corrections of its
+// readout (its black per row and column, its curves, defects and flat
+// fields, phase_one.h). LibRaw applies none of a DNG's. What's here is
+// what the GPU reads (develop.hlsl's `corrections`).
 
 #include <cstddef>
 #include <cstdint>
@@ -17,16 +18,22 @@ namespace dng
 {
 
 // develop.hlsl's layout, 32-bit words:
-//   0  gain maps over the mosaic (OpcodeList2)
+//   0  gain maps over the mosaic (OpcodeList2, a Phase One's flat fields)
 //   1  gain maps over R, G, B (OpcodeList3)
 //   2  1: a radial vignette (OpcodeList3's FixVignetteRadial)
+//   3  1: the readout's own corrections (words 40..47)
 //   4..11  its k0..k4, centre x, y (photosites) and 1 / the farthest corner's distance squared
 //   16 planes WarpRectilinear corrects (0: none, 1: all alike, 3: each its own)
 //   17..19 its centre x, y (photosites) and the farthest corner's distance
 //   20..37 each plane's kr0..kr3, kt0, kt1
+//   40..47 the readout's (Readout's; 0 where it has none): where each row's
+//      black offsets start, where each column's, the split column and row,
+//      where the curves start, where each row's defects start, where the
+//      bad columns' bits start
 //   48 on: each map's 16 words (top, left, bottom, right, plane, planes, row pitch, column
 //      pitch, points down, across, planes in the map, where its gains start; spacing
-//      down, across, origin down, across as floats), list 2's first, then the gains
+//      down, across, origin down, across as floats), list 2's first, then the gains,
+//      then the readout's
 struct Corrections
 {
     std::vector<uint32_t> words;
@@ -34,6 +41,44 @@ struct Corrections
     bool empty() const { return words.empty(); }
     bool warps() const { return words.size() > 16 && words[16] != 0; }
 };
+
+// A gain map, as the develop interpolates it (develop.hlsl's map_gain):
+// over the photosites of `area` (top, left, bottom, right, in the active
+// area; bottom and right past it), every pitch-th row and column from its
+// corner, the planes from `plane` on; its points `spacing` apart from
+// `origin`, in photosites from the area's corner (its first photosite's
+// centre at 0.5), down then across, `map_planes` gains a point;
+// bilinear between them, held at the edges.
+struct GainMap
+{
+    uint32_t area[4] = {};
+    uint32_t plane = 0, planes = 1;
+    uint32_t pitch[2] = {1, 1};   // rows, columns
+    uint32_t points[2] = {};      // down, across
+    uint32_t map_planes = 1;
+    float spacing[2] = {}, origin[2] = {};  // down, across
+    std::vector<float> gains;
+};
+
+// A sensor's corrections of its readout, made before the gain maps over the
+// mosaic, at each photosite of the active area: its black, less offsets
+// per row (left and right of the split column) and per column (above and
+// below the split row), held at 0; curves, each quarter its own (split as
+// the offsets are); and defects, a photosite the rounded mean of its
+// neighbours'. After the gain maps, bad columns estimated from those
+// around (develop.hlsl's corrected()).
+struct Readout
+{
+    std::vector<int16_t> row_black, column_black;  // two a row, two a column; or none
+    int split[2] = {};                              // the column, the row
+    std::vector<uint16_t> curves;                   // 65536 a quarter: above left, above right, below left, below right; or none
+    std::vector<std::vector<uint16_t>> defects;     // each row's defects' columns; or none
+    std::vector<uint8_t> bad_columns;               // a column's: 1 bad, 3 bad and on its own (none of the others within 4); or none
+};
+
+// `c`'s words (its first 48, or none yet) with the gain maps and the
+// readout's corrections after them.
+void lay_out(Corrections& c, const std::vector<GainMap>& mosaic, const std::vector<GainMap>& rgb, const Readout* readout = nullptr);
 
 // The opcode lists of the raw image `width` x `height` (as stored) in the
 // DNG `file`, in the coordinates of its active area (`active_w` x

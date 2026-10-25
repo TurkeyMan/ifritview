@@ -109,27 +109,28 @@ void walk(const Reader& r, uint32_t at, std::vector<Ifd>& out, int depth)
     }
 }
 
-struct Map
-{
-    uint32_t head[12];
-    float spacing_v, spacing_h, origin_v, origin_h;
-    std::vector<float> gains;
-};
-
-// One GainMap's parameters (the DNG spec's order), or false if it's malformed.
-bool gain_map(const uint8_t* d, size_t size, Map& m)
+// One GainMap's parameters (the DNG spec's order), or false if it's
+// malformed. Its grid, relative to its area in the spec, in photosites.
+bool gain_map(const uint8_t* d, size_t size, GainMap& m)
 {
     if (size < 76)
         return false;
+    uint32_t head[10];
     for (int i = 0; i < 10; ++i)
-        m.head[i] = be32(d + i * 4);
-    m.spacing_v = float(be_double(d + 40)), m.spacing_h = float(be_double(d + 48));
-    m.origin_v = float(be_double(d + 56)), m.origin_h = float(be_double(d + 64));
-    const uint32_t planes = be32(d + 72), points = m.head[8] * m.head[9];
-    m.head[10] = planes;
-    if (!planes || planes > 4 || !points || points > (1u << 20) || size < 76 + size_t(points) * planes * 4 || m.head[2] <= m.head[0] ||
-        m.head[3] <= m.head[1] || !m.head[6] || !m.head[7] || !(m.spacing_v > 0) || !(m.spacing_h > 0))
+        head[i] = be32(d + i * 4);
+    const double spacing_v = be_double(d + 40), spacing_h = be_double(d + 48);
+    const uint32_t planes = be32(d + 72), points = head[8] * head[9];
+    if (!planes || planes > 4 || !points || points > (1u << 20) || size < 76 + size_t(points) * planes * 4 || head[2] <= head[0] ||
+        head[3] <= head[1] || !head[6] || !head[7] || !(spacing_v > 0) || !(spacing_h > 0))
         return false;
+    const double high = head[2] - head[0], wide = head[3] - head[1];
+    std::copy_n(head, 4, m.area);
+    m.plane = head[4], m.planes = head[5];
+    m.pitch[0] = head[6], m.pitch[1] = head[7];
+    m.points[0] = head[8], m.points[1] = head[9];
+    m.map_planes = planes;
+    m.spacing[0] = float(spacing_v * high), m.spacing[1] = float(spacing_h * wide);
+    m.origin[0] = float(be_double(d + 56) * high), m.origin[1] = float(be_double(d + 64) * wide);
     m.gains.resize(size_t(points) * planes);
     for (size_t i = 0; i < m.gains.size(); ++i)
         m.gains[i] = be_float(d + 76 + i * 4);
@@ -146,6 +147,70 @@ const char* name(uint32_t id)
 
 }  // namespace
 
+void lay_out(Corrections& c, const std::vector<GainMap>& mosaic, const std::vector<GainMap>& rgb, const Readout* readout)
+{
+    std::vector<uint32_t>& w = c.words;
+    w.resize(48);
+    w[0] = uint32_t(mosaic.size()), w[1] = uint32_t(rgb.size());
+    for (const auto* list : {&mosaic, &rgb})
+        for (const GainMap& m : *list)
+        {
+            const uint32_t d[16] = {m.area[0],          m.area[1],          m.area[2],         m.area[3],        m.plane,      m.planes,
+                                    m.pitch[0],         m.pitch[1],         m.points[0],       m.points[1],      m.map_planes, 0,
+                                    bits(m.spacing[0]), bits(m.spacing[1]), bits(m.origin[0]), bits(m.origin[1])};
+            w.insert(w.end(), d, d + 16);
+        }
+    size_t d = 48;
+    for (const auto* list : {&mosaic, &rgb})
+        for (const GainMap& m : *list)
+        {
+            w[d + 11] = uint32_t(w.size());
+            for (float g : m.gains)
+                w.push_back(bits(g));
+            d += 16;
+        }
+    if (!readout)
+        return;
+    const Readout& r = *readout;
+    w[3] = 1;
+    // Two 16-bit values a word, the first in the low half.
+    const auto pack = [&w](const auto& v) -> uint32_t
+    {
+        if (v.empty())
+            return 0;
+        const size_t at = w.size();
+        for (size_t i = 0; i < v.size(); i += 2)
+            w.push_back(uint16_t(v[i]) | uint32_t(i + 1 < v.size() ? uint16_t(v[i + 1]) : 0) << 16);
+        return uint32_t(at);
+    };
+    w[40] = pack(r.row_black);
+    w[41] = pack(r.column_black);
+    w[42] = uint32_t(r.split[0]), w[43] = uint32_t(r.split[1]);
+    w[44] = pack(r.curves);
+    if (!r.defects.empty())
+    {
+        // Where each row's columns start, and where the last's end; then the columns.
+        const size_t rows = w.size();
+        w.resize(rows + r.defects.size() + 1);
+        for (size_t y = 0; y < r.defects.size(); ++y)
+        {
+            w[rows + y] = uint32_t(w.size());
+            w.insert(w.end(), r.defects[y].begin(), r.defects[y].end());
+        }
+        w[rows + r.defects.size()] = uint32_t(w.size());
+        w[45] = uint32_t(rows);
+    }
+    if (!r.bad_columns.empty())
+    {
+        // Two bits a column, sixteen columns a word.
+        const size_t at = w.size();
+        w.resize(at + (r.bad_columns.size() + 15) / 16);
+        for (size_t x = 0; x < r.bad_columns.size(); ++x)
+            w[at + x / 16] |= uint32_t(r.bad_columns[x] & 3) << (x % 16 * 2);
+        w[46] = uint32_t(at);
+    }
+}
+
 Corrections corrections(const uint8_t* file, size_t size, int width, int height, int active_w, int active_h)
 {
     Corrections c;
@@ -160,7 +225,7 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
             raw = &i;
     if (!raw)
         return c;
-    std::vector<Map> maps[2];  // list 2's, list 3's
+    std::vector<GainMap> maps[2];  // list 2's, list 3's
     bool vignette = false;
     uint32_t warp_planes = 0;
     double warp[3][6] = {}, warp_h = 0.5, warp_v = 0.5;
@@ -181,8 +246,8 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
             if (bytes > end - at - 16)
                 break;
             bool used = false;
-            Map m;
-            if (id == 9 && gain_map(d, bytes, m) && (l == 2 || (m.head[4] == 0 && m.head[5] == 1 && m.head[10] == 1)))
+            GainMap m;
+            if (id == 9 && gain_map(d, bytes, m) && (l == 2 || (m.plane == 0 && m.planes == 1 && m.map_planes == 1)))
             {
                 maps[l - 1].push_back(std::move(m));
                 used = true;
@@ -222,7 +287,7 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
     }
     std::vector<uint32_t>& w = c.words;
     w.assign(48, 0);
-    w[0] = uint32_t(maps[0].size()), w[1] = uint32_t(maps[1].size()), w[2] = vignette;
+    w[2] = vignette;
     if (vignette)
     {
         // r^2 against the farthest corner's, from the centre (relative to the image).
@@ -243,20 +308,7 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
             for (int j = 0; j < 6; ++j)
                 w[20 + q * 6 + j] = bits(float(warp[std::min(q, warp_planes - 1)][j]));
     }
-    const size_t descriptors = w.size();
-    w.resize(descriptors + (maps[0].size() + maps[1].size()) * 16);
-    size_t d = descriptors;
-    for (auto& list : maps)
-        for (Map& m : list)
-        {
-            m.head[11] = uint32_t(w.size());
-            for (int j = 0; j < 12; ++j)
-                w[d + j] = m.head[j];
-            w[d + 12] = bits(m.spacing_v), w[d + 13] = bits(m.spacing_h), w[d + 14] = bits(m.origin_v), w[d + 15] = bits(m.origin_h);
-            for (float g : m.gains)
-                w.push_back(bits(g));
-            d += 16;
-        }
+    lay_out(c, maps[0], maps[1]);
     return c;
 }
 

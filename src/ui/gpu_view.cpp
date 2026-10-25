@@ -11,6 +11,7 @@
 #include "shaders/decode.h"
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
+#include "shaders/develop_correct.h"
 #include "shaders/develop_ycc.h"
 #include "shaders/difference.h"
 #include "shaders/histogram.h"
@@ -300,7 +301,8 @@ bool GpuView::programs(std::string& error)
     for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
                                  std::pair{&compose_, shaders::compose}, std::pair{&difference_program_, shaders::difference},
                                  std::pair{&histogram_view_, shaders::histogram_view},
-                                 std::pair{&develop_, shaders::develop}, std::pair{&develop_linear_, shaders::develop_linear},
+                                 std::pair{&develop_, shaders::develop}, std::pair{&develop_correct_, shaders::develop_correct},
+                                 std::pair{&develop_linear_, shaders::develop_linear},
                                  std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
                                  std::pair{&warp_, shaders::warp}})
     {
@@ -520,6 +522,49 @@ void GpuView::check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& valu
         for (int x = 0; x < m.width; ++x)
             off += area[size_t(y) * m.width + x] != sample_at(st, samples, unsigned(x + st.left), unsigned(y + st.top));
     std::fprintf(stderr, "gpu raw check: %zu of %zu photosites of the active area differ\n", off, area.size());
+}
+
+// LibRaw rounds down after each of its corrections, the develop not at all:
+// how far apart they are, over the whole and away from the edges (where
+// LibRaw reads the margins the develop doesn't have), and the farthest.
+void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr& corrected)
+{
+    const gint64 t0 = g_get_monotonic_time();
+    std::vector<uint16_t> read(size_t(m.width) * m.height);
+    device_->readback(corrected, std::as_writable_bytes(std::span(read)), size_t(m.width) * 2).wait();
+    const gint64 t1 = g_get_monotonic_time();
+    std::vector<float> ours(read.size());  // black off, as LibRaw's
+    for (int y = 0; y < m.height; ++y)
+        for (int x = 0; x < m.width; ++x)
+            ours[size_t(y) * m.width + x] = float(read[size_t(y) * m.width + x]) - m.black[(y & 1) * 2 + (x & 1)];
+    const std::vector<uint16_t>& theirs = *m.corrected;
+    if (theirs.size() != ours.size())
+        return;
+    constexpr int kEdge = 4;
+    double sum = 0;
+    float worst[2] = {}, limits[3] = {1, 2, 8};
+    size_t at[2] = {}, over[2][3] = {};
+    for (int y = 0; y < m.height; ++y)
+        for (int x = 0; x < m.width; ++x)
+        {
+            const size_t i = size_t(y) * m.width + x;
+            const float d = std::min(ours[i], 65535.f) - float(theirs[i]), a = std::fabs(d);  // LibRaw's hold at 65535
+            const int inner = x >= kEdge && y >= kEdge && x < m.width - kEdge && y < m.height - kEdge;
+            sum += d;
+            for (int k = 0; k <= inner; ++k)
+            {
+                if (a > worst[k])
+                    worst[k] = a, at[k] = i;
+                for (int l = 0; l < 3; ++l)
+                    over[k][l] += a > limits[l];
+            }
+        }
+    for (int k = 0; k < 2; ++k)
+        std::fprintf(stderr, "gpu corrections check: %s: greatest difference %.2f at (%zu, %zu), ours %.2f, LibRaw's %u; over 1: %zu, over 2: %zu, over 8: %zu\n",
+                     k ? "away from the edges" : "every photosite", worst[k], at[k] % m.width, at[k] / m.width, ours[at[k]], theirs[at[k]], over[k][0],
+                     over[k][1], over[k][2]);
+    std::fprintf(stderr, "gpu corrections check: %zu photosites, ours less LibRaw's %+.3f on average (made and read back in %.0f ms)\n", ours.size(),
+                 sum / double(ours.size()), (t1 - t0) / 1000.0);
 }
 
 bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
@@ -772,6 +817,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     {
         // A raw, developed here: the mosaic up as it is, then demosaiced into
         // level 0 (camera RGB, unbalanced).
+        const gint64 t_start = g_get_monotonic_time();
         rap::gpu::texture_ptr sites;
         rap::gpu::buffer_ptr levels;
         if (m->stream)
@@ -810,6 +856,27 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         {
             device_->upload(corrections, std::as_bytes(std::span(*m->corrections)));
             p.size[3] = 1;
+        }
+        // Its own corrections of the mosaic (OpcodeList2's gain maps, a Phase
+        // One's readout corrections), made once a photosite into a mosaic of
+        // the same kind, which the develop reads as it would the raw's.
+        if (corrections && ((*m->corrections)[0] || (*m->corrections)[3]))
+        {
+            rap::gpu::pass c;
+            c.program = develop_correct_;
+            c.inputs = {sites};
+            c.buffers = {levels ? levels : histogram_, corrections};
+            c.uniforms = bytes(p);
+            c.target = device_->create({m->width, m->height, rap::gpu::format::r16, 1, true});
+            if (!c.target)
+            {
+                error = "too big for the GPU";
+                return false;
+            }
+            device_->run(std::span(&c, 1));
+            sites = c.target;
+            if (m->corrected)
+                check_corrections(*m, sites);
         }
         // Output (x, y), as shown, to the photosite: through the turn, then
         // into the framing (EXIF orientation: what the stored image needs).
@@ -872,6 +939,13 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             w.uniforms = bytes(wp);
             w.target = top;
             device_->run(std::span(&w, 1));
+        }
+        if (std::getenv("IFRIT_TRACE"))
+        {
+            // (Read back once the develop is done: how long it took, from the upload on.)
+            auto probe = std::make_shared<std::vector<std::byte>>(histogram_->size());
+            device_->readback(histogram_, *probe, [probe, t_start]
+                              { std::fprintf(stderr, "gpu: a raw uploaded and developed in %.1f ms\n", (g_get_monotonic_time() - t_start) / 1000.0); });
         }
         s.levels.push_back(top);
         // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame
