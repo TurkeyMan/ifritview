@@ -1,5 +1,9 @@
 # Roadmap
 
+- **GPU image pipeline** (in progress; see [gpu-pipeline.md](gpu-pipeline.md)):
+  images on the GPU in their native format, viewing and tone mapping in
+  shaders, presentation without leaving the GPU, then HDR output. The
+  raw develop pipeline below is built on it.
 - Decoder backends as plugin `.so`s loaded with `g_module_open`, so a package
   can *Recommend* the format libraries instead of requiring them. (Startup is
   not the motivation: the dynamic loader is ~4 ms of the ~140 ms warm start;

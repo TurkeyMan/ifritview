@@ -3,6 +3,11 @@
 #include "compare.h"
 #include "decoders/decoder.h"
 #include "encoders/encoder.h"
+#ifdef HAVE_GPU
+#include "gpu.h"
+
+#include <glib.h>
+#endif
 #include "jpeg_lossless.h"
 #include "scale.h"
 #include "metadata/file_metadata.h"
@@ -224,7 +229,7 @@ int process(int argc, char** argv)
         }
         else if (st.name == "save")
             ok = parse_save(st.arg, st.save, error);
-        else if (st.name == "info")
+        else if (st.name == "info" || st.name == "gpu")
             ;
         else if (st.name == "diff")
             ok = !st.arg.empty(), error = "diff: takes the file to compare with, e.g. diff:original.png";
@@ -298,6 +303,27 @@ int process(int argc, char** argv)
             }
             img.exposure_edit = std::strtod(st.arg.c_str(), nullptr);
             img.retone(img.exposure_edit);
+        }
+        else if (st.name == "gpu")
+        {
+#ifdef HAVE_GPU
+            // The pixels again from the image's own samples, on the GPU, for
+            // comparing with the CPU's (diff:); what it took is told.
+            PixelBuffer pixels;
+            std::string why;
+            const int64_t start = g_get_monotonic_time();
+            if (!gpu::render(img, img.exposure_edit, pixels, why))
+            {
+                std::fprintf(stderr, "gpu: %s\n", why.c_str());
+                return 2;
+            }
+            std::printf("gpu: %s, %.1f ms\n", gpu::renderer().c_str(), (g_get_monotonic_time() - start) / 1000.0);
+            img.pixels = std::move(pixels);
+            img.mips.clear();
+#else
+            std::fprintf(stderr, "gpu: this build has no GPU pipeline\n");
+            return 2;
+#endif
         }
         else if (st.name == "info")
         {
@@ -432,6 +458,9 @@ it is at that step, after earlier turns and crops)
                      zoomed-out image with (smaller only; the shape is up to you)
   diff:FILE          compare the image at this point with FILE (the same size): PSNR,
                      the largest difference, and how much of it differs
+  gpu                render the pixels again from the image's own samples (a raw's
+                     or a 16-bit or float image's) on the GPU, at the exposure so
+                     far; for checking the GPU pipeline against the CPU with diff:
   info               print the image's size and format at this point, and how the
                      input was saved as its format's save settings ("the file's jpg
                      settings: progressive=1 quality=85 subsampling=3"; quality

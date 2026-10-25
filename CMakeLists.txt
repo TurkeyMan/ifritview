@@ -346,6 +346,18 @@ else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
 endif()
 
+# The GPU image pipeline (docs/gpu-pipeline.md): OpenGL ES 3 through EGL.
+# Optional while it grows; Windows gets it through ANGLE later.
+pkg_check_modules(GPU IMPORTED_TARGET egl glesv2)
+if(GPU_FOUND AND NOT WIN32)
+  target_sources(ifrit_core PRIVATE src/gpu.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_GPU)
+  target_link_libraries(ifrit_core PUBLIC PkgConfig::GPU)
+  message(STATUS "gpu: enabled (OpenGL ES 3 through EGL)")
+else()
+  message(STATUS "gpu: not found (egl, glesv2), skipping")
+endif()
+
 # Reverse geocoding of GPS positions (optional): an HTTPS request through
 # rapport (src/http.cpp), with json-glib to read the answer.
 pkg_check_modules(GEOCODE IMPORTED_TARGET json-glib-1.0)
