@@ -239,6 +239,10 @@ private:
     double scaled_zoom_ = 0;
     std::unique_ptr<rap::image> checker_;
 
+    // The histogram: over the image (fullscreen) or in the panel's canvas; drawn by the GPU only.
+    bool histogram_overlay_ = false;
+    rap::canvas* histogram_panel_ = nullptr;
+    void draw_histogram_panel();
 #ifdef HAVE_GPU
     // Drawn on the GPU (gpu_view.h) where it can be: then on_paint draws
     // only what goes over the image. `generation_` changes when the image's
@@ -259,9 +263,6 @@ private:
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;
-    bool histogram_overlay_ = false;
-    rap::canvas* histogram_panel_ = nullptr;
-    void draw_histogram_panel();
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)
