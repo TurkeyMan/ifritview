@@ -45,7 +45,7 @@ pipeline; desktop GL 3.3 leaves Windows HDR behind an interop extension.
 The processing context belongs to IfritView, not the toolkit: made on the
 loader's side, current on one worker thread, rendering offscreen. A finished
 frame crosses to the presenting toolkit without a copy where the platform
-allows:
+allows.
 
 rapport stays GL-free: it presents a frame the app hands it (a dmabuf on
 Linux, a D3D11 shared texture on Windows) as the canvas's image layer, and
