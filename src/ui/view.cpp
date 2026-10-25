@@ -565,6 +565,16 @@ void View::draw_compare(rap::painter& p, float alpha)
 void View::retoned()
 {
 #ifdef HAVE_GPU
+    if (gpu_shown_)
+    {
+        // The GPU draws from the image's own data, unchanged: the CPU's copies
+        // are only made again if it comes to draw (no 8-bit upload on the UI
+        // thread for nothing).
+        drop_caches();
+        base_.reset();
+        base_dirty_ = true;
+        return;
+    }
     const uint64_t keep = generation_;
     image_changed();
     generation_ = keep;  // the GPU works from the image's own data, which is the same

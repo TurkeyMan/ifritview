@@ -1230,7 +1230,17 @@ void App::request_retone()
                             view_->retoned();
                     }
                     if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
-                        request_retone();  // the slider moved on while we rendered
+                    {
+                        if (view_->drawn_on_gpu())
+                            retone_later_ = ui_.timer(400, false,
+                                                      [this]
+                                                      {
+                                                          retone_later_ = {};
+                                                          request_retone();
+                                                      });  // once the slider rests: the GPU shows it meanwhile
+                        else
+                            request_retone();  // the slider moved on while we rendered
+                    }
                 });
         })
         .detach();
