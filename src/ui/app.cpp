@@ -1236,7 +1236,7 @@ void App::schedule_prefetch()
             return;
         if (i == folder_.index())
             return;
-        const std::string path = folder_.directory() + "/" + folder_.name_at(i);
+        const std::string path = folder_.path_at(i);
         if (!cache_.contains(path) && std::find(paths.begin(), paths.end(), path) == paths.end())
             paths.push_back(path);
     };

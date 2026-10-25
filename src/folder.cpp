@@ -117,9 +117,12 @@ void Folder::rescan(const Config& cfg)
 
 std::string Folder::current() const
 {
-    if (index_ < 0)
-        return {};
-    gchar* full = g_build_filename(dir_.c_str(), files_[index_].c_str(), nullptr);
+    return index_ < 0 ? std::string() : path_at(index_);
+}
+
+std::string Folder::path_at(int index) const
+{
+    gchar* full = g_build_filename(dir_.c_str(), files_[index].c_str(), nullptr);
     std::string s = full;
     g_free(full);
     return s;

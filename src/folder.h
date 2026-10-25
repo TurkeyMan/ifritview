@@ -34,6 +34,7 @@ public:
     std::string current() const;       // full path, or empty
     std::string current_name() const;  // file name only
     const std::string& name_at(int index) const { return files_[index]; }
+    std::string path_at(int index) const;  // full path, as current() gives it (the cache's key)
 
     bool step(int delta, bool wrap);  // false when there is nowhere to go
     bool go(int index);
