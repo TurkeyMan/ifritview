@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,16 @@ bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size);
 FILE* open_file(const std::string& path);
 // Forget the cached bytes (the next file_bytes reads afresh).
 void release_file_bytes();
+// A whole file read into memory, to hand to whichever thread decodes it.
+struct FileBlob
+{
+    PixelBuffer data;  // huge-page backed when large: a 25 MB raw faults in a dozen times, not thousands
+    bool ok = false;
+};
+std::shared_ptr<const FileBlob> read_file(const std::string& path);
+// This thread's next decode of `path` takes its bytes from `blob` (read by
+// another thread) instead of reading the file, until release_file_bytes.
+void provide_file_bytes(const std::string& path, std::shared_ptr<const FileBlob> blob);
 
 // Decoders in priority order: the compiled-in ones, then the plugins' once
 // they're loaded, then the gdk-pixbuf catch-all. Safe from any thread; the

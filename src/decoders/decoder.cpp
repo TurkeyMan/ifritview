@@ -20,8 +20,7 @@ namespace
 struct FileBuffer
 {
     std::string path;
-    PixelBuffer data;  // huge-page backed when large: a 25 MB raw faults in a dozen times, not thousands
-    bool ok = false;
+    std::shared_ptr<const FileBlob> blob;
 };
 thread_local FileBuffer t_file;
 
@@ -165,27 +164,35 @@ bool try_decode(const Decoder& d, const std::string& path, Image& out, std::stri
 
 }  // namespace
 
+std::shared_ptr<const FileBlob> read_file(const std::string& path)
+{
+    auto blob = std::make_shared<FileBlob>();
+    const int64_t n = platform::file_size(path);
+    if (FILE* f = n >= 0 ? platform::fopen(path, "rb") : nullptr)
+    {
+        blob->data.resize(size_t(n));
+        blob->ok = n == 0 || std::fread(blob->data.data(), 1, blob->data.size(), f) == blob->data.size();
+        std::fclose(f);
+    }
+    return blob;
+}
+
+void provide_file_bytes(const std::string& path, std::shared_ptr<const FileBlob> blob)
+{
+    t_file.path = path;
+    t_file.blob = std::move(blob);
+}
+
 bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size)
 {
-    if (t_file.path != path)
+    if (t_file.path != path || !t_file.blob)
     {
         t_file.path = path;
-        t_file.ok = false;
-        t_file.data.clear();
-        const int64_t n = platform::file_size(path);
-        if (FILE* f = n >= 0 ? platform::fopen(path, "rb") : nullptr)
-        {
-            if (n >= 0)
-            {
-                t_file.data.resize(size_t(n));
-                t_file.ok = n == 0 || std::fread(t_file.data.data(), 1, t_file.data.size(), f) == t_file.data.size();
-            }
-            std::fclose(f);
-        }
+        t_file.blob = read_file(path);
     }
-    data = t_file.data.data();
-    size = t_file.data.size();
-    return t_file.ok;
+    data = t_file.blob->data.data();
+    size = t_file.blob->data.size();
+    return t_file.blob->ok;
 }
 
 FILE* open_file(const std::string& path)

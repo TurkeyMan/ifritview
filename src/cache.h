@@ -22,9 +22,12 @@ public:
     // Budget in bytes; 0 picks a share of the memory available right now.
     explicit ImageCache(size_t budget = 0);
 
-    void put(const std::string& path, Entry entry);
+    // `soon` false: the first to go when over budget (an image left behind
+    // while flicking ahead), not the last.
+    void put(const std::string& path, Entry entry, bool soon = true);
     bool get(const std::string& path, Entry& entry);  // refreshes recency, checks mtime
     bool contains(const std::string& path) const;
+    bool peek(const std::string& path, Entry& entry) const;  // as get, but not counted as a use
     void erase(const std::string& path);
     void clear();
     size_t bytes() const { return bytes_; }

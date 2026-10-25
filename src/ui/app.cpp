@@ -931,6 +931,10 @@ void App::navigate(int delta)
     }
     if (tracing())
         nav_stamp_us_ = now_us();
+    const int64_t now = g_get_monotonic_time();
+    nav_steps_.push_back({now, delta > 0 ? 1 : -1});
+    while (nav_steps_.size() > 64 || now - nav_steps_.front().us > 1'000'000)
+        nav_steps_.pop_front();
     if (folder_.step(delta, cfg_.wrap_around))
     {
         awaiting_present_ = true;
@@ -998,6 +1002,18 @@ void App::on_loaded(Loader::Result& r)
 {
     if (r.image)
         request_place(r.image);  // prefetched neighbours get their place name looked up ahead of time
+    if (r.prefetch && r.image && !r.preview)
+    {
+        // The whole image, for one shown or cached as its preview: adopted
+        // into it, as its develop would be.
+        if (image_ && image_key_ == r.path && image_->is_preview())
+            r.prefetch = false;  // on screen: below
+        else if (ImageCache::Entry old; cache_.peek(r.path, old) && old.image->is_preview())
+        {
+            old.image->adopt(std::move(*r.image));
+            return;
+        }
+    }
     if (r.prefetch)
     {
         // Never replace what is already cached: it may carry the user's edits.
@@ -1191,7 +1207,7 @@ void App::leave_image()
     if (image_->edited)
         cache_.erase(image_key_);
     else
-        cache_.put(image_key_, {image_, ImageCache::file_mtime(image_path_)});
+        cache_.put(image_key_, {image_, ImageCache::file_mtime(image_path_)}, !flicking());  // flicking on: what's behind goes first
 }
 
 void App::crop_to_selection()
@@ -1211,6 +1227,15 @@ void App::crop_to_selection()
     refresh_metadata();
 }
 
+// Cached as a visit would leave it: a preview the GPU would develop doesn't count.
+bool App::cached_in_full(const std::string& key)
+{
+    ImageCache::Entry e;
+    if (!cache_.contains(key))
+        return false;
+    return !decode_options().gpu_develop || (cache_.peek(key, e) && !e.image->is_preview());
+}
+
 // Neighbours in the browsing direction first, then behind; skips what the
 // cache already has.
 void App::schedule_prefetch()
@@ -1218,7 +1243,7 @@ void App::schedule_prefetch()
     std::vector<std::string> paths;
     // The file's next page first, where it has pages: paging is browsing too.
     if (image_ && part_.page + 1 < image_->page_count)
-        if (const std::string next = part_key(image_path_, {part_.page + 1, 0}); !cache_.contains(next))
+        if (const std::string next = part_key(image_path_, {part_.page + 1, 0}); !cached_in_full(next))
             paths.push_back(next);
     const int n = folder_.count();
     if (n <= 1)
@@ -1236,17 +1261,48 @@ void App::schedule_prefetch()
         if (i == folder_.index())
             return;
         const std::string path = folder_.path_at(i);
-        if (!cache_.contains(path) && std::find(paths.begin(), paths.end(), path) == paths.end())
+        if (!cached_in_full(path) && std::find(paths.begin(), paths.end(), path) == paths.end())
             paths.push_back(path);
     };
-    for (int k = 1; k <= cfg_.prefetch_ahead || k <= cfg_.prefetch_behind; ++k)
+    // Flicking through (the wheel spun): far ahead the way it's going, a
+    // good margin past a second at that pace (speeding up a little doesn't
+    // catch it up), and nothing behind. Browsing slowly:
+    // both ways alike, for flipping back and forth to compare.
+    int direction = 1, ahead = cfg_.prefetch_ahead, behind = std::max(cfg_.prefetch_ahead, cfg_.prefetch_behind);
+    if (flicking(&direction))
     {
-        if (k <= cfg_.prefetch_ahead)
-            add(k);
-        if (k <= cfg_.prefetch_behind)
-            add(-k);
+        // Within half the cache, at what the image on screen takes.
+        const size_t each = std::max<size_t>(image_ ? ImageCache::image_bytes(*image_) : 0, 32 << 20);
+        const int room = int(cache_.budget() / 2 / each);
+        const int pace = int(nav_steps_.size());  // steps in the last second
+        ahead = std::clamp(pace * 3 / 2 + 2, cfg_.prefetch_ahead, std::max(cfg_.prefetch_ahead, std::min(32, room)));
+        behind = 0;
     }
+    else if (!nav_steps_.empty())
+        direction = nav_steps_.back().direction;
+    for (int k = 1; k <= ahead || k <= behind; ++k)
+    {
+        if (k <= ahead)
+            add(k * direction);
+        if (k <= behind)
+            add(-k * direction);
+    }
+    if (tracing())
+        std::fprintf(stderr, "prefetch: %d %s, %d behind%s\n", ahead, direction > 0 ? "ahead" : "back", behind, flicking() ? " (flicking)" : "");
     loader_.prefetch(std::move(paths));
+}
+
+// Three or more steps the same way in the last second.
+bool App::flicking(int* direction) const
+{
+    const int64_t now = g_get_monotonic_time();
+    int net = 0, n = 0;
+    for (const NavStep& s : nav_steps_)
+        if (now - s.us <= 1'000'000)
+            net += s.direction, ++n;
+    if (direction && net != 0)
+        *direction = net > 0 ? 1 : -1;
+    return n >= 3 && std::abs(net) == n;
 }
 
 void App::request_place(const std::shared_ptr<Image>& image)

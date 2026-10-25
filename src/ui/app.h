@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <future>
 #include <map>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -124,6 +125,15 @@ private:
     void request_retone();
     bool retone_busy_ = false;
     int64_t nav_stamp_us_ = 0;
+    // The last second or so of steps through the folder (when, which way):
+    // how fast and which way the user is going, for the prefetch.
+    struct NavStep
+    {
+        int64_t us;
+        int direction;
+    };
+    std::deque<NavStep> nav_steps_;
+    bool flicking(int* direction = nullptr) const;
     bool awaiting_present_ = false;
     int pending_steps_ = 0;
     void fit_window_to_image();
@@ -135,6 +145,7 @@ private:
     bool apply_xmp_geometry(Image& image);
     void ensure_developed();
     void schedule_prefetch();
+    bool cached_in_full(const std::string& key);
     void request_place(const std::shared_ptr<Image>& image);
     void refresh_metadata();
     std::vector<MetadataGroup> collect_metadata() const;

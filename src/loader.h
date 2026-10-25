@@ -1,6 +1,7 @@
 #pragma once
 
 #include "image.h"
+#include "decoders/decoder.h"
 
 #include <glib.h>
 
@@ -14,13 +15,15 @@
 #include <thread>
 #include <vector>
 
-// Decodes on a worker thread. A newer request replaces a pending one, so
-// scrolling quickly through a folder only decodes what ends up on screen.
 // Decoding off the main thread, with the image being navigated to always
 // first. A dedicated foreground worker handles only that image (its preview,
 // or its full decode when there is none) and never waits behind anything.
-// A pool of background workers, at lower OS priority, handles the develop of
-// the image on screen and then prefetches of its neighbours, nearest first.
+// Everything else goes through one reader, which reads files whole, one after
+// another (a disk does one thing at a time), and hands each to a pool of
+// workers at lower OS priority, about four in five of the cores, which decode
+// them in parallel: the develop of the image on screen first, then its
+// neighbours, nearest first, each as far as a visit would take it (a raw's
+// mosaic, when the GPU develops it).
 class Loader
 {
 public:
@@ -51,7 +54,8 @@ public:
 
 private:
     void run_foreground();
-    void run_background();
+    void run_reader();
+    void run_worker();
     enum class Lane
     {
         Foreground,
@@ -61,21 +65,31 @@ private:
     void post(Result* r, Lane lane);
     void decode_into(Result& r);
 
-    Callback callback_;
-    Dispatch dispatch_;
-    std::mutex mutex_;
-    std::condition_variable fg_wake_, bg_wake_;
     struct Job
     {
         uint64_t generation;
         std::string path;
+        std::shared_ptr<const FileBlob> file;  // read, or null for the reader to read
     };
-    std::optional<Job> pending_;  // foreground
-    std::optional<Job> develop_;  // background, ahead of prefetches
-    std::vector<std::string> prefetch_;
-    std::vector<std::string> in_flight_;  // background paths being decoded right now
-    std::vector<std::string> developing_;  // develops in flight (also in in_flight_)
+    // The file read for `path` and waiting for a worker, if any, taken from
+    // the queue. Under the lock.
+    std::shared_ptr<const FileBlob> take_read(const std::string& path);
+    bool busy_with(const std::string& path) const;  // being read, or waiting or decoded in full. Under the lock.
+
+    Callback callback_;
+    Dispatch dispatch_;
+    std::mutex mutex_;
+    std::condition_variable fg_wake_, reader_wake_, worker_wake_;
+    std::optional<Job> pending_;            // foreground
+    std::optional<Job> develop_;            // the image on screen's, ahead of prefetches
+    std::vector<std::string> prefetch_;     // still to read, nearest first
+    std::vector<std::string> order_;        // the latest prefetch list: the order the read ones are decoded in
+    std::vector<Job> read_;                 // prefetches read, waiting for a worker
+    std::string reading_;                   // the reader's file now
+    std::vector<std::string> developing_;   // full decodes running (develops, and prefetches that go as far)
+    std::vector<std::string> in_flight_;    // every decode the workers are running
+    unsigned workers_ = 1;
     bool stop_ = false;
-    std::thread foreground_;
-    std::vector<std::thread> background_;
+    std::thread foreground_, reader_;
+    std::vector<std::thread> pool_;
 };

@@ -16,6 +16,8 @@ size_t ImageCache::image_bytes(const Image& image)
     size_t n = image.pixels.size();
     if (image.linear)
         n += image.linear->rgb.size() * sizeof(uint16_t);
+    if (image.mosaic && image.mosaic->data)
+        n += image.mosaic->data->size() * sizeof(uint16_t);
     if (image.animation)
         for (const Animation::Frame& f : image.animation->frames)
             n += f.pixels.size();
@@ -43,7 +45,7 @@ void ImageCache::set_budget(size_t budget)
     trim();
 }
 
-void ImageCache::put(const std::string& path, Entry entry)
+void ImageCache::put(const std::string& path, Entry entry, bool soon)
 {
     erase(path);
     if (!entry.image)
@@ -51,8 +53,8 @@ void ImageCache::put(const std::string& path, Entry entry)
     const size_t n = image_bytes(*entry.image);
     if (n > budget_)
         return;
-    order_.push_front(path);
-    slots_[path] = Slot{std::move(entry), n, order_.begin()};
+    const auto where = soon ? order_.insert(order_.begin(), path) : order_.insert(order_.end(), path);
+    slots_[path] = Slot{std::move(entry), n, where};
     bytes_ += n;
     trim();
 }
@@ -70,6 +72,15 @@ bool ImageCache::get(const std::string& path, Entry& entry)
     order_.erase(it->second.where);
     order_.push_front(path);
     it->second.where = order_.begin();
+    entry = it->second.entry;
+    return true;
+}
+
+bool ImageCache::peek(const std::string& path, Entry& entry) const
+{
+    auto it = slots_.find(path);
+    if (it == slots_.end())
+        return false;
     entry = it->second.entry;
     return true;
 }
