@@ -508,14 +508,15 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     const auto& id = theirs.imgdata.idata;
     const auto& rd = theirs.imgdata.rawdata;
     const char* gpu = !id.filters ? (rd.float3_image || rd.float4_image ? "no: float, demosaiced" : rd.float_image ? "no: float mosaic"
-                                     : rd.color3_image || rd.color4_image                         ? "no: demosaiced (linear, sRAW, Foveon)"
+                                     : (rd.color3_image || rd.color4_image) && id.colors == 3     ? "yes: linear or sRAW"
+                                     : rd.color3_image || rd.color4_image                         ? "no: demosaiced, not three colours"
                                                                                                     : "no: no colour filter")
                       : id.filters == 9    ? "no: X-Trans"
                       : id.filters < 1000  ? "no: other filter pattern"
                       : id.colors != 3     ? "no: four colours"
                       : rd.float_image     ? "no: float mosaic"
                       : !rd.raw_image      ? "no: unpacked elsewhere"
-                                           : "yes";
+                                           : ok ? "yes: decoded on the GPU too" : "yes: unpacked by LibRaw";
     std::fprintf(stderr, "rawcheck-gpu: %s %s\n", path.c_str(), gpu);
     std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's %.0f ms (%s, %s %s); levels %s\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
                  (t2 - t1) / 1000.0, info.decoder_name ? info.decoder_name : "?", theirs.imgdata.idata.make, theirs.imgdata.idata.model,
