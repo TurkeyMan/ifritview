@@ -7,8 +7,9 @@
 // can run beside the true one for thousands of samples without meeting it.
 // So past the chunk's end it goes on into the next chunks, against their
 // guesses, until it meets one: the guess met, its chunk, and how many
-// samples the true decode and that guess had each decoded by then. ~0 when
-// it never meets one (a corrupt stream; resolve flags it).
+// samples the true decode and that guess had each decoded by then. At the
+// stream's end there's no chunk after to meet: one that gets there unmet
+// decodes all the rest itself (~1, and how many it decoded).
 #define LJPEG_BITS
 #include "ljpeg.hlsli"
 
@@ -58,5 +59,5 @@ void main(uint3 id : SV_DispatchThreadID)
         if (met >= 0)
             break;
     }
-    ways.Store4(i * 16, met >= 0 ? uint4(uint(met), j, a, b[met]) : uint4(0xFFFFFFFF, 0, 0, 0));
+    ways.Store4(i * 16, met >= 0 ? uint4(uint(met), j, a, b[met]) : uint4(0xFFFFFFFE, chunks - 1, a, 0));
 }

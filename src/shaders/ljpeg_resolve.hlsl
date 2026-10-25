@@ -3,8 +3,8 @@
 // how many. A way that met a guess of a later chunk takes the chunks it ran
 // over with it: the samples are all decoded from its way in, and those
 // chunks have none of their own. One thread: a chunk is a couple of loads.
-// Word 0 of the plan: 1 if the true decode met none of the guesses (a
-// corrupt stream: the result is wrong).
+// Word 0 of the plan: 1 if the samples ran out before the stream did, or a
+// way was never worked out (a corrupt stream: the result is wrong).
 #include "ljpeg.hlsli"
 
 RWByteAddressBuffer guesses : register(u0);
@@ -28,6 +28,15 @@ void main()
             continue;
         }
         const uint4 w = ways.Load4((k * components + s) * 16);
+        if (w.x == 0xFFFFFFFE)
+        {
+            // Met none to the stream's end: the rest is this chunk's.
+            plan.Store4(16 + k * 16, uint4(out_of.x, out_of.y, at, w.z));
+            at += w.z;
+            for (++k; k < chunks; ++k)
+                plan.Store4(16 + k * 16, uint4(0, 0, at, 0));
+            break;
+        }
         if (w.x >= components)
         {
             failed = 1;
@@ -43,5 +52,5 @@ void main()
         s = w.x;
         k = w.y + 1;
     }
-    plan.Store(0, failed);
+    plan.Store(0, failed || at < samples ? 1 : 0);
 }
