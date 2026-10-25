@@ -96,6 +96,10 @@ Section "IfritView"
   CreateShortcut "$SMPROGRAMS\IfritView.lnk" "$INSTDIR\ifritview.exe"
 
   WriteRegStr HKLM "Software\IfritView" "InstallDir" "$INSTDIR"
+  ; Found by name, as Windows finds programs (Run, ShellExecute) and as
+  ; other tools look for it (a diff tool offering it for images).
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\ifritview.exe" "" "$INSTDIR\ifritview.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\ifritview.exe" "Path" "$INSTDIR"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "IfritView"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Manu Evans"
@@ -129,6 +133,7 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   DeleteRegKey HKLM "Software\IfritView"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\ifritview.exe"
   ; What the app registered for the user when offered as the default viewer.
   ; (Extensions' "Open with" entries naming IfritView.Image are left: with
   ; the ProgID gone, Windows passes over them.)
