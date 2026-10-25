@@ -69,8 +69,10 @@ std::string sort_key(const std::string& name, bool files_first)
 // Under `dir`, from its folder `rel` (relative; empty: `dir` itself), the
 // files the list shows, and (cfg.recursive) those of the folders inside,
 // not following links (no loops) or hidden folders unless hidden files show.
-void collect(const std::string& dir, const std::string& rel, const Config& cfg, std::vector<std::string>& out, int depth)
+void collect(const std::string& dir, const std::string& rel, const Config& cfg, std::vector<std::string>& out, int depth, const std::function<bool()>& stop)
 {
+    if (stop && stop())
+        return;
     const std::string here = rel.empty() ? dir : join(dir, rel);
     GDir* d = g_dir_open(here.c_str(), 0, nullptr);
     if (!d)
@@ -84,16 +86,16 @@ void collect(const std::string& dir, const std::string& rel, const Config& cfg, 
         {
             const std::string full = join(dir, name);
             if (g_file_test(full.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(full.c_str(), G_FILE_TEST_IS_SYMLINK))
-                collect(dir, name, cfg, out, depth + 1);
+                collect(dir, name, cfg, out, depth + 1, stop);
         }
     }
     g_dir_close(d);
 }
 
-std::vector<std::string> list_images(const std::string& dir, const Config& cfg)
+std::vector<std::string> list_images(const std::string& dir, const Config& cfg, const std::function<bool()>& stop)
 {
     std::vector<std::string> names;
-    collect(dir, "", cfg, names, 0);
+    collect(dir, "", cfg, names, 0, stop);
     std::vector<std::pair<std::string, std::string>> keyed;  // sort key, name
     keyed.reserve(names.size());
     for (std::string& name : names)
@@ -107,39 +109,47 @@ std::vector<std::string> list_images(const std::string& dir, const Config& cfg)
 
 }  // namespace
 
-void Folder::scan(const std::string& path, const Config& cfg)
+Folder::Listing Folder::list(const std::string& path, const Config& cfg, const std::function<bool()>& stop)
 {
-    std::string want;
+    Listing l;
     if (g_file_test(path.c_str(), G_FILE_TEST_IS_DIR))
-    {
-        dir_ = path;
-    }
+        l.dir = path;
     else
     {
         gchar* d = g_path_get_dirname(path.c_str());
         gchar* b = g_path_get_basename(path.c_str());
-        dir_ = d;
-        want = b;
+        l.dir = d;
+        l.want = b;
         g_free(d);
         g_free(b);
+        l.opened = g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR);
     }
-    files_ = list_images(dir_, cfg);
-    index_ = files_.empty() ? -1 : 0;
+    l.files = list_images(l.dir, cfg, stop);
+    return l;
+}
+
+void Folder::adopt(Listing l)
+{
+    const bool same = l.dir == dir_;
+    const int was = index_;
+    dir_ = std::move(l.dir);
+    files_ = std::move(l.files);
     gone_ = false;
-    if (!want.empty())
+    if (auto it = std::find(files_.begin(), files_.end(), l.want); !l.want.empty() && it != files_.end())
+        index_ = int(it - files_.begin());
+    else if (l.opened)
     {
-        auto it = std::find(files_.begin(), files_.end(), want);
-        if (it != files_.end())
-        {
-            index_ = int(it - files_.begin());
-        }
-        else if (g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR))
-        {
-            // Opened explicitly, so show it even though it isn't in the filter.
-            files_.insert(files_.begin(), want);
-            index_ = 0;
-        }
+        // Opened explicitly, so show it even though it isn't in the filter.
+        files_.insert(files_.begin(), l.want);
+        index_ = 0;
     }
+    else
+        index_ = files_.empty() ? -1 : same ? std::clamp(was, 0, count() - 1) : 0;
+}
+
+void Folder::scan(const std::string& path, const Config& cfg)
+{
+    adopt(list(path, cfg));
 }
 
 void Folder::set_single(const std::string& file)
@@ -158,14 +168,9 @@ void Folder::rescan(const Config& cfg)
 {
     if (dir_.empty())
         return;
-    const std::string keep = index_ >= 0 ? files_[index_] : "";
-    files_ = list_images(dir_, cfg);
-    gone_ = false;
-    auto it = std::find(files_.begin(), files_.end(), keep);
-    if (it != files_.end())
-        index_ = int(it - files_.begin());
-    else
-        index_ = files_.empty() ? -1 : std::min(std::max(index_, 0), count() - 1);
+    Listing l = list(dir_, cfg);
+    l.want = current_name();
+    adopt(std::move(l));
 }
 
 std::string Folder::current() const

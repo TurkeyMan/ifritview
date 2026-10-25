@@ -57,7 +57,9 @@ public:
     void go_last();
     void reload();
     void on_dropped(const std::vector<std::string>& paths);  // files or folders dropped on the window
-    void set_recursive(bool on, const std::string& root = {});  // Config::recursive: the toolbar's toggle, a folder dropped
+    void set_recursive(bool on, const std::string& root = {});                    // Config::recursive: the toolbar's toggle, a folder dropped
+    void list_folder(const std::string& path, std::function<void()> then = {});  // on a thread of its own, then folder_listed
+    void folder_listed(Folder::Listing listing, bool again, double ms);
     void toggle_fullscreen();
     void zoom_in();
     void zoom_out();
@@ -312,14 +314,22 @@ private:
     std::shared_ptr<Image> preview_image_;  // the latest preview, compared while its toggle is on
     std::shared_ptr<const ImageDifference> preview_difference_;  // between image_ and preview_image_
     std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
-    // Shared with the preview workers, which may outlive a request: the
-    // latest generation wins, and the app waits for running ones on exit.
-    struct PreviewState
+    // Shared with work on threads of its own, which may outlive a request:
+    // the latest generation wins, and the app waits for running ones on exit.
+    struct Background : std::enable_shared_from_this<Background>
     {
         std::atomic<uint64_t> generation{0};
         std::atomic<int> running{0};
+        // Counted as running until the last copy of this goes (a thread holds it).
+        std::shared_ptr<void> start()
+        {
+            ++running;
+            return std::shared_ptr<void>(nullptr, [self = shared_from_this()](void*) { --self->running; });
+        }
+        void wait_out();  // on exit: the latest generation moved on, those running waited for (a few seconds at most)
     };
-    std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
+    std::shared_ptr<Background> preview_ = std::make_shared<Background>();  // previews: a save's, the camera's JPEG, LibRaw's develop, a comparison
+    std::shared_ptr<Background> listing_ = std::make_shared<Background>();  // the folder, listed
     bool refit_after_layout_ = false;
     bool refit_when_laid_out_ = false;  // a fit guessed the chrome: fit again once laid out
     double fitted_scale_ = 0;           // the device scale the window was last fitted at

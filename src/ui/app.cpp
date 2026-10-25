@@ -70,16 +70,13 @@ void App::plugins_loaded()
         return;
     cfg_.add_new_extensions(extensions);
     // A file opened by name stays even if its type isn't listed; scan() keeps it.
-    const std::string current = folder_.current();
     const bool was_empty = folder_.empty();
-    if (!current.empty())
-        folder_.scan(current, cfg_);
-    else
-        folder_.rescan(cfg_);
-    if (was_empty && !folder_.empty())
-        load_current();  // a folder of nothing but plugin formats
-    update_title();
-    update_status();
+    list_folder(folder_.current(),
+                [this, was_empty]
+                {
+                    if (was_empty && !folder_.empty())
+                        load_current();  // a folder of nothing but plugin formats
+                });
 }
 
 App::~App()
@@ -90,8 +87,14 @@ App::~App()
     outgoing_video_.stop();
     // A save preview still encoding uses the encoders' and decoders' statics,
     // which go when the process does: let it finish (or give up) first.
-    ++preview_->generation;
-    for (int i = 0; i < 600 && preview_->running.load(); ++i)
+    preview_->wait_out();
+    listing_->wait_out();
+}
+
+void App::Background::wait_out()
+{
+    ++generation;
+    for (int i = 0; i < 600 && running.load(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
@@ -797,10 +800,16 @@ void App::open_path(const std::string& path, FirstImage* first)
     g_free(canonical);
     if (!first)
     {
-        platform::trace("reading the folder");
-        folder_.scan(file, cfg_);
-        platform::trace("folder read: %d files", folder_.count());
-        load_current();
+        // A file shows at once, its folder listed meanwhile; a folder, from
+        // its first image once it's listed.
+        if (g_file_test(file.c_str(), G_FILE_TEST_IS_DIR))
+            list_folder(file, [this] { load_current(); });
+        else
+        {
+            folder_.set_single(file);
+            load_current();
+            list_folder(file);
+        }
         return;
     }
     // The image is being decoded already: the window opens with it, and the
@@ -859,9 +868,9 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     if (folder_.directory() != watched_dir_ || diff_session_)
         return;  // a different folder by now, or comparing two files
     const std::filesystem::path dir = rap::sys::path_from_utf8(watched_dir_).lexically_normal();
-    bool listed = batch.overflow, reload_shown = false;
+    bool listed = false, reload_shown = false;
     if (batch.overflow)
-        folder_.rescan(cfg_);  // events were lost: what's there now
+        list_folder({});  // events were lost: what's there now
     // Names as the folder lists them: relative to it (with subfolders, a
     // path inside it); none for what's outside what's listed.
     const auto listed_name = [&](const std::filesystem::path& p) -> std::optional<std::string>
@@ -915,10 +924,7 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         cache_.erase(full);  // what was cached of it is out of date
     }
     if (rescan)
-    {
-        folder_.rescan(cfg_);
-        listed = true;
-    }
+        list_folder({});
     if (reload_shown)
     {
         // Rewritten: read it again. Not via the cache, which leaving it would
@@ -1035,12 +1041,7 @@ void App::image_presented()
                     deferred_scan_.clear();
                     if (folder_.empty() || folder_.current() != file)
                         return;  // something else was opened meanwhile
-                    folder_.scan(file, cfg_);
-                    platform::trace("folder read: %d files", folder_.count());
-                    watch_folder();
-                    update_title();
-                    update_status();
-                    schedule_prefetch();
+                    list_folder(file);
                 });
     }
     awaiting_present_ = false;
@@ -1070,8 +1071,8 @@ void App::go_last()
 
 void App::reload()
 {
-    folder_.rescan(cfg_);
     load_current();
+    list_folder({});
 }
 
 // A dropped file opens with its folder, as if opened from the menu; a
@@ -1107,12 +1108,47 @@ void App::set_recursive(bool on, const std::string& root)
         return;
     }
     const std::string shown = folder_.current();
-    const gint64 t0 = g_get_monotonic_time();
-    if (!on && !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename())
-        folder_.scan(shown, cfg_);
-    else
-        folder_.rescan(cfg_);
-    platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), on ? ", with subfolders," : "", (g_get_monotonic_time() - t0) / 1000.0);
+    const bool inside = !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename();
+    list_folder(!on && inside ? shown : std::string());
+}
+
+// The folder of `path` (a file's, or a directory; empty: the one browsed,
+// again) listed on a thread of its own, a big one taking a while, then
+// adopted here (the cursor kept on the image shown), and `then`. A newer
+// listing makes this one's moot.
+void App::list_folder(const std::string& path, std::function<void()> then)
+{
+    const bool again = path.empty();
+    const std::string target = again ? folder_.directory() : path;
+    if (target.empty())
+        return;
+    const uint64_t generation = ++listing_->generation;
+    std::thread(
+        [state = listing_, running = listing_->start(), generation, target, again, cfg = cfg_, then = std::move(then)]
+        {
+            platform::lower_thread_priority();
+            const gint64 t0 = g_get_monotonic_time();
+            auto listing = std::make_shared<Folder::Listing>(Folder::list(target, cfg, [&] { return state->generation.load() != generation; }));
+            const double ms = (g_get_monotonic_time() - t0) / 1000.0;
+            platform::post_main(
+                [state, generation, listing, again, ms, then]
+                {
+                    if (!s_app || state->generation.load() != generation)
+                        return;
+                    s_app->folder_listed(std::move(*listing), again, ms);
+                    if (then)
+                        then();
+                });
+        })
+        .detach();
+}
+
+void App::folder_listed(Folder::Listing listing, bool again, double ms)
+{
+    if (again)
+        listing.want = folder_.current_name();  // where the cursor is now, not when it was asked for
+    folder_.adopt(std::move(listing));
+    platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), cfg_.recursive ? ", with subfolders," : "", ms);
     watch_folder();
     update_title();
     update_status();
@@ -1358,15 +1394,9 @@ void App::show_instead()
         status_message_ = busy_message_ = _("Developing with LibRaw…");
         update_status();
     }
-    ++preview_->running;  // waited for on exit
     std::thread(
-        [this, request, what, path = image_path_, raw = image_, state = preview_]
+        [this, request, what, path = image_path_, raw = image_, running = preview_->start()]
         {
-            struct Done
-            {
-                PreviewState& s;
-                ~Done() { --s.running; }
-            } done{*state};
             auto other = std::make_shared<Image>();
             std::string error;
             bool ok;
@@ -1807,7 +1837,7 @@ void App::open_settings_page(int page)
             video_.set_loop(cfg_.video_loop);
             video_.set_muted(cfg_.video_muted);
             view_->set_video_muted(cfg_.video_muted);
-            folder_.rescan(cfg_);
+            list_folder({});
             smooth_toggle_->set_checked(cfg_.smooth_upscale());
             xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
             window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
