@@ -1569,7 +1569,7 @@ msgid "Wrap around at the end of the folder"
 msgstr ""
 
 #: src/ui/settings.cpp:349
-msgid "With subfolders, a folder's own images before the folders in it"
+msgid "Interleave subfolders with images"
 msgstr ""
 
 #: src/ui/settings.cpp:304

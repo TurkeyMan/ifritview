@@ -26,7 +26,7 @@ struct Config
     bool wrap_around = true;              // next after the last image goes to the first
     bool show_hidden = false;
     bool recursive = false;               // the folders inside too, in order of their paths
-    bool files_first = false;             // and a folder's own images before the folders in it
+    bool interleave_folders = false;      // and the folders inside among a folder's images, by name (else after them)
     int prefetch_ahead = 3;  // images decoded in advance in the browsing direction
     int prefetch_behind = 1;
     int cache_megabytes = 0;        // decoded image cache; 0 = a share of free memory

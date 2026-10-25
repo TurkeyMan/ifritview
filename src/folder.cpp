@@ -47,9 +47,9 @@ bool is_separator(char c)
 
 // The list's order, for a name relative to the directory: its path from
 // there, a folder at a time, each by name as a file manager sorts them;
-// with `files_first`, a folder's own files before the folders in it, else
-// the two alike.
-std::string sort_key(const std::string& name, bool files_first)
+// `interleave`: a folder's files and the folders in it alike, else its
+// files before its folders.
+std::string sort_key(const std::string& name, bool interleave)
 {
     std::string key;
     size_t from = 0;
@@ -58,7 +58,7 @@ std::string sort_key(const std::string& name, bool files_first)
         const bool file = i == name.size();
         if (!file && !is_separator(name[i]))
             continue;
-        if (files_first)
+        if (!interleave)
             key += file ? '\x01' : '\x02';
         key += collate_key(name.substr(from, i - from)) + '\0';  // a shorter name first: "a" before "ab"
         from = i + 1;
@@ -99,7 +99,7 @@ std::vector<std::string> list_images(const std::string& dir, const Config& cfg, 
     std::vector<std::pair<std::string, std::string>> keyed;  // sort key, name
     keyed.reserve(names.size());
     for (std::string& name : names)
-        keyed.emplace_back(sort_key(name, cfg.files_first), std::move(name));
+        keyed.emplace_back(sort_key(name, cfg.interleave_folders), std::move(name));
     std::sort(keyed.begin(), keyed.end());
     names.clear();
     for (auto& [key, name] : keyed)
@@ -203,8 +203,8 @@ bool Folder::add(const std::string& name, const Config& cfg)
 {
     if (dir_.empty() || contains(name) || !qualifies(dir_, name, cfg))
         return false;
-    const std::string key = sort_key(name, cfg.files_first);
-    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f, cfg.files_first) > key; });
+    const std::string key = sort_key(name, cfg.interleave_folders);
+    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f, cfg.interleave_folders) > key; });
     const int i = int(at - files_.begin());
     files_.insert(at, name);
     if (index_ < 0)
@@ -240,8 +240,8 @@ bool Folder::rename(const std::string& from, const std::string& to, const Config
         return remove(from) | add(to, cfg);
     // The current file: it stays current under its new name, in its new place.
     files_.erase(it);
-    const std::string key = sort_key(to, cfg.files_first);
-    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f, cfg.files_first) > key; });
+    const std::string key = sort_key(to, cfg.interleave_folders);
+    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f, cfg.interleave_folders) > key; });
     index_ = int(at - files_.begin());
     files_.insert(at, to);
     return true;

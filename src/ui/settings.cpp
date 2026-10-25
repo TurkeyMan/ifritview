@@ -165,7 +165,7 @@ struct State
     std::unique_ptr<rap::window> window;
     bool finished = false;
 
-    rap::check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *files_first = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
+    rap::check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *interleave_folders = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
     rap::spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
     rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
@@ -216,7 +216,7 @@ struct State
         cfg.min_window_height = int(min_height->value());
         cfg.wrap_around = wrap_around->checked();
         cfg.show_hidden = show_hidden->checked();
-        cfg.files_first = files_first->checked();
+        cfg.interleave_folders = interleave_folders->checked();
         cfg.prefetch_ahead = int(prefetch_ahead->value());
         cfg.prefetch_behind = int(prefetch_behind->value());
         cfg.cache_megabytes = int(cache_mb->value());
@@ -346,7 +346,7 @@ rap::node general_page(const Config& cfg, State& st)
                  L::form{
                      {"", L::check{_("Wrap around at the end of the folder"), cfg.wrap_around}.bind(st.wrap_around)},
                      {"", L::check{_("Include hidden files"), cfg.show_hidden}.bind(st.show_hidden)},
-                     {"", L::check{_("With subfolders, a folder's own images before the folders in it"), cfg.files_first}.bind(st.files_first)},
+                     {"", L::check{_("Interleave subfolders with images"), cfg.interleave_folders}.bind(st.interleave_folders)},
                      {_("Preload images ahead"), L::spin{0, 16, double(cfg.prefetch_ahead)}.bind(st.prefetch_ahead)},
                      {_("Preload images behind"), L::spin{0, 16, double(cfg.prefetch_behind)}.bind(st.prefetch_behind)},
                      {_("Image cache (MB, 0 = auto)"),
