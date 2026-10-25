@@ -14,10 +14,13 @@ cbuffer Params : register(b0)
     float4 as_shot;      // R, G, B multipliers, the least 1; w: saturation in data units
     int4 map_x;          // photosite x = map_x.x * out.x + map_x.y * out.y + map_x.z
     int4 map_y;          // photosite y = map_y.x * out.x + map_y.y * out.y + map_y.z
-    int4 size;           // the mosaic's width, height
+    int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels)
 };
 
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
+ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count R G B G2, zeros
+
+static float3 black_level;
 
 // The photosite at (x, y) as a balanced value, 1 = saturation.
 float site(int x, int y)
@@ -26,7 +29,21 @@ float site(int x, int y)
     y = clamp(y, 0, size.y - 1);
     const int c = colour[(y & 1) * 2 + (x & 1)];
     const float d = mosaic.Load(int3(x, y, 0)) * 65535;
-    return (d - black[c]) / (as_shot.w - black[c]) * as_shot[c];
+    return (d - black_level[c]) / (as_shot.w - black_level[c]) * as_shot[c];
+}
+
+// As LibRaw's: measured where the sensor is masked, if those were read and
+// not mostly zero; else what the file says.
+float3 black_levels()
+{
+    if (size.z != 0)
+    {
+        const uint4 sum = levels.Load4(0), count = levels.Load4(16);
+        const uint zero = levels.Load(32);
+        if (zero < count.x && count.y && count.z && count.w)
+            return float3(sum.x / count.x, sum.y / count.y, sum.z / count.z);
+    }
+    return black.rgb;
 }
 
 int colour_at(int x, int y)
@@ -36,6 +53,7 @@ int colour_at(int x, int y)
 
 float4 main(float4 position : SV_Position) : SV_Target
 {
+    black_level = black_levels();
     const int2 o = int2(position.xy);
     const int x = map_x.x * o.x + map_x.y * o.y + map_x.z;
     const int y = map_y.x * o.x + map_y.y * o.y + map_y.z;

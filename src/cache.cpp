@@ -1,5 +1,7 @@
 #include "cache.h"
 
+#include "decoders/ljpeg.h"
+
 #include "platform.h"
 
 #include <glib.h>
@@ -18,6 +20,8 @@ size_t ImageCache::image_bytes(const Image& image)
         n += image.linear->rgb.size() * sizeof(uint16_t);
     if (image.mosaic && image.mosaic->data)
         n += image.mosaic->data->size() * sizeof(uint16_t);
+    if (image.mosaic && image.mosaic->stream && image.mosaic->stream->jpeg)
+        n += image.mosaic->stream->jpeg->bits.size() + 4 * 65536 * sizeof(uint16_t);
     if (image.animation)
         for (const Animation::Frame& f : image.animation->frames)
             n += f.pixels.size();

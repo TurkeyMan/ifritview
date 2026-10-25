@@ -45,6 +45,10 @@ struct DecodeOptions
     // Raws (Bayer) only unpacked, for the GPU to develop (Image::mosaic): the
     // viewer, when it draws on the GPU. Else LibRaw develops them here.
     bool gpu_develop = false;
+    // And those of them this decoder takes (a CR2's lossless JPEG) left
+    // compressed for the GPU to decode too (RawMosaic::stream): the CPU only
+    // reads the file.
+    bool gpu_decode = false;
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();

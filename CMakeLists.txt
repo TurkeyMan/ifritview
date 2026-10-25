@@ -55,6 +55,7 @@ add_library(ifrit_core STATIC
   src/white_balance.cpp
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
+  src/decoders/ljpeg.cpp
   src/encoders/encoder.cpp
   src/encoders/dds.cpp
   src/encoders/reduce.cpp
@@ -369,11 +370,13 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifrit_core NAME render_raw_tone SOURCE src/shaders/render.hlsl DEFINES RAW TONE)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
-  set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/display.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli)
-  foreach(shader decode develop resample compose histogram_view)
+  set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/display.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
+      src/shaders/ljpeg.hlsli)
+  foreach(shader decode develop resample compose histogram_view mosaic)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
-  foreach(shader stats peak histogram histogram_max)
+  foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
+          ljpeg_black)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl STAGE compute DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
   message(STATUS "gpu: enabled (shaders with ${RAPPORT_SHADER_COMPILER})")

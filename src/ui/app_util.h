@@ -36,6 +36,7 @@ inline DecodeOptions decode_options_for(const Config& cfg)
 #ifdef HAVE_GPU
     // Raws developed on the GPU (the CPU only unpacks), unless the view is told off it.
     o.gpu_develop = !std::getenv("IFRIT_NO_GPU_VIEW") && !std::getenv("IFRIT_CPU_DEVELOP");
+    o.gpu_decode = o.gpu_develop && !std::getenv("IFRIT_CPU_RAW_DECODE");
 #endif
     return o;
 }

@@ -25,6 +25,7 @@
 #include <vector>
 
 struct Image;
+struct RawMosaic;
 
 // What the front buffer holds.
 enum class FrontBuffer
@@ -94,6 +95,10 @@ private:
     bool programs(std::string& error);
     // The image's data on the device, decoded to linear light (level 0).
     bool upload(const Image& image, std::string& error);
+    // A raw's readout still compressed (RawMosaic::stream) decoded here: its
+    // active area into `sites` (a photosite a texel), and what's masked
+    // summed into `levels` for the develop's black level.
+    bool decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(int n);
 
@@ -142,6 +147,7 @@ private:
     float as_shot_[3] = {1, 1, 1};                // a raw's: what its level 0 was developed with, the least 1
     bool auto_exposure_ = false;                  // a raw developed here: scaled by its own 99th percentile
     rap::gpu::program_ptr develop_;
+    rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_;
     bool tonable_ = false;                        // exposure applies
     rap::gpu::texture_ptr rows_;                  // the first pass's output, reused while big enough
     rap::gpu::texture_ptr frames_[2];
