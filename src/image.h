@@ -40,7 +40,8 @@ struct RawMosaic
     std::shared_ptr<const Stream> stream;
     int width = 0, height = 0;
     int colour[4] = {};          // the filter over (row & 1, col & 1): 0 R, 1 G, 2 B (row-major, 2 x 2)
-    float black[4] = {};         // per colour, in data units
+    float black[4] = {};         // per photosite of the 2 x 2 (as colour), in data units
+    int filter[4] = {};          // the colour there as LibRaw counts them: 0 R, 1 G, 2 B, 3 the other G
     float white = 65535;         // saturation, in data units
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)

@@ -10,40 +10,47 @@
 cbuffer Params : register(b0)
 {
     int4 colour;         // the filter over (row & 1, col & 1), row-major: 0 R, 1 G, 2 B
-    float4 black;        // per colour (R, G, B), data units
+    float4 black;        // per photosite of the 2 x 2 (as colour), data units
     float4 as_shot;      // R, G, B multipliers, the least 1; w: saturation in data units
     int4 map_x;          // photosite x = map_x.x * out.x + map_x.y * out.y + map_x.z
     int4 map_y;          // photosite y = map_y.x * out.x + map_y.y * out.y + map_y.z
     int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels)
+    int4 filter;         // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G), as levels counts them
 };
 
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
 ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count R G B G2, zeros
 
-static float3 black_level;
+static float4 black_level;
 
 // The photosite at (x, y) as a balanced value, 1 = saturation.
 float site(int x, int y)
 {
     x = clamp(x, 0, size.x - 1);
     y = clamp(y, 0, size.y - 1);
-    const int c = colour[(y & 1) * 2 + (x & 1)];
+    const int i = (y & 1) * 2 + (x & 1), c = colour[i];
     const float d = mosaic.Load(int3(x, y, 0)) * 65535;
-    return (d - black_level[c]) / (as_shot.w - black_level[c]) * as_shot[c];
+    return (d - black_level[i]) / (as_shot.w - black_level[i]) * as_shot[c];
 }
 
-// As LibRaw's: measured where the sensor is masked, if those were read and
-// not mostly zero; else what the file says.
-float3 black_levels()
+// Each photosite of the 2 x 2's, as LibRaw's: measured where the sensor is
+// masked (per colour), if those were read and not mostly zero; else what the
+// file says.
+float4 black_levels()
 {
     if (size.z != 0)
     {
         const uint4 sum = levels.Load4(0), count = levels.Load4(16);
         const uint zero = levels.Load(32);
         if (zero < count.x && count.y && count.z && count.w)
-            return float3(sum.x / count.x, sum.y / count.y, sum.z / count.z);
+        {
+            float4 b;
+            for (int i = 0; i < 4; ++i)
+                b[i] = sum[filter[i]] / count[filter[i]];
+            return b;
+        }
     }
-    return black.rgb;
+    return black;
 }
 
 int colour_at(int x, int y)

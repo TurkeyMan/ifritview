@@ -74,6 +74,7 @@ struct DevelopParams
     float as_shot[4];  // w: saturation
     int32_t map_x[4], map_y[4];
     int32_t size[4];
+    int32_t filter[4];  // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G)
 };
 
 // ljpeg.hlsli's block.
@@ -499,12 +500,13 @@ bool GpuView::upload(const Image& image, std::string& error)
         }
         DevelopParams p{};
         for (int i = 0; i < 4; ++i)
-            p.colour[i] = m->colour[i];
-        for (int c = 0; c < 3; ++c)
         {
-            p.black[c] = m->black[c];
-            p.as_shot[c] = m->as_shot[c];
+            p.colour[i] = m->colour[i];
+            p.filter[i] = m->filter[i];
+            p.black[i] = m->black[i];
         }
+        for (int c = 0; c < 3; ++c)
+            p.as_shot[c] = m->as_shot[c];
         p.as_shot[3] = m->white;
         p.size[0] = m->width, p.size[1] = m->height, p.size[2] = levels ? 1 : 0;
         // Output (x, y), as shown, to the photosite: through the turn, then

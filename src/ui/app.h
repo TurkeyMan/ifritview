@@ -94,6 +94,7 @@ public:
     void remember_pane_width();
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
+    void script_export(const std::string& path);
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
     void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 

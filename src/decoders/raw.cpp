@@ -514,15 +514,24 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
                      m->stream ? "prepared for the GPU" : readout.empty() ? "unpacked by LibRaw" : "unpacked here", (t1 - t0) / 1000.0,
                      (g_get_monotonic_time() - t1) / 1000.0);
     // dcraw's FC(row, col): the filter colour, 0 R, 1 G, 2 B, 3 the second G.
+    // Its black level as LibRaw has it: the common one, its colour's, and its
+    // place in a repeating pattern of them (DNG's BlackLevelRepeatDim).
     for (int row = 0; row < 2; ++row)
         for (int c = 0; c < 2; ++c)
         {
             const int f = (id.filters >> ((((row << 1) & 14) | (c & 1)) << 1)) & 3;
             m->colour[row * 2 + c] = f == 3 ? 1 : f;
+            m->filter[row * 2 + c] = f;
+            unsigned b = col.black + col.cblack[f];
+            if (col.cblack[4] && col.cblack[5] && 6 + col.cblack[4] * col.cblack[5] <= LIBRAW_CBLACK_SIZE)
+                b += col.cblack[6 + (row % col.cblack[4]) * col.cblack[5] + c % col.cblack[5]];
+            m->black[row * 2 + c] = float(b);
         }
-    for (int c = 0; c < 4; ++c)
-        m->black[c] = float(col.black + col.cblack[c]);
     m->white = float(col.maximum);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "raw: black %u + %u %u %u %u, pattern %ux%u: %u %u %u %u, white %u, mul %g %g %g, filters %08x\n", col.black, col.cblack[0],
+                     col.cblack[1], col.cblack[2], col.cblack[3], col.cblack[4], col.cblack[5], col.cblack[6], col.cblack[7], col.cblack[8],
+                     col.cblack[9], col.maximum, col.cam_mul[0], col.cam_mul[1], col.cam_mul[2], id.filters);
     // As shot, scaled so the least is 1: a channel clips at 1 after it, and
     // clipping all at 1 keeps highlights neutral.
     float mul[3] = {col.cam_mul[0], col.cam_mul[1], col.cam_mul[2]};
@@ -538,6 +547,29 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             m->rgb_cam[i][j] = col.rgb_cam[i][j];
             m->cam_xyz[i][j] = col.cam_xyz[i][j];
         }
+    // A DNG's camera LibRaw has no table for: its own matrix, XYZ to camera
+    // (ColorMatrix, by CameraCalibration where there is one), the one for
+    // D65 if there are two.
+    bool empty = true;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            empty &= col.cam_xyz[i][j] == 0;
+    if (empty)
+    {
+        const auto& dng = col.dng_color;
+        const int k = dng[1].illuminant == 21 || (dng[0].illuminant != 21 && dng[1].colormatrix[0][0] != 0) ? 1 : 0;
+        const auto& cm = dng[k].colormatrix;
+        const auto& cc = dng[k].calibration;
+        const bool calibrated = cc[0][0] != 0 && cc[1][1] != 0 && cc[2][2] != 0;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+            {
+                float v = 0;
+                for (int n = 0; n < 3; ++n)
+                    v += (calibrated ? cc[i][n] : float(i == n)) * cm[n][j];
+                m->cam_xyz[i][j] = v;
+            }
+    }
     // The camera's framing, as the CPU develop crops to it.
     m->crop[0] = 0, m->crop[1] = 0, m->crop[2] = m->width, m->crop[3] = m->height;
     if (decode_options().raw_camera_crop)

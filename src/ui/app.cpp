@@ -708,6 +708,20 @@ void App::script_end_dialog(bool accept)
     }
 }
 
+// Development aid: the image shown, as saving would have it (a raw's pixels
+// from its develop on the GPU), straight to `path` in the format its
+// extension names.
+void App::script_export(const std::string& path)
+{
+    if (!image_)
+        return;
+    pixels_for_cpu();
+    std::string error;
+    const Encoder* e = encoder_for_extension(file_extension(path));
+    if (!e || !e->encode(*image_, path, EncodeOptions{}, error))
+        std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), e ? error.c_str() : "no encoder for that extension");
+}
+
 void App::script_compare(const std::string& how)
 {
     if (how == "swap")
