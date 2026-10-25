@@ -56,6 +56,7 @@ public:
     void go_first();
     void go_last();
     void reload();
+    void set_recursive(bool on);  // Config::recursive, from the toolbar
     void toggle_fullscreen();
     void zoom_in();
     void zoom_out();
@@ -213,9 +214,10 @@ private:
     void pixels_for_cpu();
     ScaleFilter smooth_enlarge_ = ScaleFilter::Lanczos3;  // what the toolbar toggle turns enlarging back on with
     rap::tool_button* xmp_toggle_ = nullptr;
+    rap::tool_button* recursive_toggle_ = nullptr;
     std::function<void(bool)> end_settings_;  // while Settings is open
     rap::tool_button* crop_button_ = nullptr;
-    std::array<rap::widget*, 6> browse_widgets_{};  // hidden while comparing
+    std::array<rap::widget*, 7> browse_widgets_{};  // hidden while comparing
     std::array<rap::widget*, 4> compare_widgets_{};  // by View::Compare; shown only while comparing
     std::array<rap::tool_button*, 4> compare_buttons_{};
     std::array<rap::widget*, 3> diff_widgets_{};  // swap, side by side, gain
@@ -235,12 +237,13 @@ private:
     bool syncing_framing_ = false;
     bool diff_session_ = false;  // comparing two files, not previewing a save
     std::string diff_name_;      // "a ↔ b"
-    std::shared_ptr<Image> save_source_;
-    std::shared_ptr<const struct LosslessJpeg> lossless_plan_;
+    std::shared_ptr<Image> save_source_;                        // what Save As saves: the image, or the difference shown
+    std::shared_ptr<const struct LosslessJpeg> lossless_plan_;  // for JPEG's Lossless, once worked out
+    uint64_t lossless_generation_ = 0;                          // which working-out of it is the latest
     std::unique_ptr<rap::sys::directory_watch> watch_;
+    std::string watched_dir_;          // what watch_ watches
+    bool watched_recursive_ = false;   // and whether the folders inside it too
     std::array<int, 2> video_shape_{};  // the video frame last fitted to
-    std::string watched_dir_;  // for JPEG's Lossless, once worked out
-    uint64_t lossless_generation_ = 0;  // what Save As saves: the image, or the difference shown
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;

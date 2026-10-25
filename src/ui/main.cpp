@@ -93,6 +93,8 @@ void run_step(App& app, const std::string& step)
         app.toggle_histogram();
     else if (step == "copy")
         app.copy_to_clipboard();
+    else if (step == "recursive:on" || step == "recursive:off")
+        app.set_recursive(step == "recursive:on");
     else if (step == "xmp")
         app.script_toggle_xmp();
     else if (step == "volume")

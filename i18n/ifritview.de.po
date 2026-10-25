@@ -1182,6 +1182,10 @@ msgstr "Diashow (S): Vollbild, zeitgesteuert, mit sanfter Bewegung"
 msgid "Crop to selection (Ctrl+Y)"
 msgstr "Auf Auswahl zuschneiden (Strg+Y)"
 
+#: src/ui/app.cpp:353
+msgid "Include subfolders: browse the folders inside this one too"
+msgstr "Unterordner einbeziehen: auch die Ordner darin durchblättern"
+
 #: src/ui/app.cpp:295 src/ui/settings.cpp:315
 msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
 msgstr ""

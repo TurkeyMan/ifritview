@@ -131,6 +131,22 @@ rap::icon b_icon()
 }
 
 // A histogram: bars on a baseline, as no icon theme has one either.
+rap::icon subfolders_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16, w = 1.2f * u;
+            // A folder, and one inside it below.
+            p.polygon({{1.5f * u, 2.5f * u}, {4.5f * u, 2.5f * u}, {5.5f * u, 3.8f * u}, {10 * u, 3.8f * u}, {10 * u, 8 * u}, {1.5f * u, 8 * u}},
+                      std::nullopt, ink, w);
+            p.line({3.5f * u, 8 * u}, {3.5f * u, 12 * u}, ink, w);
+            p.line({3.5f * u, 12 * u}, {5.5f * u, 12 * u}, ink, w);
+            p.polygon({{5.5f * u, 8.5f * u}, {8.5f * u, 8.5f * u}, {9.5f * u, 9.8f * u}, {14.5f * u, 9.8f * u}, {14.5f * u, 14 * u}, {5.5f * u, 14 * u}},
+                      std::nullopt, ink, w);
+        });
+}
+
 rap::icon histogram_icon()
 {
     return rap::icon::drawn(
@@ -334,6 +350,11 @@ void App::build_ui()
                 L::tool_button{rap::icon::named("go-next-symbolic"), _("Next image (Right, wheel down)")}
                     .on_click([this] { navigate(+1); })
                     .handle(browse_widgets_[1]),
+                L::tool_button{subfolders_icon(), _("Include subfolders: browse the folders inside this one too")}
+                    .toggle(cfg_.recursive)
+                    .on_toggled([this](bool on) { set_recursive(on); })
+                    .bind(recursive_toggle_)
+                    .handle(browse_widgets_[6]),
                 separator{}.handle(browse_widgets_[2]),
                 L::tool_button{rap::icon::named("media-playback-start-symbolic"), _("Slideshow (S): fullscreen, timed, with gentle motion")}
                     .on_click([this] { toggle_slideshow(); })
@@ -819,13 +840,15 @@ void App::take_first_image(FirstImage& first, const std::string& file, uint64_t 
 void App::watch_folder()
 {
     const std::string dir = folder_.directory();
-    if (!first_presented_ || dir == watched_dir_)
+    if (!first_presented_ || (dir == watched_dir_ && cfg_.recursive == watched_recursive_))
         return;
     watch_.reset();
     watched_dir_ = dir;
+    watched_recursive_ = cfg_.recursive;
     if (dir.empty())
         return;
     rap::sys::watch_options options;
+    options.recursive = cfg_.recursive;
     options.settle = std::chrono::milliseconds(300);  // a file being written arrives once, done
     auto w = rap::sys::directory_watch::start(rap::sys::path_from_utf8(dir), options,
                                               [](rap::sys::watch_batch batch)
@@ -847,13 +870,31 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     bool listed = batch.overflow, reload_shown = false;
     if (batch.overflow)
         folder_.rescan(cfg_);  // events were lost: what's there now
+    // Names as the folder lists them: relative to it (with subfolders, a
+    // path inside it); none for what's outside what's listed.
+    const auto listed_name = [&](const std::filesystem::path& p) -> std::optional<std::string>
+    {
+        std::filesystem::path rel = p.lexically_normal().lexically_relative(dir);
+        if (rel.empty() || *rel.begin() == ".." || (!cfg_.recursive && rel.has_parent_path()))
+            return std::nullopt;
+        return rap::sys::path_to_utf8(rel.make_preferred());
+    };
+    bool rescan = false;
     for (const rap::sys::file_event& e : batch.events)
     {
-        if (batch.overflow || e.path.parent_path().lexically_normal() != dir)
+        const std::optional<std::string> listed_as = batch.overflow ? std::nullopt : listed_name(e.path);
+        if (!listed_as)
             continue;
-        const std::string name = rap::sys::path_to_utf8(e.path.filename());
+        const std::string& name = *listed_as;
         const std::string full = rap::sys::path_to_utf8(e.path);
         using K = rap::sys::file_event::kind;
+        // A folder inside, come, gone or renamed: what's in it with it.
+        if (cfg_.recursive && (std::filesystem::is_directory(e.path) || folder_.contains_under(name) ||
+                               (e.what == K::renamed && listed_name(e.old_path) && folder_.contains_under(*listed_name(e.old_path)))))
+        {
+            rescan = true;
+            continue;
+        }
         switch (e.what)
         {
             case K::removed: listed |= folder_.remove(name); break;
@@ -867,7 +908,7 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
                 break;
             case K::renamed:
             {
-                const std::string from = rap::sys::path_to_utf8(e.old_path.filename());
+                const std::string from = listed_name(e.old_path).value_or(std::string());
                 const bool shown = from == folder_.current_name();
                 // Renamed over the shown file: how most programs save (a
                 // temporary written, then renamed into place). Read it again.
@@ -880,6 +921,11 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
             }
         }
         cache_.erase(full);  // what was cached of it is out of date
+    }
+    if (rescan)
+    {
+        folder_.rescan(cfg_);
+        listed = true;
     }
     if (reload_shown)
     {
@@ -1034,6 +1080,29 @@ void App::reload()
 {
     folder_.rescan(cfg_);
     load_current();
+}
+
+// Subfolders browsed too, or not: the list again, the image shown staying.
+// Off, from an image in a folder inside: that image's folder is the one browsed.
+void App::set_recursive(bool on)
+{
+    if (on == cfg_.recursive)
+        return;
+    cfg_.recursive = on;
+    cfg_.save();
+    if (recursive_toggle_)
+        recursive_toggle_->set_checked(on);  // when not from the button
+    const std::string shown = folder_.current();
+    const gint64 t0 = g_get_monotonic_time();
+    if (!on && !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename())
+        folder_.scan(shown, cfg_);
+    else
+        folder_.rescan(cfg_);
+    platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), on ? ", with subfolders," : "", (g_get_monotonic_time() - t0) / 1000.0);
+    watch_folder();
+    update_title();
+    update_status();
+    schedule_prefetch();
 }
 
 void App::on_loaded(Loader::Result& r)

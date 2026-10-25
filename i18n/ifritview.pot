@@ -1175,6 +1175,10 @@ msgstr ""
 msgid "Crop to selection (Ctrl+Y)"
 msgstr ""
 
+#: src/ui/app.cpp:353
+msgid "Include subfolders: browse the folders inside this one too"
+msgstr ""
+
 #: src/ui/app.cpp:295 src/ui/settings.cpp:315
 msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
 msgstr ""

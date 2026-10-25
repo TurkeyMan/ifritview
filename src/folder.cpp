@@ -12,18 +12,24 @@
 namespace
 {
 
-// Whether `name` in `dir` is one the list shows.
-bool qualifies(const std::string& dir, const char* name, const Config& cfg)
+std::string join(const std::string& a, const std::string& b)
 {
-    if (!cfg.show_hidden && name[0] == '.')
+    gchar* full = g_build_filename(a.c_str(), b.c_str(), nullptr);
+    std::string s = full;
+    g_free(full);
+    return s;
+}
+
+// Whether `name` (relative to `dir`) is one the list shows.
+bool qualifies(const std::string& dir, const std::string& name, const Config& cfg)
+{
+    const size_t base = name.find_last_of(G_DIR_SEPARATOR_S "/");
+    if (!cfg.show_hidden && name[base == std::string::npos ? 0 : base + 1] == '.')
         return false;
     const std::string ext = file_extension(name);
     if (!cfg.accepts_extension(ext) || !extension_supported(ext))  // e.g. videos without GStreamer
         return false;
-    gchar* full = g_build_filename(dir.c_str(), name, nullptr);
-    const bool regular = g_file_test(full, G_FILE_TEST_IS_REGULAR);
-    g_free(full);
-    return regular;
+    return g_file_test(join(dir, name).c_str(), G_FILE_TEST_IS_REGULAR);
 }
 
 std::string collate_key(const std::string& name)
@@ -34,19 +40,61 @@ std::string collate_key(const std::string& name)
     return k;
 }
 
+bool is_separator(char c)
+{
+    return c == '/' || c == G_DIR_SEPARATOR;
+}
+
+// The list's order, for a name relative to the directory: by folder, a
+// folder's own files before the folders in it, each by name as a file
+// manager sorts them.
+std::string sort_key(const std::string& name)
+{
+    std::string key;
+    size_t from = 0;
+    for (size_t i = 0; i < name.size(); ++i)
+        if (is_separator(name[i]))
+        {
+            key += '\x02' + collate_key(name.substr(from, i - from)) + '\0';  // a folder: after its parent's files
+            from = i + 1;
+        }
+    return key + '\x01' + collate_key(name.substr(from));
+}
+
+// Under `dir`, from its folder `rel` (relative; empty: `dir` itself), the
+// files the list shows, and (cfg.recursive) those of the folders inside,
+// not following links (no loops) or hidden folders unless hidden files show.
+void collect(const std::string& dir, const std::string& rel, const Config& cfg, std::vector<std::string>& out, int depth)
+{
+    const std::string here = rel.empty() ? dir : join(dir, rel);
+    GDir* d = g_dir_open(here.c_str(), 0, nullptr);
+    if (!d)
+        return;
+    while (const gchar* entry = g_dir_read_name(d))
+    {
+        const std::string name = rel.empty() ? std::string(entry) : join(rel, entry);
+        if (qualifies(dir, name, cfg))
+            out.push_back(name);
+        else if (cfg.recursive && depth < 64 && (cfg.show_hidden || entry[0] != '.'))
+        {
+            const std::string full = join(dir, name);
+            if (g_file_test(full.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(full.c_str(), G_FILE_TEST_IS_SYMLINK))
+                collect(dir, name, cfg, out, depth + 1);
+        }
+    }
+    g_dir_close(d);
+}
+
 std::vector<std::string> list_images(const std::string& dir, const Config& cfg)
 {
-    std::vector<std::pair<std::string, std::string>> keyed;  // collate key, name
-    GDir* d = g_dir_open(dir.c_str(), 0, nullptr);
-    if (!d)
-        return {};
-    while (const gchar* name = g_dir_read_name(d))
-        if (qualifies(dir, name, cfg))
-            keyed.emplace_back(collate_key(name), name);
-    g_dir_close(d);
-    std::sort(keyed.begin(), keyed.end());
     std::vector<std::string> names;
-    names.reserve(keyed.size());
+    collect(dir, "", cfg, names, 0);
+    std::vector<std::pair<std::string, std::string>> keyed;  // sort key, name
+    keyed.reserve(names.size());
+    for (std::string& name : names)
+        keyed.emplace_back(sort_key(name), std::move(name));
+    std::sort(keyed.begin(), keyed.end());
+    names.clear();
     for (auto& [key, name] : keyed)
         names.push_back(std::move(name));
     return names;
@@ -122,10 +170,7 @@ std::string Folder::current() const
 
 std::string Folder::path_at(int index) const
 {
-    gchar* full = g_build_filename(dir_.c_str(), files_[index].c_str(), nullptr);
-    std::string s = full;
-    g_free(full);
-    return s;
+    return join(dir_, files_[index]);
 }
 
 std::string Folder::current_name() const
@@ -138,12 +183,18 @@ bool Folder::contains(const std::string& name) const
     return std::find(files_.begin(), files_.end(), name) != files_.end();
 }
 
+bool Folder::contains_under(const std::string& folder) const
+{
+    return std::any_of(files_.begin(), files_.end(), [&](const std::string& f)
+                       { return f.size() > folder.size() && f.compare(0, folder.size(), folder) == 0 && is_separator(f[folder.size()]); });
+}
+
 bool Folder::add(const std::string& name, const Config& cfg)
 {
-    if (dir_.empty() || contains(name) || !qualifies(dir_, name.c_str(), cfg))
+    if (dir_.empty() || contains(name) || !qualifies(dir_, name, cfg))
         return false;
-    const std::string key = collate_key(name);
-    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return collate_key(f) > key; });
+    const std::string key = sort_key(name);
+    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f) > key; });
     const int i = int(at - files_.begin());
     files_.insert(at, name);
     if (index_ < 0)
@@ -179,8 +230,8 @@ bool Folder::rename(const std::string& from, const std::string& to, const Config
         return remove(from) | add(to, cfg);
     // The current file: it stays current under its new name, in its new place.
     files_.erase(it);
-    const std::string key = collate_key(to);
-    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return collate_key(f) > key; });
+    const std::string key = sort_key(to);
+    auto at = std::find_if(files_.begin(), files_.end(), [&](const std::string& f) { return sort_key(f) > key; });
     index_ = int(at - files_.begin());
     files_.insert(at, to);
     return true;

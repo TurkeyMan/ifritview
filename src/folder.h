@@ -5,7 +5,9 @@
 
 struct Config;
 
-// The sorted list of viewable files in one directory, with a cursor.
+// The sorted list of viewable files in one directory (Config::recursive:
+// and in the folders inside it, each folder's own first, then each folder
+// in it the same way), with a cursor. Names are relative to the directory.
 class Folder
 {
 public:
@@ -26,13 +28,14 @@ public:
     bool remove(const std::string& name);
     bool rename(const std::string& from, const std::string& to, const Config& cfg);
     bool contains(const std::string& name) const;
+    bool contains_under(const std::string& folder) const;  // any file in `folder` (relative), or the folders inside it
 
     bool empty() const { return files_.empty(); }
     int count() const { return int(files_.size()); }
     int index() const { return index_; }
     const std::string& directory() const { return dir_; }
     std::string current() const;       // full path, or empty
-    std::string current_name() const;  // file name only
+    std::string current_name() const;  // its name, relative to directory()
     const std::string& name_at(int index) const { return files_[index]; }
     std::string path_at(int index) const;  // full path, as current() gives it (the cache's key)
 
@@ -43,7 +46,7 @@ private:
     void drop_gone(int& target);  // the shown file, gone: out of the list, `target` kept on its file
 
     std::string dir_;
-    std::vector<std::string> files_;  // names, sorted
+    std::vector<std::string> files_;  // names relative to dir_, sorted (sort_key)
     int index_ = -1;
     bool gone_ = false;  // the current file was removed while shown
 };
