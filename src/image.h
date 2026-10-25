@@ -58,6 +58,7 @@ struct RawMosaic
     int filter[4] = {};          // the colour there as LibRaw counts them: 0 R, 1 G, 2 B, 3 the other G
     float white = 65535;         // saturation, in data units
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
+    bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height

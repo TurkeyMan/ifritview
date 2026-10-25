@@ -19,7 +19,14 @@ cbuffer Params : register(b0)
     int4 ycc;            // YCC: block height, formula, hue, luma offset (RawMosaic::Ycc)
     int4 ycc_at;         // YCC: the first block's x, y
     float4 ycc_mul;      // YCC: sraw_mul; w: the guided fill's regularisation, in luma units squared
+    int4 flags;          // x: the data is white balanced already (the camera did it): not again
 };
+
+// The as-shot balance, as it's still to be applied to the data.
+float3 to_balance()
+{
+    return flags.x ? 1 : as_shot.rgb;
+}
 
 ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count R G B G2, zeros
 
@@ -107,7 +114,7 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int y = clamp(map_y.x * o.x + map_y.y * o.y + map_y.z, 0, size.y - 1);
     const float3 d = pixels.Load(int3(x, y, 0)).rgb * 65535;
     const float3 rgb = (d - black.rgb) / (as_shot.w - black.rgb);
-    return float4(clamp(rgb * as_shot.rgb, 0, 1) / as_shot.rgb, 1);
+    return float4(clamp(rgb * to_balance(), 0, 1) / as_shot.rgb, 1);
 }
 #else
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
@@ -181,7 +188,7 @@ float site(int x, int y)
     y = clamp(y, 0, size.y - 1);
     const int i = (y & 1) * 2 + (x & 1), c = colour[i];
     const float d = mosaic.Load(int3(x, y, 0)) * 65535;
-    return (d - black_level[i]) / (as_shot.w - black_level[i]) * shading[i] * as_shot[c];
+    return (d - black_level[i]) / (as_shot.w - black_level[i]) * shading[i] * (flags.x ? 1 : as_shot[c]);
 }
 
 // Each photosite of the 2 x 2's, as LibRaw's: measured where the sensor is

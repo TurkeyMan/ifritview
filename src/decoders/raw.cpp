@@ -738,6 +738,7 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
     const float least = std::min({mul[0], mul[1], mul[2]});
     for (int c = 0; c < 3; ++c)
         m->as_shot[c] = mul[c] / least;
+    m->balanced = (col.as_shot_wb_applied & LIBRAW_ASWB_APPLIED) != 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
         {

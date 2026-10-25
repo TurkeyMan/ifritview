@@ -83,6 +83,7 @@ struct DevelopParams
     int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
     int32_t ycc_at[4];  // YCC: the first block's x, y
     float ycc_mul[4];   // YCC: sraw_mul; w: the guided fill's regularisation
+    int32_t flags[4];   // x: the data is white balanced already
 };
 
 // warp.hlsl's block.
@@ -564,6 +565,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         for (int c = 0; c < 3; ++c)
             p.as_shot[c] = m->as_shot[c];
         p.as_shot[3] = m->white;
+        p.flags[0] = m->balanced;
         p.size[0] = m->width, p.size[1] = m->height, p.size[2] = levels ? 1 : 0;
         rap::gpu::buffer_ptr corrections;
         if (m->corrections && m->channels == 1 && !m->ycc.block_h &&
