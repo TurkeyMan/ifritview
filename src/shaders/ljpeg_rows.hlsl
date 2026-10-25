@@ -5,6 +5,16 @@
 #include "ljpeg.hlsli"
 
 RWByteAddressBuffer values : register(u0);
+RWByteAddressBuffer curve : register(u1);  // a Nikon's, 16 bits an entry (curve_top: its last), applied as each sample's written
+
+uint curved(uint v)
+{
+    if (curve_top == 0)
+        return v & 0xFFFF;
+    const int s = int(v << 16) >> 16;  // as int16, clamped to the curve
+    const uint i = uint(clamp(s, 0, int(curve_top)));
+    return (curve.Load((i >> 1) * 4) >> ((i & 1) * 16)) & 0xFFFF;
+}
 
 #define THREADS 256
 
@@ -49,8 +59,8 @@ void main(uint3 group : SV_GroupID, uint3 id : SV_GroupThreadID)
         const uint v = values.Load((base + w2) * 4);
         const uint a = (2 * w2) % components, b = (2 * w2 + 1) % components;
         v4[a] += v & 0xFFFF;
-        const uint lo = v4[a] & 0xFFFF;
+        const uint lo = curved(v4[a]);
         v4[b] += v >> 16;
-        values.Store((base + w2) * 4, lo | (v4[b] & 0xFFFF) << 16);
+        values.Store((base + w2) * 4, lo | curved(v4[b]) << 16);
     }
 }

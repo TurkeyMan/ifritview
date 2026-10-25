@@ -36,9 +36,16 @@ cbuffer Ljpeg : register(b0)
     int4 rect;        // black: the masked area summed, top, left, bottom, right
     uint mosaic_w;    // the active area's size
     uint mosaic_h;
-    uint pad0;
-    uint pad1;
+    uint scheme;      // bit 0: Nikon's (a difference's bits as Nikon codes them); bits 8..15: rows a row's first samples continue from
+    uint curve_top;   // the curve's last index (rows applies it to each sample, clamped to it), 0: none
+    uint4 initial;    // the first rows' first samples: row 0's components 0, 1 | row 1's 0, 1 (16 bits each), then 2, 3 the same
 };
+
+uint start_of(uint r, uint c)  // initial[], row r (< step), component c
+{
+    const uint w = initial[(c >> 1) * 2 + r];
+    return (c & 1) ? w >> 16 : w & 0xFFFF;
+}
 
 // Where the readout's (x, y) is among the samples: Canon's stream fills each
 // slice top to bottom, slice after slice.
@@ -84,6 +91,22 @@ bool next_symbol(inout uint pos, uint c, out int diff)
         return false;
     }
     pos += len;
+    if (scheme & 1)
+    {
+        // Nikon's: a length and a shift; that many bits less the shift,
+        // shifted back up with a one under them.
+        const uint bits = size & 15, shift = size >> 4, n = bits > shift ? bits - shift : 0;
+        uint x = 0;
+        if (n)
+        {
+            x = (v << len) >> (32 - n);
+            pos += n;
+        }
+        diff = int(((x << 1) + 1) << shift >> 1);
+        if (bits > 0 && (diff & int(1u << (bits - 1))) == 0)
+            diff -= int(1u << bits) - (shift == 0 ? 1 : 0);
+        return true;
+    }
     if (size == 16)
         diff = -32768;
     else if (size != 0)

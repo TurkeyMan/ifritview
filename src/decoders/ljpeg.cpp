@@ -64,6 +64,7 @@ struct Stream
     uint64_t size_bits;
     const uint16_t* table[4];  // each component's
     int components;
+    bool nikon;  // a difference's bits as Nikon codes them
 };
 
 // One sample's difference at `pos` (in bits) with component `c`'s table.
@@ -81,6 +82,22 @@ inline bool next(const Stream& s, uint64_t& pos, int c, int& diff)
         return false;
     }
     pos += len;
+    if (s.nikon)
+    {
+        // The symbol is a length and a shift: that many bits less the
+        // shift, then shifted back up, with a one under them.
+        const unsigned bits = size & 15, shift = size >> 4, n = bits > shift ? bits - shift : 0;
+        uint32_t v = 0;
+        if (n)
+        {
+            v = uint32_t((w << len) >> (64 - n));
+            pos += n;
+        }
+        diff = int(((v << 1) + 1) << shift >> 1);
+        if (bits > 0 && (diff & (1 << (bits - 1))) == 0)
+            diff -= (1 << bits) - (shift == 0 ? 1 : 0);
+        return true;
+    }
     if (size == 0)
         diff = 0;
     else if (size == 16)
@@ -295,6 +312,9 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
                  }
              });
     p.width = width, p.height = height, p.components = ncomp, p.precision = precision;
+    p.step = 1;
+    for (int c = 0; c < 4; ++c)
+        p.initial[0][c] = p.initial[1][c] = uint16_t(1u << (precision - 1));
     p.total_bits = uint64_t(kept[ranges]) * 8;
     p.bits = std::move(bits);
     for (int c = 0; c < ncomp; ++c)
@@ -307,6 +327,33 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
 bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads)
 {
     return parse(data, size, p, error, threads, false);
+}
+
+bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, const uint8_t tree[32], const uint16_t start[2][2],
+                   const uint16_t* curve, size_t curve_size, Prepared& p, std::string& error)
+{
+    if (columns < 2 || columns % 2 || rows < 1 || !size)
+        return error = "not a Nikon stream", false;
+    size_t n = 0;
+    for (int k = 0; k < 16; ++k)
+        n += tree[k];
+    Table t;
+    if (n > 16 || !build_table(tree, tree + 16, n, t))
+        return error = "bad Nikon tree", false;
+    p = Prepared{};
+    p.width = columns / 2, p.height = rows, p.components = 2, p.precision = 14;
+    p.nikon = true;
+    p.step = 2;
+    for (int r = 0; r < 2; ++r)
+        for (int c = 0; c < 2; ++c)
+            p.initial[r][c] = start[r][c];
+    p.bits.assign(data, data + size);
+    p.bits.resize(size + 8, 0);
+    p.total_bits = uint64_t(size) * 8;
+    p.lookup[0] = p.lookup[1] = t.lookup;
+    if (curve)
+        p.curve.assign(curve, curve + curve_size);
+    return true;
 }
 
 bool takes(const uint8_t* data, size_t size)
@@ -342,7 +389,7 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
     const uint64_t total_bits = p.total_bits;
     if (!width || !height || ncomp < 1 || ncomp > 4 || p.bits.size() < total_bits / 8 + 8)
         return error = "not prepared", false;
-    Stream s{p.bits.data(), total_bits, {}, ncomp};
+    Stream s{p.bits.data(), total_bits, {}, ncomp, p.nikon};
     for (int c = 0; c < ncomp; ++c)
     {
         if (p.lookup[c].size() != 65536)
@@ -493,22 +540,28 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
 
     mark("decoded");
     // -- Pass 4: differences to samples. Each row's first samples continue
-    // down from the row above's (the first row's from half the range); the
-    // rest from their left, so the rows go in parallel. Arithmetic modulo
-    // 2^16, as the standard has it.
+    // down from those `step` rows above (the first rows' from where the
+    // stream says they start); the rest from their left, so the rows go in
+    // parallel. Arithmetic modulo 2^16, as the standard has it; then a
+    // Nikon's curve, clamped to it.
     const size_t row = size_t(width) * ncomp;
     for (int c = 0; c < ncomp; ++c)
-    {
-        uint16_t v = uint16_t(1u << (precision - 1));
         for (int y = 0; y < height; ++y)
-            d[y * row + c] = v = uint16_t(v + d[y * row + c]);
-    }
+        {
+            const uint16_t above = y < p.step ? p.initial[y][c] : d[(y - p.step) * row + c];
+            d[y * row + c] = uint16_t(above + d[y * row + c]);
+        }
+    const uint16_t* curve = p.curve.empty() ? nullptr : p.curve.data();
+    const int top = int(p.curve.size()) - 1;
     parallel(threads, size_t(height),
              [&](size_t y)
              {
                  uint16_t* r = d + y * row;
                  for (size_t x = ncomp; x < row; ++x)
                      r[x] = uint16_t(r[x - ncomp] + r[x]);
+                 if (curve)
+                     for (size_t x = 0; x < row; ++x)
+                         r[x] = curve[std::clamp(int(int16_t(r[x])), 0, top)];
              });
     mark("summed");
     if (trace)

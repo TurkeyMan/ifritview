@@ -39,10 +39,25 @@ struct Prepared
     std::vector<uint8_t> bits;
     uint64_t total_bits = 0;
     std::vector<uint16_t> lookup[4];  // 65536 entries each, for components 0..components-1
+    // A row's first samples continue those `step` rows above; the first
+    // `step` rows' from `initial` (per row and component).
+    int step = 1;
+    uint16_t initial[2][4] = {};
+    // Nikon's NEF (no JPEG framing, nothing stuffed): one table for both
+    // columns' samples, a difference's bits as Nikon codes them (its tree's
+    // symbol a length and a shift), and a curve after (indices clamped to it).
+    bool nikon = false;
+    std::vector<uint16_t> curve;
 };
 
 // `data` starts at the SOI marker. `threads` 0: as many as there are cores.
 bool prepare(const uint8_t* data, size_t size, Prepared& out, std::string& error, unsigned threads = 0);
+// A Nikon NEF's compressed data (`data`: from where it starts): `columns`
+// samples a row (the readout's width, two columns interleaved), `rows` of
+// them, coded by `tree` (16 counts, then the symbols), the first two rows'
+// first two samples `start`, and its curve.
+bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, const uint8_t tree[32], const uint16_t start[2][2],
+                   const uint16_t* curve, size_t curve_size, Prepared& out, std::string& error);
 // Whether prepare and decode take this stream (its headers only: quick).
 bool takes(const uint8_t* data, size_t size);
 bool decode(const Prepared& stream, Image& out, std::string& error, unsigned threads = 0);

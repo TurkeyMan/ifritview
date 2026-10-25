@@ -275,6 +275,48 @@ void rows_in_parallel(unsigned n, F f)
 class RawAccess : public LibRaw
 {
 public:
+    // A Nikon NEF's compressed readout as LibRaw's nikon_load_raw reads it:
+    // the version, the tree for it and its depth, the first rows' starting
+    // samples, the curve. False for others, and for a stream that changes
+    // tree partway down ("split"): LibRaw unpacks those.
+    bool nikon(const uint8_t* file, size_t size, ljpeg::Prepared& p, std::string& error) const
+    {
+        static const uint8_t trees[6][32] = {
+            {0, 1, 5, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 5, 4, 3, 6, 2, 7, 1, 0, 8, 9, 11, 10, 12},  // 12-bit lossy
+            {0, 1, 5, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0x39, 0x5a, 0x38, 0x27, 0x16, 5, 4, 3, 2, 1, 0, 11, 12, 12},  // after a split
+            {0, 1, 4, 2, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 4, 6, 3, 7, 2, 8, 1, 9, 0, 10, 11, 12},  // 12-bit lossless
+            {0, 1, 4, 3, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 5, 6, 4, 7, 8, 3, 9, 2, 1, 0, 10, 11, 12, 13, 14},  // 14-bit lossy
+            {0, 1, 5, 1, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 8, 0x5c, 0x4b, 0x3a, 0x29, 7, 6, 5, 4, 3, 2, 1, 0, 13, 14},  // after a split
+            {0, 1, 4, 2, 2, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 7, 6, 8, 5, 9, 4, 10, 3, 11, 12, 2, 0, 1, 13, 14}};  // 14-bit lossless
+        libraw_decoder_info_t info{};
+        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name ||
+            std::strcmp(info.decoder_name, "nikon_load_raw()") != 0)
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const bool le = u.order == 0x4949;
+        const auto get2 = [&](size_t at) -> uint16_t
+        { return at + 2 > size ? 0 : le ? uint16_t(file[at] | file[at + 1] << 8) : uint16_t(file[at] << 8 | file[at + 1]); };
+        size_t at = size_t(u.meta_offset);
+        if (at + 2 > size || size_t(u.data_offset) >= size)
+            return false;
+        const uint8_t ver0 = file[at], ver1 = file[at + 1];
+        at += 2;
+        if (ver0 == 0x49 || ver1 == 0x58)
+            at += 2110;
+        int tree = ver0 == 0x46 ? 2 : 0;
+        if (u.tiff_bps == 14)
+            tree += 3;
+        const uint16_t start[2][2] = {{get2(at), get2(at + 2)}, {get2(at + 4), get2(at + 6)}};
+        if (ver0 == 0x44 && (ver1 == 0x20 || ver1 == 0x40) && get2(size_t(u.meta_offset) + 562))
+        {
+            error = "a split Nikon stream";
+            return false;
+        }
+        const auto& sz = imgdata.sizes;
+        return ljpeg::prepare_nikon(file + u.data_offset, size - size_t(u.data_offset), sz.raw_width, sz.height, trees[tree], start,
+                                    imgdata.color.curve, 0x4000, p, error);
+    }
+
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
     // which formula and hue for this camera and firmware, and sraw_mul.
     void canon_ycc(RawMosaic::Ycc& y) const
@@ -297,11 +339,11 @@ public:
     }
     // The areas crop_masked_pixels measures, for a lossless JPEG readout
     // (LibRaw 0.22's rule), for the GPU to measure instead.
-    void masked_areas(int m[8][4]) const
+    void masked_areas(int m[8][4], bool sides) const
     {
         const auto& sz = imgdata.sizes;
         std::memcpy(m, sz.mask, sizeof sz.mask);
-        if (m[0][3] > 0)
+        if (m[0][3] > 0 || !sides)  // the sides measured for Canon's lossless JPEG readouts, not Nikon's
             return;
         m[0][1] = m[1][1] += 2;
         m[0][3] -= 2;
@@ -370,6 +412,19 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
 {
     uint32_t offset, length;
     unsigned slices[3];
+    // A NEF: its rows as they come (raw_width wide, `height` of them), the rest of the readout none.
+    if (ljpeg::Prepared nef; static_cast<const RawAccess&>(raw).nikon(file, size, nef, error))
+    {
+        ljpeg::Image j;
+        if (!ljpeg::decode(nef, j, error))
+            return false;
+        const auto& sz = raw.imgdata.sizes;
+        if (size_t(j.width) * j.components != sz.raw_width || j.height > sz.raw_height)
+            return error = "unexpected layout", false;
+        out.assign(size_t(sz.raw_width) * sz.raw_height, 0);
+        std::copy(j.samples.begin(), j.samples.end(), out.begin());
+        return true;
+    }
     if (!locate_cr2(file, size, offset, length, slices))
         return false;
     ljpeg::Image j;
@@ -571,8 +626,18 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             std::copy_n(slices, 3, stream->slices);
             stream->left = sz.left_margin, stream->top = sz.top_margin;
             stream->filters = raw.imgdata.idata.filters;
-            raw.masked_areas(stream->mask);
+            raw.masked_areas(stream->mask, true);
         }
+    }
+    else if (ljpeg::Prepared nef; decode_options().gpu_decode && raw.nikon(file, size, nef, ours_error))
+    {
+        const auto& sz = raw.imgdata.sizes;
+        stream = std::make_shared<RawMosaic::Stream>();
+        stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(nef));
+        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
+        stream->left = sz.left_margin, stream->top = sz.top_margin;
+        stream->filters = raw.imgdata.idata.filters;
+        raw.masked_areas(stream->mask, false);
     }
     if (stream)
         ;  // decoded on the GPU

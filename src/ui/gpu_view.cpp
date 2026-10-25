@@ -92,9 +92,10 @@ struct LjpegParams
     uint32_t readout_w, readout_h, slice_n, slice_w;
     uint32_t slice_last, left, top, filters;
     int32_t rect[4];
-    uint32_t mosaic_w, mosaic_h, pad0, pad1;
+    uint32_t mosaic_w, mosaic_h, scheme, curve_top;
+    uint32_t initial[4];
 };
-static_assert(sizeof(LjpegParams) == 96, "ljpeg.hlsli's layout");
+static_assert(sizeof(LjpegParams) == 112, "ljpeg.hlsli's layout");
 
 // BT.709 (sRGB) linear to XYZ, D65.
 constexpr float kXyzFrom709[3][3] = {
@@ -379,6 +380,10 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     p.left = uint32_t(st.left), p.top = uint32_t(st.top);
     p.filters = st.filters;
     p.mosaic_w = uint32_t(m.width), p.mosaic_h = uint32_t(m.height);
+    p.scheme = (j.nikon ? 1u : 0u) | uint32_t(j.step) << 8;
+    for (int r = 0; r < 2; ++r)
+        for (int c = 0; c < 4; c += 2)
+            p.initial[(c >> 1) * 2 + r] = j.initial[r][c] | uint32_t(j.initial[r][c + 1]) << 16;
 
     // The stream (whole words: its tail padded), each component's table a
     // word an entry, and the passes' working buffers.
@@ -393,8 +398,14 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     auto plan = device_->create_buffer(16 + chunks * 16);
     auto values = device_->create_buffer(samples * 2);
     levels = device_->create_buffer(36);
+    // A Nikon's curve, 16 bits an entry (an even count: whole words).
+    std::vector<uint16_t> curve_words(j.curve.begin(), j.curve.end());
+    if (curve_words.size() % 2)
+        curve_words.push_back(curve_words.back());
+    auto curve = device_->create_buffer(std::max<size_t>(4, curve_words.size() * 2));
+    p.curve_top = j.curve.empty() ? 0 : uint32_t(j.curve.size() - 1);
     sites = device_->create({m.width, m.height, rap::gpu::format::r16, 1, true});
-    if (!stream || !table || !guesses || !ways || !plan || !values || !levels || !sites)
+    if (!stream || !table || !guesses || !ways || !plan || !values || !levels || !sites || !curve)
     {
         error = "too big for the GPU";
         return false;
@@ -404,6 +415,8 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     std::copy(j.bits.begin() + whole, j.bits.end(), tail);
     device_->upload(stream, std::as_bytes(std::span(tail)), whole);
     device_->upload(table, std::as_bytes(std::span(lookup)));
+    if (!curve_words.empty())
+        device_->upload(curve, std::as_bytes(std::span(curve_words)));
     device_->clear(values, 0);
     device_->clear(levels, 0);
 
@@ -438,7 +451,7 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         dispatch(ljpeg_resolve_, {guesses, ways, plan}, 1, 1, blocks[0]),
         dispatch(ljpeg_decode_, {stream, table, plan, values}, (chunks + 63) / 64, 1, blocks[0]),
         dispatch(ljpeg_columns_, {values}, 1, 1, blocks[0]),
-        dispatch(ljpeg_rows_, {values}, uint64_t(j.height), 1, blocks[0]),
+        dispatch(ljpeg_rows_, {values, curve}, uint64_t(j.height), 1, blocks[0]),
     };
     for (size_t b = 1; b < blocks.size(); ++b)
         work.push_back(dispatch(ljpeg_black_, {values, levels}, (uint64_t(blocks[b].rect[3] - blocks[b].rect[1]) + 15) / 16,
