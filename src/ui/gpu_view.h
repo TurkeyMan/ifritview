@@ -146,7 +146,7 @@ private:
     float input_to_xyz_[3][3] = {};               // the image's data -> XYZ (a raw's: its colour matrix, before white balance)
     float as_shot_[3] = {1, 1, 1};                // a raw's: what its level 0 was developed with, the least 1
     bool auto_exposure_ = false;                  // a raw developed here: scaled by its own 99th percentile
-    rap::gpu::program_ptr develop_;
+    rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_;
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_;
     bool tonable_ = false;                        // exposure applies
     rap::gpu::texture_ptr rows_;                  // the first pass's output, reused while big enough

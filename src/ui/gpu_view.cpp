@@ -7,6 +7,8 @@
 #include "shaders/compose.h"
 #include "shaders/decode.h"
 #include "shaders/develop.h"
+#include "shaders/develop_linear.h"
+#include "shaders/develop_ycc.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
 #include "shaders/histogram_view.h"
@@ -75,6 +77,9 @@ struct DevelopParams
     int32_t map_x[4], map_y[4];
     int32_t size[4];
     int32_t filter[4];  // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G)
+    int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
+    int32_t ycc_at[4];  // YCC: the first block's x, y
+    float ycc_mul[4];   // YCC: sraw_mul; w: the guided fill's regularisation
 };
 
 // ljpeg.hlsli's block.
@@ -260,7 +265,9 @@ bool GpuView::programs(std::string& error)
         return true;
     for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
                                  std::pair{&compose_, shaders::compose}, std::pair{&histogram_view_, shaders::histogram_view},
-                                 std::pair{&develop_, shaders::develop}, std::pair{&mosaic_, shaders::mosaic}})
+                                 std::pair{&develop_, shaders::develop}, std::pair{&develop_linear_, shaders::develop_linear},
+                                 std::pair{&develop_ycc_, shaders::develop_ycc},
+                                 std::pair{&mosaic_, shaders::mosaic}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -305,28 +312,42 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     if (device_->software() && !keep)
     {
         // On the CPU's cores, then up as a photosite a texel: the active area
-        // out of the readout (Canon's slices undone). Its black level is the
-        // file's (measured where masked only on the GPU).
+        // out of the readout (Canon's slices undone), and the masked areas
+        // summed for the black level just as ljpeg_black does on the GPU.
         ljpeg::Image cpu;
         if (!ljpeg::decode(j, cpu, error))
             return false;
+        const auto sample = [&](unsigned rx, unsigned ry) -> uint16_t
+        {
+            size_t i = size_t(ry) * st.readout_w + rx;
+            if (st.slices[0])
+            {
+                const unsigned s = std::min(rx / st.slices[1], st.slices[0]), w = s < st.slices[0] ? st.slices[1] : st.slices[2];
+                i = size_t(s) * st.slices[1] * st.readout_h + size_t(ry) * w + (rx - s * st.slices[1]);
+            }
+            return i < cpu.samples.size() ? cpu.samples[i] : 0;
+        };
         std::vector<uint16_t> area(size_t(m.width) * m.height);
         for (int y = 0; y < m.height; ++y)
             for (int x = 0; x < m.width; ++x)
-            {
-                const unsigned rx = unsigned(x + st.left), ry = unsigned(y + st.top);
-                size_t i = size_t(ry) * st.readout_w + rx;
-                if (st.slices[0])
+                area[size_t(y) * m.width + x] = sample(unsigned(x + st.left), unsigned(y + st.top));
+        uint32_t sums[9] = {};  // sum R G B G2, count R G B G2, zeros
+        for (const auto& r : st.mask)
+            for (int y = std::max(r[0], 0); y < std::min(r[2], st.readout_h); ++y)
+                for (int x = std::max(r[1], 0); x < std::min(r[3], st.readout_w); ++x)
                 {
-                    const unsigned s = std::min(rx / st.slices[1], st.slices[0]), w = s < st.slices[0] ? st.slices[1] : st.slices[2];
-                    i = size_t(s) * st.slices[1] * st.readout_h + size_t(ry) * w + (rx - s * st.slices[1]);
+                    const unsigned c = (st.filters >> ((((y << 1) & 14) | (x & 1)) << 1)) & 3;
+                    const uint16_t v = sample(unsigned(x), unsigned(y));
+                    sums[c] += v;
+                    sums[4 + c] += 1;
+                    sums[8] += v == 0;
                 }
-                area[size_t(y) * m.width + x] = i < cpu.samples.size() ? cpu.samples[i] : 0;
-            }
         sites = device_->create({m.width, m.height, rap::gpu::format::r16});
-        if (!sites)
+        levels = device_->create_buffer(sizeof sums);
+        if (!sites || !levels)
             return error = "too big for the GPU", false;
         device_->upload(sites, std::as_bytes(std::span(area)), {1, rap::gpu::sample_type::u16});
+        device_->upload(levels, std::as_bytes(std::span(sums)));
         return true;
     }
     const uint64_t samples = uint64_t(j.width) * j.components * j.height;
@@ -496,6 +517,11 @@ bool GpuView::upload(const Image& image, std::string& error)
             if (!decode_stream(*m, sites, levels, error))
                 return false;
         }
+        else if (m->data && m->channels == 3)
+        {
+            if ((sites = device_->create({m->width, m->height, rap::gpu::format::rgba16})))
+                device_->upload(sites, std::as_bytes(std::span(*m->data)), {3, rap::gpu::sample_type::u16});
+        }
         else if (m->data && (sites = device_->create({m->width, m->height, rap::gpu::format::r16})))
             device_->upload(sites, std::as_bytes(std::span(*m->data)), {1, rap::gpu::sample_type::u16});
         auto top = device_->create({w, h, rap::gpu::format::rgba16f, 1, true});
@@ -533,7 +559,17 @@ bool GpuView::upload(const Image& image, std::string& error)
         p.map_x[0] = a, p.map_x[1] = b, p.map_x[2] = c + cx;
         p.map_y[0] = d, p.map_y[1] = e, p.map_y[2] = f + cy;
         rap::gpu::pass pass;
-        pass.program = develop_;
+        if (m->ycc.block_h)
+        {
+            p.ycc[0] = m->ycc.block_h, p.ycc[1] = m->ycc.formula, p.ycc[2] = m->ycc.hue, p.ycc[3] = m->ycc.luma_offset;
+            p.ycc_at[0] = m->ycc.x0, p.ycc_at[1] = m->ycc.y0;
+            static const bool sraw_mul = !std::getenv("IFRIT_SRAW_NO_MUL");
+            for (int c = 0; c < 3; ++c)
+                p.ycc_mul[c] = sraw_mul ? m->ycc.mul[c] : 1.f;
+            const float e = 0.01f * m->white;  // colour follows luma changes larger than ~1% of the range
+            p.ycc_mul[3] = e * e;
+        }
+        pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
         pass.inputs = {sites};
         pass.buffers = {levels ? levels : histogram_};  // read only when measured here
         pass.uniforms = bytes(p);

@@ -39,6 +39,20 @@ struct RawMosaic
     };
     std::shared_ptr<const Stream> stream;
     int width = 0, height = 0;
+    int channels = 1;            // 1: a Bayer mosaic; 3: R, G, B a photosite (linear raws), or Ycc's, in `data`
+    // Canon's sRAW and mRAW as stored, when block_h isn't 0: luma at every
+    // photosite, the two colour differences only at each block's first
+    // (8192 meaning none; elsewhere 8192). The develop fills the colour in
+    // from the luma and converts as Canon's formula has it (develop.hlsl's YCC).
+    struct Ycc
+    {
+        int block_h = 0;              // blocks 2 wide by this: 1 (4:2:2) or 2 (4:2:0); 0: not YCbCr
+        int x0 = 0, y0 = 0;           // where the first whole block starts
+        int formula = 0;              // 1: the 5D Mark II generation's coefficients; 2: plain sums
+        int hue = 0;                  // formula 1's offset
+        int luma_offset = 0;          // taken off the luma (formula 2, cameras before the 5D Mark II)
+        float mul[3] = {1, 1, 1};     // LibRaw's sraw_mul, / 1024
+    } ycc;
     int colour[4] = {};          // the filter over (row & 1, col & 1): 0 R, 1 G, 2 B (row-major, 2 x 2)
     float black[4] = {};         // per photosite of the 2 x 2 (as colour), in data units
     int filter[4] = {};          // the colour there as LibRaw counts them: 0 R, 1 G, 2 B, 3 the other G

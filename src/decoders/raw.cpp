@@ -7,6 +7,7 @@
 #include <glib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -274,6 +275,26 @@ void rows_in_parallel(unsigned n, F f)
 class RawAccess : public LibRaw
 {
 public:
+    // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
+    // which formula and hue for this camera and firmware, and sraw_mul.
+    void canon_ycc(RawMosaic::Ycc& y) const
+    {
+        const unsigned long long id = libraw_internal_data.identify_data.unique_id;
+        const bool coefficients = id == 0x80000218ULL || id == 0x80000250ULL || id == 0x80000261ULL || id == 0x80000232ULL ||
+                                  id == 0x80000287ULL;  // 5D Mark II, 7D, 50D, 1D Mark IV, 60D
+        y.formula = coefficients ? 1 : 2;
+        y.luma_offset = !coefficients && id < 0x80000218ULL ? 512 : 0;
+        int v[3] = {0, 0, 0};
+        const char* cp = imgdata.color.model2;
+        while (*cp && !std::isdigit(static_cast<unsigned char>(*cp)))
+            ++cp;
+        std::sscanf(cp, "%d.%d.%d", v, v + 1, v + 2);
+        const int ver = (v[0] * 1000 + v[1]) * 1000 + v[2];
+        const int sraw = y.block_h == 2 ? 3 : 1;  // the first component's samples, less one
+        y.hue = id >= 0x80000281ULL || (id == 0x80000218ULL && ver > 1000006) ? sraw << 1 : (sraw + 1) << 2;
+        for (int c = 0; c < 3; ++c)
+            y.mul[c] = libraw_internal_data.unpacker_data.sraw_mul[c] ? libraw_internal_data.unpacker_data.sraw_mul[c] / 1024.f : 1.f;
+    }
     // The areas crop_masked_pixels measures, for a lossless JPEG readout
     // (LibRaw 0.22's rule), for the GPU to measure instead.
     void masked_areas(int m[8][4]) const
@@ -423,12 +444,85 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     const bool levels = a.black == b.black && a.maximum == b.maximum && std::memcmp(a.cblack, b.cblack, 4 * sizeof a.cblack[0]) == 0;
     libraw_decoder_info_t info{};
     theirs.get_decoder_info(&info);
+    // Whether the GPU's develop would take it (decode_mosaic's test), and if not why.
+    const auto& id = theirs.imgdata.idata;
+    const auto& rd = theirs.imgdata.rawdata;
+    const char* gpu = !id.filters ? (rd.float3_image || rd.float4_image ? "no: float, demosaiced" : rd.float_image ? "no: float mosaic"
+                                     : rd.color3_image || rd.color4_image                         ? "no: demosaiced (linear, sRAW, Foveon)"
+                                                                                                    : "no: no colour filter")
+                      : id.filters == 9    ? "no: X-Trans"
+                      : id.filters < 1000  ? "no: other filter pattern"
+                      : id.colors != 3     ? "no: four colours"
+                      : rd.float_image     ? "no: float mosaic"
+                      : !rd.raw_image      ? "no: unpacked elsewhere"
+                                           : "yes";
+    std::fprintf(stderr, "rawcheck-gpu: %s %s\n", path.c_str(), gpu);
     std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's %.0f ms (%s, %s %s); levels %s\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
                  (t2 - t1) / 1000.0, info.decoder_name ? info.decoder_name : "?", theirs.imgdata.idata.make, theirs.imgdata.idata.model,
                  levels ? "same" : "DIFFERENT");
     if (!levels)
         std::fprintf(stderr, "rawcheck:   black %u / %u, maximum %u / %u, cblack %u %u %u %u / %u %u %u %u\n", a.black, b.black, a.maximum, b.maximum,
                      a.cblack[0], a.cblack[1], a.cblack[2], a.cblack[3], b.cblack[0], b.cblack[1], b.cblack[2], b.cblack[3]);
+}
+
+bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out);
+
+// Three colours a photosite already (a linear DNG, Canon's sRAW and mRAW):
+// LibRaw unpacks them, its raw2image takes the active area out, and they go
+// up as they are, the develop taking off black and scaling (develop.hlsl's
+// LINEAR) with no demosaic.
+bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
+{
+    const int64_t t0 = g_get_monotonic_time();
+    int r = raw.unpack();
+    if (r == LIBRAW_SUCCESS)
+        r = raw.raw2image();
+    if (r != LIBRAW_SUCCESS)
+    {
+        error = libraw_strerror(r);
+        return false;
+    }
+    const auto& sz = raw.imgdata.sizes;
+    const ushort(*image)[4] = raw.imgdata.image;
+    if (!image || sz.iwidth != sz.width || sz.iheight != sz.height)
+        return false;
+    auto m = std::make_shared<RawMosaic>();
+    m->width = sz.width;
+    m->height = sz.height;
+    m->channels = 3;
+    auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height * 3);
+    rows_in_parallel(unsigned(m->height),
+                     [&](unsigned y)
+                     {
+                         uint16_t* o = data->data() + size_t(y) * m->width * 3;
+                         const ushort(*i)[4] = image + size_t(y) * m->width;
+                         for (int x = 0; x < m->width; ++x, o += 3)
+                             o[0] = i[x][0], o[1] = i[x][1], o[2] = i[x][2];
+                     });
+    if (ycc)
+    {
+        // Which rows and columns the colour's at (the first block's corner):
+        // counted over the first rows, any colour but none (8192) marking one.
+        int at[2][2] = {};
+        for (int y = 0; y < std::min(4, m->height); ++y)
+            for (int x = 0; x < std::min(512, m->width); ++x)
+            {
+                const uint16_t* p = data->data() + (size_t(y) * m->width + x) * 3;
+                if (p[1] != 8192 || p[2] != 8192)
+                    ++at[y & 1][x & 1];
+            }
+        const bool both_rows = at[0][0] + at[0][1] && at[1][0] + at[1][1];
+        m->ycc.block_h = both_rows ? 1 : 2;
+        m->ycc.y0 = both_rows || at[0][0] + at[0][1] ? 0 : 1;
+        m->ycc.x0 = at[m->ycc.y0][0] >= at[m->ycc.y0][1] ? 0 : 1;
+        raw.canon_ycc(m->ycc);
+    }
+    m->data = std::move(data);
+    raw.free_image();
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "raw: %s, unpacked by LibRaw in %.0f ms\n", ycc ? "Canon sRAW as stored" : "linear",
+                     (g_get_monotonic_time() - t0) / 1000.0);
+    return finish_mosaic(raw, std::move(m), out);
 }
 
 // Unpacked only: the sensor's Bayer mosaic and what developing it needs,
@@ -438,8 +532,22 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
 bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out, std::string& error)
 {
     const auto& id = raw.imgdata.idata;
-    if (!id.filters || id.filters == 9 || id.filters < 1000 || id.colors != 3)
-        return false;  // not a 2 x 2 Bayer pattern
+    // A 2 x 2 Bayer pattern, or already three colours a photosite (a linear
+    // DNG, Canon's sRAW): no X-Trans, Foveon or four-colour filters yet.
+    const bool linear = !id.filters && id.colors == 3;
+    if (!linear && (id.filters == 9 || id.filters < 1000 || id.colors != 3))
+        return false;
+    if (linear)
+    {
+        // Canon's sRAW as stored (its YCbCr), not LibRaw's RGB made from it:
+        // the develop converts it (RawMosaic::Ycc).
+        libraw_decoder_info_t info{};
+        raw.get_decoder_info(&info);
+        const bool ycc = info.decoder_name && std::strcmp(info.decoder_name, "canon_sraw_load_raw()") == 0;
+        if (ycc)
+            raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
+        return decode_linear(raw, out, error, ycc);
+    }
     // A CR2 here, on every core; the rest by LibRaw.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
@@ -489,7 +597,6 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     }
     const int64_t t1 = g_get_monotonic_time();
     const auto& sz = raw.imgdata.sizes;
-    const auto& col = raw.imgdata.color;
     if ((!src && !stream) || sz.width == 0 || sz.height == 0)
         return false;
     auto m = std::make_shared<RawMosaic>();
@@ -513,12 +620,29 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         std::fprintf(stderr, "raw: %s in %.0f ms, active area copied in %.0f ms\n",
                      m->stream ? "prepared for the GPU" : readout.empty() ? "unpacked by LibRaw" : "unpacked here", (t1 - t0) / 1000.0,
                      (g_get_monotonic_time() - t1) / 1000.0);
+    return finish_mosaic(raw, std::move(m), out);
+}
+
+// What developing it needs besides the data: levels, the camera's balance and
+// colour, its framing and how it was held; and the image as it will be shown.
+bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
+{
+    const auto& id = raw.imgdata.idata;
+    const auto& sz = raw.imgdata.sizes;
+    const auto& col = raw.imgdata.color;
     // dcraw's FC(row, col): the filter colour, 0 R, 1 G, 2 B, 3 the second G.
     // Its black level as LibRaw has it: the common one, its colour's, and its
     // place in a repeating pattern of them (DNG's BlackLevelRepeatDim).
     for (int row = 0; row < 2; ++row)
         for (int c = 0; c < 2; ++c)
         {
+            if (m->channels == 3)
+            {
+                // Linear: per channel R, G, B.
+                const int ch = row * 2 + c;
+                m->black[ch] = float(col.black + (ch < 3 ? col.cblack[ch] : 0));
+                continue;
+            }
             const int f = (id.filters >> ((((row << 1) & 14) | (c & 1)) << 1)) & 3;
             m->colour[row * 2 + c] = f == 3 ? 1 : f;
             m->filter[row * 2 + c] = f;
