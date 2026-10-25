@@ -147,7 +147,7 @@ private:
                          std::string& error);
     void finish_readout(const RawMosaic& m, const LjpegParams& p, std::vector<rap::gpu::dispatch> work, const rap::gpu::buffer_ptr& values,
                         const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites);
-    void check_readout(const rap::gpu::buffer_ptr& values, const rap::gpu::buffer_ptr& levels,
+    void check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& values, const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites,
                        const std::function<bool(std::vector<uint16_t>&, std::string&)>& cpu);
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(Source& s, int n);

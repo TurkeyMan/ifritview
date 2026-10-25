@@ -410,6 +410,77 @@ public:
     // Whether LibRaw's crop_masked_pixels measures the sides of the active
     // area (a packed readout's flag says so).
     bool packed_sides() const { return loader() == "packed_load_raw()" && libraw_internal_data.unpacker_data.load_flags & 32; }
+    // A DNG's lossless JPEG readout (Compression 7) as LibRaw's
+    // lossless_dng_load_raw reads it: its tiles' streams (or its one
+    // strip's), each a frame's samples in rows `tile[0]` wide filling a
+    // tile `tile[1]` high, `tile[2]` tiles across (as RawMosaic::Stream's
+    // tile), and its linearisation curve. False for others, and for
+    // anything that wouldn't come out as LibRaw has it (two samples a
+    // photosite, a DNG before 1.1 (a 16-bit difference read as bits), tiles
+    // that aren't their frames' size, a strip short of the readout): LibRaw
+    // unpacks those. `check_only`: the first stream's header only, for its
+    // predictor.
+    bool dng(const uint8_t* file, size_t size, ljpeg::Prepared& p, unsigned tile[3], std::string& error, bool check_only = false) const
+    {
+        if (loader() != "lossless_dng_load_raw()")
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        const auto& id = imgdata.idata;
+        if (!(id.filters || id.colors == 1) || u.tiff_samples != 1)
+            return error = "not a sample a photosite", false;
+        if (id.dng_version < 0x01010000)
+            return error = "a DNG before 1.1", false;
+        const unsigned rw = sz.raw_width, rh = sz.raw_height;
+        const bool tiled = u.tile_length < INT_MAX;
+        if (!rw || !rh || !u.tile_width || !u.tile_length)
+            return false;
+        const unsigned across = tiled ? (rw + u.tile_width - 1) / u.tile_width : 1, down = tiled ? (rh + u.tile_length - 1) / u.tile_length : 1;
+        // The tiles' offsets, a word each where the first would be (as get4 reads them).
+        std::vector<uint64_t> offsets;
+        if (!tiled)
+            offsets.push_back(uint64_t(u.data_offset));
+        else
+        {
+            const bool le = u.order == 0x4949;
+            for (size_t k = 0; k < size_t(across) * down; ++k)
+            {
+                const size_t at = size_t(u.data_offset) + 4 * k;
+                if (u.data_offset < 0 || at + 4 > size)
+                    return error = "tile offsets past the file's end", false;
+                const uint8_t* b = file + at;
+                offsets.push_back(le ? uint32_t(b[0] | b[1] << 8 | b[2] << 16 | uint32_t(b[3]) << 24)
+                                     : uint32_t(uint32_t(b[0]) << 24 | b[1] << 16 | b[2] << 8 | b[3]));
+            }
+        }
+        int predictor = 0;
+        if (offsets[0] >= size || !ljpeg::takes(file + offsets[0], size_t(size - offsets[0]), &predictor))
+            return error = "not a lossless JPEG taken here", false;
+        if (check_only)
+        {
+            p.predictor = predictor;
+            return true;
+        }
+        if (!ljpeg::prepare_tiles(file, size, offsets, p, error))
+            return false;
+        // A JPEG row's samples fill the tile's rows (the readout's, if
+        // narrower) one after another, as adobe_copy_pixel places them.
+        const unsigned wrap = std::min(u.tile_width, rw);
+        const uint64_t jwide = uint64_t(p.width) * p.components, frame = jwide * p.height;
+        if (p.components > 1 && jwide * p.components == rw)
+            return error = "a JPEG LibRaw reads past its rows", false;
+        if (tiled ? frame != uint64_t(wrap) * u.tile_length : frame < uint64_t(rw) * rh)
+            return error = "tiles not their frames' size", false;
+        tile[0] = wrap, tile[1] = tiled ? u.tile_length : rh, tile[2] = across;
+        const ushort* curve = imgdata.color.curve;
+        for (int v = 0; v < 0x10000; ++v)
+            if (curve[v] != v)
+            {
+                p.curve.assign(curve, curve + 0x10000);
+                break;
+            }
+        return true;
+    }
 
     // A raw compressed in blocks (rawblocks.h): Sony's compressed ARW,
     // Panasonic's RW2 but for encoding 8. False for others; and, with why,
@@ -556,8 +627,8 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
 }
 
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
-// in blocks (rawblocks), one stored uncompressed (rawpacked), a NEF's or a
-// CR2's lossless JPEG. False for others, and (with why) for one of those
+// in blocks (rawblocks), one stored uncompressed (rawpacked), a NEF's, a
+// DNG's or a CR2's lossless JPEG. False for others, and (with why) for one of those
 // laid out in a way this doesn't take. `blocks`: a raw in blocks' layout,
 // which says what of the readout LibRaw writes (the rest it leaves as it is).
 bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
@@ -579,7 +650,7 @@ bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::ve
     if (!error.empty())
         return false;
     uint32_t offset, length;
-    unsigned slices[3];
+    unsigned slices[3], tile[3];
     // A NEF: its rows as they come (raw_width wide, `height` of them), the rest of the readout none.
     if (ljpeg::Prepared nef; raw.nikon(file, size, nef, error))
     {
@@ -593,6 +664,26 @@ bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::ve
         std::copy(j.samples.begin(), j.samples.end(), out.begin());
         return true;
     }
+    // A DNG: each tile's rows into its place, what lies past the readout's edges dropped.
+    if (ljpeg::Prepared dng; raw.dng(file, size, dng, tile, error))
+    {
+        ljpeg::Image j;
+        if (!ljpeg::decode(dng, j, error))
+            return false;
+        RawMosaic::Stream st;  // where the samples lie, as the GPU's would
+        std::copy_n(tile, 3, st.tile);
+        const unsigned rw = raw.imgdata.sizes.raw_width, rh = raw.imgdata.sizes.raw_height;
+        out.resize(size_t(rw) * rh);
+        parallel(rh,
+                 [&](unsigned y)
+                 {
+                     for (unsigned x = 0; x < rw; x += tile[0])  // a tile's row at a time
+                         std::memcpy(out.data() + size_t(y) * rw + x, j.samples.data() + st.index(x, y), size_t(std::min(tile[0], rw - x)) * 2);
+                 });
+        return true;
+    }
+    if (!error.empty())
+        return false;
     if (!locate_cr2(file, size, offset, length, slices))
         return false;
     ljpeg::Image j;
@@ -789,12 +880,12 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     bool phase_one = false;  // its black taken off first (RawAccess::phase_one_prepare)
     std::shared_ptr<RawMosaic::Stream> stream;
     uint32_t offset, length;
-    unsigned slices[3];
+    unsigned slices[3], tile[3];
     if (decode_options().gpu_decode && locate_cr2(file, size, offset, length, slices))
     {
         auto prepared = std::make_shared<ljpeg::Prepared>();
         const auto& sz = raw.imgdata.sizes;
-        if (ljpeg::prepare(file + offset, length, *prepared, ours_error) &&
+        if (ljpeg::prepare(file + offset, length, *prepared, ours_error) && prepared->predictor == 1 &&
             uint64_t(prepared->width) * prepared->components * prepared->height == uint64_t(sz.raw_width) * sz.raw_height &&
             (!slices[0] || size_t(slices[0]) * slices[1] + slices[2] == sz.raw_width))
         {
@@ -807,6 +898,15 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     {
         stream = raw.readout_stream(false);
         stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(nef));
+    }
+    else if (ljpeg::Prepared head, dng; decode_options().gpu_decode && raw.dng(file, size, head, tile, ours_error, true) && head.predictor == 1 &&
+                                         raw.dng(file, size, dng, tile, ours_error))
+    {
+        // A DNG predicted from the left: its tiles on the GPU (predicted
+        // from above, unpacked here on every core).
+        stream = raw.readout_stream(false);
+        stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(dng));
+        std::copy_n(tile, 3, stream->tile);
     }
     else if (auto packed = std::make_shared<rawpacked::Prepared>(); decode_options().gpu_decode && raw.packed(file, size, *packed, ours_error))
     {
@@ -1202,8 +1302,9 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// A raw whose readout the GPU decodes (a CR2, a NEF, one uncompressed, Sony's and
-// Panasonic's blocks): ready as soon as its preview would be.
+// A raw whose readout the GPU decodes (a CR2, a NEF, a DNG predicted from the
+// left, one uncompressed, Sony's and Panasonic's blocks): ready as soon as
+// its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1211,23 +1312,25 @@ bool quick(const std::string& path)
     const uint8_t* bytes = nullptr;
     size_t size = 0;
     uint32_t offset, length;
-    unsigned slices[3];
+    unsigned slices[3], tile[3];
     if (!file_bytes(path, bytes, size))
         return false;
+    int predictor = 0;
     if (locate_cr2(bytes, size, offset, length, slices))
-        return ljpeg::takes(bytes + offset, length);
-    // A NEF of the kind decoded on the GPU, or a Bayer readout stored
+        return ljpeg::takes(bytes + offset, length, &predictor) && predictor == 1;
+    // A NEF or DNG of the kind decoded on the GPU, or a Bayer readout stored
     // uncompressed (opening it reads only its headers). On the heap: a
     // LibRaw is hundreds of KB.
     auto raw = std::make_unique<RawAccess>();
-    ljpeg::Prepared unused;
+    ljpeg::Prepared unused;  // a NEF's or DNG's header
     rawpacked::Prepared packed;
     rawblocks::Prepared blocks;
     std::string error;
     if (raw->open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
     const auto& id = raw->imgdata.idata;
-    return raw->nikon(bytes, size, unused, error, true) || (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error)) ||
+    return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
+           (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error)) ||
            (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
 }
 

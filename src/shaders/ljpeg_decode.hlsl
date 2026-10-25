@@ -14,15 +14,16 @@ void main(uint3 id : SV_DispatchThreadID)
     if (k >= chunks)
         return;
     const uint4 p = plan.Load4(16 + k * 16);
-    if (p.z >= samples)
+    if (p.w == 0)
         return;
-    const uint n = min(p.w, samples - p.z);
+    const uint4 t = tables_of(part_of(k));
+    const uint n = p.w;
     uint pos = p.x, c = p.y, low = 0;
     bool holding = false;
     int diff;
     for (uint j = 0; j < n; ++j)
     {
-        next_symbol(pos, c, diff);
+        next_symbol(pos, table_for(t, c), diff);
         c = following(c);
         const uint i = p.z + j, v = uint(diff) & 0xFFFF;
         if ((i & 1) == 0)

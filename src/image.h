@@ -5,6 +5,7 @@
 #include "metadata/file_metadata.h"
 #include "pixel_format.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -35,8 +36,8 @@ struct RawMosaic
     // Or, with `data` null, the readout as the file has it, for the GPU to
     // decode: its lossless JPEG prepared (ljpeg.h), its blocks (rawblocks.h)
     // or its samples stored uncompressed (rawpacked.h); how that lays out
-    // (Canon's slices), where the active area sits in it, and where the
-    // sensor is masked (the black level, measured as LibRaw does).
+    // (Canon's slices, a DNG's tiles), where the active area sits in it, and
+    // where the sensor is masked (the black level, measured as LibRaw does).
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
@@ -49,6 +50,24 @@ struct RawMosaic
         int mask[8][4] = {};      // masked areas: top, left, bottom, right (LibRaw's), in the readout
         std::shared_ptr<const void> file;  // holds the file's bytes (`file_size` of them), which `packed` and `blocks` point into
         size_t file_size = 0;
+        // A DNG's tiles (its one strip a tile the readout's width): each
+        // one's width and height, how many across; their streams' samples
+        // one tile's after another's. None: Canon's slices, or rows as they come.
+        unsigned tile[3] = {};
+        // Where the readout's (x, y) is among the decoded samples (as
+        // ljpeg.hlsli's readout_index).
+        size_t index(unsigned x, unsigned y) const
+        {
+            if (tile[0])
+            {
+                const unsigned tx = x / tile[0], ty = y / tile[1];
+                return (size_t(ty) * tile[2] + tx) * tile[0] * tile[1] + size_t(y - ty * tile[1]) * tile[0] + (x - tx * tile[0]);
+            }
+            if (!slices[0])
+                return size_t(y) * readout_w + x;
+            const unsigned s = std::min(x / slices[1], slices[0]), w = s < slices[0] ? slices[1] : slices[2];
+            return size_t(s) * slices[1] * readout_h + size_t(y) * w + (x - s * slices[1]);
+        }
     };
     std::shared_ptr<const Stream> stream;
     int width = 0, height = 0;
