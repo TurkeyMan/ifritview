@@ -190,7 +190,7 @@ private:
     double difference_exposure_ = 0;
     float difference_wb_[3] = {};
 
-    rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_;
+    rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_;
     rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)
     rap::gpu::texture_ptr frames_[2];

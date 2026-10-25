@@ -162,6 +162,8 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
         return c;
     std::vector<Map> maps[2];  // list 2's, list 3's
     bool vignette = false;
+    uint32_t warp_planes = 0;
+    double warp[3][6] = {}, warp_h = 0.5, warp_v = 0.5;
     double k[5] = {}, centre_h = 0.5, centre_v = 0.5;
     std::string applied, skipped;
     for (int l = 1; l < 3; ++l)
@@ -192,6 +194,19 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
                 centre_h = be_double(d + 40), centre_v = be_double(d + 48);
                 vignette = used = true;
             }
+            else if (id == 1 && l == 2 && bytes >= 4)
+            {
+                const uint32_t planes = be32(d);
+                if ((planes == 1 || planes == 3) && bytes >= 4 + planes * 48 + 16)
+                {
+                    for (uint32_t q = 0; q < planes; ++q)
+                        for (int j = 0; j < 6; ++j)
+                            warp[q][j] = be_double(d + 4 + q * 48 + j * 8);
+                    warp_h = be_double(d + 4 + planes * 48), warp_v = be_double(d + 4 + planes * 48 + 8);
+                    warp_planes = planes;
+                    used = true;
+                }
+            }
             std::string& to = used ? applied : skipped;
             to += std::string(to.empty() ? "" : ", ") + name(id) + " (list " + std::to_string(l + 1) + (flags & 1 ? ", optional" : "") + ")";
             at += 16 + bytes;
@@ -200,13 +215,13 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
     c.summary = applied.empty() ? "" : "applied: " + applied;
     if (!skipped.empty())
         c.summary += (c.summary.empty() ? "" : "; ") + std::string("not applied: ") + skipped;
-    if (maps[0].empty() && maps[1].empty() && !vignette)
+    if (maps[0].empty() && maps[1].empty() && !vignette && !warp_planes)
     {
         c.words.clear();
         return c;
     }
     std::vector<uint32_t>& w = c.words;
-    w.assign(16, 0);
+    w.assign(48, 0);
     w[0] = uint32_t(maps[0].size()), w[1] = uint32_t(maps[1].size()), w[2] = vignette;
     if (vignette)
     {
@@ -216,6 +231,17 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
         for (int j = 0; j < 5; ++j)
             w[4 + j] = bits(float(k[j]));
         w[9] = bits(float(cx)), w[10] = bits(float(cy)), w[11] = bits(float(1 / (dx * dx + dy * dy)));
+    }
+    if (warp_planes)
+    {
+        // Normalised by the distance from the centre to the farthest corner.
+        const double cx = warp_h * active_w, cy = warp_v * active_h;
+        const double dx = std::max(cx, active_w - cx), dy = std::max(cy, active_h - cy);
+        w[16] = warp_planes;
+        w[17] = bits(float(cx)), w[18] = bits(float(cy)), w[19] = bits(float(std::sqrt(dx * dx + dy * dy)));
+        for (uint32_t q = 0; q < 3; ++q)
+            for (int j = 0; j < 6; ++j)
+                w[20 + q * 6 + j] = bits(float(warp[std::min(q, warp_planes - 1)][j]));
     }
     const size_t descriptors = w.size();
     w.resize(descriptors + (maps[0].size() + maps[1].size()) * 16);

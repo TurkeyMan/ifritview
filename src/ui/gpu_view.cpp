@@ -10,6 +10,7 @@
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_ycc.h"
+#include "shaders/warp.h"
 #include "shaders/difference.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
@@ -82,6 +83,13 @@ struct DevelopParams
     int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
     int32_t ycc_at[4];  // YCC: the first block's x, y
     float ycc_mul[4];   // YCC: sraw_mul; w: the guided fill's regularisation
+};
+
+// warp.hlsl's block.
+struct WarpParams
+{
+    int32_t map_x[4], map_y[4];
+    int32_t size[4];
 };
 
 // ljpeg.hlsli's block.
@@ -270,7 +278,8 @@ bool GpuView::programs(std::string& error)
                                  std::pair{&compose_, shaders::compose}, std::pair{&difference_program_, shaders::difference},
                                  std::pair{&histogram_view_, shaders::histogram_view},
                                  std::pair{&develop_, shaders::develop}, std::pair{&develop_linear_, shaders::develop_linear},
-                                 std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic}})
+                                 std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
+                                 std::pair{&warp_, shaders::warp}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -594,9 +603,37 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
         pass.inputs = {sites};
         pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};  // each read only when there
+        // A DNG whose lens is corrected (WarpRectilinear): the whole active
+        // area developed as it lies, then warped into the framing as shown.
+        const bool warp = corrections && (*m->corrections)[16] != 0;
+        rap::gpu::texture_ptr whole;
+        if (warp && !(whole = device_->create({m->width, m->height, rap::gpu::format::rgba16f, 1, true})))
+        {
+            error = "too big for the GPU";
+            return false;
+        }
+        WarpParams wp{};
+        if (warp)
+        {
+            std::memcpy(wp.map_x, p.map_x, sizeof wp.map_x);
+            std::memcpy(wp.map_y, p.map_y, sizeof wp.map_y);
+            wp.size[0] = m->width, wp.size[1] = m->height;
+            p.map_x[0] = 1, p.map_x[1] = 0, p.map_x[2] = 0;
+            p.map_y[0] = 0, p.map_y[1] = 1, p.map_y[2] = 0;
+        }
         pass.uniforms = bytes(p);
-        pass.target = top;
+        pass.target = warp ? whole : top;
         device_->run(std::span(&pass, 1));
+        if (warp)
+        {
+            rap::gpu::pass w;
+            w.program = warp_;
+            w.inputs = {whole};
+            w.buffers = {corrections};
+            w.uniforms = bytes(wp);
+            w.target = top;
+            device_->run(std::span(&w, 1));
+        }
         s.levels.push_back(top);
         // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame
         // puts its white balance in front (render()).

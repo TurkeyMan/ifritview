@@ -151,7 +151,7 @@ float mosaic_gain(int x, int y)
     float g = 1;
     const uint n = corrections.Load(0);
     for (uint i = 0; i < n; ++i)
-        g *= map_gain(16 + i * 16, x, y, 0);
+        g *= map_gain(48 + i * 16, x, y, 0);
     return g;
 }
 
@@ -162,7 +162,7 @@ float3 rgb_gain(int x, int y)
     const uint n2 = corrections.Load(0), n3 = corrections.Load(4);
     for (uint i = 0; i < n3; ++i)
     {
-        const uint d = 16 + (n2 + i) * 16;
+        const uint d = 48 + (n2 + i) * 16;
         g *= float3(map_gain(d, x, y, 0), map_gain(d, x, y, 1), map_gain(d, x, y, 2));
     }
     if (corrections.Load(8))
