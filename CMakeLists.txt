@@ -56,6 +56,7 @@ add_library(ifrit_core STATIC
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
   src/decoders/ljpeg.cpp
+  src/decoders/dng_opcodes.cpp
   src/encoders/encoder.cpp
   src/encoders/dds.cpp
   src/encoders/reduce.cpp

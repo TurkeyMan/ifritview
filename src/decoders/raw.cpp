@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "dng_opcodes.h"
 #include "ljpeg.h"
 #include "../i18n.h"
 #include "../platform.h"
@@ -910,6 +911,24 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     }
     if (!ok)
         return false;
+    // A DNG's own lens shading and vignetting, applied as it's developed.
+    static const bool corrections = !std::getenv("IFRIT_NO_DNG_CORRECTIONS");
+    if (corrections && out.mosaic && out.mosaic->channels == 1 && !out.mosaic->ycc.block_h && raw.imgdata.idata.dng_version)
+    {
+        dng::Corrections c = dng::corrections(bytes, size, raw.imgdata.sizes.raw_width, raw.imgdata.sizes.raw_height,
+                                                       raw.imgdata.sizes.width, raw.imgdata.sizes.height);
+        if (!c.summary.empty())
+        {
+            out.add(N_("Raw"), N_("DNG corrections"), c.summary);
+            platform::trace("raw: DNG corrections %s", c.summary.c_str());
+        }
+        if (!c.empty())
+        {
+            auto m = std::make_shared<RawMosaic>(*out.mosaic);
+            m->corrections = std::make_shared<const std::vector<uint32_t>>(std::move(c.words));
+            out.mosaic = std::move(m);
+        }
+    }
 
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
     if (out.linear)

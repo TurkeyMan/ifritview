@@ -556,6 +556,13 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             p.as_shot[c] = m->as_shot[c];
         p.as_shot[3] = m->white;
         p.size[0] = m->width, p.size[1] = m->height, p.size[2] = levels ? 1 : 0;
+        rap::gpu::buffer_ptr corrections;
+        if (m->corrections && m->channels == 1 && !m->ycc.block_h &&
+            (corrections = device_->create_buffer(m->corrections->size() * 4)))
+        {
+            device_->upload(corrections, std::as_bytes(std::span(*m->corrections)));
+            p.size[3] = 1;
+        }
         // Output (x, y), as shown, to the photosite: through the turn, then
         // into the framing (EXIF orientation: what the stored image needs).
         const int cw = m->crop[2] - 1, ch = m->crop[3] - 1, cx = m->crop[0], cy = m->crop[1];
@@ -586,7 +593,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         }
         pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
         pass.inputs = {sites};
-        pass.buffers = {levels ? levels : histogram_};  // read only when measured here
+        pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};  // each read only when there
         pass.uniforms = bytes(p);
         pass.target = top;
         device_->run(std::span(&pass, 1));

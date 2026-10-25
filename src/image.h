@@ -62,6 +62,9 @@ struct RawMosaic
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height
     int orientation = 1;         // EXIF 1..8: how the camera was held
+    // A DNG's corrections (its lens shading, vignetting), as the develop
+    // reads them (dng_opcodes.h); null when it has none.
+    std::shared_ptr<const std::vector<uint32_t>> corrections;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be
