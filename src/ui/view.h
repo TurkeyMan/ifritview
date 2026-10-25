@@ -232,6 +232,7 @@ private:
         uint32_t background = 0;
         bool checkerboard = false;
         ScaleFilter enlarge = ScaleFilter::Nearest, shrink = ScaleFilter::Nearest;
+        bool measured = false;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;

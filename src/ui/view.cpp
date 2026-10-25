@@ -1084,7 +1084,16 @@ bool View::draw_on_gpu(rap::color background)
     if (device)
         gpu_waiting_since_ = 0;
     if (device && (!gpu_ || gpu_->device() != device))
-        gpu_ = std::make_unique<GpuView>(device);
+        gpu_ = std::make_unique<GpuView>(device,
+                                         [this, alive = alive_]
+                                         {
+                                             ui_.post(
+                                                 [this, alive]
+                                                 {
+                                                     if (*alive)
+                                                         invalidate();
+                                                 });
+                                         });
     if (!device)
     {
         if (gpu_shown_)
@@ -1099,7 +1108,7 @@ bool View::draw_on_gpu(rap::color background)
     GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
-               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter};
+               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, gpu_->measured()};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 

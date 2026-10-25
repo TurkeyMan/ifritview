@@ -3,6 +3,7 @@
 // the transparency checkerboard or the background, all in linear light,
 // then encoded for the front buffer: sRGB (8-bit dithered, or 10-bit), PQ,
 // or linear scRGB.
+#include "display.hlsli"
 #include "resample.hlsli"
 
 cbuffer Params : register(b0)
@@ -24,12 +25,19 @@ cbuffer Params : register(b0)
     float exposure;     // the scene's scale before tone mapping (2^ev; a raw without a curve: its gain too)
     int tone;           // 0: clip; 1: the raw's camera-matched curve (`tone_curve`), by luminance
     int output;         // 0: sRGB, 8-bit, dithered; 1: sRGB, 10-bit; 2: PQ; 3: linear scRGB
-    float white;        // PQ: SDR white in nits
-    float3 unused;
+    float white;        // SDR white in nits (PQ output, and the luminance roll-off's scale)
+    float source_peak;  // the image's peak luminance after exposure (1 = SDR white); 0: no mapping
+    float display_peak; // the display's
+    int gamut;          // 1: compress chromaticity into the display's gamut, per hue (`extents`)
+    float2 display_r;   // the display's primaries in u'v'
+    float2 display_g;
+    float2 display_b;
+    float2 unused;
 };
 
 Texture2D<float4> source : register(t0);
 Texture2D<float> tone_curve : register(t1);  // 4096 display-linear values for scene luminance 0..1
+Texture2D<float> extents : register(t2);     // per hue (72 x 1): how far the image goes from white, 1 = the display's edge
 
 float srgb_encode(float v)
 {
@@ -56,6 +64,39 @@ float3 tone_map(float3 c)
         const int i = int(x);
         const float o = lerp(tone_curve.Load(int3(i, 0, 0)), tone_curve.Load(int3(min(i + 1, 4095), 0, 0)), x - i);
         c *= lum > 1e-6 ? o / lum : 0;
+    }
+    // BT.709 primaries in, as the image's data is kept; the display's out
+    // (the same until there's a display description).
+    if (source_peak > 0 || gamut)
+    {
+        const float3 xyz = mul(kRgbToXyz709, c);
+        float y = xyz.y;
+        float2 uv = uv_from_xyz(xyz);
+        if (source_peak > 0 && tone != 1)  // a raw's camera curve is display-referred already
+        {
+            const float mapped = eetf(y, source_peak, display_peak, white);
+            // Towards white as it nears the display's peak, as film does.
+            const float knee = 0.75 * display_peak;
+            uv = lerp(uv, kWhiteUv, smoothstep(knee, display_peak, mapped) * 0.6);
+            y = mapped;
+        }
+        if (gamut)
+        {
+            const float2 v = uv - kWhiteUv;
+            const float len = length(v);
+            if (len > 1e-6)
+            {
+                const float2 dir = v / len;
+                const float edge = edge_distance(dir, display_r, display_g, display_b);
+                const float hue = (atan2(dir.y, dir.x) / kTwoPi + 1) * 72;
+                const uint i0 = uint(floor(hue)) % 72u, i1 = (i0 + 1u) % 72u;
+                const float limit = lerp(extents.Load(int3(i0, 0, 0)), extents.Load(int3(i1, 0, 0)), frac(hue));
+                // A short knee when the image barely leaves the gamut.
+                const float threshold = clamp(1 - 0.6 * (limit - 1), 0.8, 0.95);
+                uv = kWhiteUv + dir * compress(len / edge, threshold, max(limit, 1.0)) * edge;
+            }
+        }
+        c = mul(kXyzToRgb709, xyz_from_yuv(y, uv));
     }
     return c;
 }

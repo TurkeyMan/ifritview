@@ -13,6 +13,8 @@
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
 
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,7 +33,9 @@ enum class FrontBuffer
 class GpuView
 {
 public:
-    explicit GpuView(std::shared_ptr<rap::gpu::device> device);
+    // `changed` runs (on any thread) when something measured in the
+    // background changes how the frame looks: draw again.
+    GpuView(std::shared_ptr<rap::gpu::device> device, std::function<void()> changed);
 
     struct Frame
     {
@@ -53,6 +57,19 @@ public:
                 rap::gpu::ticket& ready, rap::frame_color& colour, std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
+    // The image's measures are in (the frame looks as it finally will).
+    bool measured() const { return measuring_ && measuring_->done; }
+
+    // What the image holds, measured once it's on the device (raw and HDR
+    // images): how bright it goes, and how far from white in each hue
+    // direction (1 = the display's edge), so the display mapping only
+    // compresses what's really there.
+    struct Measures
+    {
+        float peak = 0;         // luminance, 1 = SDR white: the 99.9th percentile (a few hot pixels don't count)
+        float extents[72] = {}; // per 5 degrees of hue round the white point
+        bool outside = false;   // anything past the display's gamut
+    };
 
 private:
     bool programs(std::string& error);
@@ -61,7 +78,20 @@ private:
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(int n);
 
+    // Measures the image from a level of at most 2048 pixels, on the
+    // device's thread; `measures_` is filled when it's done.
+    void measure();
+
     std::shared_ptr<rap::gpu::device> device_;
+    std::function<void()> changed_;
+    struct Measuring
+    {
+        std::atomic<bool> done{false};
+        Measures measures;
+    };
+    std::shared_ptr<Measuring> measuring_;
+    rap::gpu::texture_ptr extents_;  // measures_.extents, once there
+    rap::gpu::texture_ptr blank_;    // for inputs a pass doesn't use
     rap::gpu::program_ptr decode_, resample_, compose_;
 
     std::weak_ptr<Image> image_;
