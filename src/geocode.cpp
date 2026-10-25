@@ -37,10 +37,7 @@ std::string key_for(double lat, double lon)
 
 std::string cache_path()
 {
-    gchar* p = g_build_filename(g_get_user_cache_dir(), "ifritview", "places.tsv", nullptr);
-    std::string s = p;
-    g_free(p);
-    return s;
+    return platform::join_path(platform::cache_dir(), "places.tsv");
 }
 
 }  // namespace

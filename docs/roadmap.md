@@ -17,7 +17,7 @@
     white balance + colour matrix + tone in our pass; WB slider with D50/D65
     ticks and an as-shot estimate;
   - lens corrections from embedded parameters (Fuji/Sony/Panasonic maker
-    notes, DNG WarpRectilinear) with lensfun as the fallback (Canon);
+    notes; a DNG's opcodes and lensfun's database are in);
   - a tone/colour model that gets closer to the camera look (per-make picture
     styles are a long tail; start with a filmic base and the matched curve);
   - threaded CPU demosaic first, then the whole thing on the GPU (demosaic,

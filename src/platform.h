@@ -30,6 +30,15 @@ size_t available_memory();
 // Absolute path of the running executable.
 std::string executable_path();
 
+// The folder for what IfritView keeps to save fetching again (place names,
+// the lens database): $XDG_CACHE_HOME/ifritview, or
+// %LOCALAPPDATA%\IfritView\cache beside the settings (GLib's own cache
+// folder on Windows is the browser's, INetCache). Not made here.
+std::string cache_dir();
+
+// `name` in the folder `dir`, with the platform's separator.
+std::string join_path(const std::string& dir, const std::string& name);
+
 // Runtime libraries (GStreamer, poppler): their file names here, whether one
 // is installed (a few stats, no load), loading, and symbol lookup.
 #ifdef _WIN32

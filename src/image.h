@@ -29,6 +29,10 @@ namespace rawpacked
 {
 struct Prepared;
 }
+namespace lenses
+{
+struct Shot;
+}
 
 struct RawMosaic
 {
@@ -98,6 +102,10 @@ struct RawMosaic
     // A DNG's corrections (its lens shading, vignetting), as the develop
     // reads them (dng_opcodes.h); null when it has none.
     std::shared_ptr<const std::vector<uint32_t>> corrections;
+    // How it was taken, for lensfun's corrections where it has none of its
+    // own (lens_database.h: the app puts them in `corrections`, `lensfun`).
+    std::shared_ptr<const lenses::Shot> shot;
+    bool lensfun = false;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be

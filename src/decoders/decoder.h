@@ -133,6 +133,13 @@ const Decoder& heif_decoder();
 const Decoder& jxl_decoder();
 const Decoder& tiff_decoder();
 const Decoder& raw_decoder();
+// How a raw was taken (camera, lens, focal length, aperture), from its
+// headers alone, framed as its whole active area; false if it isn't one.
+namespace lenses
+{
+struct Shot;
+}
+bool raw_shot(const std::string& path, lenses::Shot& out);
 const Decoder& stb_decoder();
 const Decoder& pixbuf_decoder();
 const Decoder& pdf_decoder();

@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "decoders/decoder.h"
+#include "platform.h"
 
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -12,14 +13,6 @@
 namespace
 {
 
-std::string join(const std::string& a, const std::string& b)
-{
-    gchar* full = g_build_filename(a.c_str(), b.c_str(), nullptr);
-    std::string s = full;
-    g_free(full);
-    return s;
-}
-
 // Whether `name` (relative to `dir`) is one the list shows.
 bool qualifies(const std::string& dir, const std::string& name, const Config& cfg)
 {
@@ -29,7 +22,7 @@ bool qualifies(const std::string& dir, const std::string& name, const Config& cf
     const std::string ext = file_extension(name);
     if (!cfg.accepts_extension(ext) || !extension_supported(ext))  // e.g. videos without GStreamer
         return false;
-    return g_file_test(join(dir, name).c_str(), G_FILE_TEST_IS_REGULAR);
+    return g_file_test(platform::join_path(dir, name).c_str(), G_FILE_TEST_IS_REGULAR);
 }
 
 std::string collate_key(const std::string& name)
@@ -73,18 +66,18 @@ void collect(const std::string& dir, const std::string& rel, const Config& cfg, 
 {
     if (stop && stop())
         return;
-    const std::string here = rel.empty() ? dir : join(dir, rel);
+    const std::string here = rel.empty() ? dir : platform::join_path(dir, rel);
     GDir* d = g_dir_open(here.c_str(), 0, nullptr);
     if (!d)
         return;
     while (const gchar* entry = g_dir_read_name(d))
     {
-        const std::string name = rel.empty() ? std::string(entry) : join(rel, entry);
+        const std::string name = rel.empty() ? std::string(entry) : platform::join_path(rel, entry);
         if (qualifies(dir, name, cfg))
             out.push_back(name);
         else if (cfg.recursive && depth < 64 && (cfg.show_hidden || entry[0] != '.'))
         {
-            const std::string full = join(dir, name);
+            const std::string full = platform::join_path(dir, name);
             if (g_file_test(full.c_str(), G_FILE_TEST_IS_DIR) && !g_file_test(full.c_str(), G_FILE_TEST_IS_SYMLINK))
                 collect(dir, name, cfg, out, depth + 1, stop);
         }
@@ -180,7 +173,7 @@ std::string Folder::current() const
 
 std::string Folder::path_at(int index) const
 {
-    return join(dir_, files_[index]);
+    return platform::join_path(dir_, files_[index]);
 }
 
 std::string Folder::current_name() const

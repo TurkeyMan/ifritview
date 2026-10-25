@@ -100,6 +100,7 @@ public:
     void script_compare(const std::string& how);
     void script_export(const std::string& path);
     void script_instead(const std::string& what);
+    void script_lens(bool on);  // the G panel's lens correction, for this run (not saved)
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
     void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 
@@ -209,6 +210,14 @@ private:
     std::shared_ptr<Image> instead_image_;  // the shown raw's, while it's shown instead
     uint64_t instead_request_ = 0;
     bool syncing_instead_ = false;  // its checks set here, not by the user
+    // Lens corrections from lensfun's database (lens_store.h) for the raw
+    // shown, when it has none of its own and the G panel's check is on: in
+    // its mosaic before it's developed, or developed again (`redevelop`)
+    // when the database arrives or the check changes (app_lens.cpp).
+    void correct_lens(bool redevelop);
+    void set_lens_correction(bool on, bool save);  // the check: saved, or (scripts) for this run
+    static void lenses_arrived();  // the database came in: the raw shown gets them
+    rap::check* lens_check_ = nullptr;
     void sync_white_balance();     // the sliders to the image's
     rap::tool_button* smooth_toggle_ = nullptr;
     // The image's 8-bit pixels at its exposure, made again if the GPU's drawing

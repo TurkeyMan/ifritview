@@ -18,6 +18,7 @@
     "libjxl",
     "libexif",
     "zstd",
+    "bzip2",
     { "name": "pkgconf", "host": true }
   ]
 }
