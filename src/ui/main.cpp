@@ -240,7 +240,11 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
     App app(ui, std::move(settings));
     platform::trace("window built");
     if (argc > 3 && std::strcmp(argv[1], "--diff") == 0)
-        app.open_diff(argv[2], argv[3]);
+    {
+        // --diff A B [--labels "A's name" "B's name"]
+        const bool labelled = argc > 6 && std::strcmp(argv[4], "--labels") == 0;
+        app.open_diff(argv[2], argv[3], labelled ? argv[5] : "", labelled ? argv[6] : "");
+    }
     else if (argc > 1)
         app.open_path(argv[1], first);
     platform::trace("first image requested");

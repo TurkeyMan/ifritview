@@ -1,6 +1,8 @@
 #include "i18n.h"
 #include "view.h"
 
+#include "../white_balance.h"
+
 #include "config.h"
 #include "platform.h"
 #include "controls.h"
@@ -578,9 +580,10 @@ void View::retoned()
         base_dirty_ = true;
         return;
     }
-    const uint64_t keep = generation_;
+    const uint64_t keep = image_ ? image_->generation : 0;
     image_changed();
-    generation_ = keep;  // the GPU works from the image's own data, which is the same
+    if (image_)
+        image_->generation = keep;  // the GPU works from the image's own data, which is the same
 #else
     image_changed();
 #endif
@@ -588,9 +591,8 @@ void View::retoned()
 
 void View::image_changed()
 {
-#ifdef HAVE_GPU
-    ++generation_;
-#endif
+    if (image_)
+        ++image_->generation;
     drop_caches();
     if (!image_)
         return;
@@ -1122,11 +1124,11 @@ bool View::draw_on_gpu(rap::color background)
         return false;
     }
     const rap::frame_target target = canvas_->target();
-    GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
+    GpuKey key{image_.get(), image_->generation, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
                cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr,
-               cfg_.histogram_channels};
+               cfg_.histogram_channels, image_->wb_kelvin, image_->wb_tint};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1137,6 +1139,8 @@ bool View::draw_on_gpu(rap::color background)
     f.pan_x = pan_x_;
     f.pan_y = pan_y_;
     f.exposure = key.exposure;
+    if (image_->mosaic && image_->wb_kelvin > 0)
+        wb_multipliers(*image_->mosaic, image_->wb_kelvin, image_->wb_tint, f.white_balance);
     f.background = background;
     f.checkerboard = cfg_.checkerboard;
     f.checker_size = int(std::lround(8 * scale_factor()));
@@ -1161,7 +1165,7 @@ bool View::draw_on_gpu(rap::color background)
     rap::gpu::ticket ready;
     rap::frame_color colour;
     std::string error;
-    if (!gpu_->render(image_, generation_, f, frame, ready, colour, error))
+    if (!gpu_->render(image_, image_->generation, f, frame, ready, colour, error))
     {
         if (std::getenv("IFRIT_TRACE"))
             std::fprintf(stderr, "gpu view: %s\n", error.c_str());
@@ -1215,7 +1219,7 @@ bool View::develop_pixels()
         gpu_ = std::make_unique<GpuView>(device);
     PixelBuffer px;
     std::string error;
-    if (!gpu_->export_pixels(image_, generation_, image_->exposure_edit, px, error))
+    if (!gpu_->export_pixels(image_, image_->generation, image_->exposure_edit, px, error))
         return false;
     image_->pixels = std::move(px);
     image_->stride = image_->width * 4;

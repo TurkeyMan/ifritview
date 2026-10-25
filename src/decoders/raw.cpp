@@ -76,13 +76,13 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error)
         ok = decode_jpeg_memory(thumb->data, thumb->data_size, out, error);
         // Embedded previews are stored unrotated; apply the camera orientation.
         if (ok && out.width >= out.height)
-            out.apply_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
+            out.apply_camera_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
     }
     else if (thumb->type == LIBRAW_IMAGE_BITMAP && thumb->colors == 3 && thumb->bits == 8)
     {
         out.allocate(thumb->width, thumb->height);
         out.from_rgb8(thumb->data, thumb->width * 3);
-        out.apply_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
+        out.apply_camera_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
         ok = true;
     }
     else
@@ -244,7 +244,7 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     out.retone(0.0);
     // dcraw_process leaves the sensor's orientation (only LibRaw's image
     // export turns it): turned as the camera held it, as the preview is.
-    out.apply_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
+    out.apply_camera_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
     if (framed)
     {
         const auto& c = raw.imgdata.sizes.raw_inset_crops[0];

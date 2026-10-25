@@ -493,7 +493,7 @@ void orient(Image& out, const std::string& value)
         up |= c == 'u';
     }
     if (left || up)
-        out.apply_orientation(left && up ? 3 : up ? 4 : 2);
+        out.apply_camera_orientation(left && up ? 3 : up ? 4 : 2);
 }
 
 void add_metadata(Image& out, const char* group, const std::vector<std::pair<std::string, std::string>>& kv)

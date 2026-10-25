@@ -240,11 +240,15 @@ struct Image
     };
     std::vector<PendingEdit> pending_edits;
     double exposure_edit = 0;  // EV chosen by the user or XMP, relative to the camera's bias
+    double wb_kelvin = 0, wb_tint = 0;  // white balance chosen for a raw the GPU develops; 0 K: as shot
     // `pixels` are let go (empty): the GPU draws from the image's own data at
     // its exposure, and they're made again only when something needs them
     // (saving, printing, copying, comparing, turning, cropping, the CPU
     // drawing). Raw and HDR images only: for the rest the pixels are the data.
     bool pixels_stale = false;
+    // Changes whenever the image's data changes in place (a develop landing,
+    // a turn, a crop, a video frame): what the GPU keeps of it is out of date.
+    uint64_t generation = 1;
 
     // Take the final pixels of this same file: pending edits are replayed on
     // them, then they replace ours in place (metadata merged, identity kept).
@@ -300,4 +304,7 @@ struct Image
 
     // Rotate/flip in place per an EXIF orientation value 1..8.
     void apply_orientation(int exif_orientation);
+    // The file's own orientation, applied as it's decoded: the image as it
+    // is, not an edit (it's still cached, its transform stays the file's).
+    void apply_camera_orientation(int o);
 };

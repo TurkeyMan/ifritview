@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace
@@ -240,10 +242,9 @@ bool GpuView::programs(std::string& error)
         }
         *program = r.program;
     }
-    stats_ = device_->create_buffer(1101 * 4);
     histogram_ = device_->create_buffer(1032 * 4);
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
-    if (!stats_ || !histogram_ || !blank_)
+    if (!histogram_ || !blank_)
     {
         error = "no room for the measures";
         return false;
@@ -310,16 +311,17 @@ bool GpuView::upload(const Image& image, std::string& error)
         pass.target = top;
         device_->run(std::span(&pass, 1));
         levels_.push_back(top);
-        // Shown through its colour matrix, its white balance (as shot) in it:
-        // XYZ = XYZ<-709 . rgb_cam . diag(white balance).
+        // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame
+        // puts its white balance in front (render()).
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
             {
                 float v = 0;
                 for (int k = 0; k < 3; ++k)
                     v += kXyzFrom709[i][k] * m->rgb_cam[k][j];
-                input_to_xyz_[i][j] = v * m->as_shot[j];
+                input_to_xyz_[i][j] = v;
             }
+        std::memcpy(as_shot_, m->as_shot, sizeof as_shot_);
         auto_exposure_ = true;
         measured_ = false;
         histogram_generation_ = 0;
@@ -392,6 +394,83 @@ bool GpuView::upload(const Image& image, std::string& error)
     return true;
 }
 
+size_t GpuView::current_bytes() const
+{
+    size_t n = 0;
+    for (const rap::gpu::texture_ptr& t : levels_)
+        n += size_t(t->width()) * t->height() * 8;  // half float RGBA
+    return n;
+}
+
+void GpuView::retain_current()
+{
+    // Not when it's the same image with its data changed (a raw's develop
+    // replacing its preview): what's on the device is stale then.
+    std::shared_ptr<Image> image = image_.lock();
+    if (image && !levels_.empty() && !(image == pending_image_ && pending_generation_ != generation_))
+    {
+        Retained r;
+        r.image = image;
+        r.generation = generation_;
+        r.levels = std::move(levels_);
+        r.tone = std::move(tone_);
+        r.stats = std::move(stats_);
+        r.scene_gain = scene_gain_;
+        std::memcpy(r.input_to_xyz, input_to_xyz_, sizeof r.input_to_xyz);
+        std::memcpy(r.as_shot, as_shot_, sizeof r.as_shot);
+        r.auto_exposure = auto_exposure_;
+        r.tonable = tonable_;
+        r.measured = measured_;
+        for (const rap::gpu::texture_ptr& t : r.levels)
+            r.bytes += size_t(t->width()) * t->height() * 8;
+        retained_.insert(retained_.begin(), std::move(r));
+    }
+    levels_.clear();
+    tone_.reset();
+    stats_.reset();
+    measured_ = false;
+    // What's gone (images closed), and the oldest past the budget.
+    std::erase_if(retained_, [](const Retained& r) { return r.image.expired(); });
+    const rap::gpu::memory_budget m = device_->memory();
+    const size_t budget = m.budget ? size_t(m.budget / 2) : size_t(2) << 30;
+    size_t used = 0;
+    for (size_t i = 0; i < retained_.size(); ++i)
+    {
+        used += retained_[i].bytes;
+        if (used > budget)
+        {
+            retained_.resize(i);
+            break;
+        }
+    }
+}
+
+bool GpuView::restore(const std::shared_ptr<Image>& image, uint64_t generation)
+{
+    for (auto it = retained_.begin(); it != retained_.end(); ++it)
+        if (it->image.lock() == image)
+        {
+            if (it->generation != generation)
+            {
+                retained_.erase(it);  // its data changed since: made again
+                return false;
+            }
+            levels_ = std::move(it->levels);
+            tone_ = std::move(it->tone);
+            stats_ = std::move(it->stats);
+            scene_gain_ = it->scene_gain;
+            std::memcpy(input_to_xyz_, it->input_to_xyz, sizeof input_to_xyz_);
+            std::memcpy(as_shot_, it->as_shot, sizeof as_shot_);
+            auto_exposure_ = it->auto_exposure;
+            tonable_ = it->tonable;
+            measured_ = it->measured;
+            histogram_generation_ = 0;  // counted for another image since
+            retained_.erase(it);
+            return true;
+        }
+    return false;
+}
+
 rap::gpu::texture_ptr GpuView::counted_level()
 {
     int n = 0;
@@ -448,9 +527,25 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         return false;
     if (image_.lock() != image || generation_ != generation || levels_.empty())
     {
+        pending_image_ = image;
+        pending_generation_ = generation;
+        retain_current();
+        pending_image_.reset();
         image_.reset();
-        if (!upload(*image, error))
-            return false;
+        const bool kept = restore(image, generation);
+        if (std::getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "gpu: %s %dx%d (%zu kept, %zu MB)\n", kept ? "kept on the GPU:" : "uploading", image->width, image->height,
+                         retained_.size(), [&] { size_t n = 0; for (auto& r : retained_) n += r.bytes; return n >> 20; }());
+        if (!kept)
+        {
+            stats_ = device_->create_buffer(1101 * 4);  // this image's measures
+            if (!stats_ || !upload(*image, error))
+            {
+                if (error.empty())
+                    error = "no room for the measures";
+                return false;
+            }
+        }
         image_ = image;
         generation_ = generation;
     }
@@ -488,11 +583,16 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     cp.tone = tone_ ? 1 : 0;
     cp.output = int32_t(f.front);
     cp.white = f.sdr_white_nits;
+    // A raw's white balance (the frame's, else as shot), in front of its matrix.
+    float wb[3] = {1, 1, 1};
+    if (auto_exposure_)
+        for (int j = 0; j < 3; ++j)
+            wb[j] = f.white_balance[0] > 0 ? f.white_balance[j] : as_shot_[j];
     for (int j = 0; j < 3; ++j)
     {
-        cp.input_x[j] = input_to_xyz_[0][j];
-        cp.input_y[j] = input_to_xyz_[1][j];
-        cp.input_z[j] = input_to_xyz_[2][j];
+        cp.input_x[j] = input_to_xyz_[0][j] * wb[j];
+        cp.input_y[j] = input_to_xyz_[1][j] * wb[j];
+        cp.input_z[j] = input_to_xyz_[2][j] * wb[j];
     }
     cp.auto_exposure = auto_exposure_ ? 1 : 0;
     // The display: sRGB at SDR white until rapport describes the real one.

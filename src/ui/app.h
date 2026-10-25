@@ -40,7 +40,10 @@ public:
     void open_path(const std::string& path, class FirstImage* first = nullptr);
     void show_window();  // after the first image is in, if it's quick
     // Two images compared, standalone (--diff, or two files dropped at once).
-    void open_diff(const std::string& a_path, const std::string& b_path);
+    // `a_label`/`b_label` name the sides instead of their files (a diff tool
+    // passing temporary copies: "file.png (HEAD)").
+    void open_diff(const std::string& a_path, const std::string& b_path, const std::string& a_label = {},
+                   const std::string& b_label = {});
     int run();
     rap::ui& ui() { return ui_; }
     rap::window& window() { return *window_; }
@@ -166,6 +169,12 @@ private:
     rap::widget* footer_ = nullptr;
     rap::widget* exposure_box_ = nullptr;
     rap::slider* exposure_ = nullptr;
+    rap::widget* wb_box_ = nullptr;
+    rap::slider *wb_kelvin_ = nullptr, *wb_tint_ = nullptr;
+    bool syncing_wb_ = false;
+    void white_balance_changed();  // the sliders moved
+    void white_balance_as_shot();  // back to the camera's
+    void sync_white_balance();     // the sliders to the image's
     rap::tool_button* smooth_toggle_ = nullptr;
     // The image's 8-bit pixels at its exposure, made again if the GPU's drawing
     // left them behind (Image::pixels_stale): before saving, printing,

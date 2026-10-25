@@ -243,7 +243,6 @@ private:
     // only what goes over the image. `generation_` changes when the image's
     // data does; `gpu_drawn_` is what the frame shown was drawn from.
     std::unique_ptr<GpuView> gpu_;
-    uint64_t generation_ = 1;
     struct GpuKey
     {
         const Image* image = nullptr;
@@ -255,6 +254,7 @@ private:
         ScaleFilter enlarge = ScaleFilter::Nearest, shrink = ScaleFilter::Nearest;
         bool histogram = false, counting = false;
         int channels = 0;
+        double wb_kelvin = 0, wb_tint = 0;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;

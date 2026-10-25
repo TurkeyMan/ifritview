@@ -187,7 +187,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
         return false;
 #ifdef HAVE_EXIF
     const ExifSummary exif = read_exif_blob(bytes, size, out);  // the file's bytes, already in memory
-    out.apply_orientation(exif.orientation);
+    out.apply_camera_orientation(exif.orientation);
     out.info = exif.camera;
     if (out.color_space.empty())
         out.color_space = exif.color_space;  // an embedded profile is more specific than the EXIF flag
@@ -206,7 +206,7 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
     if (!decode_from(cinfo, err, out, error))
         return false;
 #ifdef HAVE_EXIF
-    out.apply_orientation(read_exif_blob(data, size, out).orientation);
+    out.apply_camera_orientation(read_exif_blob(data, size, out).orientation);
 #endif
     return true;
 }

@@ -656,6 +656,17 @@ void orient_rect(int o, int W, int H, int& x, int& y, int& w, int& h)
     }
 }
 
+void Image::apply_camera_orientation(int o)
+{
+    const bool was_edited = edited;
+    const Transform was = transform;
+    const auto pending = pending_edits;
+    apply_orientation(o);
+    edited = was_edited;
+    transform = was;
+    pending_edits = pending;
+}
+
 void Image::apply_orientation(int o)
 {
     if (o < 2 || o > 8)

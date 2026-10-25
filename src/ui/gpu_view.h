@@ -45,6 +45,7 @@ public:
         int width = 0, height = 0;              // the canvas's frame target, device pixels
         double zoom = 1, pan_x = 0, pan_y = 0;  // device pixels per image pixel; the image's top left
         double exposure = 0;                    // EV, for images with more than the display shows
+        float white_balance[3] = {};            // a raw's R, G, B multipliers (the least 1); 0: as shot
         rap::color background;
         bool checkerboard = false;  // under transparency
         int checker_size = 8;       // device pixels
@@ -99,6 +100,27 @@ private:
     // The level the measures and the histogram count: at most 2048 pixels.
     rap::gpu::texture_ptr counted_level();
 
+    // Images left behind stay on the device (level 0, the levels made, the
+    // measures), most recent first, so flipping back to one is a redraw:
+    // up to about half the memory the GPU says the app has.
+    struct Retained
+    {
+        std::weak_ptr<Image> image;
+        uint64_t generation = 0;
+        std::vector<rap::gpu::texture_ptr> levels;
+        rap::gpu::texture_ptr tone;
+        rap::gpu::buffer_ptr stats;
+        float scene_gain = 1, input_to_xyz[3][3] = {}, as_shot[3] = {1, 1, 1};
+        bool auto_exposure = false, tonable = false, measured = false;
+        size_t bytes = 0;
+    };
+    std::vector<Retained> retained_;
+    std::shared_ptr<Image> pending_image_;  // what render() is moving to, while it retains the last
+    uint64_t pending_generation_ = 0;
+    void retain_current();                                       // the current image's, into retained_
+    bool restore(const std::shared_ptr<Image>& image, uint64_t generation);  // from retained_, if it's there
+    size_t current_bytes() const;
+
     std::shared_ptr<rap::gpu::device> device_;
     rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
     rap::gpu::program_ptr decode_, resample_, compose_, stats_program_, peak_, histogram_program_, histogram_max_, histogram_view_;
@@ -116,7 +138,8 @@ private:
     std::vector<rap::gpu::texture_ptr> levels_;  // linear, premultiplied, half float
     rap::gpu::texture_ptr tone_;                  // a raw's camera-matched curve, 4096 x 1
     float scene_gain_ = 1;                        // the scene's scale before exposure (a raw's gain without a curve)
-    float input_to_xyz_[3][3] = {};               // the image's data -> XYZ (a raw's: its matrix and white balance)
+    float input_to_xyz_[3][3] = {};               // the image's data -> XYZ (a raw's: its colour matrix, before white balance)
+    float as_shot_[3] = {1, 1, 1};                // a raw's: what its level 0 was developed with, the least 1
     bool auto_exposure_ = false;                  // a raw developed here: scaled by its own 99th percentile
     rap::gpu::program_ptr develop_;
     bool tonable_ = false;                        // exposure applies

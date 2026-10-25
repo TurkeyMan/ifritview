@@ -377,7 +377,7 @@ void finish_metadata(DecodeCall& call)
             call.info = exif.camera;
         if (out.color_space.empty())
             out.color_space = exif.color_space;
-        out.apply_orientation(exif.orientation);
+        out.apply_camera_orientation(exif.orientation);
     }
 #endif
 #ifdef HAVE_IPTC

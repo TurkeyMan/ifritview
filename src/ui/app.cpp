@@ -1,5 +1,7 @@
 #include "i18n.h"
 #include "app.h"
+
+#include "../white_balance.h"
 #include "app_util.h"
 
 #include "platform.h"
@@ -249,19 +251,40 @@ void App::build_ui()
     using L::spacer;
     using L::vbox;
 
-    // Exposure, in stops around the camera's compensation; raw only.
-    rap::node exposure =
-        hbox{
-            L::label{_("EV")},
-            L::slider{-3.0, 3.0, 0.0}
-                .step(0.1, 1.0)
-                .show_value(2)
-                .mark(0.0)
-                .on_changed([this](double) { retone(); })
-                .bind(exposure_)
-                .width(rap::extent{24, rap::extent::unit::chars})
-                .tooltip(_("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
-                         "Greyed while the embedded preview stands in for the raw")),
+    // The develop controls, under the histogram: exposure in stops round the
+    // camera's compensation (raw and HDR images), and a raw's white balance
+    // as a temperature and tint (raws the GPU develops).
+    rap::node develop =
+        vbox{
+            L::form{
+                {_("Exposure"), L::slider{-3.0, 3.0, 0.0}
+                                    .step(0.1, 1.0)
+                                    .show_value(2)
+                                    .mark(0.0)
+                                    .on_changed([this](double) { retone(); })
+                                    .bind(exposure_)
+                                    .tooltip(_("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
+                                               "Greyed while the embedded preview stands in for the raw"))},
+            },
+            vbox{
+                L::form{
+                    {_("Temperature"), L::slider{2000.0, 12000.0, 5500.0}
+                                           .step(50, 500)
+                                           .show_value(0)
+                                           .on_changed([this](double) { white_balance_changed(); })
+                                           .bind(wb_kelvin_)
+                                           .tooltip(_("White balance: the colour temperature of the light (kelvin)"))},
+                    {_("Tint"), L::slider{-150.0, 150.0, 0.0}
+                                    .step(1, 10)
+                                    .show_value(0)
+                                    .mark(0.0)
+                                    .on_changed([this](double) { white_balance_changed(); })
+                                    .bind(wb_tint_)
+                                    .tooltip(_("White balance: towards green (-) or magenta (+)"))},
+                    {"", L::button{_("As shot")}.on_click([this] { white_balance_as_shot(); })},
+                },
+            }
+                .handle(wb_box_),
         }
             .handle(exposure_box_);
 
@@ -326,7 +349,6 @@ void App::build_ui()
                     .bind(side_button_)
                     .handle(diff_widgets_[1]),
                 spacer{},
-                exposure,
                 hbox{
                     L::label{_("Gain")},
                     L::slider{1.0, 32.0, 8.0}
@@ -389,6 +411,7 @@ void App::build_ui()
                         .bind(histogram_canvas_)
                         .height(rap::extent{13, rap::extent::unit::lines}),
 
+                    develop,
                     L::form{
                         {_("Peak"), L::label{""}.bind(hist_peak_)},
                         {_("Brightest"), L::label{""}.bind(hist_max_)},
@@ -1111,6 +1134,40 @@ void App::sync_exposure_slider()
     exposure_->set_range(bias - down, bias + 3.0);
     exposure_->set_value(bias + image_->exposure_edit);
     exposure_->set_enabled(!image_->is_preview());
+    sync_white_balance();
+}
+
+void App::sync_white_balance()
+{
+    const bool raw = image_ && image_->mosaic && !image_->is_preview();
+    wb_box_->set_visible(raw);
+    if (!raw)
+        return;
+    double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
+    if (kelvin <= 0)
+        wb_as_shot(*image_->mosaic, kelvin, tint);
+    syncing_wb_ = true;
+    wb_kelvin_->set_value(kelvin);
+    wb_tint_->set_value(tint);
+    syncing_wb_ = false;
+}
+
+void App::white_balance_changed()
+{
+    if (syncing_wb_ || !image_ || !image_->mosaic)
+        return;
+    image_->wb_kelvin = wb_kelvin_->value();
+    image_->wb_tint = wb_tint_->value();
+    view_->redraw();
+}
+
+void App::white_balance_as_shot()
+{
+    if (!image_ || !image_->mosaic)
+        return;
+    image_->wb_kelvin = image_->wb_tint = 0;
+    sync_white_balance();
+    view_->redraw();
 }
 
 void App::set_exposure(double ev)

@@ -133,7 +133,7 @@ void App::settle_side_by_side()
 }
 
 
-void App::open_diff(const std::string& a_path, const std::string& b_path)
+void App::open_diff(const std::string& a_path, const std::string& b_path, const std::string& a_label, const std::string& b_label)
 {
     if (save_dialog_)
         save_dialog_->close();
@@ -145,7 +145,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
     const uint64_t generation = ++load_generation_;
     ++preview_->running;  // waited for on exit, as a save preview is
     std::thread(
-        [this, generation, a_path, b_path, state = preview_]
+        [this, generation, a_path, b_path, a_label, b_label, state = preview_]
         {
             struct Done
             {
@@ -164,7 +164,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
                     difference = std::make_shared<ImageDifference>(compare_images(*a, *b));
             }
             platform::post_main(
-                [this, generation, a, b, a_path, b_path, difference, ok, error]
+                [this, generation, a, b, a_path, b_path, a_label, b_label, difference, ok, error]
                 {
                     if (generation != load_generation_)
                         return;
@@ -186,9 +186,9 @@ void App::open_diff(const std::string& a_path, const std::string& b_path)
                     std::error_code ec;
                     file_size_ = std::filesystem::file_size(a_path, ec);
                     diff_session_ = true;
-                    diff_name_ = name(pa) + "  ↔  " + name(pb);
+                    diff_name_ = (a_label.empty() ? name(pa) : a_label) + "  ↔  " + (b_label.empty() ? name(pb) : b_label);
                     status_message_ = diff_name_;
-                    view_->begin_compare(a, b, name(pa), name(pb), difference,
+                    view_->begin_compare(a, b, a_label.empty() ? name(pa) : a_label, b_label.empty() ? name(pb) : b_label, difference,
                                          difference ? View::Compare::Difference : View::Compare::Swipe);
                     view_->set_compare_gain(int(gain_->value() + 0.5));
                     update_toolbar();

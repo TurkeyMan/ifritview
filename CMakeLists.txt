@@ -52,6 +52,7 @@ add_library(ifrit_core STATIC
   src/i18n.cpp
   src/folder.cpp
   src/image.cpp
+  src/white_balance.cpp
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
   src/encoders/encoder.cpp

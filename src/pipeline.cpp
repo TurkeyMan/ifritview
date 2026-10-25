@@ -437,7 +437,9 @@ const char* help_text()
 
 USAGE
   ifritview [FILE | FOLDER]          open the viewer on a file (and its folder) or a folder
-  ifritview --diff A B               compare two images in the viewer
+  ifritview --diff A B [--labels LA LB]
+                                     compare two images in the viewer (named LA and LB,
+                                     not by their files: a diff tool's temporary copies)
   ifritview --process IN STEP...     read IN, do the steps in order, no window
   ifritview --convert IN OUT [KEY=VALUE...]
                                      shorthand for --process IN save:OUT,KEY=VALUE,...
