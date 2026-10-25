@@ -221,9 +221,10 @@ struct Image
     };
     std::vector<PendingEdit> pending_edits;
     double exposure_edit = 0;  // EV chosen by the user or XMP, relative to the camera's bias
-    // `pixels` were made at an earlier exposure: the GPU draws from the
-    // image's own data, and they're brought up to date only when something
-    // needs them (saving, printing, copying, comparing, the CPU drawing).
+    // `pixels` are let go (empty): the GPU draws from the image's own data at
+    // its exposure, and they're made again only when something needs them
+    // (saving, printing, copying, comparing, turning, cropping, the CPU
+    // drawing). Raw and HDR images only: for the rest the pixels are the data.
     bool pixels_stale = false;
 
     // Take the final pixels of this same file: pending edits are replayed on

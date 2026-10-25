@@ -617,6 +617,7 @@ void App::transform(int exif_orientation)
 {
     if (!image_)
         return;
+    pixels_for_cpu();
     image_->apply_orientation(exif_orientation);  // a preview remembers it for its develop
     view_->image_changed();
     fit_window_to_image();
@@ -1108,6 +1109,7 @@ void App::crop_to_selection()
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h))
         return;
+    pixels_for_cpu();
     *image_ = image_->crop(x, y, w, h);  // same object: the view and pane keep their pointer
     if (image_->tonable())
         image_->retone(image_->exposure_edit);
@@ -1200,6 +1202,8 @@ void App::retone()
         // and nothing reaches the CPU. Its 8-bit pixels are made again only
         // if something needs them (pixels_for_cpu).
         image_->pixels_stale = true;
+        PixelBuffer().swap(image_->pixels);  // tens of megabytes it doesn't need
+        image_->mips.clear();
         view_->redraw();
         return;
     }
@@ -1225,7 +1229,8 @@ void App::request_retone()
                 [this, image, linear, source, ev, result]
                 {
                     retone_busy_ = false;
-                    const bool current = image->linear == linear && image->source == source && result->size() == image->pixels.size();
+                    const bool current = image->linear == linear && image->source == source &&
+                                         result->size() == size_t(image->width) * image->height * 4;
                     if (current)
                     {
                         image->pixels = std::move(*result);
@@ -1238,7 +1243,10 @@ void App::request_retone()
                     if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
                     {
                         if (view_->drawn_on_gpu())
+                        {
                             image_->pixels_stale = true;  // the GPU shows it; made again when needed
+                            PixelBuffer().swap(image_->pixels);
+                        }
                         else
                             request_retone();  // the slider moved on while we rendered
                     }

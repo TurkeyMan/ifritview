@@ -280,7 +280,10 @@ void View::set_image(std::shared_ptr<Image> image)
     const bool replacement = outgoing_.image && image_ && image && image->width == image_->width && image->height == image_->height;
     if (!replacement)
         drop_outgoing();
-    if (pending_crossfade_ms_ > 0 && !replacement && image_ && image && image.get() != image_.get() && image_->width > 0)
+    // (Not from an image whose pixels were let go while the GPU drew it:
+    // the fade would have nothing to show.)
+    if (pending_crossfade_ms_ > 0 && !replacement && image_ && image && image.get() != image_.get() && image_->width > 0 &&
+        !image_->pixels_stale)
     {
         // Snapshot the current rendering: a pre-scaled image at the motion's
         // zoom (or the current zoom) plus the motion itself, so it carries on.

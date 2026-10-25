@@ -305,7 +305,7 @@ PixelBuffer Image::render_source(double ev) const
 
 PixelBuffer Image::retone_buffer(double ev) const
 {
-    PixelBuffer out(pixels.size());
+    PixelBuffer out(size_t(width) * height * 4);  // the pixels themselves may have been let go (pixels_stale)
     const bool from_source = !linear && source && source->linear;
     if ((!linear && !from_source) || out.empty())
         return out;
