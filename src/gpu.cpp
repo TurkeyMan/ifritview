@@ -1,6 +1,6 @@
 // OpenGL ES 3 through EGL, with no window: a surfaceless context (Mesa's,
 // which also runs without a GPU as llvmpipe), else a 1×1 pbuffer on the
-// default display. One context, made current on whichever thread is using
+// default display. Windows has its own, on Direct3D 11. One context, made current on whichever thread is using
 // it and released after, under a lock.
 //
 // The shaders reproduce Image::retone_buffer()'s arithmetic step for step

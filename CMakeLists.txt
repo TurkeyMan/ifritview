@@ -347,7 +347,7 @@ else()
 endif()
 
 # The GPU image pipeline (docs/gpu-pipeline.md): OpenGL ES 3 through EGL.
-# Optional while it grows; Windows gets it through ANGLE later.
+# Optional while it grows. Windows gets its own on Direct3D 11.
 pkg_check_modules(GPU IMPORTED_TARGET egl glesv2)
 if(GPU_FOUND AND NOT WIN32)
   target_sources(ifrit_core PRIVATE src/gpu.cpp)

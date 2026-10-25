@@ -26,19 +26,21 @@ between that and the screen done there in floating point.
 Without a usable GPU (no driver, a remote session) the same passes run on
 Mesa's software renderer, and failing that the current CPU path stands.
 
-## API: OpenGL ES 3
+## APIs: OpenGL ES 3 on Linux, Direct3D 11 on Windows
 
-One shader codebase everywhere, OpenGL ES 3.0 (3.1 where compute helps):
+Each platform's native GPU API, every pass written once for each (GLSL and
+HLSL), behind one small interface (upload, run a pass, export a frame):
 
-- **Linux:** EGL; surfaceless contexts for work without a window
-  (`--process`, saving, thumbnails), which also run under llvmpipe.
-- **Windows:** ANGLE, whose GLES runs on Direct3D 11. Its surfaces can be a
-  DXGI swapchain, including the HDR formats (`EGL_EXT_gl_colorspace_scrgb_linear`),
-  which desktop GL can't present to without vendor interop; and it avoids the
-  unevenness of Windows GL drivers.
+- **Linux:** OpenGL ES 3.0 through EGL; surfaceless contexts for work
+  without a window (`--process`, saving, thumbnails), which also run under
+  llvmpipe. Frames leave as dmabufs (`EGL_MESA_image_dma_buf_export`).
+- **Windows:** Direct3D 11, rendering into a shared texture on the adapter
+  the canvas presents on; the DXGI swapchain it ends in is the only route to
+  HDR on Windows, and D3D11 is there on every machine (Remote Desktop, VMs,
+  Windows on ARM), where OpenGL often isn't.
 
-Vulkan would also work everywhere but is far more machinery for an image
-pipeline; desktop GL 3.3 leaves Windows HDR behind an interop extension.
+Vulkan could later replace OpenGL on Linux (explicit dmabuf export and sync,
+compute) behind the same interface, if GL ever limits us.
 
 ## Contexts and threads
 
@@ -47,7 +49,7 @@ loader's side, current on one worker thread, rendering offscreen. A finished
 frame crosses to the presenting toolkit without a copy where the platform
 allows.
 
-rapport stays GL-free: it presents a frame the app hands it (a dmabuf on
+rapport stays free of either API: it presents a frame the app hands it (a dmabuf on
 Linux, a D3D11 shared texture on Windows) as the canvas's image layer, and
 `on_paint` keeps drawing the overlay above it. `present()` keeps only the
 newest frame and asks for a redraw; the toolkit's frame clock still paces,
