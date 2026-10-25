@@ -1939,3 +1939,32 @@ msgstr ""
 #: src/ui/settings.cpp
 msgid "Nearest (the pixels as they are)"
 msgstr ""
+
+#: src/ui/app.cpp
+msgid "Peak"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Brightest"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Darkest"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Average (APL)"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Clipped"
+msgstr ""
+
+#: src/ui/app.cpp
+#, c-format
+msgid "%.1f%% black, %.1f%% white"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "The histogram needs a GPU."
+msgstr ""

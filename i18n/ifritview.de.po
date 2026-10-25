@@ -1964,3 +1964,32 @@ msgstr "Fläche (mittelnd)"
 #: src/ui/settings.cpp
 msgid "Nearest (the pixels as they are)"
 msgstr "Nächster Nachbar (die Pixel, wie sie sind)"
+
+#: src/ui/app.cpp
+msgid "Peak"
+msgstr "Spitze"
+
+#: src/ui/app.cpp
+msgid "Brightest"
+msgstr "Hellster Wert"
+
+#: src/ui/app.cpp
+msgid "Darkest"
+msgstr "Dunkelster Wert"
+
+#: src/ui/app.cpp
+msgid "Average (APL)"
+msgstr "Mittel (APL)"
+
+#: src/ui/app.cpp
+msgid "Clipped"
+msgstr "Beschnitten"
+
+#: src/ui/app.cpp
+#, c-format
+msgid "%.1f%% black, %.1f%% white"
+msgstr "%.1f %% schwarz, %.1f %% weiß"
+
+#: src/ui/app.cpp
+msgid "The histogram needs a GPU."
+msgstr "Das Histogramm braucht eine GPU."
