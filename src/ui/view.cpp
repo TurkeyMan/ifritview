@@ -394,7 +394,7 @@ void View::begin_compare(std::shared_ptr<Image> a, std::shared_ptr<Image> b, std
         if (same_size)
         {
             image_ = std::move(a);  // zoom and pan stay
-            image_changed();
+            image_replaced();
         }
         else
             set_image(std::move(a));
@@ -437,7 +437,7 @@ void View::swap_compare()
     std::swap(compare_->a_label, compare_->b_label);
     compare_->difference_layer = Layer{};  // drawn over A's grey
     image_ = compare_->a.image;
-    image_changed();
+    image_replaced();
     invalidate();
 }
 
@@ -450,7 +450,7 @@ void View::end_compare()
     if (original && image_ != original)
     {
         image_ = std::move(original);  // a swap left B in its place
-        image_changed();
+        image_replaced();
     }
     invalidate();
 }
@@ -513,6 +513,13 @@ void View::draw_tag(rap::painter& p, const std::string& text, float x, float y, 
     p.text({x0 + 6, y + 3}, text, style);
 }
 
+bool View::difference_ready() const
+{
+    const ImageDifference* d = compare_ ? compare_->difference.get() : nullptr;
+    const Image* a = compare_ ? compare_->a.image.get() : nullptr;
+    return d && a && d->width == a->width && d->height == a->height && !d->errors.empty();
+}
+
 void View::draw_compare(rap::painter& p, float alpha)
 {
     Comparison& c = *compare_;
@@ -520,27 +527,18 @@ void View::draw_compare(rap::painter& p, float alpha)
     const auto L = [scale](double device) { return float(device / scale); };
     int vw, vh;
     view_size(vw, vh);
-    const double top = std::max(0.0, pan_y_), bottom = std::min(double(vh), pan_y_ + c.a.image->height * zoom_);
-    // Which image is which, in a tag at the image's top edge.
-    const auto tag = [&](const std::string& text, float tx, bool right_aligned) { draw_tag(p, text, tx, L(top) + 8, right_aligned); };
     const double rel_b = double(c.a.image->width) / c.b.image->width;  // B drawn at A's width
-    const float left = L(std::max(0.0, pan_x_)) + 8;
     switch (c.mode)
     {
         case Compare::A:
             draw_layer(p, c.a, alpha);
-            tag(c.a_label, left, false);
             return;
         case Compare::B:
             draw_layer(p, c.b, alpha, rel_b);
-            tag(c.b_label, left, false);
             return;
         case Compare::Difference:
             if (difference_shown())
-            {
                 draw_layer(p, c.difference_layer, alpha);
-                tag(rap::i18n::format(_("Difference ×{0}"), c.gain), left, false);
-            }
             else
                 draw_layer(p, c.b, alpha, rel_b);  // not worked out yet
             return;
@@ -556,7 +554,38 @@ void View::draw_compare(rap::painter& p, float alpha)
         draw_layer(p, c.a, alpha);
         p.pop_clip();
     }
+}
+
+void View::draw_compare_marks(rap::painter& p)
+{
+    Comparison& c = *compare_;
+    if (!c.a.image || !c.b.image)
+        return;
+    const double scale = scale_factor();
+    const auto L = [scale](double device) { return float(device / scale); };
+    int vw, vh;
+    view_size(vw, vh);
+    const double top = std::max(0.0, pan_y_), bottom = std::min(double(vh), pan_y_ + c.a.image->height * zoom_);
+    // Which image is which, in a tag at the image's top edge.
+    const auto tag = [&](const std::string& text, float tx, bool right_aligned) { draw_tag(p, text, tx, L(top) + 8, right_aligned); };
+    const float left = L(std::max(0.0, pan_x_)) + 8;
+    switch (c.mode)
+    {
+        case Compare::A:
+            tag(c.a_label, left, false);
+            return;
+        case Compare::B:
+            tag(c.b_label, left, false);
+            return;
+        case Compare::Difference:
+            if (difference_ready())
+                tag(rap::i18n::format(_("Difference ×{0}"), c.gain), left, false);
+            return;
+        case Compare::Swipe:
+            break;
+    }
     // The divider, and a handle on it.
+    const double x = divider_x();
     p.rect({L(x) - 1.5f, L(top), 3, L(bottom - top)}, 0, rap::color{0, 0, 0, 140}, std::nullopt);
     p.rect({L(x) - 0.5f, L(top), 1, L(bottom - top)}, 0, rap::color{255, 255, 255, 230}, std::nullopt);
     const float mid = L((top + bottom) / 2);
@@ -593,6 +622,11 @@ void View::image_changed()
 {
     if (image_)
         ++image_->generation;
+    image_replaced();
+}
+
+void View::image_replaced()
+{
     drop_caches();
     if (!image_)
         return;
@@ -1096,15 +1130,26 @@ void View::paint(rap::painter& p, rap::size_f)
 #ifdef HAVE_GPU
 bool View::draw_on_gpu(rap::color background)
 {
-    // The plain case: one still image, shown as it is. Comparing, zoom
-    // animations, cross-fades, videos and vector images are the CPU's still.
+    // The plain case: one still image shown as it is, or a comparison of
+    // two (A, B, a swipe between them, where they differ). Zoom animations,
+    // cross-fades, videos and vector images are the CPU's still.
     static const bool off = std::getenv("IFRIT_NO_GPU_VIEW") != nullptr;
-    const bool plain = !off && canvas_ && image_ && image_->width > 0 && image_->height > 0 && !compare_ && !motion_.active &&
-                       !outgoing_.image && !image_->is_video && !image_->vector && !image_->animation;
+    const auto still = [](const Image* im)
+    { return im && im->width > 0 && im->height > 0 && !im->is_video && !im->vector && !im->animation; };
+    // Comparing: whether A shows (the view's image), and B; the difference
+    // until it's worked out is B.
+    const Compare mode = compare_mode();
+    const bool difference = compare_ && mode == Compare::Difference && difference_ready();
+    const Image* b = compare_ && (mode == Compare::B || mode == Compare::Swipe || (mode == Compare::Difference && !difference))
+                         ? compare_->b.image.get()
+                         : nullptr;
+    const bool a_shown = !compare_ || mode == Compare::A || mode == Compare::Swipe || difference;
+    const bool plain = !off && canvas_ && still(image_.get()) && (!compare_ || still(compare_->b.image.get())) && !motion_.active &&
+                       !outgoing_.image;
     std::shared_ptr<rap::gpu::device> device = plain ? canvas_->gpu_device() : nullptr;
     // A GPU in software (lavapipe, WARP) is slower than the CPU's own
     // drawing: it takes only what needs it, raw and HDR images.
-    if (device && device->software() && !image_->tonable())
+    if (device && device->software() && !(a_shown && image_->tonable()) && !(b && b->tonable()))
         device = nullptr;
     gpu_wanted_ = plain;
     if (device)
@@ -1129,6 +1174,26 @@ bool View::draw_on_gpu(rap::color background)
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
                cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr,
                cfg_.histogram_channels, image_->wb_kelvin, image_->wb_tint};
+    // Comparing, what's transparent in either shows over the checkerboard
+    // whatever the setting, as the CPU draws it.
+    const bool compared_alpha = compare_ && (image_->has_alpha || compare_->b.image->has_alpha);
+    if (compare_)
+    {
+        key.compare = int(mode);
+        key.checkerboard = cfg_.checkerboard || compared_alpha;
+        key.gain = compare_->gain;
+        key.difference = difference ? compare_->difference.get() : nullptr;
+        if (mode == Compare::Swipe)
+            key.split = int(std::lround(divider_x()));
+        if (b)
+        {
+            key.b = b;
+            key.b_generation = b->generation;
+            key.b_exposure = b->tonable() ? b->exposure_edit : 0.0;
+            key.b_wb_kelvin = b->wb_kelvin;
+            key.b_wb_tint = b->wb_tint;
+        }
+    }
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1142,7 +1207,7 @@ bool View::draw_on_gpu(rap::color background)
     if (image_->mosaic && image_->wb_kelvin > 0)
         wb_multipliers(*image_->mosaic, image_->wb_kelvin, image_->wb_tint, f.white_balance);
     f.background = background;
-    f.checkerboard = cfg_.checkerboard;
+    f.checkerboard = key.checkerboard;
     f.checker_size = int(std::lround(8 * scale_factor()));
     f.enlarge = cfg_.enlarge_filter;
     f.shrink = cfg_.shrink_filter;
@@ -1165,7 +1230,28 @@ bool View::draw_on_gpu(rap::color background)
     rap::gpu::ticket ready;
     rap::frame_color colour;
     std::string error;
-    if (!gpu_->render(image_, image_->generation, f, frame, ready, colour, error))
+    // B as A's framing has it (scaled to A's width when the sizes differ),
+    // through its own exposure and white balance.
+    GpuView::Frame fb = f;
+    if (b)
+    {
+        fb.zoom = zoom_ * double(image_->width) / b->width;
+        fb.exposure = key.b_exposure;
+        std::fill(std::begin(fb.white_balance), std::end(fb.white_balance), 0.0f);
+        if (b->mosaic && b->wb_kelvin > 0)
+            wb_multipliers(*b->mosaic, b->wb_kelvin, b->wb_tint, fb.white_balance);
+    }
+    bool drawn;
+    if (b && mode != Compare::Swipe)
+        drawn = gpu_->render(compare_->b.image, b->generation, fb, frame, ready, colour, error);
+    else if (b)
+        drawn = gpu_->render_swipe(image_, image_->generation, f, compare_->b.image, b->generation, fb, key.split, frame, ready, colour,
+                                   error);
+    else if (difference)
+        drawn = gpu_->render_difference(image_, image_->generation, compare_->difference, compare_->gain, f, frame, ready, colour, error);
+    else
+        drawn = gpu_->render(image_, image_->generation, f, frame, ready, colour, error);
+    if (!drawn)
     {
         if (std::getenv("IFRIT_TRACE"))
             std::fprintf(stderr, "gpu view: %s\n", error.c_str());
@@ -1177,7 +1263,21 @@ bool View::draw_on_gpu(rap::color background)
     }
     canvas_->present(frame, ready, colour);
     if (std::getenv("IFRIT_TRACE"))
-        platform::trace("gpu view: %dx%d at zoom %.4f", f.width, f.height, f.zoom);
+    {
+        std::string how;
+        if (compare_)
+        {
+            static const char* const kModes[] = {"A", "B", "swipe", "difference"};
+            how = std::string(", comparing: ") + kModes[int(mode)];
+            if (mode == Compare::Swipe)
+                how += " at x " + std::to_string(key.split);
+            else if (difference)
+                how += " x" + std::to_string(compare_->gain);
+            else if (mode == Compare::Difference)
+                how += " (B until it's worked out)";
+        }
+        platform::trace("gpu view: %dx%d at zoom %.4f%s", f.width, f.height, f.zoom, how.c_str());
+    }
     gpu_shown_ = true;
     if (histogram_panel_)
     {
@@ -1279,7 +1379,9 @@ void View::paint_over(rap::painter& p, rap::color)
 
     if (divided_)
         p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);
-    if (!compare_ && !label_.empty())
+    if (compare_)
+        draw_compare_marks(p);
+    else if (!label_.empty())
         draw_tag(p, label_, float(std::max(0.0, pan_x_) / scale_factor()) + 8, float(std::max(0.0, pan_y_) / scale_factor()) + 8, false);
     if (presented_ != image_.get())
     {
