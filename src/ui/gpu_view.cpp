@@ -1,6 +1,7 @@
 #include "gpu_view.h"
 
 #include "../image.h"
+#include "../decoders/decoder.h"
 #include "../decoders/ljpeg.h"
 #include <glib.h>
 #include "shaders/compose.h"
@@ -120,7 +121,21 @@ double reach(ScaleFilter f, double inv)
 
 }  // namespace
 
-GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(device)) {}
+GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(device))
+{
+    // A GPU in software decodes a raw's stream slower than the CPU's cores:
+    // the loader unpacks them from now on (the ones it already prepared are
+    // decoded on the CPU here, decode_stream).
+    if (device_->software())
+    {
+        DecodeOptions o = decode_options();
+        if (o.gpu_decode)
+        {
+            o.gpu_decode = false;
+            set_decode_options(o);
+        }
+    }
+}
 
 void GpuView::read_details(std::function<void(const Details&)> done)
 {
@@ -283,6 +298,33 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
 {
     const RawMosaic::Stream& st = *m.stream;
     const ljpeg::Prepared& j = *st.jpeg;
+    if (device_->software())
+    {
+        // On the CPU's cores, then up as a photosite a texel: the active area
+        // out of the readout (Canon's slices undone). Its black level is the
+        // file's (measured where masked only on the GPU).
+        ljpeg::Image cpu;
+        if (!ljpeg::decode(j, cpu, error))
+            return false;
+        std::vector<uint16_t> area(size_t(m.width) * m.height);
+        for (int y = 0; y < m.height; ++y)
+            for (int x = 0; x < m.width; ++x)
+            {
+                const unsigned rx = unsigned(x + st.left), ry = unsigned(y + st.top);
+                size_t i = size_t(ry) * st.readout_w + rx;
+                if (st.slices[0])
+                {
+                    const unsigned s = std::min(rx / st.slices[1], st.slices[0]), w = s < st.slices[0] ? st.slices[1] : st.slices[2];
+                    i = size_t(s) * st.slices[1] * st.readout_h + size_t(ry) * w + (rx - s * st.slices[1]);
+                }
+                area[size_t(y) * m.width + x] = i < cpu.samples.size() ? cpu.samples[i] : 0;
+            }
+        sites = device_->create({m.width, m.height, rap::gpu::format::r16});
+        if (!sites)
+            return error = "too big for the GPU", false;
+        device_->upload(sites, std::as_bytes(std::span(area)), {1, rap::gpu::sample_type::u16});
+        return true;
+    }
     const uint64_t samples = uint64_t(j.width) * j.components * j.height;
     const uint32_t row = uint32_t(j.width * j.components);
     constexpr uint32_t kChunkBits = 8192;  // ~700 samples: the true decode meets a guess within a few dozen
