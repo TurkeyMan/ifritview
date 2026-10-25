@@ -263,12 +263,14 @@ bool decode_mosaic(LibRaw& raw, Image& out, std::string& error)
     const auto& id = raw.imgdata.idata;
     if (!id.filters || id.filters == 9 || id.filters < 1000 || id.colors != 3)
         return false;  // not a 2 x 2 Bayer pattern
+    const int64_t t0 = g_get_monotonic_time();
     int r = raw.unpack();
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);
         return false;
     }
+    const int64_t t1 = g_get_monotonic_time();
     const auto& sz = raw.imgdata.sizes;
     const auto& col = raw.imgdata.color;
     const ushort* src = raw.imgdata.rawdata.raw_image;
@@ -283,6 +285,8 @@ bool decode_mosaic(LibRaw& raw, Image& out, std::string& error)
         std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * sz.raw_pitch / 2 + sz.left_margin,
                     size_t(m->width) * 2);
     m->data = std::move(data);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "raw: unpacked in %.0f ms, active area copied in %.0f ms\n", (t1 - t0) / 1000.0, (g_get_monotonic_time() - t1) / 1000.0);
     // dcraw's FC(row, col): the filter colour, 0 R, 1 G, 2 B, 3 the second G.
     for (int row = 0; row < 2; ++row)
         for (int c = 0; c < 2; ++c)
@@ -397,12 +401,16 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     raw.imgdata.params.output_color = 1;  // sRGB
     const uint8_t* bytes = nullptr;
     size_t size = 0;
+    const int64_t t_read = g_get_monotonic_time();
     if (!file_bytes(path, bytes, size))
     {
         error = "cannot read file";
         return false;
     }
+    const int64_t t_open = g_get_monotonic_time();
     int r = raw.open_buffer(bytes, size);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "raw: file read in %.0f ms, opened in %.0f ms\n", (t_open - t_read) / 1000.0, (g_get_monotonic_time() - t_open) / 1000.0);
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);

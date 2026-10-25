@@ -544,6 +544,7 @@ void Image::adopt(Image&& f)
             f = f.crop(int(e.x * f.width), int(e.y * f.height), int(e.w * f.width), int(e.h * f.height));
     }
     pending_edits.clear();
+    ++generation;  // new data in place: what the GPU kept of the old is stale
     width = f.width;
     height = f.height;
     stride = f.stride;

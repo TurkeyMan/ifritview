@@ -1013,21 +1013,20 @@ void App::on_loaded(Loader::Result& r)
             return;
         }
     }
-    // A develop for the image on screen is adopted in place.
+    // A develop for the image on screen is adopted in place, even one
+    // started before the user left it and came back (only one runs).
     if (!r.preview && !r.cached && r.image && image_ && image_->is_preview() && image_key_ == r.path)
     {
         image_->adopt(std::move(*r.image));
         if (tracing())
-            std::fprintf(stderr, "developed %s %dx%d\n", key_text(r.path).c_str(), image_->width, image_->height);
-        if (r.generation == load_generation_)
-        {
-            status_message_.clear();
-            view_->image_changed();
-            fit_window_to_image();
-            sync_exposure_slider();
-            update_status();
-            refresh_metadata();
-        }
+            std::fprintf(stderr, "developed %s %dx%d: decoded in %.0f ms, %.0f ms to reach the UI\n", key_text(r.path).c_str(), image_->width,
+                         image_->height, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
+        status_message_.clear();
+        view_->image_changed();
+        fit_window_to_image();
+        sync_exposure_slider();
+        update_status();
+        refresh_metadata();
         return;
     }
     if (r.generation != load_generation_)

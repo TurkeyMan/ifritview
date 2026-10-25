@@ -43,6 +43,11 @@ void Loader::request_develop(uint64_t generation, const std::string& path)
 {
     {
         std::lock_guard lock(mutex_);
+        if (std::find(developing_.begin(), developing_.end(), path) != developing_.end())
+        {  // already developing (left and come back to): its result is adopted
+            develop_.reset();
+            return;
+        }
         develop_ = Job{generation, path};
     }
     bg_wake_.notify_one();
@@ -151,6 +156,8 @@ void Loader::run_background()
                     }
             }
             in_flight_.push_back(job.path);
+            if (is_develop)
+                developing_.push_back(job.path);
         }
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
         if (is_develop)
@@ -170,6 +177,8 @@ void Loader::run_background()
         {
             std::lock_guard lock(mutex_);
             in_flight_.erase(std::find(in_flight_.begin(), in_flight_.end(), job.path));
+            if (is_develop)
+                developing_.erase(std::find(developing_.begin(), developing_.end(), job.path));
         }
         bg_wake_.notify_one();
         post(r, is_develop ? Lane::Develop : Lane::Prefetch);

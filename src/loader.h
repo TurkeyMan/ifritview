@@ -74,6 +74,7 @@ private:
     std::optional<Job> develop_;  // background, ahead of prefetches
     std::vector<std::string> prefetch_;
     std::vector<std::string> in_flight_;  // background paths being decoded right now
+    std::vector<std::string> developing_;  // develops in flight (also in in_flight_)
     bool stop_ = false;
     std::thread foreground_;
     std::vector<std::thread> background_;

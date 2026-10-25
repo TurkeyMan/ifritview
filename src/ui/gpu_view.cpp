@@ -1,6 +1,7 @@
 #include "gpu_view.h"
 
 #include "../image.h"
+#include <glib.h>
 #include "shaders/compose.h"
 #include "shaders/decode.h"
 #include "shaders/develop.h"
@@ -538,6 +539,7 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
                          retained_.size(), [&] { size_t n = 0; for (auto& r : retained_) n += r.bytes; return n >> 20; }());
         if (!kept)
         {
+            const int64_t t0 = g_get_monotonic_time();
             stats_ = device_->create_buffer(1101 * 4);  // this image's measures
             if (!stats_ || !upload(*image, error))
             {
@@ -545,6 +547,9 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
                     error = "no room for the measures";
                 return false;
             }
+            if (std::getenv("IFRIT_TRACE"))
+                std::fprintf(stderr, "gpu: %s in %.1f ms on the UI thread\n", image->mosaic ? "mosaic uploaded and developed" : "uploaded",
+                             (g_get_monotonic_time() - t0) / 1000.0);
         }
         image_ = image;
         generation_ = generation;
