@@ -1577,6 +1577,10 @@ msgstr "Durchblättern"
 msgid "Wrap around at the end of the folder"
 msgstr "Am Ende des Ordners wieder von vorn beginnen"
 
+#: src/ui/settings.cpp:349
+msgid "With subfolders, a folder's own images before the folders in it"
+msgstr "Mit Unterordnern: die Bilder eines Ordners vor den Ordnern darin"
+
 #: src/ui/settings.cpp:304
 msgid "Include hidden files"
 msgstr "Versteckte Dateien einbeziehen"

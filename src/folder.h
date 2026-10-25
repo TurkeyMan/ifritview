@@ -6,8 +6,8 @@
 struct Config;
 
 // The sorted list of viewable files in one directory (Config::recursive:
-// and in the folders inside it, each folder's own first, then each folder
-// in it the same way), with a cursor. Names are relative to the directory.
+// and in the folders inside it, in order of their paths from it), with a
+// cursor. Names are relative to the directory.
 class Folder
 {
 public:

@@ -1568,6 +1568,10 @@ msgstr ""
 msgid "Wrap around at the end of the folder"
 msgstr ""
 
+#: src/ui/settings.cpp:349
+msgid "With subfolders, a folder's own images before the folders in it"
+msgstr ""
+
 #: src/ui/settings.cpp:304
 msgid "Include hidden files"
 msgstr ""

@@ -164,6 +164,7 @@ void Config::load()
     wrap_around = get_bool(kf, kFiles, "wrap_around", wrap_around);
     show_hidden = get_bool(kf, kFiles, "show_hidden", show_hidden);
     recursive = get_bool(kf, kFiles, "recursive", recursive);
+    files_first = get_bool(kf, kFiles, "files_first", files_first);
     prefetch_ahead = std::clamp(get_int(kf, kFiles, "prefetch_ahead", prefetch_ahead), 0, 16);
     prefetch_behind = std::clamp(get_int(kf, kFiles, "prefetch_behind", prefetch_behind), 0, 16);
     cache_megabytes = std::max(0, get_int(kf, kFiles, "cache_megabytes", cache_megabytes));
@@ -262,6 +263,7 @@ bool Config::save() const
     g_key_file_set_boolean(kf, kFiles, "wrap_around", wrap_around);
     g_key_file_set_boolean(kf, kFiles, "show_hidden", show_hidden);
     g_key_file_set_boolean(kf, kFiles, "recursive", recursive);
+    g_key_file_set_boolean(kf, kFiles, "files_first", files_first);
     g_key_file_set_integer(kf, kFiles, "prefetch_ahead", prefetch_ahead);
     g_key_file_set_integer(kf, kFiles, "prefetch_behind", prefetch_behind);
     g_key_file_set_integer(kf, kFiles, "cache_megabytes", cache_megabytes);

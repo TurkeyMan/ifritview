@@ -56,7 +56,8 @@ public:
     void go_first();
     void go_last();
     void reload();
-    void set_recursive(bool on);  // Config::recursive, from the toolbar
+    void on_dropped(const std::vector<std::string>& paths);  // files or folders dropped on the window
+    void set_recursive(bool on, const std::string& root = {});  // Config::recursive: the toolbar's toggle, a folder dropped
     void toggle_fullscreen();
     void zoom_in();
     void zoom_out();

@@ -527,15 +527,7 @@ void App::build_ui()
     view_->on_framing_changed = [this, follow] { follow(*view_, *side_view_); };
     side_view_->on_framing_changed = [this, follow] { follow(*side_view_, *view_); };
     window_->on_key([this](const rap::key_event& e) { return on_key(e); });
-    // A dropped file opens with its folder, as if opened from the menu.
-    window_->on_files_dropped(
-        [this](const std::vector<std::string>& paths)
-        {
-            if (paths.size() == 2)
-                open_diff(paths[0], paths[1]);
-            else if (!paths.empty())
-                open_path(paths.front());
-        });
+    window_->on_files_dropped([this](const std::vector<std::string>& paths) { on_dropped(paths); });
     // A width the user drags the info pane to is kept for next time.
     splitter_->on_moved([this] { remember_pane_width(); });
     window_->on_fullscreen_changed([this](bool fs) { on_fullscreen_changed(fs); });
@@ -1082,16 +1074,38 @@ void App::reload()
     load_current();
 }
 
-// Subfolders browsed too, or not: the list again, the image shown staying.
-// Off, from an image in a folder inside: that image's folder is the one browsed.
-void App::set_recursive(bool on)
+// A dropped file opens with its folder, as if opened from the menu; a
+// dropped folder is browsed with the folders inside it, from its first; two
+// dropped are compared.
+void App::on_dropped(const std::vector<std::string>& paths)
 {
-    if (on == cfg_.recursive)
+    if (paths.size() == 2)
+        open_diff(paths[0], paths[1]);
+    else if (!paths.empty() && g_file_test(paths.front().c_str(), G_FILE_TEST_IS_DIR))
+        set_recursive(true, paths.front());
+    else if (!paths.empty())
+        open_path(paths.front());
+}
+
+// Subfolders browsed too, or not: the list again, the image shown staying
+// (off, from an image in a folder inside, that image's folder is the one
+// browsed); or, given a `root`, that folder browsed from its first image.
+void App::set_recursive(bool on, const std::string& root)
+{
+    if (on != cfg_.recursive)
+    {
+        cfg_.recursive = on;
+        cfg_.save();
+        if (recursive_toggle_)
+            recursive_toggle_->set_checked(on);  // when not from the button
+    }
+    else if (root.empty())
         return;
-    cfg_.recursive = on;
-    cfg_.save();
-    if (recursive_toggle_)
-        recursive_toggle_->set_checked(on);  // when not from the button
+    if (!root.empty())
+    {
+        open_path(root);
+        return;
+    }
     const std::string shown = folder_.current();
     const gint64 t0 = g_get_monotonic_time();
     if (!on && !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename())
