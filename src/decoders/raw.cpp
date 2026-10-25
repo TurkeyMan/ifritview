@@ -1,6 +1,7 @@
 #include "decoder.h"
 #include "ljpeg.h"
 #include "../i18n.h"
+#include "../platform.h"
 
 #include <libraw/libraw.h>
 
@@ -805,13 +806,17 @@ bool preview(const std::string& path, Image& out)
     raw.set_exifparser_handler(on_exif_tag, &bias);  // the slider rests at the camera's compensation even on the preview
     const uint8_t* bytes = nullptr;
     size_t size = 0;
+    const int64_t t0 = g_get_monotonic_time();
     if (!file_bytes(path, bytes, size) || raw.open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
+    const int64_t t1 = g_get_monotonic_time();
     std::string error;
     int fit_w = 0, fit_h = 0;
     preview_fit(fit_w, fit_h);
     if (!decode_preview(raw, out, error, fit_w, fit_h))
         return false;
+    platform::trace("raw: preview %dx%d, opened in %.1f ms, decoded in %.1f ms", out.width, out.height, (t1 - t0) / 1000.0,
+                    (g_get_monotonic_time() - t1) / 1000.0);
     out.format = "RAW preview";
     out.is_raw = true;
     out.info = camera_name(raw);

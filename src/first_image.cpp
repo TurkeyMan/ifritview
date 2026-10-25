@@ -11,6 +11,10 @@ FirstImage::FirstImage(std::string path, std::shared_future<Config> settings)
         {
             settings.wait();
             platform::trace("first image: decoding starts");
+            // A stand-in at most a 4K screen's size: the window, not open
+            // yet, is never bigger, and an 8K camera JPEG decoded whole
+            // costs hundreds of milliseconds before anything shows.
+            set_preview_fit(3840, 2160);
             auto image = std::make_shared<Image>();
             std::string error;
             bool preview = false;
