@@ -2069,3 +2069,7 @@ msgstr "LibRaw konnte es nicht entwickeln: {0}"
 #: src/ui/app.cpp
 msgid "Can't develop this raw ({0}): showing the camera's embedded JPEG"
 msgstr "Dieses Raw lässt sich nicht entwickeln ({0}): gezeigt wird das eingebettete JPEG der Kamera"
+
+#: src/decoders/raw.cpp:1216
+msgid "DNG corrections"
+msgstr "DNG-Korrekturen"
