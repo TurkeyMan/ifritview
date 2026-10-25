@@ -1,8 +1,8 @@
 // Each row's first sample of each component: that of the row `step` above
 // (1; Nikon's 2: the same colours) plus its difference, the first rows from
-// where the stream says they start. In one group, a run of rows a thread for
-// each of the `step` chains: each sums its run, thread 0 chains the runs,
-// each writes its own.
+// where the stream says they start. A group a stream, a run of rows a thread
+// for each of the `step` chains: each sums its run, thread 0 chains the
+// runs, each writes its own.
 #include "ljpeg.hlsli"
 
 RWByteAddressBuffer values : register(u0);
@@ -11,15 +11,16 @@ RWByteAddressBuffer values : register(u0);
 
 groupshared uint run_sum[THREADS * 4], run_start[THREADS * 4];
 
-uint first_of(uint r, uint c)
+uint first_of(uint base, uint r, uint c)  // base: the stream's first sample
 {
-    const uint i = r * row + c;
+    const uint i = base + r * row + c;
     return SAMPLE(values, i);
 }
 
 [numthreads(THREADS, 1, 1)]
-void main(uint3 id : SV_GroupThreadID)
+void main(uint3 group : SV_GroupID, uint3 id : SV_GroupThreadID)
 {
+    const uint base = group.x * samples;
     const uint t = id.x, step = max(1u, (scheme >> 8) & 0xFF);
     for (uint chain = 0; chain < step; ++chain)
     {
@@ -31,7 +32,7 @@ void main(uint3 id : SV_GroupThreadID)
         {
             uint sum = 0;
             for (uint k = first; k < last; ++k)
-                sum += first_of(chain + k * step, c);
+                sum += first_of(base, chain + k * step, c);
             run_sum[t * 4 + c] = sum;
         }
         GroupMemoryBarrierWithGroupSync();
@@ -55,7 +56,7 @@ void main(uint3 id : SV_GroupThreadID)
             // The row's first `components` samples, whole words (rows start even).
             for (uint c4 = 0; c4 < components; c4 += 2)
             {
-                const uint at = (r * row + c4) >> 1;
+                const uint at = (base + r * row + c4) >> 1;
                 const uint w = values.Load(at * 4);
                 v[c4] += w & 0xFFFF;
                 uint hi = w >> 16;

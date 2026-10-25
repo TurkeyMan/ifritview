@@ -5,6 +5,7 @@
 #include "metadata/file_metadata.h"
 #include "pixel_format.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -26,7 +27,7 @@ struct RawMosaic
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
     // Or, with `data` null, the readout still compressed, for the GPU to
     // decode: its lossless JPEG prepared (ljpeg.h), how that lays out
-    // (Canon's slices), where the active area sits in it, and where the
+    // (Canon's slices, a DNG's tiles), where the active area sits in it, and where the
     // sensor is masked (the black level, measured as LibRaw does).
     struct Stream
     {
@@ -36,6 +37,24 @@ struct RawMosaic
         int left = 0, top = 0;    // the active area's corner in the readout
         unsigned filters = 0;     // LibRaw's: the colour at (row, col) of the readout
         int mask[8][4] = {};      // masked areas: top, left, bottom, right (LibRaw's), in the readout
+        // A DNG's tiles (its one strip a tile the readout's width): each
+        // one's width and height, how many across; their streams' samples
+        // one tile's after another's. None: Canon's slices, or rows as they come.
+        unsigned tile[3] = {};
+        // Where the readout's (x, y) is among the decoded samples (`frame`:
+        // a stream's, a tile's).
+        size_t index(unsigned x, unsigned y, size_t frame) const
+        {
+            if (tile[0])
+            {
+                const unsigned tx = x / tile[0], ty = y / tile[1];
+                return (size_t(ty) * tile[2] + tx) * frame + size_t(y - ty * tile[1]) * tile[0] + (x - tx * tile[0]);
+            }
+            if (!slices[0])
+                return size_t(y) * readout_w + x;
+            const unsigned s = std::min(x / slices[1], slices[0]), w = s < slices[0] ? slices[1] : slices[2];
+            return size_t(s) * slices[1] * readout_h + size_t(y) * w + (x - s * slices[1]);
+        }
     };
     std::shared_ptr<const Stream> stream;
     int width = 0, height = 0;

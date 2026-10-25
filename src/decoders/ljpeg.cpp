@@ -27,31 +27,32 @@ uint64_t load_be64(const uint8_t* p)
 #endif
 }
 
-// One Huffman table as a lookup on the next 16 bits: the code's length in
-// the high byte (0: no such code), its symbol (the difference's size in
-// bits) in the low one.
-struct Table
-{
-    std::vector<uint16_t> lookup;
-};
-
 bool build_table(const uint8_t counts[16], const uint8_t* symbols, size_t n, Table& t)
 {
-    t.lookup.assign(65536, 0);
+    t = Table{};
+    if (n > sizeof t.symbols)
+        return false;
     uint32_t code = 0;
     size_t k = 0;
     for (int len = 1; len <= 16; ++len)
     {
+        t.maxcode[len] = -1;
+        t.delta[len] = int(k) - int(code);
         for (int i = 0; i < counts[len - 1]; ++i, ++code)
         {
             if (k >= n || code >= (1u << len))
                 return false;
-            const uint8_t s = symbols[k++];
+            const uint8_t s = symbols[k];
             if (s > 16)
                 return false;
-            const uint32_t first = code << (16 - len), last = (code + 1) << (16 - len);
-            for (uint32_t c = first; c < last; ++c)
-                t.lookup[c] = uint16_t(len << 8 | s);
+            t.symbols[k++] = s;
+            t.maxcode[len] = int32_t(code);
+            if (len <= Table::kFast)
+            {
+                const uint32_t first = code << (Table::kFast - len), last = (code + 1) << (Table::kFast - len);
+                for (uint32_t c = first; c < last; ++c)
+                    t.fast[c] = uint16_t(len << 8 | s);
+            }
         }
         code <<= 1;
     }
@@ -62,7 +63,7 @@ struct Stream
 {
     const uint8_t* bits;  // unstuffed, with 8 bytes of padding after `size`
     uint64_t size_bits;
-    const uint16_t* table[4];  // each component's
+    const Table* table[4];  // each component's
     int components;
     bool nikon;  // a difference's bits as Nikon codes them
 };
@@ -73,13 +74,26 @@ struct Stream
 inline bool next(const Stream& s, uint64_t& pos, int c, int& diff)
 {
     uint64_t w = load_be64(s.bits + (pos >> 3)) << (pos & 7);
-    const uint16_t e = s.table[c][w >> 48];
-    const unsigned len = e >> 8, size = e & 0xff;
+    const Table& t = *s.table[c];
+    const uint16_t e = t.fast[w >> (64 - Table::kFast)];
+    unsigned len = e >> 8, size = e & 0xff;
     if (!len)
     {
-        pos += 1;
-        diff = 0;
-        return false;
+        // Longer than the lookup: by its length.
+        const uint32_t v = uint32_t(w >> 48);
+        for (unsigned l = Table::kFast + 1; l <= 16; ++l)
+            if (const int code = int(v >> (16 - l)); code <= t.maxcode[l])
+            {
+                len = l;
+                size = t.symbols[code + t.delta[l]];
+                break;
+            }
+        if (!len)
+        {
+            pos += 1;
+            diff = 0;
+            return false;
+        }
     }
     pos += len;
     if (s.nikon)
@@ -161,7 +175,7 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     }
     Table tables[4];
     bool have_table[4] = {};
-    int precision = 0, width = 0, height = 0, ncomp = 0;
+    int precision = 0, width = 0, height = 0, ncomp = 0, predictor = 1;
     int comp_id[4] = {}, comp_table[4] = {};
     size_t i = 2, scan = 0;
     while (!scan)
@@ -216,10 +230,8 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
                         return error = "subsampled components", false;
                 }
                 break;
-            case 0xDD:  // DRI
-                if (body >= 2 && (seg[0] | seg[1]))
-                    return error = "restart intervals", false;
-                break;
+            case 0xDD:  // DRI: any, even none (LibRaw then neither resets the predictions nor the bits)
+                return error = "restart intervals", false;
             case 0xDA:  // SOS
             {
                 const int ns = seg[0];
@@ -235,9 +247,18 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
                     comp_table[k] = seg[2 + 2 * k] >> 4;
                     if (comp_table[k] > 3 || !have_table[comp_table[k]])
                         return error = "missing Huffman table", false;
+                    // LibRaw (the reference) takes component k's table as
+                    // the one numbered k, or the last numbered before it,
+                    // whatever the scan says (a CR2's are alike): where
+                    // the two differ, not taken.
+                    int libraw = k;
+                    while (libraw > 0 && !have_table[libraw])
+                        --libraw;
+                    if (libraw != comp_table[k] && std::memcmp(&tables[libraw], &tables[comp_table[k]], sizeof(Table)) != 0)
+                        return error = "tables not LibRaw's", false;
                 }
-                const int predictor = seg[1 + 2 * ns], transform = seg[3 + 2 * ns] & 15;
-                if (predictor != 1 || transform != 0)
+                predictor = seg[1 + 2 * ns];
+                if (predictor < 1 || predictor > 7 || (seg[3 + 2 * ns] & 15) != 0)
                     return error = "unsupported predictor", false;
                 scan = i + 2 + len;
                 break;
@@ -251,6 +272,7 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     }
     if (!width || !height || !ncomp)
         return error = "no frame", false;
+    p.predictor = predictor;
     if (header_only)
         return true;
 
@@ -315,10 +337,21 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     p.step = 1;
     for (int c = 0; c < 4; ++c)
         p.initial[0][c] = p.initial[1][c] = uint16_t(1u << (precision - 1));
-    p.total_bits = uint64_t(kept[ranges]) * 8;
     p.bits = std::move(bits);
+    p.parts.assign(1, {});
+    p.parts[0].bits = uint64_t(kept[ranges]) * 8;
+    p.tables.clear();
+    int index[4] = {-1, -1, -1, -1};
     for (int c = 0; c < ncomp; ++c)
-        p.lookup[c] = tables[comp_table[c]].lookup;
+    {
+        int& i = index[comp_table[c]];
+        if (i < 0)
+        {
+            i = int(p.tables.size());
+            p.tables.push_back(tables[comp_table[c]]);
+        }
+        p.parts[0].table[c] = uint32_t(i);
+    }
     return true;
 }
 
@@ -326,7 +359,59 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
 
 bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads)
 {
+    p = Prepared{};
     return parse(data, size, p, error, threads, false);
+}
+
+bool prepare_tiles(const uint8_t* file, size_t size, const std::vector<uint64_t>& offsets, Prepared& p, std::string& error, unsigned threads)
+{
+    if (threads == 0)
+        threads = std::max(1u, std::thread::hardware_concurrency());
+    const auto t0 = std::chrono::steady_clock::now();
+    p = Prepared{};
+    if (offsets.empty())
+        return error = "no tiles", false;
+    for (uint64_t at : offsets)
+        if (at >= size)
+            return error = "a tile past the file's end", false;
+    if (offsets.size() == 1)
+        return parse(file + offsets[0], size_t(size - offsets[0]), p, error, threads, false);
+    // Each tile on its own (a tile's stream is read to the marker ending
+    // it, however far the file goes on), then one after another.
+    std::vector<Prepared> tiles(offsets.size());
+    std::vector<std::string> errors(offsets.size());
+    parallel(threads, offsets.size(), [&](size_t k) { parse(file + offsets[k], size_t(size - offsets[k]), tiles[k], errors[k], 1, false); });
+    std::vector<size_t> at(tiles.size() + 1, 0);
+    for (size_t k = 0; k < tiles.size(); ++k)
+    {
+        const Prepared& t = tiles[k];
+        if (t.parts.size() != 1)
+            return error = "tile " + std::to_string(k) + ": " + errors[k], false;
+        if (t.width != tiles[0].width || t.height != tiles[0].height || t.components != tiles[0].components ||
+            t.precision != tiles[0].precision || t.predictor != tiles[0].predictor)
+            return error = "tiles not alike", false;
+        at[k + 1] = at[k] + t.bits.size();  // each with its padding
+    }
+    p.width = tiles[0].width, p.height = tiles[0].height, p.components = tiles[0].components, p.precision = tiles[0].precision;
+    p.predictor = tiles[0].predictor;
+    p.step = 1;
+    std::copy(&tiles[0].initial[0][0], &tiles[0].initial[0][0] + 8, &p.initial[0][0]);
+    p.bits.resize(at.back());
+    p.parts.resize(tiles.size());
+    for (size_t k = 0; k < tiles.size(); ++k)
+    {
+        Prepared::Part& part = p.parts[k];
+        part = tiles[k].parts[0];
+        part.start = uint64_t(at[k]) * 8;
+        for (int c = 0; c < p.components; ++c)
+            part.table[c] += uint32_t(p.tables.size());
+        p.tables.insert(p.tables.end(), tiles[k].tables.begin(), tiles[k].tables.end());
+    }
+    parallel(threads, tiles.size(), [&](size_t k) { std::memcpy(p.bits.data() + at[k], tiles[k].bits.data(), tiles[k].bits.size()); });
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "ljpeg: %zu tiles prepared in %.1f ms\n", tiles.size(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    return true;
 }
 
 bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, const uint8_t tree[32], const uint16_t start[2][2],
@@ -349,18 +434,30 @@ bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, cons
             p.initial[r][c] = start[r][c];
     p.bits.assign(data, data + size);
     p.bits.resize(size + 8, 0);
-    p.total_bits = uint64_t(size) * 8;
-    p.lookup[0] = p.lookup[1] = t.lookup;
-    if (curve)
-        p.curve.assign(curve, curve + curve_size);
+    p.parts.assign(1, {});
+    p.parts[0].bits = uint64_t(size) * 8;
+    p.tables.assign(1, t);
+    if (curve && curve_size)
+    {
+        // As nikon_load_raw indexes it: the sample as a signed 16 bits,
+        // clamped to the curve.
+        p.curve.resize(65536);
+        const int top = int(curve_size) - 1;
+        for (int v = 0; v < 65536; ++v)
+            p.curve[v] = curve[std::clamp(int(int16_t(uint16_t(v))), 0, top)];
+    }
     return true;
 }
 
-bool takes(const uint8_t* data, size_t size)
+bool takes(const uint8_t* data, size_t size, int* predictor)
 {
     Prepared p;
     std::string error;
-    return parse(data, size, p, error, 1, true);
+    if (!parse(data, size, p, error, 1, true))
+        return false;
+    if (predictor)
+        *predictor = p.predictor;
+    return true;
 }
 
 bool decode(const uint8_t* data, size_t size, Image& out, std::string& error, unsigned threads)
@@ -369,14 +466,31 @@ bool decode(const uint8_t* data, size_t size, Image& out, std::string& error, un
     return prepare(data, size, p, error, threads) && decode(p, out, error, threads);
 }
 
-bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
+namespace
 {
-    if (threads == 0)
-        threads = std::max(1u, std::thread::hardware_concurrency());
-    // IFRIT_TRACE: each pass's time.
+
+// A stream's differences decoded on this thread alone, start to end.
+bool decode_serial(const Stream& s, uint64_t samples, uint16_t* d, std::string& error)
+{
+    uint64_t pos = 0;
+    int c = 0, diff;
+    for (uint64_t j = 0; j < samples; ++j)
+    {
+        if (pos >= s.size_bits)
+            return error = "too few samples", false;
+        if (!next(s, pos, c, diff))
+            return error = "corrupt data", false;
+        d[j] = uint16_t(diff);
+        c = c + 1 == s.components ? 0 : c + 1;
+    }
+    return true;
+}
+
+// One stream's differences into `d` (its frame's samples), on `threads`.
+bool decode_differences(const Prepared& p, const Prepared::Part& part, uint16_t* d, unsigned threads, std::string& error, std::string& times)
+{
     static const bool trace = std::getenv("IFRIT_TRACE") != nullptr;
     auto last = std::chrono::steady_clock::now();
-    std::string times;
     const auto mark = [&](const char* what)
     {
         if (!trace)
@@ -385,26 +499,19 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
         times += std::string(times.empty() ? "" : ", ") + what + " " + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(now - last).count() / 1000) + " ms";
         last = now;
     };
-    const int width = p.width, height = p.height, ncomp = p.components, precision = p.precision;
-    const uint64_t total_bits = p.total_bits;
-    if (!width || !height || ncomp < 1 || ncomp > 4 || p.bits.size() < total_bits / 8 + 8)
-        return error = "not prepared", false;
-    Stream s{p.bits.data(), total_bits, {}, ncomp, p.nikon};
+    const int ncomp = p.components;
+    const uint64_t total_bits = part.bits;
+    Stream s{p.bits.data() + part.start / 8, total_bits, {}, ncomp, p.nikon};
     for (int c = 0; c < ncomp; ++c)
-    {
-        if (p.lookup[c].size() != 65536)
-            return error = "not prepared", false;
-        s.table[c] = p.lookup[c].data();
-    }
-    const uint64_t samples = uint64_t(width) * height * ncomp;
-    out.width = width, out.height = height, out.components = ncomp, out.precision = precision;
-    out.samples.assign(samples, 0);
-    uint16_t* d = out.samples.data();
+        s.table[c] = &p.tables[part.table[c]];
+    const uint64_t samples = uint64_t(p.width) * p.height * ncomp;
 
     // -- Pass 1: each chunk decoded from its start as if a code began there,
     // once for each component that could be due (each has its own table), to
     // past its end.
-    const size_t chunks = std::clamp<size_t>(size_t(threads) * 4, 1, std::max<uint64_t>(1, total_bits / 4096));
+    const size_t chunks = threads <= 1 ? 1 : std::clamp<size_t>(size_t(threads) * 4, 1, std::max<uint64_t>(1, total_bits / 4096));
+    if (chunks == 1)
+        return decode_serial(s, samples, d, error);
     const uint64_t chunk_bits = (total_bits + chunks - 1) / chunks;
     std::vector<Exit> guess(chunks * ncomp);
     parallel(threads, chunks * ncomp,
@@ -506,7 +613,8 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
     }
     mark("synchronised");
     if (trace)
-        times += " (" + std::to_string(met_count) + " of " + std::to_string(chunks - 1) + " met, " + std::to_string(lockstep) + " steps)";
+        times += " (" + std::to_string(chunks) + " chunks, " + std::to_string(met_count) + " of " + std::to_string(chunks - 1) + " met, " +
+                 std::to_string(lockstep) + " steps)";
     // -- Pass 3: each chunk decoded again from its true entry, its differences
     // written where they go (the first sample's place: the counts before it).
     std::vector<uint64_t> first(chunks + 1, 0);
@@ -539,33 +647,157 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
         return error = "corrupt data", false;
 
     mark("decoded");
-    // -- Pass 4: differences to samples. Each row's first samples continue
-    // down from those `step` rows above (the first rows' from where the
-    // stream says they start); the rest from their left, so the rows go in
-    // parallel. Arithmetic modulo 2^16, as the standard has it; then a
-    // Nikon's curve, clamped to it.
-    const size_t row = size_t(width) * ncomp;
+    return true;
+}
+
+// LibRaw's prediction from the row above (ljpeg_row's), for predictors 2..7:
+// `a` the sample to the left, `b` above, `c` above and to the left.
+inline int predict(int predictor, int a, int b, int c)
+{
+    switch (predictor)
+    {
+        case 2:
+            return b;
+        case 3:
+            return c;
+        case 4:
+            return a + b - c;
+        case 5:
+            return a + ((b - c) >> 1);
+        case 6:
+            return b + ((a - c) >> 1);
+        case 7:
+            return (a + b) >> 1;
+        default:
+            return a;
+    }
+}
+
+// One stream's differences to samples. Each row's first samples continue
+// down from those `step` rows above (the first rows' from where the stream
+// says they start); the rest from their left, so the rows go in parallel.
+// Arithmetic modulo 2^16, as the standard has it. A predictor from the row
+// above (all but the first row's, LibRaw's way) goes a row after another.
+void sum(const Prepared& p, uint16_t* d, unsigned threads)
+{
+    const int height = p.height, ncomp = p.components;
+    const size_t row = size_t(p.width) * ncomp;
     for (int c = 0; c < ncomp; ++c)
         for (int y = 0; y < height; ++y)
         {
             const uint16_t above = y < p.step ? p.initial[y][c] : d[(y - p.step) * row + c];
             d[y * row + c] = uint16_t(above + d[y * row + c]);
         }
-    const uint16_t* curve = p.curve.empty() ? nullptr : p.curve.data();
-    const int top = int(p.curve.size()) - 1;
-    parallel(threads, size_t(height),
-             [&](size_t y)
-             {
-                 uint16_t* r = d + y * row;
-                 for (size_t x = ncomp; x < row; ++x)
-                     r[x] = uint16_t(r[x - ncomp] + r[x]);
-                 if (curve)
-                     for (size_t x = 0; x < row; ++x)
-                         r[x] = curve[std::clamp(int(int16_t(r[x])), 0, top)];
-             });
-    mark("summed");
+    const auto left = [&](size_t y)
+    {
+        uint16_t* r = d + y * row;
+        for (size_t x = ncomp; x < row; ++x)
+            r[x] = uint16_t(r[x - ncomp] + r[x]);
+    };
+    if (p.predictor == 1)
+    {
+        parallel(threads, size_t(height), left);
+        return;
+    }
+    // A row after another (a row needs the one above it all), each
+    // predictor's loop its own.
+    left(0);
+    const auto rows = [&]<int P>()
+    {
+        for (size_t y = 1; y < size_t(height); ++y)
+        {
+            uint16_t* r = d + y * row;
+            const uint16_t* u = r - row;
+            int last[4];  // each component's sample to the left, kept at hand
+            for (int c = 0; c < ncomp; ++c)
+                last[c] = r[c];
+            for (size_t x = ncomp; x < row; x += ncomp)
+                for (int c = 0; c < ncomp; ++c)
+                {
+                    const uint16_t v = uint16_t(predict(P, last[c], u[x + c], u[x + c - ncomp]) + r[x + c]);
+                    r[x + c] = v;
+                    last[c] = v;
+                }
+        }
+    };
+    switch (p.predictor)
+    {
+        case 2:
+            return rows.template operator()<2>();
+        case 3:
+            return rows.template operator()<3>();
+        case 4:
+            return rows.template operator()<4>();
+        case 5:
+            return rows.template operator()<5>();
+        case 6:
+            return rows.template operator()<6>();
+        default:
+            return rows.template operator()<7>();
+    }
+}
+
+}  // namespace
+
+bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
+{
+    if (threads == 0)
+        threads = std::max(1u, std::thread::hardware_concurrency());
+    static const bool trace = std::getenv("IFRIT_TRACE") != nullptr;
+    const auto t0 = std::chrono::steady_clock::now();
+    const int width = p.width, height = p.height, ncomp = p.components;
+    if (!width || !height || ncomp < 1 || ncomp > 4 || p.parts.empty() || p.predictor < 1 || p.predictor > 7 ||
+        (!p.curve.empty() && p.curve.size() != 65536))
+        return error = "not prepared", false;
+    for (const Prepared::Part& part : p.parts)
+    {
+        if (part.start % 8 || part.start / 8 + (part.bits + 7) / 8 + 8 > p.bits.size())
+            return error = "not prepared", false;
+        for (int c = 0; c < ncomp; ++c)
+            if (part.table[c] >= p.tables.size())
+                return error = "not prepared", false;
+    }
+    const size_t frame = size_t(width) * height * ncomp;
+    out.width = width, out.height = height, out.components = ncomp, out.precision = p.precision;
+    out.samples.assign(frame * p.parts.size(), 0);
+    // One stream on every thread; a DNG's tiles side by side, a thread each.
+    std::string times;
+    const auto finish = [&](size_t k, unsigned on)
+    {
+        uint16_t* d = out.samples.data() + k * frame;
+        sum(p, d, on);
+        if (!p.curve.empty())
+            for (size_t i = 0; i < frame; ++i)
+                d[i] = p.curve[d[i]];
+    };
+    if (p.parts.size() == 1)
+    {
+        if (!decode_differences(p, p.parts[0], out.samples.data(), threads, error, times))
+            return false;
+        const auto t1 = std::chrono::steady_clock::now();
+        finish(0, threads);
+        if (trace)
+            times += ", summed " + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t1).count() / 1000) + " ms";
+    }
+    else
+    {
+        std::vector<std::string> errors(p.parts.size());
+        std::vector<char> ok(p.parts.size(), 0);
+        parallel(threads, p.parts.size(),
+                 [&](size_t k)
+                 {
+                     std::string unused;
+                     if ((ok[k] = decode_differences(p, p.parts[k], out.samples.data() + k * frame, 1, errors[k], unused)))
+                         finish(k, 1);
+                 });
+        for (size_t k = 0; k < ok.size(); ++k)
+            if (!ok[k])
+                return error = "tile " + std::to_string(k) + ": " + errors[k], false;
+    }
     if (trace)
-        std::fprintf(stderr, "ljpeg: %dx%d x%d, %zu chunks on %u threads: %s\n", width, height, ncomp, chunks, threads, times.c_str());
+        std::fprintf(stderr, "ljpeg: %zu x %dx%d x%d, predictor %d, on %u threads in %.1f ms%s%s\n", p.parts.size(), width, height, ncomp,
+                     p.predictor, threads, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
+                     times.empty() ? "" : ": ", times.c_str());
     return true;
 }
 

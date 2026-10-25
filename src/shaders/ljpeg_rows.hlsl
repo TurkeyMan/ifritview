@@ -1,18 +1,17 @@
-// A row a group: each sample its left neighbour's (of its component) plus
+// A row a group (x: the row, y: the stream): each sample its left neighbour's (of its component) plus
 // its difference, the row's first samples already summed (columns). Each
 // thread sums its run of the row's words per component, thread 0 chains the
 // runs, each writes its run's running sums.
 #include "ljpeg.hlsli"
 
 RWByteAddressBuffer values : register(u0);
-RWByteAddressBuffer curve : register(u1);  // a Nikon's, 16 bits an entry (curve_top: its last), applied as each sample's written
+RWByteAddressBuffer curve : register(u1);  // 65536 entries, 16 bits each, applied as each sample's written (`curved`)
 
-uint curved(uint v)
+uint through_curve(uint v)
 {
-    if (curve_top == 0)
-        return v & 0xFFFF;
-    const int s = int(v << 16) >> 16;  // as int16, clamped to the curve
-    const uint i = uint(clamp(s, 0, int(curve_top)));
+    const uint i = v & 0xFFFF;
+    if (curved == 0)
+        return i;
     return (curve.Load((i >> 1) * 4) >> ((i & 1) * 16)) & 0xFFFF;
 }
 
@@ -26,7 +25,7 @@ void main(uint3 group : SV_GroupID, uint3 id : SV_GroupThreadID)
     const uint r = group.x, t = id.x;
     if (r >= rows)
         return;
-    const uint words = row >> 1, base = r * words;
+    const uint words = row >> 1, base = (group.y * rows + r) * words;
     const uint per = (words + THREADS - 1) / THREADS;
     const uint first = min(words, t * per), last = min(words, first + per);
     // Word w holds samples 2w and 2w + 1: components (2w) % C and (2w + 1) % C.
@@ -59,8 +58,8 @@ void main(uint3 group : SV_GroupID, uint3 id : SV_GroupThreadID)
         const uint v = values.Load((base + w2) * 4);
         const uint a = (2 * w2) % components, b = (2 * w2 + 1) % components;
         v4[a] += v & 0xFFFF;
-        const uint lo = curved(v4[a]);
+        const uint lo = through_curve(v4[a]);
         v4[b] += v >> 16;
-        values.Store((base + w2) * 4, lo | curved(v4[b]) << 16);
+        values.Store((base + w2) * 4, lo | through_curve(v4[b]) << 16);
     }
 }
