@@ -186,6 +186,7 @@ void Config::load()
     shrink_filter = scale_filter_named(get_string(kf, kView, "shrink_filter", scale_filter_name(shrink_filter)), shrink_filter);
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
+    histogram = get_bool(kf, kView, "histogram", histogram);
     animate = get_bool(kf, kView, "animate", animate);
     video_autoplay = get_bool(kf, kView, "video_autoplay", video_autoplay);
     video_muted = get_bool(kf, kView, "video_muted", video_muted);
@@ -265,6 +266,7 @@ bool Config::save() const
     g_key_file_remove_key(kf, kView, "smooth_downscale", nullptr);
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
+    g_key_file_set_boolean(kf, kView, "histogram", histogram);
     g_key_file_set_boolean(kf, kView, "animate", animate);
     g_key_file_set_boolean(kf, kView, "video_autoplay", video_autoplay);
     g_key_file_set_boolean(kf, kView, "video_muted", video_muted);

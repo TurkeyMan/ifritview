@@ -7,14 +7,17 @@
 // frame is resampled from the right one with the filter the settings choose,
 // exposed and tone-mapped, composited over the checkerboard or the
 // background, and encoded for the front buffer, which says what it holds.
+// Raw and HDR images are measured on the device when they arrive (their
+// peak, and how far from white they go in each hue), so the display
+// mapping compresses only what's there; and a classic histogram of what's
+// shown is counted there and drawn into the frame. None of it comes back
+// to the CPU.
 
 #include "../config.h"
 
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
 
-#include <atomic>
-#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,9 +36,7 @@ enum class FrontBuffer
 class GpuView
 {
 public:
-    // `changed` runs (on any thread) when something measured in the
-    // background changes how the frame looks: draw again.
-    GpuView(std::shared_ptr<rap::gpu::device> device, std::function<void()> changed);
+    explicit GpuView(std::shared_ptr<rap::gpu::device> device);
 
     struct Frame
     {
@@ -48,6 +49,8 @@ public:
         ScaleFilter shrink = ScaleFilter::Lanczos3, enlarge = ScaleFilter::Lanczos3;
         FrontBuffer front = FrontBuffer::Srgb8;
         float sdr_white_nits = 203;  // PQ and scRGB: what SDR white is
+        bool histogram = false;      // the histogram panel, at `panel` (device pixels: x, y, width, height)
+        int panel[4] = {};
     };
 
     // The frame, into a texture for canvas::present, with what it holds;
@@ -57,19 +60,6 @@ public:
                 rap::gpu::ticket& ready, rap::frame_color& colour, std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
-    // The image's measures are in (the frame looks as it finally will).
-    bool measured() const { return measuring_ && measuring_->done; }
-
-    // What the image holds, measured once it's on the device (raw and HDR
-    // images): how bright it goes, and how far from white in each hue
-    // direction (1 = the display's edge), so the display mapping only
-    // compresses what's really there.
-    struct Measures
-    {
-        float peak = 0;         // luminance, 1 = SDR white: the 99.9th percentile (a few hot pixels don't count)
-        float extents[72] = {}; // per 5 degrees of hue round the white point
-        bool outside = false;   // anything past the display's gamut
-    };
 
 private:
     bool programs(std::string& error);
@@ -78,21 +68,17 @@ private:
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(int n);
 
-    // Measures the image from a level of at most 2048 pixels, on the
-    // device's thread; `measures_` is filled when it's done.
-    void measure();
+    // The level the measures and the histogram count: at most 2048 pixels.
+    rap::gpu::texture_ptr counted_level();
 
     std::shared_ptr<rap::gpu::device> device_;
-    std::function<void()> changed_;
-    struct Measuring
-    {
-        std::atomic<bool> done{false};
-        Measures measures;
-    };
-    std::shared_ptr<Measuring> measuring_;
-    rap::gpu::texture_ptr extents_;  // measures_.extents, once there
-    rap::gpu::texture_ptr blank_;    // for inputs a pass doesn't use
-    rap::gpu::program_ptr decode_, resample_, compose_;
+    rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
+    rap::gpu::program_ptr decode_, resample_, compose_, stats_program_, peak_, histogram_program_, histogram_max_;
+    rap::gpu::buffer_ptr stats_;      // the image's measures (view.hlsli's layout), for raw and HDR images
+    bool measured_ = false;           // `stats_` is this image's
+    rap::gpu::buffer_ptr histogram_;  // R, G, B, Y counts of what's shown, and the tallest
+    double histogram_exposure_ = -1e9;  // what it was counted at (and the image's generation below)
+    uint64_t histogram_generation_ = 0;
 
     std::weak_ptr<Image> image_;
     uint64_t generation_ = 0;

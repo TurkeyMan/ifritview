@@ -200,6 +200,12 @@ bool App::on_key(const rap::key_event& e)
         case 'a':
             toggle_animation();
             return true;
+        case 'g':
+            // The histogram of what's shown (drawn on the GPU); the choice is kept.
+            cfg_.histogram = !cfg_.histogram;
+            cfg_.save();
+            view_->config_changed();
+            return true;
         case 'c':
             if (ctrl)
             {

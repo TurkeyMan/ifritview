@@ -1080,20 +1080,15 @@ bool View::draw_on_gpu(rap::color background)
     const bool plain = !off && canvas_ && image_ && image_->width > 0 && image_->height > 0 && !compare_ && !motion_.active &&
                        !outgoing_.image && !image_->is_video && !image_->vector && !image_->animation;
     std::shared_ptr<rap::gpu::device> device = plain ? canvas_->gpu_device() : nullptr;
+    // A GPU in software (lavapipe, WARP) is slower than the CPU's own
+    // drawing: it takes only what needs it, raw and HDR images.
+    if (device && device->software() && !image_->tonable())
+        device = nullptr;
     gpu_wanted_ = plain;
     if (device)
         gpu_waiting_since_ = 0;
     if (device && (!gpu_ || gpu_->device() != device))
-        gpu_ = std::make_unique<GpuView>(device,
-                                         [this, alive = alive_]
-                                         {
-                                             ui_.post(
-                                                 [this, alive]
-                                                 {
-                                                     if (*alive)
-                                                         invalidate();
-                                                 });
-                                         });
+        gpu_ = std::make_unique<GpuView>(device);
     if (!device)
     {
         if (gpu_shown_)
@@ -1108,7 +1103,7 @@ bool View::draw_on_gpu(rap::color background)
     GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
-               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, gpu_->measured()};
+               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, cfg_.histogram};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1124,6 +1119,17 @@ bool View::draw_on_gpu(rap::color background)
     f.checker_size = int(std::lround(8 * scale_factor()));
     f.enlarge = cfg_.enlarge_filter;
     f.shrink = cfg_.shrink_filter;
+    f.histogram = cfg_.histogram;
+    if (f.histogram)
+    {
+        // Top right: whole device pixels a bin, a little in from the corner.
+        const double scale = scale_factor();
+        const int w = 256 * std::max(1, int(std::lround(scale))), h = int(std::lround(100 * scale)), margin = int(std::lround(12 * scale));
+        f.panel[0] = std::max(0, target.width - w - margin);
+        f.panel[1] = margin;
+        f.panel[2] = w;
+        f.panel[3] = h;
+    }
     rap::gpu::texture_ptr frame;
     rap::gpu::ticket ready;
     rap::frame_color colour;

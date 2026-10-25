@@ -3,9 +3,11 @@
 #include "../image.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
+#include "shaders/histogram.h"
+#include "shaders/histogram_max.h"
+#include "shaders/peak.h"
 #include "shaders/resample.h"
-
-#include "../half.h"
+#include "shaders/stats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -39,35 +41,17 @@ struct ComposeParams
     float exposure;
     int32_t tone, output;
     float white;
-    float source_peak, display_peak;
-    int32_t gamut;
+    int32_t measured;
+    float display_peak;
     float display_r[2], display_g[2], display_b[2];
-    float unused[2];
+    int32_t show_histogram, unused;
+    float panel[4];
 };
+static_assert(sizeof(ComposeParams) == 176, "as view.hlsli's cbuffer packs");
 
 // sRGB's primaries and white in u'v' (CIE 1976 UCS): the display's until
 // rapport describes the real one.
 constexpr float kSrgbR[2] = {0.4507f, 0.5229f}, kSrgbG[2] = {0.1250f, 0.5625f}, kSrgbB[2] = {0.1754f, 0.1579f};
-constexpr float kWhiteU = 0.19783f, kWhiteV = 0.46832f;
-
-// How far from white the triangle's edge is in direction (dx, dy), as display.hlsli has it.
-float edge_distance(float dx, float dy)
-{
-    const float* corners[3] = {kSrgbR, kSrgbG, kSrgbB};
-    float best = 1e9f;
-    for (int i = 0; i < 3; ++i)
-    {
-        const float ax = corners[i][0] - kWhiteU, ay = corners[i][1] - kWhiteV;
-        const float ex = corners[(i + 1) % 3][0] - corners[i][0], ey = corners[(i + 1) % 3][1] - corners[i][1];
-        const float den = dx * ey - dy * ex;
-        if (std::fabs(den) < 1e-9f)
-            continue;
-        const float t = (ax * ey - ay * ex) / den, u = (ax * dy - ay * dx) / den;
-        if (t > 0 && u >= -1e-6f && u <= 1 + 1e-6f)
-            best = std::min(best, t);
-    }
-    return best;
-}
 
 float linear(uint8_t v)
 {
@@ -94,73 +78,7 @@ double reach(ScaleFilter f, double inv)
 
 }  // namespace
 
-GpuView::GpuView(std::shared_ptr<rap::gpu::device> device, std::function<void()> changed)
-    : device_(std::move(device)), changed_(std::move(changed))
-{
-}
-
-void GpuView::measure()
-{
-    auto measuring = std::make_shared<Measuring>();
-    measuring_ = measuring;
-    int n = 0;
-    while (std::max(levels_[0]->width(), levels_[0]->height()) >> n > 2048)
-        ++n;
-    const rap::gpu::texture_ptr src = level(n);
-    const int w = src->width(), h = src->height();
-    auto pixels = std::make_shared<std::vector<std::byte>>(size_t(w) * h * 8);
-    device_->readback(src, *pixels, size_t(w) * 8, 0,
-                      [measuring, pixels, w, h, changed = changed_]
-                      {
-                          // Linear, premultiplied, BT.709 primaries, half floats.
-                          Measures& m = measuring->measures;
-                          constexpr int kBins = 1024;  // log2 luminance, 2^-20 .. 2^12
-                          std::vector<uint32_t> histogram(kBins);
-                          size_t counted = 0;
-                          const uint16_t* px = reinterpret_cast<const uint16_t*>(pixels->data());
-                          for (size_t i = 0, n = size_t(w) * h; i < n; ++i, px += 4)
-                          {
-                              const float a = half_to_float(px[3]);
-                              if (!(a > 0))
-                                  continue;
-                              const float r = half_to_float(px[0]) / a, g = half_to_float(px[1]) / a, b = half_to_float(px[2]) / a;
-                              const float y = 0.2126729f * r + 0.7151522f * g + 0.0721750f * b;
-                              if (!(y > 0))
-                                  continue;
-                              const int bin = std::clamp(int((std::log2(y) + 20) * kBins / 32), 0, kBins - 1);
-                              ++histogram[size_t(bin)];
-                              ++counted;
-                              if (y < 1e-3f)
-                                  continue;  // too dark for its colour to count
-                              const float x = 0.4124564f * r + 0.3575761f * g + 0.1804375f * b;
-                              const float z = 0.0193339f * r + 0.1191920f * g + 0.9503041f * b;
-                              const float d = x + 15 * y + 3 * z;
-                              const float du = 4 * x / d - kWhiteU, dv = 9 * y / d - kWhiteV;
-                              const float len = std::hypot(du, dv);
-                              if (len < 1e-6f)
-                                  continue;
-                              const float extent = len / edge_distance(du / len, dv / len);
-                              const int hue = std::clamp(int((std::atan2(dv, du) / 6.2831853f + 1) * 72) % 72, 0, 71);
-                              m.extents[hue] = std::max(m.extents[hue], extent);
-                          }
-                          // The 99.9th percentile's luminance.
-                          size_t seen = 0;
-                          for (int bin = kBins - 1; bin >= 0; --bin)
-                          {
-                              seen += histogram[size_t(bin)];
-                              if (seen * 1000 >= counted)
-                              {
-                                  m.peak = std::exp2(float(bin + 1) * 32 / kBins - 20);
-                                  break;
-                              }
-                          }
-                          for (float e : m.extents)
-                              m.outside = m.outside || e > 1;
-                          measuring->done = true;
-                          if (changed)
-                              changed();
-                      });
-}
+GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(device)) {}
 
 bool GpuView::programs(std::string& error)
 {
@@ -177,6 +95,28 @@ bool GpuView::programs(std::string& error)
         }
         *program = r.program;
     }
+    for (auto [program, make] : {std::pair{&stats_program_, shaders::stats}, std::pair{&peak_, shaders::peak},
+                                 std::pair{&histogram_program_, shaders::histogram},
+                                 std::pair{&histogram_max_, shaders::histogram_max}})
+    {
+        auto r = device_->compute_program(make());
+        if (!r.program)
+        {
+            error = r.error;
+            return false;
+        }
+        *program = r.program;
+    }
+    stats_ = device_->create_buffer(1098 * 4);
+    histogram_ = device_->create_buffer(1025 * 4);
+    blank_ = device_->create({1, 1, rap::gpu::format::r32f});
+    if (!stats_ || !histogram_ || !blank_)
+    {
+        error = "no room for the measures";
+        return false;
+    }
+    const float zero = 0;
+    device_->upload(blank_, std::as_bytes(std::span(&zero, 1)), {1, rap::gpu::sample_type::f32});
     return true;
 }
 
@@ -251,11 +191,17 @@ bool GpuView::upload(const Image& image, std::string& error)
     p.target = top;
     device_->run(std::span(&p, 1));
     levels_.push_back(top);
-    measuring_.reset();
-    extents_.reset();
-    if (tonable_)
-        measure();
+    measured_ = false;
+    histogram_generation_ = 0;
     return true;
+}
+
+rap::gpu::texture_ptr GpuView::counted_level()
+{
+    int n = 0;
+    while (std::max(levels_[0]->width(), levels_[0]->height()) >> n > 2048)
+        ++n;
+    return level(n);
 }
 
 rap::gpu::texture_ptr GpuView::level(int n)
@@ -346,25 +292,54 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     cp.tone = tone_ ? 1 : 0;
     cp.output = int32_t(f.front);
     cp.white = f.sdr_white_nits;
-    // The display mapping, from the image's measures once they're in.
+    // The display: sRGB at SDR white until rapport describes the real one.
     std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
     std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
     std::memcpy(cp.display_b, kSrgbB, sizeof cp.display_b);
-    cp.display_peak = 1;  // SDR: white is as bright as it goes
-    if (measuring_ && measuring_->done)
+    cp.display_peak = 1;
+
+    // Raw and HDR images measured once (their peak, their extent in each
+    // hue), on the device: the mapping reads them there.
+    std::vector<rap::gpu::dispatch> counts;
+    const rap::gpu::texture_ptr counted = (tonable_ && !measured_) || f.histogram ? counted_level() : nullptr;
+    const auto over = [&](rap::gpu::program_ptr program, std::vector<rap::gpu::buffer_ptr> buffers)
     {
-        const Measures& m = measuring_->measures;
-        cp.source_peak = m.peak * cp.exposure;
-        if (m.outside)
-        {
-            if (!extents_)
-            {
-                extents_ = device_->create({72, 1, rap::gpu::format::r32f});
-                if (extents_)
-                    device_->upload(extents_, std::as_bytes(std::span(m.extents)), {1, rap::gpu::sample_type::f32});
-            }
-            cp.gamut = extents_ ? 1 : 0;
-        }
+        rap::gpu::dispatch d;
+        d.program = std::move(program);
+        d.inputs = {counted, tone_ ? tone_ : blank_};
+        d.buffers = std::move(buffers);
+        d.uniforms = bytes(cp);  // copied at run(); `cp` is final for what they read
+        d.groups[0] = (counted->width() + 15) / 16;
+        d.groups[1] = (counted->height() + 15) / 16;
+        return d;
+    };
+    if (tonable_ && !measured_)
+    {
+        device_->clear(stats_, 0);
+        counts.push_back(over(stats_program_, {histogram_, stats_}));
+        rap::gpu::dispatch peak = over(peak_, {histogram_, stats_});
+        peak.groups[0] = peak.groups[1] = 1;
+        counts.push_back(std::move(peak));
+        measured_ = true;
+    }
+    cp.measured = measured_ ? 1 : 0;
+    // The histogram of what's shown: again when exposure or the image change.
+    if (f.histogram && (histogram_generation_ != generation || histogram_exposure_ != f.exposure || counts.size()))
+    {
+        device_->clear(histogram_, 0);
+        counts.push_back(over(histogram_program_, {histogram_, stats_}));
+        rap::gpu::dispatch tallest = over(histogram_max_, {histogram_});
+        tallest.inputs.clear();
+        tallest.groups[0] = tallest.groups[1] = 1;
+        counts.push_back(std::move(tallest));
+        histogram_generation_ = generation;
+        histogram_exposure_ = f.exposure;
+    }
+    if (f.histogram)
+    {
+        cp.show_histogram = 1;
+        cp.panel[0] = float(f.panel[0]), cp.panel[1] = float(f.panel[1]);
+        cp.panel[2] = float(f.panel[0] + f.panel[2]), cp.panel[3] = float(f.panel[1] + f.panel[3]);
     }
 
     // A whole-pixel 1:1 is a copy; enlarging with no filter is nearest.
@@ -425,17 +400,12 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         cp.column = x0;
         last.inputs = {rows_};
     }
-    if (!blank_)
-    {
-        blank_ = device_->create({1, 1, rap::gpu::format::r32f});
-        const float zero = 0;
-        if (blank_)
-            device_->upload(blank_, std::as_bytes(std::span(&zero, 1)), {1, rap::gpu::sample_type::f32});
-    }
     last.inputs.push_back(tone_ ? tone_ : blank_);
-    last.inputs.push_back(cp.gamut ? extents_ : blank_);
+    last.buffers = {stats_, histogram_};
     last.uniforms = bytes(cp);
     passes.push_back(std::move(last));
+    if (!counts.empty())
+        device_->run(counts);
     ready = device_->run(passes);
     out = frame;
     return true;

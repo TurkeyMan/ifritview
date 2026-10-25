@@ -3,41 +3,12 @@
 // the transparency checkerboard or the background, all in linear light,
 // then encoded for the front buffer: sRGB (8-bit dithered, or 10-bit), PQ,
 // or linear scRGB.
-#include "display.hlsli"
 #include "resample.hlsli"
+#include "view.hlsli"
 
-cbuffer Params : register(b0)
-{
-    float4 background;  // linear
-    float4 checker_a;   // linear; the two squares
-    float4 checker_b;
-    float4 image_rect;  // x0, y0, x1, y1 in frame pixels
-    int nearest;        // 1: texel fetch from `source` (the image), mapping both axes below
-    int filter;         // else: vertical filter over `source` (the first pass's rows)
-    float inv;          // source texels per frame pixel, vertically (and horizontally when nearest)
-    float offset;       // source position of frame row 0's top edge
-    float offset_x;     // nearest: source position of frame column 0's left edge
-    int column;         // filtered: frame column -> source column (subtracted)
-    int rows;           // the source's rows: taps past them are clamped
-    int checker_size;   // device pixels; 0: no checkerboard
-    float inv_x;        // nearest: source texels per frame pixel, horizontally
-    int columns;        // nearest: the image's width
-    float exposure;     // the scene's scale before tone mapping (2^ev; a raw without a curve: its gain too)
-    int tone;           // 0: clip; 1: the raw's camera-matched curve (`tone_curve`), by luminance
-    int output;         // 0: sRGB, 8-bit, dithered; 1: sRGB, 10-bit; 2: PQ; 3: linear scRGB
-    float white;        // SDR white in nits (PQ output, and the luminance roll-off's scale)
-    float source_peak;  // the image's peak luminance after exposure (1 = SDR white); 0: no mapping
-    float display_peak; // the display's
-    int gamut;          // 1: compress chromaticity into the display's gamut, per hue (`extents`)
-    float2 display_r;   // the display's primaries in u'v'
-    float2 display_g;
-    float2 display_b;
-    float2 unused;
-};
+ByteAddressBuffer histogram : register(t9);  // histogram.hlsl's counts, when it's shown
 
-Texture2D<float4> source : register(t0);
-Texture2D<float> tone_curve : register(t1);  // 4096 display-linear values for scene luminance 0..1
-Texture2D<float> extents : register(t2);     // per hue (72 x 1): how far the image goes from white, 1 = the display's edge
+
 
 float srgb_encode(float v)
 {
@@ -52,53 +23,41 @@ float pq_encode(float nits)
     return pow((c1 + c2 * y) / (1 + c3 * y), m2);
 }
 
-// The scene colour as the display shows it (linear, 1 = SDR white).
-float3 tone_map(float3 c)
+float srgb_decode(float v)
 {
-    c *= exposure;
-    if (tone == 1)
+    return v <= 0.04045 ? v / 12.92 : pow(max(v + 0.055, 0.0) / 1.055, 2.4);
+}
+float3 srgb_decode3(float3 c)
+{
+    return float3(srgb_decode(c.r), srgb_decode(c.g), srgb_decode(c.b));
+}
+
+// The classic histogram, at a point of the panel: a dark backdrop, R, G and
+// B as additive fills (where they overlap: cyan, magenta, yellow, white),
+// and luminance as a light outline over them. Heights scale to the tallest
+// bin between the ends (0 and 255 hold every clipped pixel and would flatten
+// the rest); bins past the panel's top are cut. sRGB-encoded colour, alpha.
+float4 histogram_panel(float2 at)
+{
+    const float2 size = panel.zw - panel.xy;
+    const float x = (at.x - panel.x) / size.x, y = 1 - (at.y - panel.y) / size.y;  // 0..1, y up
+    const uint bin = min(uint(x * 256), 255u);
+    const float tallest = max(1.0, float(histogram.Load(1024 * 4)));
+    float3 fill = 0;
+    [unroll] for (uint ch = 0; ch < 3; ++ch)
     {
-        // The camera's curve maps luminance; the colour scales with it, so hue holds.
-        const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
-        const float x = saturate(lum) * 4095;
-        const int i = int(x);
-        const float o = lerp(tone_curve.Load(int3(i, 0, 0)), tone_curve.Load(int3(min(i + 1, 4095), 0, 0)), x - i);
-        c *= lum > 1e-6 ? o / lum : 0;
+        const float h = float(histogram.Load((ch * 256 + bin) * 4)) / tallest;
+        fill[ch] = y <= h ? 0.85 : 0;
     }
-    // BT.709 primaries in, as the image's data is kept; the display's out
-    // (the same until there's a display description).
-    if (source_peak > 0 || gamut)
-    {
-        const float3 xyz = mul(kRgbToXyz709, c);
-        float y = xyz.y;
-        float2 uv = uv_from_xyz(xyz);
-        if (source_peak > 0 && tone != 1)  // a raw's camera curve is display-referred already
-        {
-            const float mapped = eetf(y, source_peak, display_peak, white);
-            // Towards white as it nears the display's peak, as film does.
-            const float knee = 0.75 * display_peak;
-            uv = lerp(uv, kWhiteUv, smoothstep(knee, display_peak, mapped) * 0.6);
-            y = mapped;
-        }
-        if (gamut)
-        {
-            const float2 v = uv - kWhiteUv;
-            const float len = length(v);
-            if (len > 1e-6)
-            {
-                const float2 dir = v / len;
-                const float edge = edge_distance(dir, display_r, display_g, display_b);
-                const float hue = (atan2(dir.y, dir.x) / kTwoPi + 1) * 72;
-                const uint i0 = uint(floor(hue)) % 72u, i1 = (i0 + 1u) % 72u;
-                const float limit = lerp(extents.Load(int3(i0, 0, 0)), extents.Load(int3(i1, 0, 0)), frac(hue));
-                // A short knee when the image barely leaves the gamut.
-                const float threshold = clamp(1 - 0.6 * (limit - 1), 0.8, 0.95);
-                uv = kWhiteUv + dir * compress(len / edge, threshold, max(limit, 1.0)) * edge;
-            }
-        }
-        c = mul(kXyzToRgb709, xyz_from_yuv(y, uv));
-    }
-    return c;
+    const float luma = float(histogram.Load((768 + bin) * 4)) / tallest;
+    const float px = 1 / size.y;  // a device pixel, in panel heights
+    const bool outline = abs(y - min(luma, 1.0)) <= 1.5 * px && luma > 0;
+    const float4 backdrop = float4(0.08, 0.08, 0.08, 0.7);
+    if (outline)
+        return float4(0.95, 0.95, 0.95, 0.95);
+    if (any(fill > 0))
+        return float4(max(fill, 0.08), 0.9);
+    return backdrop;
 }
 
 // A pixel's own noise in -1..1, triangular: what 8-bit output adds to hide banding.
@@ -156,7 +115,14 @@ float4 main(float4 position : SV_Position) : SV_Target
     float4 under = background;
     if (checker_size > 0 && cover > 0)
         under = ((uint(p.x) / uint(checker_size) + uint(p.y) / uint(checker_size)) & 1u) ? checker_a : checker_b;
-    const float3 rgb = c.rgb + (1 - c.a) * under.rgb;
+    float3 rgb = c.rgb + (1 - c.a) * under.rgb;
+
+    // The histogram panel over it (sRGB-encoded colours, blended in linear).
+    if (show_histogram && p.x >= panel.x && p.x < panel.z && p.y >= panel.y && p.y < panel.w)
+    {
+        const float4 h = histogram_panel(float2(p) + 0.5);
+        rgb = lerp(rgb, srgb_decode3(h.rgb), h.a);
+    }
     if (output == 3)
         return float4(rgb, 1);
     if (output == 2)
