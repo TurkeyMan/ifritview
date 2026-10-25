@@ -52,6 +52,7 @@ enum class Action
     Navigate,
     Zoom,
     Scroll,
+    Exposure,
 };
 
 struct ControlInfo
@@ -85,7 +86,7 @@ constexpr std::array<ControlInfo, size_t(Control::Count)> kControls = {{
     {Control::ShiftWheel, "shift_wheel", N_("Shift + wheel"), Kind::Wheel},
 }};
 
-constexpr std::array<ActionInfo, 15> kActions = {{
+constexpr std::array<ActionInfo, 16> kActions = {{
     {Action::None, "none", N_("Nothing"), Kind::Click},
     {Action::ZoomSelection, "zoom-selection", N_("Zoom to selection / reset zoom"), Kind::Click},
     {Action::ToggleFullscreen, "fullscreen", N_("Toggle fullscreen"), Kind::Click},
@@ -101,6 +102,7 @@ constexpr std::array<ActionInfo, 15> kActions = {{
     {Action::Navigate, "navigate", N_("Previous / next image"), Kind::Wheel},
     {Action::Zoom, "zoom", N_("Zoom in / out"), Kind::Wheel},
     {Action::Scroll, "scroll", N_("Scroll the image"), Kind::Wheel},
+    {Action::Exposure, "exposure", N_("Exposure up / down"), Kind::Wheel},
 }};
 
 using Bindings = std::array<Action, size_t(Control::Count)>;
@@ -116,7 +118,7 @@ constexpr Bindings default_bindings()
     b[size_t(Control::RightDrag)] = Action::Pan;
     b[size_t(Control::Wheel)] = Action::Navigate;
     b[size_t(Control::CtrlWheel)] = Action::Zoom;
-    b[size_t(Control::ShiftWheel)] = Action::Scroll;
+    b[size_t(Control::ShiftWheel)] = Action::Exposure;
     return b;
 }
 

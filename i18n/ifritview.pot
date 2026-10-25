@@ -126,6 +126,10 @@ msgstr ""
 msgid "Scroll the image"
 msgstr ""
 
+#: src/controls.h:104
+msgid "Exposure up / down"
+msgstr ""
+
 #: src/decoders/astc_file.cpp:66 src/decoders/astc_file.cpp:67
 #: src/decoders/astc_file.cpp:69
 msgid "ASTC"

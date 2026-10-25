@@ -133,6 +133,7 @@ private:
         int direction;
     };
     std::deque<NavStep> nav_steps_;
+    double exposure_range_[2] = {-3, 3};  // the slider's, as last set
     bool flicking(int* direction = nullptr) const;
     bool awaiting_present_ = false;
     int pending_steps_ = 0;

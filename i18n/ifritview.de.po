@@ -121,6 +121,10 @@ msgstr "Vergrößern / verkleinern"
 msgid "Scroll the image"
 msgstr "Bild scrollen"
 
+#: src/controls.h:104
+msgid "Exposure up / down"
+msgstr "Belichtung heller / dunkler"
+
 #: src/decoders/astc_file.cpp:66 src/decoders/astc_file.cpp:67
 #: src/decoders/astc_file.cpp:69
 msgid "ASTC"

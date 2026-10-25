@@ -161,6 +161,7 @@ public:
     std::function<void(double fraction, bool final)> on_video_seek;
     std::function<void()> on_selection_changed;
     std::function<void(Action)> on_action;
+    std::function<void(int direction)> on_exposure_step;  // a wheel bound to exposure: +1 a notch down
 
 private:
     void invalidate();

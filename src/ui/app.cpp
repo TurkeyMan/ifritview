@@ -553,6 +553,13 @@ void App::build_ui()
         }
     };
     side_view_->on_action = view_->on_action;
+    // A notch up brightens by a third of a stop, the cameras' own step,
+    // where the slider applies (raws, HDR).
+    view_->on_exposure_step = [this](int direction)
+    {
+        if (image_ && exposure_applies() && !image_->is_preview())
+            set_exposure(std::clamp(exposure_->value() - direction / 3.0, exposure_range_[0], exposure_range_[1]));
+    };
     view_->on_zoom_changed = [this] { update_status(); };
     view_->on_presented = [this] { image_presented(); };
     view_->on_resized = [this]
@@ -1159,7 +1166,9 @@ void App::sync_exposure_slider()
     const double bias = image_->exposure_bias;
     // An HDR image may need taking down further than a raw to see its brightest.
     const double down = image_->hdr() ? std::max(3.0, std::ceil(std::log2(double(image_->source->peak)))) : 3.0;
-    exposure_->set_range(bias - down, bias + 3.0);
+    exposure_range_[0] = bias - down;
+    exposure_range_[1] = bias + 3.0;
+    exposure_->set_range(exposure_range_[0], exposure_range_[1]);
     exposure_->set_value(bias + image_->exposure_edit);
     exposure_->set_enabled(!image_->is_preview());
     sync_white_balance();

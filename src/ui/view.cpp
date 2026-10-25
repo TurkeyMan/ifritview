@@ -1177,7 +1177,7 @@ bool View::draw_on_gpu(rap::color background)
     }
     canvas_->present(frame, ready, colour);
     if (std::getenv("IFRIT_TRACE"))
-        std::fprintf(stderr, "gpu view: %dx%d at zoom %.4f\n", f.width, f.height, f.zoom);
+        platform::trace("gpu view: %dx%d at zoom %.4f", f.width, f.height, f.zoom);
     gpu_shown_ = true;
     if (histogram_panel_)
     {
@@ -1738,6 +1738,10 @@ void View::run_wheel(Action a, int direction, double x, double y)
         case Action::Navigate:
             if (on_action)
                 on_action(direction > 0 ? Action::NextImage : Action::PrevImage);
+            return;
+        case Action::Exposure:
+            if (on_exposure_step)
+                on_exposure_step(direction);
             return;
         case Action::Scroll:
             pan_y_ -= direction * 64.0 * scale;

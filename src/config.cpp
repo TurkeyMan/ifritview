@@ -222,6 +222,9 @@ void Config::load()
         geocoder_url.clear();
     if (map_url.find("{lat}") == std::string::npos || map_url.find("{lon}") == std::string::npos)
         map_url = "https://www.google.com/maps?q={lat},{lon}";
+    // Version 2: Shift + wheel moved from scrolling (dragging pans better)
+    // to exposure; a file from before still has the old default.
+    const bool before_exposure_wheel = get_int(kf, kControlsGroup, "version", 1) < 2;
     for (const ControlInfo& c : kControls)
     {
         Action& a = controls[size_t(c.id)];
@@ -232,6 +235,13 @@ void Config::load()
         f = action_from_key(get_string(kf, kFullscreenControlsGroup, c.key, action_info(f).key), f);
         if (!action_fits(f, c.kind))
             f = Action::None;
+        if (before_exposure_wheel && c.id == Control::ShiftWheel)
+        {
+            if (a == Action::Scroll)
+                a = Action::Exposure;
+            if (f == Action::Scroll)
+                f = Action::Exposure;
+        }
     }
     g_key_file_free(kf);
 }
@@ -288,6 +298,7 @@ bool Config::save() const
         g_key_file_set_string(kf, kControlsGroup, c.key, action_info(controls[size_t(c.id)]).key);
         g_key_file_set_string(kf, kFullscreenControlsGroup, c.key, action_info(fullscreen_controls[size_t(c.id)]).key);
     }
+    g_key_file_set_integer(kf, kControlsGroup, "version", 2);
     g_key_file_set_string(kf, kSave, "metadata", save_metadata.c_str());
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
     g_key_file_set_string(kf, kInterfaceGroup, "language", language.c_str());
