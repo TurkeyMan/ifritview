@@ -96,6 +96,11 @@ rap::node View::node()
 void View::attach(rap::canvas* canvas)
 {
     canvas_ = canvas;
+#ifdef HAVE_GPU
+    // The GPU device arriving (or going) changes the frame target: draw again,
+    // on it if it's there.
+    canvas_->on_frame_target([this](const rap::frame_target&) { invalidate(); });
+#endif
 }
 
 void View::invalidate()
@@ -630,6 +635,7 @@ void View::config_changed()
 {
     drop_caches();
     layout();
+    invalidate();  // drawn the new way now (the filters, the checkerboard, the backgrounds), not at the next move
 }
 
 void View::drop_caches()
@@ -943,6 +949,27 @@ void View::paint(rap::painter& p, rap::size_f)
     const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
 #ifdef HAVE_GPU
     const bool on_gpu = draw_on_gpu(bg);
+    // A raw or an HDR image is the GPU's to draw (its own data, in linear
+    // light): while the device is still coming, the background and the busy
+    // ring. If none comes (no usable GPU at all), the CPU draws it after all.
+    constexpr int64_t kGpuPatienceUs = 4000000;
+    if (!on_gpu && image_ && image_->tonable() && gpu_wanted_ && !gpu_)
+    {
+        const int64_t now = now_us();
+        if (!gpu_waiting_since_)
+            gpu_waiting_since_ = now;
+        if (now - gpu_waiting_since_ < kGpuPatienceUs)
+        {
+            p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
+            if (!gpu_wait_tick_)
+                gpu_wait_tick_ = ui_.timer(100, false, [this] { gpu_wait_tick_ = {}; invalidate(); });
+            const bool was_busy = busy_;
+            busy_ = true;
+            paint_over(p, bg);
+            busy_ = was_busy;
+            return;
+        }
+    }
 #else
     const bool on_gpu = false;
 #endif
@@ -1053,6 +1080,9 @@ bool View::draw_on_gpu(rap::color background)
     const bool plain = !off && canvas_ && image_ && image_->width > 0 && image_->height > 0 && !compare_ && !motion_.active &&
                        !outgoing_.image && !image_->is_video && !image_->vector && !image_->animation;
     std::shared_ptr<rap::gpu::device> device = plain ? canvas_->gpu_device() : nullptr;
+    gpu_wanted_ = plain;
+    if (device)
+        gpu_waiting_since_ = 0;
     if (device && (!gpu_ || gpu_->device() != device))
         gpu_ = std::make_unique<GpuView>(device);
     if (!device)

@@ -235,6 +235,9 @@ private:
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;
+    bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
+    int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
+    rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)
     // Draws the frame on the GPU when it's the plain case (one still image,
     // not compared, moving or fading); false when the CPU draws it.
     bool draw_on_gpu(rap::color background);
