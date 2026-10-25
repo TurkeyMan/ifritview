@@ -214,6 +214,8 @@ void Image::retone(double ev)
 void Image::build_mips()
 {
     mips.clear();
+    if (pixels.size() < size_t(width) * height * 4)
+        return;  // none yet (a raw the GPU develops)
     const uint8_t* src = pixels.data();
     int w = width, h = height;
     while (std::max(w, h) > 1024 && w >= 2 && h >= 2)
@@ -556,6 +558,8 @@ void Image::adopt(Image&& f)
         info = std::move(f.info);
     linear = std::move(f.linear);
     source = std::move(f.source);
+    mosaic = std::move(f.mosaic);
+    pixels_stale = f.pixels_stale;
     if (f.stored)
         stored = std::move(f.stored);
     mips = std::move(f.mips);  // empty if pending edits rewrote f's pixels
@@ -660,6 +664,16 @@ void Image::apply_orientation(int o)
         pending_edits.push_back({o, 0, 0, 0, 0});
     mips.clear();
     vector.reset();  // its renderings would be the right way up
+    if (mosaic)
+    {
+        // A raw the GPU develops turns as it develops: the turn joins the
+        // camera's, and the pixels (if any) are made again when asked for.
+        auto m = std::make_shared<RawMosaic>(*mosaic);
+        m->orientation = compose_orientation(m->orientation, o);
+        mosaic = std::move(m);
+        PixelBuffer().swap(pixels);
+        pixels_stale = true;
+    }
     edited = true;
     // The crop turns with the image; the turn joins the one before.
     Transform& t = transform;
@@ -671,9 +685,12 @@ void Image::apply_orientation(int o)
     const int W = width, H = height;
     const bool transposed = o >= 5;
     const int dw = transposed ? H : W, dh = transposed ? W : H;
-    PixelBuffer out(size_t(dw) * dh * 4);
-    reorient(reinterpret_cast<const uint32_t*>(pixels.data()), W, H, 1, o, reinterpret_cast<uint32_t*>(out.data()), dw, dh);
-    pixels = std::move(out);
+    if (pixels.size() >= size_t(W) * H * 4)  // none while a raw waits for the GPU (pixels_stale)
+    {
+        PixelBuffer out(size_t(dw) * dh * 4);
+        reorient(reinterpret_cast<const uint32_t*>(pixels.data()), W, H, 1, o, reinterpret_cast<uint32_t*>(out.data()), dw, dh);
+        pixels = std::move(out);
+    }
     if (linear)
     {
         auto l = std::make_shared<LinearData>();

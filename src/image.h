@@ -12,6 +12,24 @@
 #include <string>
 #include <vector>
 
+// A raw's sensor data, undeveloped: one value a photosite in a Bayer
+// mosaic, with what developing it needs. The GPU develops it (demosaic,
+// white balance, colour) into the image it shows; nothing developed is kept
+// on the CPU unless something asks (Image::pixels_stale).
+struct RawMosaic
+{
+    std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
+    int width = 0, height = 0;
+    int colour[4] = {};          // the filter over (row & 1, col & 1): 0 R, 1 G, 2 B (row-major, 2 x 2)
+    float black[4] = {};         // per colour, in data units
+    float white = 65535;         // saturation, in data units
+    float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
+    float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)
+    float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
+    int crop[4] = {};            // the camera's framing in the data: x, y, width, height
+    int orientation = 1;         // EXIF 1..8: how the camera was held
+};
+
 // Linear scene data kept alongside a developed raw image so exposure can be
 // changed without demosaicing again.
 struct LinearData
@@ -153,12 +171,13 @@ struct Image
     std::string encoded_as;
     std::map<std::string, int> encoding;
     std::shared_ptr<LinearData> linear;  // only for raw files
+    std::shared_ptr<const RawMosaic> mosaic;  // a raw the GPU develops (then `pixels` start stale); dropped by turns and crops, once baked
     std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null
     std::shared_ptr<const VectorSource> vector;  // can be drawn sharper; dropped by turns, flips and crops
     // More than the display shows (a linear source past 1): exposure applies.
     bool hdr() const { return source && source->linear && source->peak > 1.0f; }
     // Re-rendered by retone(): a raw's linear data, or an HDR source.
-    bool tonable() const { return linear || hdr(); }
+    bool tonable() const { return linear || mosaic || hdr(); }
     // Halvings of `pixels` (½, ¼, …) for fast downscaled display, built off the
     // main thread after a decode. Empty when absent or stale; anything that
     // rewrites `pixels` clears them.

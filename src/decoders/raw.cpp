@@ -254,6 +254,86 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     return true;
 }
 
+// Unpacked only: the sensor's Bayer mosaic and what developing it needs,
+// for the GPU to develop (gpu_view's develop pass). The CPU's part of a raw
+// is just this, a fraction of a second. False for sensors it doesn't take
+// (X-Trans, Foveon, linear DNGs): those develop here, on the CPU.
+bool decode_mosaic(LibRaw& raw, Image& out, std::string& error)
+{
+    const auto& id = raw.imgdata.idata;
+    if (!id.filters || id.filters == 9 || id.filters < 1000 || id.colors != 3)
+        return false;  // not a 2 x 2 Bayer pattern
+    int r = raw.unpack();
+    if (r != LIBRAW_SUCCESS)
+    {
+        error = libraw_strerror(r);
+        return false;
+    }
+    const auto& sz = raw.imgdata.sizes;
+    const auto& col = raw.imgdata.color;
+    const ushort* src = raw.imgdata.rawdata.raw_image;
+    if (!src || sz.width == 0 || sz.height == 0)
+        return false;
+    auto m = std::make_shared<RawMosaic>();
+    m->width = sz.width;
+    m->height = sz.height;
+    auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height);
+    // The active area, out of the readout with its margins.
+    for (int y = 0; y < m->height; ++y)
+        std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * sz.raw_pitch / 2 + sz.left_margin,
+                    size_t(m->width) * 2);
+    m->data = std::move(data);
+    // dcraw's FC(row, col): the filter colour, 0 R, 1 G, 2 B, 3 the second G.
+    for (int row = 0; row < 2; ++row)
+        for (int c = 0; c < 2; ++c)
+        {
+            const int f = (id.filters >> ((((row << 1) & 14) | (c & 1)) << 1)) & 3;
+            m->colour[row * 2 + c] = f == 3 ? 1 : f;
+        }
+    for (int c = 0; c < 4; ++c)
+        m->black[c] = float(col.black + col.cblack[c]);
+    m->white = float(col.maximum);
+    // As shot, scaled so the least is 1: a channel clips at 1 after it, and
+    // clipping all at 1 keeps highlights neutral.
+    float mul[3] = {col.cam_mul[0], col.cam_mul[1], col.cam_mul[2]};
+    if (!(mul[0] > 0 && mul[1] > 0 && mul[2] > 0))
+        for (int c = 0; c < 3; ++c)
+            mul[c] = col.pre_mul[c] > 0 ? col.pre_mul[c] : 1;
+    const float least = std::min({mul[0], mul[1], mul[2]});
+    for (int c = 0; c < 3; ++c)
+        m->as_shot[c] = mul[c] / least;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+        {
+            m->rgb_cam[i][j] = col.rgb_cam[i][j];
+            m->cam_xyz[i][j] = col.cam_xyz[i][j];
+        }
+    // The camera's framing, as the CPU develop crops to it.
+    m->crop[0] = 0, m->crop[1] = 0, m->crop[2] = m->width, m->crop[3] = m->height;
+    if (decode_options().raw_camera_crop)
+    {
+        const auto& c = sz.raw_inset_crops[0];
+        const int left = int(c.cleft) - int(sz.left_margin), top = int(c.ctop) - int(sz.top_margin);
+        if (c.cwidth && c.cheight && c.cleft != 0xFFFF && c.ctop != 0xFFFF && left >= 0 && top >= 0 &&
+            left + int(c.cwidth) <= m->width && top + int(c.cheight) <= m->height)
+        {
+            m->crop[0] = left, m->crop[1] = top, m->crop[2] = c.cwidth, m->crop[3] = c.cheight;
+            out.add(N_("Raw"), N_("Camera framing"),
+                    std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " +
+                        std::to_string(c.ctop) + ")");
+        }
+    }
+    m->orientation = flip_to_orientation(sz.flip);
+    const bool turned = m->orientation >= 5;
+    // What it will be, as shown: no pixels until something asks for them.
+    out.width = turned ? m->crop[3] : m->crop[2];
+    out.height = turned ? m->crop[2] : m->crop[3];
+    out.stride = out.width * 4;
+    out.pixels_stale = true;
+    out.mosaic = std::move(m);
+    return true;
+}
+
 // The embedded JPEG, used as the on-screen stand-in while the real decode
 // runs; not offered when the configured mode is the preview anyway.
 void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64);
@@ -337,6 +417,12 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         ok = decode_preview(raw, out, error);
         mode = "embedded preview";
     }
+    // Developed on the GPU where there is one: only unpacked here.
+    if (!ok && options.raw_mode == RawMode::Full && options.gpu_develop)
+    {
+        ok = decode_mosaic(raw, out, error);
+        mode = "full size, GPU";
+    }
     if (!ok)
     {
         const bool half = options.raw_mode != RawMode::Full;
@@ -349,6 +435,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
     if (out.linear)
         out.color_space = "sRGB (developed)";  // the sensor has no colour space; this is what we rendered to
+    else if (out.mosaic)
+        out.color_space = "camera (developed on the GPU)";
     std::string make = raw.imgdata.idata.normalized_make[0] ? raw.imgdata.idata.normalized_make : raw.imgdata.idata.make;
     out.format = make.empty() ? "RAW" : make + " RAW";
     out.format += ", " + mode;

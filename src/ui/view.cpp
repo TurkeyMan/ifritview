@@ -1203,6 +1203,29 @@ void View::present_on_gpu()
 #endif
 }
 
+bool View::develop_pixels()
+{
+#ifdef HAVE_GPU
+    if (!image_ || !image_->mosaic || !canvas_)
+        return false;
+    std::shared_ptr<rap::gpu::device> device = canvas_->gpu_device();
+    if (!device)
+        return false;
+    if (!gpu_ || gpu_->device() != device)
+        gpu_ = std::make_unique<GpuView>(device);
+    PixelBuffer px;
+    std::string error;
+    if (!gpu_->export_pixels(image_, generation_, image_->exposure_edit, px, error))
+        return false;
+    image_->pixels = std::move(px);
+    image_->stride = image_->width * 4;
+    gpu_drawn_ = {};  // its frames were drawn into: draw the view again
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool View::drawn_on_gpu() const
 {
 #ifdef HAVE_GPU

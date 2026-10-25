@@ -41,6 +41,9 @@ struct DecodeOptions
     };
     RawMode raw_mode = RawMode::Full;
     bool raw_camera_crop = true;  // frame as the camera did, dropping the sensor margins it never shows
+    // Raws (Bayer) only unpacked, for the GPU to develop (Image::mosaic): the
+    // viewer, when it draws on the GPU. Else LibRaw develops them here.
+    bool gpu_develop = false;
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();

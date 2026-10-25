@@ -3,6 +3,7 @@
 #include "../image.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
+#include "shaders/develop.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
 #include "shaders/histogram_view.h"
@@ -48,8 +49,23 @@ struct ComposeParams
     int32_t show_histogram;
     uint32_t histogram_channels;
     float panel[4];
+    float input_x[4], input_y[4], input_z[4];
+    int32_t auto_exposure, unused2[3];
 };
-static_assert(sizeof(ComposeParams) == 176, "as view.hlsli's cbuffer packs");
+static_assert(sizeof(ComposeParams) == 240, "as view.hlsli's cbuffer packs");
+
+struct DevelopParams
+{
+    int32_t colour[4];
+    float black[4];
+    float as_shot[4];  // w: saturation
+    int32_t map_x[4], map_y[4];
+    int32_t size[4];
+};
+
+// BT.709 (sRGB) linear to XYZ, D65.
+constexpr float kXyzFrom709[3][3] = {
+    {0.4124564f, 0.3575761f, 0.1804375f}, {0.2126729f, 0.7151522f, 0.0721750f}, {0.0193339f, 0.1191920f, 0.9503041f}};
 
 // sRGB's primaries and white in u'v' (CIE 1976 UCS): the display's until
 // rapport describes the real one.
@@ -88,14 +104,15 @@ void GpuView::read_details(std::function<void(const Details&)> done)
         return;
     struct Read
     {
-        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1032 * 4);
+        std::vector<std::byte> stats = std::vector<std::byte>(1101 * 4), histogram = std::vector<std::byte>(1032 * 4);
     };
     auto read = std::make_shared<Read>();
     const bool scene = tonable_;
     const float exposure = histogram_scale_;
+    const bool automatic = auto_exposure_;
     device_->readback(stats_, read->stats);
     device_->readback(histogram_, read->histogram,
-                      [read, scene, exposure, done = std::move(done)]
+                      [read, scene, exposure, automatic, done = std::move(done)]
                       {
                           const auto word = [](const std::vector<std::byte>& v, size_t i)
                           {
@@ -114,14 +131,17 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                           const uint32_t count = word(read->stats, 1096);
                           if (count)
                           {
-                              d.minimum = as_float(~word(read->stats, 1098)) * exposure;
-                              d.maximum = as_float(word(read->stats, 1099)) * exposure;
-                              d.peak = as_float(word(read->stats, 1097)) * exposure;
+                              float scale = exposure;
+                              if (automatic && as_float(word(read->stats, 1100)) > 0)
+                                  scale /= as_float(word(read->stats, 1100));  // as auto_gain() has it
+                              d.minimum = as_float(~word(read->stats, 1098)) * scale;
+                              d.maximum = as_float(word(read->stats, 1099)) * scale;
+                              d.peak = as_float(word(read->stats, 1097)) * scale;
                               // The mean from the log2 histogram's bin centres (to a couple of percent).
                               double sum = 0;
                               for (int bin = 0; bin < 1024; ++bin)
                                   sum += double(word(read->stats, size_t(bin))) * std::exp2((bin + 0.5) * 32 / 1024 - 20);
-                              d.average = float(sum / count) * exposure;
+                              d.average = float(sum / count) * scale;
                           }
                           // Clipped as shown: R, G or B at an end (each channel's share, the largest).
                           uint64_t total = 0;
@@ -135,6 +155,36 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                               }
                           done(d);
                       });
+}
+
+bool GpuView::export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, double exposure, PixelBuffer& out,
+                            std::string& error)
+{
+    // The view's own frame at 1:1, the whole image, as an SDR display shows it.
+    Frame f;
+    f.width = image->width;
+    f.height = image->height;
+    f.zoom = 1;
+    f.exposure = exposure;
+    f.background = rap::color{0, 0, 0};
+    f.enlarge = f.shrink = ScaleFilter::Nearest;
+    f.front = FrontBuffer::Srgb8;
+    rap::gpu::texture_ptr frame;
+    rap::gpu::ticket ready;
+    rap::frame_color colour;
+    if (!render(image, generation, f, frame, ready, colour, error))
+        return false;
+    std::vector<std::byte> rgba(size_t(f.width) * f.height * 4);
+    device_->readback(frame, rgba, size_t(f.width) * 4).wait();
+    out.resize(rgba.size());
+    for (size_t i = 0; i < rgba.size(); i += 4)  // RGBA to BGRA, opaque
+    {
+        out[i] = uint8_t(rgba[i + 2]);
+        out[i + 1] = uint8_t(rgba[i + 1]);
+        out[i + 2] = uint8_t(rgba[i]);
+        out[i + 3] = 255;
+    }
+    return true;
 }
 
 bool GpuView::draw_histogram(int width, int height, int channels, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready)
@@ -167,7 +217,8 @@ bool GpuView::programs(std::string& error)
     if (compose_)
         return true;
     for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
-                                 std::pair{&compose_, shaders::compose}, std::pair{&histogram_view_, shaders::histogram_view}})
+                                 std::pair{&compose_, shaders::compose}, std::pair{&histogram_view_, shaders::histogram_view},
+                                 std::pair{&develop_, shaders::develop}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -189,7 +240,7 @@ bool GpuView::programs(std::string& error)
         }
         *program = r.program;
     }
-    stats_ = device_->create_buffer(1100 * 4);
+    stats_ = device_->create_buffer(1101 * 4);
     histogram_ = device_->create_buffer(1032 * 4);
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
     if (!stats_ || !histogram_ || !blank_)
@@ -211,6 +262,69 @@ bool GpuView::upload(const Image& image, std::string& error)
     DecodeParams dp{1, 3, 0, 0};
     scene_gain_ = 1;
     tonable_ = image.tonable();
+    auto_exposure_ = false;
+    std::memcpy(input_to_xyz_, kXyzFrom709, sizeof input_to_xyz_);
+    if (const RawMosaic* m = image.mosaic.get())
+    {
+        // A raw, developed here: the mosaic up as it is, then demosaiced into
+        // level 0 (camera RGB, unbalanced).
+        auto sites = device_->create({m->width, m->height, rap::gpu::format::r16});
+        auto top = device_->create({w, h, rap::gpu::format::rgba16f, 1, true});
+        if (!sites || !top)
+        {
+            error = "too big for the GPU";
+            return false;
+        }
+        device_->upload(sites, std::as_bytes(std::span(*m->data)), {1, rap::gpu::sample_type::u16});
+        DevelopParams p{};
+        for (int i = 0; i < 4; ++i)
+            p.colour[i] = m->colour[i];
+        for (int c = 0; c < 3; ++c)
+        {
+            p.black[c] = m->black[c];
+            p.as_shot[c] = m->as_shot[c];
+        }
+        p.as_shot[3] = m->white;
+        p.size[0] = m->width, p.size[1] = m->height;
+        // Output (x, y), as shown, to the photosite: through the turn, then
+        // into the framing (EXIF orientation: what the stored image needs).
+        const int cw = m->crop[2] - 1, ch = m->crop[3] - 1, cx = m->crop[0], cy = m->crop[1];
+        int a = 1, b = 0, c = 0, d = 0, e = 1, f = 0;  // crop x = a*x + b*y + c, crop y = d*x + e*y + f
+        switch (m->orientation)
+        {
+            case 2: a = -1, c = cw; break;
+            case 3: a = -1, c = cw, e = -1, f = ch; break;
+            case 4: e = -1, f = ch; break;
+            case 5: a = 0, b = 1, d = 1, e = 0; break;
+            case 6: a = 0, b = 1, d = -1, e = 0, f = ch; break;
+            case 7: a = 0, b = -1, c = cw, d = -1, e = 0, f = ch; break;
+            case 8: a = 0, b = -1, c = cw, d = 1, e = 0; break;
+            default: break;
+        }
+        p.map_x[0] = a, p.map_x[1] = b, p.map_x[2] = c + cx;
+        p.map_y[0] = d, p.map_y[1] = e, p.map_y[2] = f + cy;
+        rap::gpu::pass pass;
+        pass.program = develop_;
+        pass.inputs = {sites};
+        pass.uniforms = bytes(p);
+        pass.target = top;
+        device_->run(std::span(&pass, 1));
+        levels_.push_back(top);
+        // Shown through its colour matrix, its white balance (as shot) in it:
+        // XYZ = XYZ<-709 . rgb_cam . diag(white balance).
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+            {
+                float v = 0;
+                for (int k = 0; k < 3; ++k)
+                    v += kXyzFrom709[i][k] * m->rgb_cam[k][j];
+                input_to_xyz_[i][j] = v * m->as_shot[j];
+            }
+        auto_exposure_ = true;
+        measured_ = false;
+        histogram_generation_ = 0;
+        return true;
+    }
     if (const LinearData* raw = image.linear.get(); raw && raw->rgb.size() == size_t(w) * h * 3)
     {
         // Linear RGB, 16 bits; its scale (and curve) applied as it's shown.
@@ -374,6 +488,13 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     cp.tone = tone_ ? 1 : 0;
     cp.output = int32_t(f.front);
     cp.white = f.sdr_white_nits;
+    for (int j = 0; j < 3; ++j)
+    {
+        cp.input_x[j] = input_to_xyz_[0][j];
+        cp.input_y[j] = input_to_xyz_[1][j];
+        cp.input_z[j] = input_to_xyz_[2][j];
+    }
+    cp.auto_exposure = auto_exposure_ ? 1 : 0;
     // The display: sRGB at SDR white until rapport describes the real one.
     std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
     std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);

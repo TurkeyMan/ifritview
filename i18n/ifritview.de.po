@@ -1997,3 +1997,11 @@ msgstr "Das Histogramm braucht eine GPU."
 #: src/ui/settings.cpp
 msgid "Picture levels in nits (else as a share of white)"
 msgstr "Bildpegel in Nits (sonst als Anteil von Weiß)"
+
+#: src/ui/app.cpp
+msgid "Histogram and levels (G)"
+msgstr "Histogramm und Pegel (G)"
+
+#: src/ui/app.cpp
+msgid "This raw needs the GPU to develop it"
+msgstr "Dieses RAW braucht zum Entwickeln die GPU"

@@ -1,4 +1,6 @@
 #pragma once
+
+#include <cstdlib>
 // Small things the App's parts share (app.cpp and the app_*.cpp beside it).
 
 #include "config.h"
@@ -31,6 +33,10 @@ inline DecodeOptions decode_options_for(const Config& cfg)
     using RawMode = DecodeOptions::RawMode;
     o.raw_mode = cfg.raw_mode == "full" ? RawMode::Full : cfg.raw_mode == "preview" ? RawMode::Preview : RawMode::Half;
     o.raw_camera_crop = cfg.raw_camera_crop;
+#ifdef HAVE_GPU
+    // Raws developed on the GPU (the CPU only unpacks), unless the view is told off it.
+    o.gpu_develop = !std::getenv("IFRIT_NO_GPU_VIEW") && !std::getenv("IFRIT_CPU_DEVELOP");
+#endif
     return o;
 }
 

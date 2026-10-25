@@ -30,7 +30,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         if (c.a > 0)
         {
             const float3 rgb = c.rgb / c.a;
-            const float3 xyz = mul(kRgbToXyz709, rgb);
+            const float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), rgb);
             if (xyz.y > 0)
             {
                 const uint bin = uint(clamp((log2(xyz.y) + 20) * 1024 / 32, 0.0, 1023.0));

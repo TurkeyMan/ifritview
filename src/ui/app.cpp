@@ -128,6 +128,20 @@ rap::icon b_icon()
         });
 }
 
+// A histogram: bars on a baseline, as no icon theme has one either.
+rap::icon histogram_icon()
+{
+    return rap::icon::drawn(
+        [](rap::painter& p, rap::size_f s)
+        {
+            const float u = s.w / 16;
+            const float heights[] = {3, 6, 10, 12, 8, 5, 7, 4};
+            for (int i = 0; i < 8; ++i)
+                p.rect({(1.5f + i * 1.65f) * u, (13.5f - heights[i]) * u, 1.25f * u, heights[i] * u}, 0, ink, std::nullopt);
+            p.line({1 * u, 14 * u}, {15 * u, 14 * u}, ink, 1.2f * u);
+        });
+}
+
 rap::icon swipe_icon()
 {
     return rap::icon::drawn(
@@ -325,6 +339,7 @@ void App::build_ui()
                         .tooltip(_("How much the difference is amplified")),
                 }
                     .handle(diff_widgets_[2]),
+                L::tool_button{histogram_icon(), _("Histogram and levels (G)")}.on_click([this] { toggle_histogram(); }),
                 tool_button("dialog-information-symbolic", _("Metadata / EXIF (I)"), &App::toggle_metadata),
                 tool_button("preferences-system-symbolic", _("Settings (Ctrl+,)"), &App::open_settings),
             }
@@ -424,6 +439,10 @@ void App::build_ui()
                 std::snprintf(buf, sizeof buf, "%.1f%%", double(v) * 100);
             return buf;
         };
+        if (std::getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "histogram: known %d scene %d min %g max %g peak %g average %g black %g white %g\n", int(d.known),
+                         int(d.scene), double(d.minimum), double(d.maximum), double(d.peak), double(d.average), double(d.black),
+                         double(d.white));
         if (!d.known)
         {
             for (rap::label* l : {hist_peak_, hist_max_, hist_min_, hist_average_, hist_clipped_})
@@ -595,6 +614,15 @@ void App::pixels_for_cpu()
 {
     if (!image_ || !image_->pixels_stale)
         return;
+    if (image_->mosaic)
+    {
+        // Developed on the GPU: rendered there and read back.
+        if (view_->develop_pixels())
+            image_->pixels_stale = false;
+        else
+            status_message_ = _("This raw needs the GPU to develop it");
+        return;
+    }
     image_->pixels_stale = false;
     image_->retone(image_->exposure_edit);
     view_->retoned();
@@ -617,7 +645,8 @@ void App::transform(int exif_orientation)
 {
     if (!image_)
         return;
-    pixels_for_cpu();
+    if (!image_->mosaic)
+        pixels_for_cpu();  // (a raw the GPU develops turns as it develops)
     image_->apply_orientation(exif_orientation);  // a preview remembers it for its develop
     view_->image_changed();
     fit_window_to_image();
@@ -1216,6 +1245,14 @@ void App::request_retone()
 {
     if (retone_busy_ || !image_ || !image_->tonable())
         return;
+    if (image_->mosaic)
+    {
+        // Developed on the GPU: its pixels are made there, when asked for.
+        image_->pixels_stale = true;
+        PixelBuffer().swap(image_->pixels);
+        view_->redraw();
+        return;
+    }
     retone_busy_ = true;
     auto image = image_;
     auto linear = image_->linear;

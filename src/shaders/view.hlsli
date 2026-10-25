@@ -33,6 +33,11 @@ cbuffer Params : register(b0)
     int show_histogram; // 1: the histogram panel, at `panel`
     uint histogram_channels;  // which (histogram.hlsli)
     float4 panel;       // x0, y0, x1, y1 in frame pixels
+    float4 input_x;     // rows of the image's data -> XYZ (its colour matrix, a raw's white balance in it)
+    float4 input_y;
+    float4 input_z;
+    int auto_exposure;  // 1: a raw developed on the GPU, its scale from its own 99th percentile (auto_gain)
+    int3 unused2;
 };
 
 Texture2D<float4> source : register(t0);
@@ -50,33 +55,47 @@ static const uint kStatsCount = 1096;   // pixels counted
 static const uint kStatsPeak = 1097;    // float: the 99.9th percentile's luminance (peak.hlsl)
 static const uint kStatsMinimum = 1098; // ~float bits of the least luminance above 0 (max of the complement: a min)
 static const uint kStatsMaximum = 1099; // float bits of the greatest
-static const uint kStatsWords = 1100;
+static const uint kStatsP99 = 1100;     // float: the 99th percentile's luminance (peak.hlsl), for auto exposure
+static const uint kStatsWords = 1101;
 
 // The scene colour as the display shows it (linear, 1 = SDR white).
+// The scene's luminance scale for a raw developed on the GPU: its 99th
+// percentile at SDR white, as LibRaw's auto-brightening does (the roll-off
+// takes the 1% above). 1 for the rest.
+float auto_gain()
+{
+    if (!auto_exposure || !measured)
+        return 1;
+    const float p99 = asfloat(stats.Load(kStatsP99 * 4));
+    return p99 > 0 ? 1 / p99 : 1;
+}
+
+// A colour of the image's data (its own space: input_x/y/z take it to XYZ)
+// as the display shows it, in the display's linear RGB (BT.709 until
+// there's a display description).
 float3 tone_map(float3 c)
 {
-    c *= exposure;
+    const float scale = exposure * auto_gain();
+    float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), c) * scale;
     if (tone == 1)
     {
         // The camera's curve maps luminance; the colour scales with it, so hue holds.
-        const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
+        const float lum = xyz.y;
         const float x = saturate(lum) * 4095;
         const int i = int(x);
         const float o = lerp(tone_curve.Load(int3(i, 0, 0)), tone_curve.Load(int3(min(i + 1, 4095), 0, 0)), x - i);
-        c *= lum > 1e-6 ? o / lum : 0;
+        xyz *= lum > 1e-6 ? o / lum : 0;
     }
-    // BT.709 primaries in, as the image's data is kept; the display's out
-    // (the same until there's a display description).
     if (measured)
     {
-        const float3 xyz = mul(kRgbToXyz709, c);
         float y = xyz.y;
         float2 uv = uv_from_xyz(xyz);
-        const float source_peak = asfloat(stats.Load(kStatsPeak * 4)) * exposure;
-        if (source_peak > 0 && tone != 1)  // a raw's camera curve is display-referred already
+        const float source_peak = asfloat(stats.Load(kStatsPeak * 4)) * scale;
+        if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
         {
             const float mapped = eetf(y, source_peak, display_peak, white);
-            // Towards white as it nears the display's peak, as film does.
+            // Towards white as it nears the display's peak, as film does (only
+            // when there's something to compress: an image that fits is shown as it is).
             const float knee = 0.75 * display_peak;
             uv = lerp(uv, kWhiteUv, smoothstep(knee, display_peak, mapped) * 0.6);
             y = mapped;
@@ -97,7 +116,7 @@ float3 tone_map(float3 c)
                 uv = kWhiteUv + dir * compress(len / edge, threshold, max(limit, 1.0)) * edge;
             }
         }
-        c = mul(kXyzToRgb709, xyz_from_yuv(y, uv));
+        xyz = xyz_from_yuv(y, uv);
     }
-    return c;
+    return mul(kXyzToRgb709, xyz);
 }

@@ -369,7 +369,7 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/display.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli)
-  foreach(shader decode resample compose histogram_view)
+  foreach(shader decode develop resample compose histogram_view)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
   foreach(shader stats peak histogram histogram_max)

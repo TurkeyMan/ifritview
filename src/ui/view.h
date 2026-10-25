@@ -51,6 +51,9 @@ public:
     // The GPU's frame for the view as it is now, presented before the next
     // paint (nothing if it's already that, or the CPU draws it).
     void present_on_gpu();
+    // A raw the GPU developed, as 8-bit pixels at its exposure (Image::mosaic):
+    // false without a GPU to do it.
+    bool develop_pixels();
     // The CPU is about to draw an image whose 8-bit pixels the GPU's drawing
     // left at an older exposure: bring them up to date (App::pixels_for_cpu).
     std::function<void()> on_needs_pixels;

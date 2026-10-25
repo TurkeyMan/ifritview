@@ -14,6 +14,7 @@
 // to the CPU.
 
 #include "../config.h"
+#include "../pixel_buffer.h"
 
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
@@ -82,6 +83,12 @@ public:
     // `done` runs on a rapport thread once they're in (if a count has run).
     void read_details(std::function<void(const Details&)> done);
 
+    // The image at `exposure` as an 8-bit sRGB rendering, full size, read back
+    // (premultiplied BGRA, as Image keeps pixels): for what reads pixels on
+    // the CPU (saving, printing, comparing) when the GPU developed it. Waits.
+    bool export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, double exposure, PixelBuffer& out,
+                       std::string& error);
+
 private:
     bool programs(std::string& error);
     // The image's data on the device, decoded to linear light (level 0).
@@ -109,6 +116,9 @@ private:
     std::vector<rap::gpu::texture_ptr> levels_;  // linear, premultiplied, half float
     rap::gpu::texture_ptr tone_;                  // a raw's camera-matched curve, 4096 x 1
     float scene_gain_ = 1;                        // the scene's scale before exposure (a raw's gain without a curve)
+    float input_to_xyz_[3][3] = {};               // the image's data -> XYZ (a raw's: its matrix and white balance)
+    bool auto_exposure_ = false;                  // a raw developed here: scaled by its own 99th percentile
+    rap::gpu::program_ptr develop_;
     bool tonable_ = false;                        // exposure applies
     rap::gpu::texture_ptr rows_;                  // the first pass's output, reused while big enough
     rap::gpu::texture_ptr frames_[2];
