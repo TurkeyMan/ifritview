@@ -173,6 +173,8 @@ void Config::load()
         raw_mode = "full";
     apply_xmp_edits = get_bool(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
     raw_camera_crop = get_bool(kf, kFiles, "raw_camera_crop", raw_camera_crop);
+    lens_correction = get_bool(kf, kFiles, "lens_correction", lens_correction);
+    lens_downloads = get_bool(kf, kFiles, "lens_downloads", lens_downloads);
 
     fit_window_to_image = get_bool(kf, kWindow, "fit_to_image", fit_window_to_image);
     min_window_width = std::max(200, get_int(kf, kWindow, "min_width", min_window_width));
@@ -270,6 +272,8 @@ bool Config::save() const
     g_key_file_set_string(kf, kFiles, "raw_mode", raw_mode.c_str());
     g_key_file_set_boolean(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
     g_key_file_set_boolean(kf, kFiles, "raw_camera_crop", raw_camera_crop);
+    g_key_file_set_boolean(kf, kFiles, "lens_correction", lens_correction);
+    g_key_file_set_boolean(kf, kFiles, "lens_downloads", lens_downloads);
 
     g_key_file_set_boolean(kf, kWindow, "fit_to_image", fit_window_to_image);
     g_key_file_set_integer(kf, kWindow, "min_width", min_window_width);

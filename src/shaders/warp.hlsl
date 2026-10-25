@@ -1,9 +1,9 @@
-// A DNG's WarpRectilinear (dng_opcodes.h): the lens's distortion and
-// lateral chromatic aberration taken out. The develop has made the whole
-// active area (camera RGB, unturned); each output pixel, in the image as
-// shown, goes back to its place in that (map_x, map_y), then to where the
-// DNG says the lens put it, each colour its own place for the chromatic
-// aberration, read there with Catmull-Rom's cubic.
+// A lens's distortion and lateral chromatic aberration taken out: a DNG's
+// WarpRectilinear (dng_opcodes.h), or lensfun's models (lens_database.h).
+// The develop has made the whole active area (camera RGB, unturned); each
+// output pixel, in the image as shown, goes back to its place in that
+// (map_x, map_y), then to where the lens put it, each colour its own place
+// for the chromatic aberration, read there with Catmull-Rom's cubic.
 cbuffer Params : register(b0)
 {
     int4 map_x;  // active-area x = map_x.x * out.x + map_x.y * out.y + map_x.z
@@ -22,7 +22,7 @@ float word_f(uint i)
 // Where the lens put what belongs at (x, y), for plane p (the DNG spec's
 // formula: radial kr0..kr3, tangential kt0, kt1, about the centre, in
 // units of the distance to the farthest corner).
-float2 source(float2 at, uint p)
+float2 source_dng(float2 at, uint p)
 {
     const float2 c = float2(word_f(17), word_f(18));
     const float m = word_f(19);
@@ -33,6 +33,32 @@ float2 source(float2 at, uint p)
     const float kt0 = word_f(k + 4), kt1 = word_f(k + 5);
     const float2 t = float2(kt0 * 2 * d.x * d.y + kt1 * (r2 + 2 * d.x * d.x), kt1 * 2 * d.x * d.y + kt0 * (r2 + 2 * d.y * d.y));
     return c + m * (f * d + t);
+}
+
+// lensfun's, as its modifier goes: about the lens's centre in units of its
+// real focal length, scaled so the frame's edges stay inside, distorted
+// (rd = ru (1 + c1 ru + c2 ru^2 + c3 ru^3 + c4 ru^4): poly3, poly5 and
+// ptlens alike), then red and blue moved from green by the TCA
+// (r (v + c r + b r^2)). Plane 1, green, has none.
+float2 source_lensfun(float2 at, uint p)
+{
+    const float2 c = float2(word_f(17), word_f(18));
+    const float n = word_f(19);
+    float2 d = (at - c) * n * word_f(20);
+    float r = length(d);
+    d *= 1 + r * (word_f(21) + r * (word_f(22) + r * (word_f(23) + r * word_f(24))));
+    if (p != 1)
+    {
+        const uint k = p == 0 ? 25 : 28;
+        r = length(d);
+        d *= word_f(k) + r * (word_f(k + 1) + r * word_f(k + 2));
+    }
+    return c + d / n;
+}
+
+float2 source(float2 at, uint p)
+{
+    return corrections.Load(12 * 4) == 1 ? source_lensfun(at, p) : source_dng(at, p);
 }
 
 float4 texel(int x, int y)
@@ -66,8 +92,8 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int2 o = int2(position.xy);
     const float2 at = float2(map_x.x * o.x + map_x.y * o.y + map_x.z, map_y.x * o.x + map_y.y * o.y + map_y.z);
     float3 rgb;
-    if (corrections.Load(16 * 4) == 1)
-        rgb = cubic(source(at, 0)).rgb;
+    if (corrections.Load(16 * 4) == 1)  // all planes alike: the DNG's one, or lensfun's without TCA (green's)
+        rgb = cubic(source(at, corrections.Load(12 * 4) == 1 ? 1 : 0)).rgb;
     else
         rgb = float3(cubic(source(at, 0)).r, cubic(source(at, 1)).g, cubic(source(at, 2)).b);
     return float4(max(rgb, 0), 1);

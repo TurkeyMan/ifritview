@@ -1183,6 +1183,14 @@ msgstr ""
 msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
 msgstr ""
 
+#: src/ui/settings.cpp
+msgid "Download lens corrections (lensfun's database, when a raw first needs it)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "The whole database is fetched from lensfun's site (about 0.5 MB), never a single lens, so it doesn't say which lenses you have; then checked for a newer one at most once a month. Off: only a copy already downloaded is used"
+msgstr ""
+
 #: src/ui/app.cpp:301
 msgid "Show A (Tab flips A and B)"
 msgstr ""
@@ -1887,6 +1895,10 @@ msgstr ""
 msgid "Third-party notices: the friends who lent a hand"
 msgstr ""
 
+#: src/ui/settings.cpp
+msgid "Lens corrections from the lensfun project's database (CC BY-SA 3.0)"
+msgstr ""
+
 #: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr ""
@@ -2011,6 +2023,14 @@ msgstr ""
 
 #: src/ui/app.cpp
 msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Lens correction"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, for raws that carry no corrections of their own"
 msgstr ""
 
 #: src/ui/app.cpp

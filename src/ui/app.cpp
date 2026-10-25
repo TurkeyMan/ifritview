@@ -13,6 +13,7 @@
 #include "first_image.h"
 #include "integration.h"
 #include "jpeg_lossless.h"
+#include "lens_store.h"
 #include "encoders/encoder.h"
 
 #include <gio/gio.h>
@@ -34,6 +35,12 @@ using APixelFormat = rap::pixel_format;
 // after it's gone (both sides on the main thread).
 static App* s_app = nullptr;
 
+void App::lenses_arrived()
+{
+    if (s_app)
+        s_app->correct_lens(true);
+}
+
 std::shared_future<Config> App::read_settings()
 {
     return std::async(std::launch::async,
@@ -54,6 +61,7 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     cfg_ = settings.get();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
+    lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
     // Format plugins load on a thread of their own, the first image never
     // waiting for them; once they're in, their formats join the folder.
@@ -313,7 +321,12 @@ void App::build_ui()
                      {"", L::check{_("LibRaw's develop")}
                               .on_toggled([this](bool on) { show_instead(on ? Instead::LibRaw : Instead::Nothing); })
                               .bind(libraw_check_)
-                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))}},
+                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))},
+                     {"", L::check{_("Lens correction"), cfg_.lens_correction}
+                              .on_toggled([this](bool on) { set_lens_correction(on, true); })
+                              .bind(lens_check_)
+                              .tooltip(_("Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, "
+                                         "for raws that carry no corrections of their own"))}},
         }
             .handle(exposure_box_);
 
@@ -1203,6 +1216,7 @@ void App::on_loaded(Loader::Result& r)
             std::fprintf(stderr, "developed %s %dx%d: decoded in %.0f ms, %.0f ms to reach the UI\n", key_text(r.path).c_str(), image_->width,
                          image_->height, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
         status_message_.clear();
+        correct_lens(false);
         view_->image_changed();
         fit_window_to_image();
         sync_exposure_slider();
@@ -1292,6 +1306,7 @@ void App::on_loaded(Loader::Result& r)
     }
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
+    correct_lens(false);
     view_->set_image(image_);
     instead_image_.reset();
     show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
@@ -1339,6 +1354,7 @@ void App::sync_white_balance()
     wb_box_->set_visible(raw);
     camera_jpeg_check_->set_visible(image_ && image_->is_raw);
     libraw_check_->set_visible(image_ && image_->is_raw);
+    lens_check_->set_visible(image_ && image_->is_raw);
     if (!raw)
         return;
     double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
@@ -1832,6 +1848,7 @@ void App::open_settings_page(int page)
             set_decode_options(decode_options_for(cfg_));
             cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
             geocoder_.set_provider(cfg_.geocoder_url);
+            lenses::allow_downloads(cfg_.lens_downloads);
             if (image_)
                 request_place(image_);
             video_.set_loop(cfg_.video_loop);

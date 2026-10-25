@@ -50,13 +50,6 @@ float be_float(const uint8_t* p)
     return f;
 }
 
-uint32_t bits(float f)
-{
-    uint32_t v;
-    std::memcpy(&v, &f, 4);
-    return v;
-}
-
 struct Ifd
 {
     uint32_t subfile = 0, width = 0, height = 0;

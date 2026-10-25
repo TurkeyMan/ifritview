@@ -162,7 +162,9 @@ float mosaic_gain(int x, int y)
     return g;
 }
 
-// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette.
+// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette;
+// or lensfun's vignetting (pa), the same polynomial as the fall-off to
+// divide out (lens_database.h).
 float3 rgb_gain(int x, int y)
 {
     float3 g = 1;
@@ -172,11 +174,13 @@ float3 rgb_gain(int x, int y)
         const uint d = 48 + (n2 + i) * 16;
         g *= float3(map_gain(d, x, y, 0), map_gain(d, x, y, 1), map_gain(d, x, y, 2));
     }
-    if (corrections.Load(8))
+    const uint vignette = corrections.Load(8);
+    if (vignette)
     {
         const float dx = x + 0.5 - word_f(9), dy = y + 0.5 - word_f(10);
         const float r2 = (dx * dx + dy * dy) * word_f(11);
-        g *= 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
+        const float p = 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
+        g *= vignette == 2 ? 1 / p : p;
     }
     return g;
 }
@@ -250,9 +254,16 @@ float4 main(float4 position : SV_Position) : SV_Target
         const float other = (6 * m + 2 * diag - 1.5 * far) / 8;  // blue at red, red at blue
         rgb = c == 0 ? float3(m, g, other) : float3(other, g, m);
     }
-    if (size.w)
-        rgb *= rgb_gain(x, y);
-    rgb = clamp(rgb, 0, 1);
+    // lensfun's vignetting brings up what the lens darkened: what the sensor
+    // clipped stays clipped (neutral), and the rest may pass it.
+    if (size.w && corrections.Load(8) == 2)
+        rgb = clamp(rgb, 0, 1) * rgb_gain(x, y);
+    else
+    {
+        if (size.w)
+            rgb *= rgb_gain(x, y);
+        rgb = clamp(rgb, 0, 1);
+    }
     return float4(rgb / as_shot.rgb, 1);
 }
 #endif

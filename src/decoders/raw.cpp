@@ -1,4 +1,5 @@
 #include "../i18n.h"
+#include "../lens_database.h"
 #include "../parallel.h"
 #include "../platform.h"
 #include "decoder.h"
@@ -62,6 +63,22 @@ std::string camera_name(const LibRaw& raw)
     std::string make = raw.imgdata.idata.normalized_make[0] ? raw.imgdata.idata.normalized_make : raw.imgdata.idata.make;
     std::string model = raw.imgdata.idata.normalized_model[0] ? raw.imgdata.idata.normalized_model : raw.imgdata.idata.model;
     return make.empty() ? model : make + " " + model;
+}
+
+// How it was taken, as lensfun's database is matched by (lens_database.h).
+lenses::Shot shot_of(const LibRaw& raw)
+{
+    const auto& id = raw.imgdata.idata;
+    const auto& lens = raw.imgdata.lens;
+    lenses::Shot s;
+    s.make = id.normalized_make[0] ? id.normalized_make : id.make;
+    s.model = id.normalized_model[0] ? id.normalized_model : id.model;
+    s.lens = lens.Lens[0] ? lens.Lens : lens.makernotes.Lens;
+    s.focal = raw.imgdata.other.focal_len;
+    s.aperture = raw.imgdata.other.aperture;
+    s.lens_min_focal = lens.makernotes.MinFocal > 0 ? lens.makernotes.MinFocal : lens.MinFocal;
+    s.lens_max_focal = lens.makernotes.MaxFocal > 0 ? lens.makernotes.MaxFocal : lens.MaxFocal;
+    return s;
 }
 
 bool decode_preview(LibRaw& raw, Image& out, std::string& error, int fit_w = 0, int fit_h = 0)
@@ -1206,6 +1223,15 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
             out.mosaic = std::move(m);
         }
     }
+    // Without any, how it was taken: the app finds the lens in lensfun's database.
+    if (out.mosaic && !out.mosaic->corrections)
+    {
+        auto shot = std::make_shared<lenses::Shot>(shot_of(raw));
+        std::copy(out.mosaic->crop, out.mosaic->crop + 4, shot->frame);
+        auto m = std::make_shared<RawMosaic>(*out.mosaic);
+        m->shot = std::move(shot);
+        out.mosaic = std::move(m);
+    }
 
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
     if (out.linear)
@@ -1332,6 +1358,18 @@ bool quick(const std::string& path)
     return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
            (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error)) ||
            (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
+}
+
+bool raw_shot(const std::string& path, lenses::Shot& out)
+{
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    auto raw = std::make_unique<LibRaw>();  // on the heap: hundreds of KB
+    if (!file_bytes(path, bytes, size) || raw->open_buffer(bytes, size) != LIBRAW_SUCCESS)
+        return false;
+    out = shot_of(*raw);
+    out.frame[2] = raw->imgdata.sizes.width, out.frame[3] = raw->imgdata.sizes.height;
+    return true;
 }
 
 const Decoder& raw_decoder()

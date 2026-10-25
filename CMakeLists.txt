@@ -59,6 +59,8 @@ add_library(ifrit_core STATIC
   src/decoders/dng_opcodes.cpp
   src/decoders/rawblocks.cpp
   src/decoders/rawpacked.cpp
+  src/lens_database.cpp
+  src/lens_store.cpp
   src/encoders/encoder.cpp
   src/encoders/dds.cpp
   src/encoders/reduce.cpp
@@ -189,6 +191,7 @@ add_executable(ifritview
   src/ui/app.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp
+  src/ui/app_lens.cpp
   src/ui/app_metadata.cpp
   src/ui/app_playback.cpp
   src/ui/app_save.cpp
@@ -401,6 +404,18 @@ if(GEOCODE_FOUND)
   message(STATUS "geocode: enabled")
 else()
   message(STATUS "geocode: not found (json-glib-1.0), skipping")
+endif()
+
+# lensfun's lens database fetched when a raw first wants it (optional; a
+# copy already in the cache is read without): the same HTTPS and json-glib
+# (its versions.json), and libbz2 for its archive.
+pkg_check_modules(BZIP2 IMPORTED_TARGET bzip2)
+if(GEOCODE_FOUND AND BZIP2_FOUND)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_LENS_DOWNLOADS)
+  target_link_libraries(ifrit_core PUBLIC PkgConfig::BZIP2)
+  message(STATUS "lens database downloads: enabled")
+else()
+  message(STATUS "lens database downloads: need json-glib-1.0 and bzip2, skipping")
 endif()
 
 if(IFRIT_HAVE_JXL)

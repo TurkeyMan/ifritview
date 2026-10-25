@@ -106,6 +106,25 @@ std::string executable_path()
 #endif
 }
 
+std::string cache_dir()
+{
+#ifdef _WIN32
+    // Beside the settings (GLib's config folder there is LocalAppData), not
+    // in GLib's cache folder, which on Windows is the browser's (INetCache).
+    return join_path(join_path(g_get_user_config_dir(), "ifritview"), "cache");
+#else
+    return join_path(g_get_user_cache_dir(), "ifritview");
+#endif
+}
+
+std::string join_path(const std::string& dir, const std::string& name)
+{
+    gchar* p = g_build_filename(dir.c_str(), name.c_str(), nullptr);
+    std::string s = p;
+    g_free(p);
+    return s;
+}
+
 namespace
 {
 

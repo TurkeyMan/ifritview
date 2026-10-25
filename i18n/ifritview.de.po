@@ -1192,6 +1192,14 @@ msgstr ""
 "Bearbeitungen aus XMP-Filialdateien übernehmen (Belichtung, Zuschnitt, "
 "Drehung)"
 
+#: src/ui/settings.cpp
+msgid "Download lens corrections (lensfun's database, when a raw first needs it)"
+msgstr "Objektivkorrekturen herunterladen (die Datenbank von lensfun, wenn ein Raw sie zum ersten Mal braucht)"
+
+#: src/ui/settings.cpp
+msgid "The whole database is fetched from lensfun's site (about 0.5 MB), never a single lens, so it doesn't say which lenses you have; then checked for a newer one at most once a month. Off: only a copy already downloaded is used"
+msgstr "Die ganze Datenbank wird von der Seite von lensfun geladen (etwa 0,5 MB), nie ein einzelnes Objektiv, sie verrät also nicht, welche Objektive Sie haben; danach höchstens einmal im Monat auf eine neuere geprüft. Aus: nur eine schon geladene Kopie wird verwendet"
+
 #: src/ui/app.cpp:301
 msgid "Show A (Tab flips A and B)"
 msgstr "A anzeigen (Tab wechselt zwischen A und B)"
@@ -1912,6 +1920,10 @@ msgstr "Die Lizenz (GPL 3.0)"
 msgid "Third-party notices: the friends who lent a hand"
 msgstr "Hinweise zu Drittanbietern: die Freunde, die mit angepackt haben"
 
+#: src/ui/settings.cpp
+msgid "Lens corrections from the lensfun project's database (CC BY-SA 3.0)"
+msgstr "Objektivkorrekturen aus der Datenbank des lensfun-Projekts (CC BY-SA 3.0)"
+
 #: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr "Einstellungen"
@@ -2037,6 +2049,14 @@ msgstr "LibRaws Entwicklung"
 #: src/ui/app.cpp
 msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
 msgstr "Das Raw so zeigen, wie LibRaw es auf der CPU entwickelt (langsamer), statt wie hier auf der GPU entwickelt"
+
+#: src/ui/app.cpp
+msgid "Lens correction"
+msgstr "Objektivkorrektur"
+
+#: src/ui/app.cpp
+msgid "Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, for raws that carry no corrections of their own"
+msgstr "Verzeichnung, Farbsäume und Vignettierung des Objektivs nach der Datenbank von lensfun herausrechnen, für Raws ohne eigene Korrekturen"
 
 #: src/ui/app.cpp
 msgid "Developing with LibRaw…"

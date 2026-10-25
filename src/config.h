@@ -33,6 +33,8 @@ struct Config
     std::string raw_mode = "full";  // full | half | preview; half bins 2x2 (fast, no demosaic)
     bool raw_camera_crop = true;    // crop the sensor margins to the camera's own framing
     bool apply_xmp_edits = true;    // honour exposure/crop/orientation from XMP
+    bool lens_correction = true;    // a raw without its own lens corrections takes lensfun's (the G panel's check)
+    bool lens_downloads = true;     // lensfun's database may be fetched (and refreshed) from its site
 
     // Window
     bool fit_window_to_image = true;
