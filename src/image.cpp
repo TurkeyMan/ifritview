@@ -428,7 +428,24 @@ Image Image::crop(int x, int y, int w, int h) const
     out.transform.y += y;
     out.transform.w = w;
     out.transform.h = h;
-    out.allocate(w, h);
+    if (mosaic)
+    {
+        // A raw the GPU develops crops as it develops: the crop joins the
+        // camera's framing, in the data's terms (before the turn).
+        auto m = std::make_shared<RawMosaic>(*mosaic);
+        int fx = x, fy = y, fw = w, fh = h;
+        orient_rect(inverse_orientation(m->orientation), width, height, fx, fy, fw, fh);
+        m->crop[0] += fx, m->crop[1] += fy, m->crop[2] = fw, m->crop[3] = fh;
+        out.mosaic = std::move(m);
+    }
+    if (pixels_stale)
+    {
+        // None yet (the GPU's develop makes them): only its size.
+        out.width = w, out.height = h, out.stride = w * 4;
+        out.pixels_stale = true;
+    }
+    else
+        out.allocate(w, h);
     out.has_alpha = has_alpha;
     out.bits_per_sample = bits_per_sample;
     out.format = format;
@@ -458,8 +475,9 @@ Image Image::crop(int x, int y, int w, int h) const
     out.place = place;
     out.stored = stored;
     out.edited = true;
-    for (int yy = 0; yy < h; ++yy)
-        std::copy_n(row(y + yy) + x, w, out.row(yy));
+    if (!pixels_stale)
+        for (int yy = 0; yy < h; ++yy)
+            std::copy_n(row(y + yy) + x, w, out.row(yy));
     if (linear)
     {
         auto l = std::make_shared<LinearData>();
@@ -632,6 +650,13 @@ int orientation_of(const Matrix& m)
 }
 
 }  // namespace
+
+// What undoes `o`: its matrix transposed (they're all rotations and flips).
+int inverse_orientation(int o)
+{
+    const Matrix m = matrix_of(o);
+    return orientation_of({m.a, m.c, m.b, m.d});
+}
 
 // `after` done to an image already turned by `before`.
 int compose_orientation(int before, int after)
