@@ -79,9 +79,14 @@ float3 tone_map(float3 c)
     float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), c) * scale;
     if (tone == 1)
     {
-        // The camera's curve maps luminance; the colour scales with it, so hue holds.
+        // The camera's curve maps luminance; the colour scales with it, so hue
+        // holds. It covers the scene from 0 to 1: pushed past that (exposure
+        // above the camera's), the scene is rolled off into it first, as the
+        // display mapping would, not clipped at its end.
         const float lum = xyz.y;
-        const float x = saturate(lum) * 4095;
+        const float peak = measured ? asfloat(stats.Load(kStatsMaximum * 4)) * scale : 0;
+        const float fitted = peak > 1 ? eetf(lum, peak, 1, white) : lum;
+        const float x = saturate(fitted) * 4095;
         const int i = int(x);
         const float o = lerp(tone_curve.Load(int3(i, 0, 0)), tone_curve.Load(int3(min(i + 1, 4095), 0, 0)), x - i);
         xyz *= lum > 1e-6 ? o / lum : 0;
@@ -90,7 +95,10 @@ float3 tone_map(float3 c)
     {
         float y = xyz.y;
         float2 uv = uv_from_xyz(xyz);
-        const float source_peak = asfloat(stats.Load(kStatsPeak * 4)) * scale;
+        // From the brightest it reaches (on the filtered level the measures
+        // come from, so a lone hot pixel is already smoothed away): nothing is
+        // clipped, and the top keeps some gradation.
+        const float source_peak = asfloat(stats.Load(kStatsMaximum * 4)) * scale;
         if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
         {
             const float mapped = eetf(y, source_peak, display_peak, white);
