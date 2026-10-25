@@ -48,7 +48,9 @@ static const uint kStatsLuminance = 0;  // 1024 counts: log2 luminance, 2^-20 ..
 static const uint kStatsExtents = 1024; // 72 floats (as uints): how far from white per 5 degrees of hue, 1 = the display's edge
 static const uint kStatsCount = 1096;   // pixels counted
 static const uint kStatsPeak = 1097;    // float: the 99.9th percentile's luminance (peak.hlsl)
-static const uint kStatsWords = 1098;
+static const uint kStatsMinimum = 1098; // ~float bits of the least luminance above 0 (max of the complement: a min)
+static const uint kStatsMaximum = 1099; // float bits of the greatest
+static const uint kStatsWords = 1100;
 
 // The scene colour as the display shows it (linear, 1 = SDR white).
 float3 tone_map(float3 c)

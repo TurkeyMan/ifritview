@@ -9,6 +9,7 @@
 groupshared uint local_luminance[1024];
 groupshared uint local_extents[72];
 groupshared uint local_count;
+groupshared uint local_least, local_most;
 
 [numthreads(16, 16, 1)]
 void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
@@ -18,7 +19,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     if (index < 72)
         local_extents[index] = 0;
     if (index == 0)
-        local_count = 0;
+        local_count = local_least = local_most = 0;
     GroupMemoryBarrierWithGroupSync();
 
     uint w, h;
@@ -35,6 +36,8 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
                 const uint bin = uint(clamp((log2(xyz.y) + 20) * 1024 / 32, 0.0, 1023.0));
                 InterlockedAdd(local_luminance[bin], 1);
                 InterlockedAdd(local_count, 1);
+                InterlockedMax(local_least, ~asuint(xyz.y));  // positive floats order as their bits
+                InterlockedMax(local_most, asuint(xyz.y));
                 const float2 v = uv_from_xyz(xyz) - kWhiteUv;
                 const float len = length(v);
                 if (xyz.y >= 1e-3 && len > 1e-6)  // too dark for its colour to count
@@ -54,5 +57,9 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     if (index < 72 && local_extents[index])
         stats.InterlockedMax((kStatsExtents + index) * 4, local_extents[index]);
     if (index == 0 && local_count)
+    {
         stats.InterlockedAdd(kStatsCount * 4, local_count);
+        stats.InterlockedMax(kStatsMinimum * 4, local_least);
+        stats.InterlockedMax(kStatsMaximum * 4, local_most);
+    }
 }

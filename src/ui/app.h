@@ -74,6 +74,9 @@ public:
     void choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared_ptr<Image> source, std::shared_ptr<const struct LosslessJpeg> lossless);
     void plan_lossless();
     void toggle_metadata();
+    // G: the histogram, docked where the info goes (one or the other), or
+    // over the image in fullscreen.
+    void toggle_histogram();
     void toggle_xmp();
     void copy_to_clipboard();
     void transform(int exif_orientation);
@@ -201,6 +204,14 @@ private:
     rap::splitter* splitter_ = nullptr;
     rap::widget* metadata_pane_ = nullptr;
     rap::list* metadata_list_ = nullptr;
+    // The pane holds the info or the histogram (and what's measured), not both.
+    rap::widget *info_box_ = nullptr, *histogram_box_ = nullptr;
+    rap::canvas* histogram_canvas_ = nullptr;
+    rap::label *hist_peak_ = nullptr, *hist_max_ = nullptr, *hist_min_ = nullptr, *hist_average_ = nullptr, *hist_clipped_ = nullptr;
+    bool pane_histogram_ = false;
+    void toggle_pane();          // the pane in or out, with the window following
+    void show_pane_content();    // the info or the histogram in it
+    void update_histogram();     // where the view draws its histogram
     bool metadata_visible_ = false;
     bool pane_before_fullscreen_ = false;
     std::string location_url_;

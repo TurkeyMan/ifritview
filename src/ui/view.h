@@ -40,6 +40,14 @@ public:
     void config_changed();
     void image_changed();  // the image's pixels (and maybe its size) changed in place
     void retoned();        // only its 8-bit pixels did, for a new exposure: its own data is the same
+    // The histogram of what's shown: over the image (fullscreen) and/or on
+    // the docked panel's canvas (null when it isn't showing). GPU only.
+    void set_histogram(bool overlay, rap::canvas* panel);
+    void histogram_panel_changed();  // the panel's canvas changed size: draw it again
+#ifdef HAVE_GPU
+    // The panel's numbers, on the UI thread, after each count.
+    std::function<void(const GpuView::Details&)> on_histogram_details;
+#endif
     // Shows `preview` (the same size: the image as it would save) in its
     // place, keeping zoom and pan; end_preview() puts the image back.
     void show_preview(std::shared_ptr<Image> preview);
@@ -232,10 +240,13 @@ private:
         uint32_t background = 0;
         bool checkerboard = false;
         ScaleFilter enlarge = ScaleFilter::Nearest, shrink = ScaleFilter::Nearest;
-        bool histogram = false;
+        bool histogram = false, counting = false;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;
+    bool histogram_overlay_ = false;
+    rap::canvas* histogram_panel_ = nullptr;
+    void draw_histogram_panel();
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)

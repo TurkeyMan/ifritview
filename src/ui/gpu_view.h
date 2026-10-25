@@ -18,6 +18,7 @@
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,7 +50,8 @@ public:
         ScaleFilter shrink = ScaleFilter::Lanczos3, enlarge = ScaleFilter::Lanczos3;
         FrontBuffer front = FrontBuffer::Srgb8;
         float sdr_white_nits = 203;  // PQ and scRGB: what SDR white is
-        bool histogram = false;      // the histogram panel, at `panel` (device pixels: x, y, width, height)
+        bool count_histogram = false;  // count what's shown, for the overlay or the docked panel
+        bool histogram = false;        // draw it into the frame, at `panel` (device pixels: x, y, width, height)
         int panel[4] = {};
     };
 
@@ -60,6 +62,23 @@ public:
                 rap::gpu::ticket& ready, rap::frame_color& colour, std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
+
+    // The histogram counted by the last render() (count_histogram), drawn
+    // into a `width` x `height` texture for the docked panel's canvas. False
+    // while there's nothing counted.
+    bool draw_histogram(int width, int height, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready);
+
+    // The numbers the docked panel shows, read back (a few kilobytes) after
+    // the last count: luminance of the scene as exposed (1 = SDR white), and
+    // how much of what's shown is clipped.
+    struct Details
+    {
+        bool scene = false;  // raw or HDR: luminance means something past white
+        float minimum = 0, maximum = 0, peak = 0, average = 0;
+        float black = 0, white = 0;  // fractions of pixels shown at 0 and at 255 (any channel)
+    };
+    // `done` runs on a rapport thread once they're in (if a count has run).
+    void read_details(std::function<void(const Details&)> done);
 
 private:
     bool programs(std::string& error);
@@ -73,12 +92,15 @@ private:
 
     std::shared_ptr<rap::gpu::device> device_;
     rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
-    rap::gpu::program_ptr decode_, resample_, compose_, stats_program_, peak_, histogram_program_, histogram_max_;
+    rap::gpu::program_ptr decode_, resample_, compose_, stats_program_, peak_, histogram_program_, histogram_max_, histogram_view_;
+    rap::gpu::texture_ptr panels_[2];  // the docked histogram, drawn
+    int next_panel_ = 0;
     rap::gpu::buffer_ptr stats_;      // the image's measures (view.hlsli's layout), for raw and HDR images
     bool measured_ = false;           // `stats_` is this image's
     rap::gpu::buffer_ptr histogram_;  // R, G, B, Y counts of what's shown, and the tallest
     double histogram_exposure_ = -1e9;  // what it was counted at (and the image's generation below)
     uint64_t histogram_generation_ = 0;
+    float histogram_scale_ = 1;  // the scene's scale it was counted at
 
     std::weak_ptr<Image> image_;
     uint64_t generation_ = 0;

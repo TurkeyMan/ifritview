@@ -18,5 +18,6 @@ void main()
             break;
         }
     }
-    stats.Store(kStatsPeak * 4, asuint(peak));
+    // A bin's top edge can be past the brightest pixel itself.
+    stats.Store(kStatsPeak * 4, asuint(min(peak, asfloat(stats.Load(kStatsMaximum * 4)))));
 }

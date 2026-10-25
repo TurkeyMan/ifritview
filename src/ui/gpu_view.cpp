@@ -5,6 +5,7 @@
 #include "shaders/decode.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
+#include "shaders/histogram_view.h"
 #include "shaders/peak.h"
 #include "shaders/resample.h"
 #include "shaders/stats.h"
@@ -80,12 +81,88 @@ double reach(ScaleFilter f, double inv)
 
 GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(device)) {}
 
+void GpuView::read_details(std::function<void(const Details&)> done)
+{
+    if (!histogram_generation_ || !measured_)
+        return;
+    struct Read
+    {
+        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1025 * 4);
+    };
+    auto read = std::make_shared<Read>();
+    const bool scene = tonable_;
+    const float exposure = histogram_scale_;
+    device_->readback(stats_, read->stats);
+    device_->readback(histogram_, read->histogram,
+                      [read, scene, exposure, done = std::move(done)]
+                      {
+                          const auto word = [](const std::vector<std::byte>& v, size_t i)
+                          {
+                              uint32_t w;
+                              std::memcpy(&w, v.data() + i * 4, 4);
+                              return w;
+                          };
+                          const auto as_float = [](uint32_t w)
+                          {
+                              float f;
+                              std::memcpy(&f, &w, 4);
+                              return f;
+                          };
+                          Details d;
+                          d.scene = scene;
+                          const uint32_t count = word(read->stats, 1096);
+                          if (count)
+                          {
+                              d.minimum = as_float(~word(read->stats, 1098)) * exposure;
+                              d.maximum = as_float(word(read->stats, 1099)) * exposure;
+                              d.peak = as_float(word(read->stats, 1097)) * exposure;
+                              // The mean from the log2 histogram's bin centres (to a couple of percent).
+                              double sum = 0;
+                              for (int bin = 0; bin < 1024; ++bin)
+                                  sum += double(word(read->stats, size_t(bin))) * std::exp2((bin + 0.5) * 32 / 1024 - 20);
+                              d.average = float(sum / count) * exposure;
+                          }
+                          // Clipped as shown: R, G or B at an end (each channel's share, the largest).
+                          uint64_t total = 0;
+                          for (int b = 0; b < 256; ++b)
+                              total += word(read->histogram, size_t(768 + b));
+                          if (total)
+                              for (int ch = 0; ch < 3; ++ch)
+                              {
+                                  d.black = std::max(d.black, float(word(read->histogram, size_t(ch * 256))) / float(total));
+                                  d.white = std::max(d.white, float(word(read->histogram, size_t(ch * 256 + 255))) / float(total));
+                              }
+                          done(d);
+                      });
+}
+
+bool GpuView::draw_histogram(int width, int height, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready)
+{
+    if (!histogram_generation_ || width <= 0 || height <= 0 || !histogram_view_)
+        return false;
+    rap::gpu::texture_ptr& t = panels_[next_panel_];
+    if (!t || t->width() != width || t->height() != height)
+        t = device_->create({width, height, rap::gpu::format::rgba8, 1, true});
+    if (!t)
+        return false;
+    next_panel_ ^= 1;
+    const float panel[4] = {0, 0, float(width), float(height)};
+    rap::gpu::pass p;
+    p.program = histogram_view_;
+    p.buffers = {histogram_, histogram_};  // t8 unused, t9 the counts
+    p.uniforms = std::as_bytes(std::span(panel));
+    p.target = t;
+    ready = device_->run(std::span(&p, 1));
+    out = t;
+    return true;
+}
+
 bool GpuView::programs(std::string& error)
 {
     if (compose_)
         return true;
     for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
-                                 std::pair{&compose_, shaders::compose}})
+                                 std::pair{&compose_, shaders::compose}, std::pair{&histogram_view_, shaders::histogram_view}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -107,7 +184,7 @@ bool GpuView::programs(std::string& error)
         }
         *program = r.program;
     }
-    stats_ = device_->create_buffer(1098 * 4);
+    stats_ = device_->create_buffer(1100 * 4);
     histogram_ = device_->create_buffer(1025 * 4);
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
     if (!stats_ || !histogram_ || !blank_)
@@ -301,7 +378,8 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     // Raw and HDR images measured once (their peak, their extent in each
     // hue), on the device: the mapping reads them there.
     std::vector<rap::gpu::dispatch> counts;
-    const rap::gpu::texture_ptr counted = (tonable_ && !measured_) || f.histogram ? counted_level() : nullptr;
+    const bool measure = !measured_ && (tonable_ || f.count_histogram);  // the panel shows them for any image
+    const rap::gpu::texture_ptr counted = measure || f.count_histogram ? counted_level() : nullptr;
     const auto over = [&](rap::gpu::program_ptr program, std::vector<rap::gpu::buffer_ptr> buffers)
     {
         rap::gpu::dispatch d;
@@ -313,7 +391,7 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         d.groups[1] = (counted->height() + 15) / 16;
         return d;
     };
-    if (tonable_ && !measured_)
+    if (measure)
     {
         device_->clear(stats_, 0);
         counts.push_back(over(stats_program_, {histogram_, stats_}));
@@ -324,7 +402,7 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
     }
     cp.measured = measured_ ? 1 : 0;
     // The histogram of what's shown: again when exposure or the image change.
-    if (f.histogram && (histogram_generation_ != generation || histogram_exposure_ != f.exposure || counts.size()))
+    if (f.count_histogram && (histogram_generation_ != generation || histogram_exposure_ != f.exposure || counts.size()))
     {
         device_->clear(histogram_, 0);
         counts.push_back(over(histogram_program_, {histogram_, stats_}));
@@ -334,6 +412,7 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         counts.push_back(std::move(tallest));
         histogram_generation_ = generation;
         histogram_exposure_ = f.exposure;
+        histogram_scale_ = cp.exposure;
     }
     if (f.histogram)
     {

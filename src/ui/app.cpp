@@ -336,6 +336,7 @@ void App::build_ui()
                     vbox{side_view_->node()}.stretch().handle(side_pane_),
                 }
                     .stretch(),
+                vbox{
                 // Hidden at first, so made once the window is up and idle.
                 L::deferred{[this]
                             {
@@ -352,6 +353,35 @@ void App::build_ui()
                                     .bind(metadata_list_)
                                     .stretch();
                             }}
+                    .handle(info_box_),
+                // The histogram of what's shown (drawn on the GPU), and what's measured.
+                vbox{
+                    L::canvas{}
+                        .on_paint(
+                            [this](rap::painter& p, rap::size_f size)
+                            {
+                                if (!histogram_canvas_->gpu_device())
+                                {
+                                    rap::text_style style;
+                                    style.fg = rap::theme_color::placeholder_text;
+                                    p.text({8, 8}, _("The histogram needs a GPU."), style);
+                                }
+                                (void)size;
+                            })
+                        .bind(histogram_canvas_)
+                        .height(rap::extent{9, rap::extent::unit::lines}),
+                    L::form{
+                        {_("Peak"), L::label{""}.bind(hist_peak_)},
+                        {_("Brightest"), L::label{""}.bind(hist_max_)},
+                        {_("Darkest"), L::label{""}.bind(hist_min_)},
+                        {_("Average (APL)"), L::label{""}.bind(hist_average_)},
+                        {_("Clipped"), L::label{""}.bind(hist_clipped_)},
+                    },
+                    L::spacer{},
+                }
+                    .margins()
+                    .handle(histogram_box_),
+                }
                     .handle(metadata_pane_),
             }
                 .bind(splitter_)
@@ -369,6 +399,33 @@ void App::build_ui()
                              .margins(false));
     platform::trace("ui: window created");
     view_->attach(view_->canvas());
+    histogram_box_->set_visible(false);
+    // The docked histogram: drawn again when its canvas changes size, and
+    // its numbers when the view has counted.
+    histogram_canvas_->on_frame_target([this](const rap::frame_target&) { view_->histogram_panel_changed(); });
+#ifdef HAVE_GPU
+    view_->on_histogram_details = [this](const GpuView::Details& d)
+    {
+        // Scene luminance in nits (SDR white at BT.2408's 203) and stops from
+        // white; an SDR image's as a share of white.
+        const auto level = [&](float v) -> std::string
+        {
+            char buf[64];
+            if (d.scene)
+                std::snprintf(buf, sizeof buf, "%.0f nits (%+.1f EV)", double(v) * 203, v > 0 ? std::log2(double(v)) : -99.0);
+            else
+                std::snprintf(buf, sizeof buf, "%.1f%%", double(v) * 100);
+            return buf;
+        };
+        hist_peak_->set_text(level(d.peak));
+        hist_max_->set_text(level(d.maximum));
+        hist_min_->set_text(level(d.minimum));
+        hist_average_->set_text(level(d.average));
+        char clipped[96];
+        std::snprintf(clipped, sizeof clipped, _("%.1f%% black, %.1f%% white"), double(d.black) * 100, double(d.white) * 100);
+        hist_clipped_->set_text(clipped);
+    };
+#endif
     side_view_->attach(side_view_->canvas());
     side_pane_->set_visible(false);
     side_view_->set_divided(true);
@@ -1264,6 +1321,7 @@ void App::on_fullscreen_changed(bool fs)
         update_title();
         exposure_box_->set_visible(exposure_applies());
     }
+    update_histogram();
     view_->set_fullscreen(fs);
     if (fs && slideshow_)
         ui_.post([this] { slideshow_start_slide(); });  // after the fullscreen layout, so the motion sees the real size

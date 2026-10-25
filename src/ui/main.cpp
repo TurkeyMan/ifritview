@@ -87,6 +87,8 @@ void run_step(App& app, const std::string& step)
         app.print_image();  // with RAPPORT_PRINT_TO set, to a file without the dialog
     else if (step == "metadata")
         app.toggle_metadata();
+    else if (step == "histogram")
+        app.toggle_histogram();
     else if (step == "copy")
         app.copy_to_clipboard();
     else if (step == "xmp")

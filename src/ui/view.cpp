@@ -1103,7 +1103,7 @@ bool View::draw_on_gpu(rap::color background)
     GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
-               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, cfg_.histogram};
+               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1119,7 +1119,8 @@ bool View::draw_on_gpu(rap::color background)
     f.checker_size = int(std::lround(8 * scale_factor()));
     f.enlarge = cfg_.enlarge_filter;
     f.shrink = cfg_.shrink_filter;
-    f.histogram = cfg_.histogram;
+    f.count_histogram = histogram_overlay_ || histogram_panel_;
+    f.histogram = histogram_overlay_;
     if (f.histogram)
     {
         // Top right: whole device pixels a bin, a little in from the corner.
@@ -1148,10 +1149,53 @@ bool View::draw_on_gpu(rap::color background)
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "gpu view: %dx%d at zoom %.4f\n", f.width, f.height, f.zoom);
     gpu_shown_ = true;
+    if (histogram_panel_)
+    {
+        draw_histogram_panel();
+        if (on_histogram_details)
+            gpu_->read_details(
+                [this, alive = alive_](const GpuView::Details& d)
+                {
+                    ui_.post(
+                        [this, alive, d]
+                        {
+                            if (*alive && on_histogram_details)
+                                on_histogram_details(d);
+                        });
+                });
+    }
     gpu_drawn_ = key;
     return true;
 }
 #endif
+
+void View::set_histogram(bool overlay, rap::canvas* panel)
+{
+    if (overlay == histogram_overlay_ && panel == histogram_panel_)
+        return;
+    histogram_overlay_ = overlay;
+    histogram_panel_ = panel;
+    invalidate();
+}
+
+void View::histogram_panel_changed()
+{
+#ifdef HAVE_GPU
+    if (histogram_panel_ && gpu_ && gpu_shown_)
+        draw_histogram_panel();
+#endif
+}
+
+void View::draw_histogram_panel()
+{
+#ifdef HAVE_GPU
+    const rap::frame_target t = histogram_panel_->target();
+    rap::gpu::texture_ptr tex;
+    rap::gpu::ticket ready;
+    if (gpu_->draw_histogram(t.width, t.height, tex, ready))
+        histogram_panel_->present(tex, ready);
+#endif
+}
 
 // What goes over the image, whoever drew it (here, or the GPU's frame
 // under the canvas's painting): the divider, its label, the busy ring, the

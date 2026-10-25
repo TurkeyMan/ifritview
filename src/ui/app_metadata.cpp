@@ -39,14 +39,56 @@ void App::remember_pane_width()
 
 void App::toggle_metadata()
 {
+    if (metadata_visible_ && pane_histogram_)
+    {
+        pane_histogram_ = false;  // the pane stays: it shows the info instead
+        show_pane_content();
+        return;
+    }
+    pane_histogram_ = false;
+    toggle_pane();
+}
+
+void App::toggle_histogram()
+{
+    if (fullscreen_)
+    {
+        cfg_.histogram = !cfg_.histogram;
+        cfg_.save();
+        update_histogram();
+        return;
+    }
+    if (metadata_visible_ && !pane_histogram_)
+    {
+        pane_histogram_ = true;
+        show_pane_content();
+        return;
+    }
+    pane_histogram_ = true;
+    toggle_pane();
+}
+
+void App::show_pane_content()
+{
+    info_box_->set_visible(!pane_histogram_);
+    histogram_box_->set_visible(pane_histogram_);
+    refresh_metadata();
+    update_histogram();
+}
+
+void App::update_histogram()
+{
+    view_->set_histogram(fullscreen_ && cfg_.histogram, metadata_visible_ && pane_histogram_ && !fullscreen_ ? histogram_canvas_ : nullptr);
+}
+
+void App::toggle_pane()
+{
     const rap::size_f before = window_->size();
     metadata_visible_ = !metadata_visible_;
     metadata_pane_->set_visible(metadata_visible_);
     if (metadata_visible_)
-    {
         splitter_->set_sizes({std::max(100.f, before.w), float(cfg_.metadata_pane_width)});
-        refresh_metadata();
-    }
+    show_pane_content();
     // The window takes (or gives back) what the pane adds in the same step,
     // so the first frame is laid out at the final width: laying the pane into
     // the old width first would show its divider mid-image for a frame.
@@ -243,7 +285,7 @@ View::OverlaySections App::overlay_sections() const
 
 void App::refresh_metadata()
 {
-    if (!metadata_visible_)
+    if (!metadata_visible_ || pane_histogram_)
         return;
     const std::string url = image_ && image_->has_location ? cfg_.map_link(image_->latitude, image_->longitude) : "";
     metadata_model_.set(collect_metadata(), image_.get(), url);
