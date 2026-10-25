@@ -43,6 +43,8 @@ struct Prepared
 
 // `data` starts at the SOI marker. `threads` 0: as many as there are cores.
 bool prepare(const uint8_t* data, size_t size, Prepared& out, std::string& error, unsigned threads = 0);
+// Whether prepare and decode take this stream (its headers only: quick).
+bool takes(const uint8_t* data, size_t size);
 bool decode(const Prepared& stream, Image& out, std::string& error, unsigned threads = 0);
 bool decode(const uint8_t* data, size_t size, Image& out, std::string& error, unsigned threads = 0);  // both
 

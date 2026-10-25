@@ -1984,3 +1984,15 @@ msgstr ""
 #: src/ui/app.cpp
 msgid "This raw needs the GPU to develop it"
 msgstr ""
+
+#: src/ui/app.cpp
+msgid "Camera's JPEG"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "This raw has no embedded JPEG"
+msgstr ""

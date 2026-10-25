@@ -128,7 +128,11 @@ struct Exit
 
 }  // namespace
 
-bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads)
+namespace
+{
+
+// prepare's work, or only its headers' (`header_only`: whether it takes the stream).
+bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads, bool header_only)
 {
     if (threads == 0)
         threads = std::max(1u, std::thread::hardware_concurrency());
@@ -230,6 +234,8 @@ bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, 
     }
     if (!width || !height || !ncomp)
         return error = "no frame", false;
+    if (header_only)
+        return true;
 
     // -- The entropy-coded data without its stuffed zero bytes, to the marker
     // that ends it.
@@ -294,6 +300,20 @@ bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, 
     for (int c = 0; c < ncomp; ++c)
         p.lookup[c] = tables[comp_table[c]].lookup;
     return true;
+}
+
+}  // namespace
+
+bool prepare(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads)
+{
+    return parse(data, size, p, error, threads, false);
+}
+
+bool takes(const uint8_t* data, size_t size)
+{
+    Prepared p;
+    std::string error;
+    return parse(data, size, p, error, 1, true);
 }
 
 bool decode(const uint8_t* data, size_t size, Image& out, std::string& error, unsigned threads)

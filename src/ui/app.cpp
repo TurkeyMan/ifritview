@@ -287,6 +287,15 @@ void App::build_ui()
             L::form{{"", L::button{_("As shot")}
                              .on_click([this] { white_balance_as_shot(); })
                              .tooltip(_("Back to the camera's exposure and white balance"))}},
+            L::form{{"", L::check{_("Camera's JPEG")}
+                             .on_toggled(
+                                 [this](bool on)
+                                 {
+                                     show_camera_jpeg_ = on;
+                                     show_camera_jpeg();
+                                 })
+                             .bind(camera_jpeg_check_)
+                             .tooltip(_("Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"))}},
         }
             .handle(exposure_box_);
 
@@ -1075,6 +1084,7 @@ void App::on_loaded(Loader::Result& r)
         sync_exposure_slider();
         update_status();
         refresh_metadata();
+        show_camera_jpeg();  // developed: now the camera's JPEG can stand beside it
         return;
     }
     if (r.generation != load_generation_)
@@ -1150,6 +1160,8 @@ void App::on_loaded(Loader::Result& r)
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
     view_->set_image(image_);
+    camera_jpeg_.reset();
+    show_camera_jpeg();  // the camera's JPEG instead, while that's chosen
     if (nav_stamp_us_)
         view_->stamp_present(nav_stamp_us_, image_.get());
     nav_stamp_us_ = 0;
@@ -1192,6 +1204,7 @@ void App::sync_white_balance()
 {
     const bool raw = image_ && image_->mosaic && !image_->is_preview();
     wb_box_->set_visible(raw);
+    camera_jpeg_check_->set_visible(image_ && image_->is_raw);
     if (!raw)
         return;
     double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
@@ -1210,6 +1223,54 @@ void App::white_balance_changed()
     image_->wb_kelvin = wb_kelvin_->value();
     image_->wb_tint = wb_tint_->value();
     view_->redraw();
+}
+
+void App::show_camera_jpeg()
+{
+    const bool wanted = show_camera_jpeg_ && image_ && image_->is_raw && !image_->is_preview();
+    if (!wanted)
+    {
+        camera_jpeg_.reset();
+        ++camera_jpeg_request_;
+        if (image_ && view_->image() != image_.get())
+            view_->set_image(image_);
+        return;
+    }
+    if (camera_jpeg_ && view_->image() == camera_jpeg_.get())
+        return;
+    // Decoded full size (the detail to compare) off this thread.
+    const uint64_t request = ++camera_jpeg_request_;
+    ++preview_->running;  // waited for on exit
+    std::thread(
+        [this, request, path = image_path_, raw = image_, state = preview_]
+        {
+            struct Done
+            {
+                PreviewState& s;
+                ~Done() { --s.running; }
+            } done{*state};
+            auto jpeg = std::make_shared<Image>();
+            if (decode_preview(path, *jpeg))
+                jpeg->build_mips();
+            else
+                jpeg.reset();
+            release_file_bytes();
+            platform::post_main(
+                [this, request, raw, jpeg]
+                {
+                    if (request != camera_jpeg_request_ || image_ != raw)
+                        return;
+                    if (!jpeg)
+                    {
+                        status_message_ = _("This raw has no embedded JPEG");
+                        update_status();
+                        return;
+                    }
+                    camera_jpeg_ = jpeg;
+                    view_->set_image(jpeg);
+                });
+        })
+        .detach();
 }
 
 // Back to how the camera took it: its white balance and its exposure.

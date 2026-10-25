@@ -409,6 +409,15 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
     return ok;
 }
 
+bool decode_is_quick(const std::string& path)
+{
+    const std::string ext = file_extension(path);
+    for (const Decoder* d : decoders())
+        if (d->quick && claims_extension(*d, ext))
+            return d->quick(path);
+    return false;
+}
+
 bool decode_preview(const std::string& path, Image& out)
 {
     const std::string ext = file_extension(path);

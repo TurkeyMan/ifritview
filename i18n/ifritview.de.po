@@ -2009,3 +2009,15 @@ msgstr "Histogramm und Pegel (G)"
 #: src/ui/app.cpp
 msgid "This raw needs the GPU to develop it"
 msgstr "Dieses RAW braucht zum Entwickeln die GPU"
+
+#: src/ui/app.cpp
+msgid "Camera's JPEG"
+msgstr "JPEG der Kamera"
+
+#: src/ui/app.cpp
+msgid "Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"
+msgstr "Die Darstellung der Kamera zeigen, das im Raw eingebettete JPEG, statt des hier entwickelten Raws"
+
+#: src/ui/app.cpp
+msgid "This raw has no embedded JPEG"
+msgstr "Dieses Raw enthält kein eingebettetes JPEG"

@@ -28,6 +28,9 @@ struct Decoder
     // more than one; the decoded image says how many there are. Unset: the
     // file is one image, and `decode` makes it.
     std::function<bool(const std::string& path, ImagePart part, Image& out, std::string& error)> decode_part = nullptr;
+    // Whether the real decode of this file is as quick as its stand-in (a
+    // raw the GPU decodes): then it goes without one. May be empty.
+    std::function<bool(const std::string& path)> quick = nullptr;
 };
 
 // Options the decoders consult. Set from the main thread, read from the
@@ -89,6 +92,8 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
 
 // A quick stand-in for the file if its decoder offers one.
 bool decode_preview(const std::string& path, Image& out);
+// Whether the file's decode is quick enough to need no stand-in (Decoder::quick).
+bool decode_is_quick(const std::string& path);
 // This thread's stand-ins (decode_preview) need cover only width x height
 // pixels, either way round: a JPEG one is decoded at 1/2, 1/4 or 1/8 size
 // when that still does. 0: full size.

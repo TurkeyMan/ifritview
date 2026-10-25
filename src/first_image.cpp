@@ -14,7 +14,7 @@ FirstImage::FirstImage(std::string path, std::shared_future<Config> settings)
             auto image = std::make_shared<Image>();
             std::string error;
             bool preview = false;
-            if (decode_preview(path_, *image))
+            if (!decode_is_quick(path_) && decode_preview(path_, *image))  // a raw the GPU decodes needs no stand-in
                 preview = true;
             else if (!decode_image(path_, *image, error))
                 image.reset();

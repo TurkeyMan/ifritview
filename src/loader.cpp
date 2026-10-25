@@ -163,10 +163,13 @@ void Loader::run_foreground()
             job.file = read_file(key_file(job.path));
         platform::trace("loader: foreground %s, %s in %.1f ms", base_name(job.path).c_str(), had ? "read already" : "read", (g_get_monotonic_time() - t0) / 1000.0);
         provide_file_bytes(key_file(job.path), job.file);
-        // A quick stand-in first (a raw's embedded JPEG); its develop goes to
-        // the pool, ahead of any prefetching, with the file already read.
+        // A quick stand-in first (a raw's embedded JPEG), unless the image
+        // itself is as quick (a raw the GPU decodes: no flicker from one to
+        // the other); its develop goes to the pool, ahead of any prefetching,
+        // with the file already read.
         auto preview = std::make_shared<Image>();
-        if (key_part(job.path) == ImagePart{} && decode_preview(job.path, *preview))  // only a file's first image has one
+        const bool first_image = key_part(job.path) == ImagePart{};  // only a file's first image has one
+        if (first_image && !decode_is_quick(job.path) && decode_preview(job.path, *preview))
         {
             preview->build_mips();
             post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);

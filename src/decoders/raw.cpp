@@ -804,6 +804,18 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
+// A CR2 whose readout the GPU decodes: ready as soon as its preview would be.
+bool quick(const std::string& path)
+{
+    if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
+        return false;
+    const uint8_t* bytes = nullptr;
+    size_t size = 0;
+    uint32_t offset, length;
+    unsigned slices[3];
+    return file_bytes(path, bytes, size) && locate_cr2(bytes, size, offset, length, slices) && ljpeg::takes(bytes + offset, length);
+}
+
 const Decoder& raw_decoder()
 {
     static const Decoder d{"RAW",
@@ -811,6 +823,9 @@ const Decoder& raw_decoder()
                             "raw", "rwl", "3fr", "erf", "kdc", "mef", "mos", "mrw", "x3f", "iiq", "srw", "fff", "dcr"},
                            sniff,
                            decode_raw,
-                           preview};
+                           preview,
+                           false,
+                           nullptr,
+                           quick};
     return d;
 }
