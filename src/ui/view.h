@@ -5,6 +5,9 @@
 #include "image.h"
 
 #include <rapport/rapport.h>
+#ifdef HAVE_GPU
+#include "gpu_view.h"
+#endif
 
 #include <cstdint>
 #include <functional>
@@ -36,6 +39,7 @@ public:
     void set_fullscreen(bool on);
     void config_changed();
     void image_changed();  // the image's pixels (and maybe its size) changed in place
+    void retoned();        // only its 8-bit pixels did, for a new exposure: its own data is the same
     // Shows `preview` (the same size: the image as it would save) in its
     // place, keeping zoom and pan; end_preview() puts the image back.
     void show_preview(std::shared_ptr<Image> preview);
@@ -180,6 +184,7 @@ private:
         bool dragging = false;
     };
     void draw_layer(rap::painter& p, Layer& layer, float alpha, double rel = 1.0);  // rel: layer px to A px
+    void paint_over(rap::painter& p, rap::color background);
     void draw_tag(rap::painter& p, const std::string& text, float x, float y, bool right_aligned);
     std::string label_;
     bool divided_ = false;
@@ -211,6 +216,28 @@ private:
     std::unique_ptr<rap::image> scaled_;
     double scaled_zoom_ = 0;
     std::unique_ptr<rap::image> checker_;
+
+#ifdef HAVE_GPU
+    // Drawn on the GPU (gpu_view.h) where it can be: then on_paint draws
+    // only what goes over the image. `generation_` changes when the image's
+    // data does; `gpu_drawn_` is what the frame shown was drawn from.
+    std::unique_ptr<GpuView> gpu_;
+    uint64_t generation_ = 1;
+    struct GpuKey
+    {
+        const Image* image = nullptr;
+        uint64_t generation = 0;
+        int width = 0, height = 0;
+        double zoom = 0, pan_x = 0, pan_y = 0, exposure = 0;
+        uint32_t background = 0;
+        bool checkerboard = false;
+        bool operator==(const GpuKey&) const = default;
+    } gpu_drawn_;
+    bool gpu_shown_ = false;
+    // Draws the frame on the GPU when it's the plain case (one still image,
+    // not compared, moving or fading); false when the CPU draws it.
+    bool draw_on_gpu(rap::color background);
+#endif
 
     // An image that renders at any size (Image::vector), rendered at the size
     // it's shown, made on a thread: the device-pixel rectangle of it from

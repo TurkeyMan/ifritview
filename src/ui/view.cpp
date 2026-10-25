@@ -552,8 +552,22 @@ void View::draw_compare(rap::painter& p, float alpha)
     tag(c.b_label, L(x) + 8, false);
 }
 
+void View::retoned()
+{
+#ifdef HAVE_GPU
+    const uint64_t keep = generation_;
+    image_changed();
+    generation_ = keep;  // the GPU works from the image's own data, which is the same
+#else
+    image_changed();
+#endif
+}
+
 void View::image_changed()
 {
+#ifdef HAVE_GPU
+    ++generation_;
+#endif
     drop_caches();
     if (!image_)
         return;
@@ -927,11 +941,22 @@ void View::paint(rap::painter& p, rap::size_f)
     view_size(vw, vh);
 
     const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
-    p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
+#ifdef HAVE_GPU
+    const bool on_gpu = draw_on_gpu(bg);
+#else
+    const bool on_gpu = false;
+#endif
+    if (!on_gpu)
+        p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
     if (divided_)
         p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);  // again over the image, below
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
+    if (on_gpu)
+    {
+        paint_over(p, bg);
+        return;
+    }
 
     // The transparency checkerboard under an image's rectangle (device px),
     // 1:1 from the view-sized checkerboard.
@@ -1014,12 +1039,89 @@ void View::paint(rap::painter& p, rap::size_f)
     }
     if (image_->vector && !compare_ && !motion_.active && std::fabs(zoom_ - 1.0) > 1e-6)  // at 1:1 the stand-in is it
         draw_native(p, alpha);
+    if (motion_.active)
+        frame_ms_ = (now_us() - t_draw) / 1000.0;
+    paint_over(p, bg);
+}
+
+#ifdef HAVE_GPU
+bool View::draw_on_gpu(rap::color background)
+{
+    // The plain case: one still image, shown as it is. Comparing, zoom
+    // animations, cross-fades, videos and vector images are the CPU's still.
+    static const bool off = std::getenv("IFRIT_NO_GPU_VIEW") != nullptr;
+    const bool plain = !off && canvas_ && image_ && image_->width > 0 && image_->height > 0 && !compare_ && !motion_.active &&
+                       !outgoing_.image && !image_->is_video && !image_->vector && !image_->animation;
+    std::shared_ptr<rap::gpu::device> device = plain ? canvas_->gpu_device() : nullptr;
+    if (device && (!gpu_ || gpu_->device() != device))
+        gpu_ = std::make_unique<GpuView>(device);
+    if (!device)
+    {
+        if (gpu_shown_)
+        {
+            canvas_->clear_frame();
+            gpu_shown_ = false;
+            gpu_drawn_ = {};
+        }
+        return false;
+    }
+    const rap::frame_target target = canvas_->target();
+    GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
+               image_->tonable() ? image_->exposure_edit : 0.0,
+               uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
+               cfg_.checkerboard};
+    if (gpu_shown_ && key == gpu_drawn_)
+        return true;  // the frame shown is this one: only the painting over it changed
+
+    GpuView::Frame f;
+    f.width = target.width;
+    f.height = target.height;
+    f.zoom = zoom_;
+    f.pan_x = pan_x_;
+    f.pan_y = pan_y_;
+    f.exposure = key.exposure;
+    f.background = background;
+    f.checkerboard = cfg_.checkerboard;
+    f.checker_size = int(std::lround(8 * scale_factor()));
+    f.enlarge = cfg_.smooth_upscale ? ScaleFilter::Lanczos3 : ScaleFilter::Nearest;
+    f.shrink = cfg_.smooth_downscale ? ScaleFilter::Lanczos3 : ScaleFilter::Nearest;
+    rap::gpu::texture_ptr frame;
+    rap::gpu::ticket ready;
+    rap::frame_color colour;
+    std::string error;
+    if (!gpu_->render(image_, generation_, f, frame, ready, colour, error))
+    {
+        if (std::getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "gpu view: %s\n", error.c_str());
+        if (gpu_shown_)
+            canvas_->clear_frame();
+        gpu_shown_ = false;
+        gpu_drawn_ = {};
+        return false;
+    }
+    canvas_->present(frame, ready, colour);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "gpu view: %dx%d at zoom %.4f\n", f.width, f.height, f.zoom);
+    gpu_shown_ = true;
+    gpu_drawn_ = key;
+    return true;
+}
+#endif
+
+// What goes over the image, whoever drew it (here, or the GPU's frame
+// under the canvas's painting): the divider, its label, the busy ring, the
+// overlay, the video controls and the selection.
+void View::paint_over(rap::painter& p, rap::color)
+{
+    const double scale = p.device_scale();
+    const auto L = [scale](double device) { return float(device / scale); };  // device px -> logical
+    int vw, vh;
+    view_size(vw, vh);
+
     if (divided_)
         p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);
     if (!compare_ && !label_.empty())
         draw_tag(p, label_, float(std::max(0.0, pan_x_) / scale_factor()) + 8, float(std::max(0.0, pan_y_) / scale_factor()) + 8, false);
-    if (motion_.active)
-        frame_ms_ = (now_us() - t_draw) / 1000.0;
     if (presented_ != image_.get())
     {
         presented_ = image_.get();

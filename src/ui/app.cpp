@@ -1141,7 +1141,7 @@ void App::request_retone()
                             image->break_transform(_("the exposure was changed"));
                         image->mips.clear();
                         if (image == image_)
-                            view_->image_changed();
+                            view_->retoned();
                     }
                     if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
                         request_retone();  // the slider moved on while we rendered
