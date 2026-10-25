@@ -1993,3 +1993,7 @@ msgstr "%.1f %% schwarz, %.1f %% weiß"
 #: src/ui/app.cpp
 msgid "The histogram needs a GPU."
 msgstr "Das Histogramm braucht eine GPU."
+
+#: src/ui/settings.cpp
+msgid "Picture levels in nits (else as a share of white)"
+msgstr "Bildpegel in Nits (sonst als Anteil von Weiß)"

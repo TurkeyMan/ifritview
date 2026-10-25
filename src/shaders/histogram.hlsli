@@ -6,17 +6,22 @@ ByteAddressBuffer histogram : register(t9);  // R, G, B, Y counts (256 each), th
 // backdrop, the `channels` shown (bits: 1 R, 2 G, 4 B, 8 luminance), R, G
 // and B as additive fills (where they overlap: cyan, magenta, yellow,
 // white) and luminance as a light outline over them, heights scaled to the
-// tallest of those shown (between the ends). sRGB-encoded colour, alpha.
+// tallest of those shown (between the ends) or eight times their mean bin,
+// whichever is lower. sRGB-encoded colour, alpha.
 float4 histogram_panel(float2 at, float4 panel, uint channels)
 {
     const float2 size = panel.zw - panel.xy;
     const float x = (at.x - panel.x) / size.x, y = 1 - (at.y - panel.y) / size.y;  // 0..1, y up
     const uint bin = min(uint(x * 256), 255u);
-    uint most = 1;
+    // Scaled to eight times the mean bin of the channels shown (or their
+    // tallest, if that's lower): spikes run off the top, the rest is readable.
+    float tallest = 1;
     [unroll] for (uint c = 0; c < 4; ++c)
         if (channels & (1u << c))
-            most = max(most, histogram.Load((1024 + c) * 4));
-    const float tallest = float(most);
+        {
+            const float mean = float(histogram.Load((1028 + c) * 4)) / 254;
+            tallest = max(tallest, min(float(histogram.Load((1024 + c) * 4)), 8 * mean));
+        }
     float3 fill = 0;
     [unroll] for (uint ch = 0; ch < 3; ++ch)
     {

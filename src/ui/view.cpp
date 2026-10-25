@@ -86,6 +86,9 @@ rap::node View::node()
                 layout();
                 if (on_resized)
                     on_resized();
+                // The frame at the new size before the paint at it: never the
+                // last image stretched by the window, then the new one.
+                present_on_gpu();
             })
         .on_pointer([this](const rap::pointer_event& e) { return pointer(e); })
         .on_scroll([this](const rap::scroll_event& e) { return scroll(e); })
@@ -107,6 +110,8 @@ void View::invalidate()
 {
     if (canvas_)
         canvas_->invalidate();
+    // Drawn now, not in the paint: the paint then shows this frame, not the last.
+    present_on_gpu();
     if (on_framing_changed && !applying_framing_)
     {
         const Framing f = framing();
@@ -1127,9 +1132,11 @@ bool View::draw_on_gpu(rap::color background)
     f.histogram = histogram_overlay_;
     if (f.histogram)
     {
-        // Top right: whole device pixels a bin, a little in from the corner.
+        // Top right, about a quarter of the width (whole device pixels a bin),
+        // a little in from the corner.
         const double scale = scale_factor();
-        const int w = 256 * std::max(1, int(std::lround(scale))), h = int(std::lround(100 * scale)), margin = int(std::lround(12 * scale));
+        const int w = 256 * std::max(1, int(std::lround(target.width * 0.25 / 256))), h = w * 2 / 5,
+                  margin = int(std::lround(16 * scale));
         f.panel[0] = std::max(0, target.width - w - margin);
         f.panel[1] = margin;
         f.panel[2] = w;
@@ -1172,6 +1179,14 @@ bool View::draw_on_gpu(rap::color background)
     return true;
 }
 #endif
+
+void View::present_on_gpu()
+{
+#ifdef HAVE_GPU
+    if (canvas_ && image_)
+        draw_on_gpu(parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38}));
+#endif
+}
 
 bool View::drawn_on_gpu() const
 {

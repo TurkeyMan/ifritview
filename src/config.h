@@ -48,6 +48,7 @@ struct Config
     bool checkerboard = true;         // show transparency over a checkerboard
     bool histogram = false;           // the histogram over the image in fullscreen (G toggles)
     int histogram_channels = 15;      // shown in it: bits 1 R, 2 G, 4 B, 8 luminance
+    bool levels_in_nits = true;       // the histogram's numbers in nits (and EV from white), else as a share of white
     bool animate = true;
     bool video_autoplay = true;
     bool video_muted = true;

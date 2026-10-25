@@ -88,7 +88,7 @@ void GpuView::read_details(std::function<void(const Details&)> done)
         return;
     struct Read
     {
-        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1028 * 4);
+        std::vector<std::byte> stats = std::vector<std::byte>(1100 * 4), histogram = std::vector<std::byte>(1032 * 4);
     };
     auto read = std::make_shared<Read>();
     const bool scene = tonable_;
@@ -190,7 +190,7 @@ bool GpuView::programs(std::string& error)
         *program = r.program;
     }
     stats_ = device_->create_buffer(1100 * 4);
-    histogram_ = device_->create_buffer(1028 * 4);
+    histogram_ = device_->create_buffer(1032 * 4);
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
     if (!stats_ || !histogram_ || !blank_)
     {

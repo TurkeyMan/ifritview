@@ -48,6 +48,9 @@ public:
     // redraw, and its 8-bit pixels can wait.
     bool drawn_on_gpu() const;
     void redraw() { invalidate(); }
+    // The GPU's frame for the view as it is now, presented before the next
+    // paint (nothing if it's already that, or the CPU draws it).
+    void present_on_gpu();
 #ifdef HAVE_GPU
     // The panel's numbers, on the UI thread, after each count.
     std::function<void(const GpuView::Details&)> on_histogram_details;

@@ -1968,3 +1968,7 @@ msgstr ""
 #: src/ui/app.cpp
 msgid "The histogram needs a GPU."
 msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Picture levels in nits (else as a share of white)"
+msgstr ""

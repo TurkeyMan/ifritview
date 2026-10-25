@@ -353,6 +353,7 @@ void App::build_ui()
                                     .bind(metadata_list_)
                                     .stretch();
                             }}
+                    .stretch()  // the list's own stretch is inside the builder: the slot needs it too
                     .handle(info_box_),
                 // The histogram of what's shown (drawn on the GPU), and what's measured.
                 vbox{
@@ -371,7 +372,7 @@ void App::build_ui()
                             })
                         .on_pointer([this](const rap::pointer_event& e) { return histogram_legend_click(e); })
                         .bind(histogram_canvas_)
-                        .height(rap::extent{9, rap::extent::unit::lines}),
+                        .height(rap::extent{13, rap::extent::unit::lines}),
 
                     L::form{
                         {_("Peak"), L::label{""}.bind(hist_peak_)},
@@ -383,6 +384,7 @@ void App::build_ui()
                     L::spacer{},
                 }
                     .margins()
+                    .stretch()
                     .handle(histogram_box_),
                 }
                     .handle(metadata_pane_),
@@ -409,13 +411,14 @@ void App::build_ui()
 #ifdef HAVE_GPU
     view_->on_histogram_details = [this](const GpuView::Details& d)
     {
-        // Scene luminance in nits (SDR white at BT.2408's 203) and stops from
-        // white; an SDR image's as a share of white.
+        // Luminance in nits (SDR white at BT.2408's 203 until the display's is
+        // known) and EV from white; or, set so, as a share of white.
         const auto level = [&](float v) -> std::string
         {
             char buf[64];
-            if (d.scene)
-                std::snprintf(buf, sizeof buf, "%.0f nits (%+.1f EV)", double(v) * 203, v > 0 ? std::log2(double(v)) : -99.0);
+            if (cfg_.levels_in_nits)
+                std::snprintf(buf, sizeof buf, "%.*f nits (%+.1f EV)", v * 203 < 10 ? 1 : 0, double(v) * 203,
+                              v > 0 ? std::log2(double(v)) : -99.0);
             else
                 std::snprintf(buf, sizeof buf, "%.1f%%", double(v) * 100);
             return buf;

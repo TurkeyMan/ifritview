@@ -172,6 +172,7 @@ struct State
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
     rap::drop_down *enlarge_filter = nullptr, *shrink_filter = nullptr;
+    rap::check* levels_in_nits = nullptr;
     rap::check *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
     rap::check *video_autoplay = nullptr, *video_muted = nullptr, *video_loop = nullptr;
     rap::spin *ss_seconds = nullptr, *ss_zoom = nullptr, *ss_fade = nullptr;
@@ -240,6 +241,7 @@ struct State
         if (const int i = shrink_filter->current(); i >= 0)
             cfg.shrink_filter = kShrinkFilters[size_t(i)];
         cfg.fullscreen_upscale = fullscreen_upscale->checked();
+        cfg.levels_in_nits = levels_in_nits->checked();
         cfg.checkerboard = checkerboard->checked();
         cfg.animate = animate->checked();
         cfg.video_autoplay = video_autoplay->checked();
@@ -409,6 +411,7 @@ rap::node viewing_page(const Config& cfg, State& st)
                                           .tooltip(_("How an image is resampled when shown smaller than it is"))
                                           .bind(st.shrink_filter)},
                      {"", L::check{_("In fullscreen, enlarge small images to fill the screen"), cfg.fullscreen_upscale}.bind(st.fullscreen_upscale)},
+                     {"", L::check{_("Picture levels in nits (else as a share of white)"), cfg.levels_in_nits}.bind(st.levels_in_nits)},
                  }},
         L::group{_("Background"),
                  L::form{
