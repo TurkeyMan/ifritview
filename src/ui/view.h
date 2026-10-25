@@ -213,9 +213,16 @@ private:
     Framing last_framing_;
     bool applying_framing_ = false;
     void draw_compare(rap::painter& p, float alpha);
+    // What goes over a comparison, whoever drew it: which image is which,
+    // and a swipe's divider.
+    void draw_compare_marks(rap::painter& p);
+    bool difference_ready() const;  // the difference is known, for images the size of A
     double divider_x() const;  // device px
     std::unique_ptr<Comparison> compare_;
     void drop_caches();
+    // image_changed() for another image put in the view's (comparing): its
+    // data is as it was, so the GPU keeps what it has of it.
+    void image_replaced();
     void zoom_changed();
     bool pointer(const rap::pointer_event& e);
     bool scroll(const rap::scroll_event& e);
@@ -260,6 +267,13 @@ private:
         bool histogram = false, counting = false;
         int channels = 0;
         double wb_kelvin = 0, wb_tint = 0;
+        // Comparing: how, and B (its own exposure and white balance).
+        int compare = -1;
+        const Image* b = nullptr;
+        uint64_t b_generation = 0;
+        double b_exposure = 0, b_wb_kelvin = 0, b_wb_tint = 0;
+        int split = 0, gain = 0;
+        const ImageDifference* difference = nullptr;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;
@@ -267,7 +281,8 @@ private:
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)
     // Draws the frame on the GPU when it's the plain case (one still image,
-    // not compared, moving or fading); false when the CPU draws it.
+    // or a comparison of two, not moving or fading); false when the CPU
+    // draws it.
     bool draw_on_gpu(rap::color background);
 #endif
 

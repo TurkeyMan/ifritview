@@ -25,6 +25,7 @@
 #include <vector>
 
 struct Image;
+struct ImageDifference;
 struct RawMosaic;
 
 // What the front buffer holds.
@@ -64,6 +65,20 @@ public:
     // when it can't, and the view draws on the CPU.
     bool render(const std::shared_ptr<Image>& image, uint64_t generation, const Frame& frame, rap::gpu::texture_ptr& out,
                 rap::gpu::ticket& ready, rap::frame_color& colour, std::string& error);
+    // Comparing, a swipe: `a` left of frame column `split`, `b` right of it,
+    // each with its own framing, exposure and white balance (`fb`'s; the
+    // rest of the frame is `fa`'s). Both stay on the device while compared,
+    // so moving the divider or flipping between them is only a redraw.
+    bool render_swipe(const std::shared_ptr<Image>& a, uint64_t a_generation, const Frame& fa, const std::shared_ptr<Image>& b,
+                      uint64_t b_generation, const Frame& fb, int split, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready,
+                      rap::frame_color& colour, std::string& error);
+    // Comparing, where they differ: as difference_image() makes it (A's
+    // grey under the error, `gain` times, red to yellow to white), from the
+    // errors compare_images() found and A as it's shown at `frame`'s
+    // exposure; made at the image's size, then resampled as an image is.
+    bool render_difference(const std::shared_ptr<Image>& a, uint64_t a_generation, const std::shared_ptr<const ImageDifference>& d,
+                           int gain, const Frame& frame, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready, rap::frame_color& colour,
+                           std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
 
@@ -92,64 +107,92 @@ public:
                        std::string& error);
 
 private:
+    // An image on the device: level 0 (its data in linear light), the levels
+    // made below it as zooming out needs them, and what showing it takes.
+    struct Source
+    {
+        std::weak_ptr<Image> image;
+        uint64_t generation = 0;
+        std::vector<rap::gpu::texture_ptr> levels;  // linear, premultiplied, half float
+        rap::gpu::texture_ptr tone;                 // a raw's camera-matched curve, 4096 x 1
+        rap::gpu::buffer_ptr stats;                 // its measures (view.hlsli's layout), for raw and HDR images
+        float scene_gain = 1;                       // the scene's scale before exposure (a raw's gain without a curve)
+        float input_to_xyz[3][3] = {};              // its data -> XYZ (a raw's: its colour matrix, before white balance)
+        float as_shot[3] = {1, 1, 1};               // a raw's: what its level 0 was developed with, the least 1
+        bool auto_exposure = false;                 // a raw developed here: scaled by its own 99th percentile
+        bool tonable = false;                       // exposure applies
+        bool measured = false;                      // `stats` is this image's
+        size_t bytes() const;
+    };
+
     bool programs(std::string& error);
     // The image's data on the device, decoded to linear light (level 0).
-    bool upload(const Image& image, std::string& error);
+    bool upload(const Image& image, Source& s, std::string& error);
     // A raw's readout still compressed (RawMosaic::stream) decoded here: its
     // active area into `sites` (a photosite a texel), and what's masked
     // summed into `levels` for the develop's black level.
     bool decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
-    rap::gpu::texture_ptr level(int n);
-
+    rap::gpu::texture_ptr level(Source& s, int n);
     // The level the measures and the histogram count: at most 2048 pixels.
-    rap::gpu::texture_ptr counted_level();
+    rap::gpu::texture_ptr counted_level(Source& s);
 
+    // What's shown: [0] the image (comparing, A), [1] comparing, B. hold()
+    // puts an image in a slot: there already, in the other one (A and B
+    // changed places), kept from before, or uploaded.
+    Source shown_[2];
+    bool hold(int n, const std::shared_ptr<Image>& image, uint64_t generation, std::string& error);
     // Images left behind stay on the device (level 0, the levels made, the
     // measures), most recent first, so flipping back to one is a redraw:
     // up to about half the memory the GPU says the app has.
-    struct Retained
-    {
-        std::weak_ptr<Image> image;
-        uint64_t generation = 0;
-        std::vector<rap::gpu::texture_ptr> levels;
-        rap::gpu::texture_ptr tone;
-        rap::gpu::buffer_ptr stats;
-        float scene_gain = 1, input_to_xyz[3][3] = {}, as_shot[3] = {1, 1, 1};
-        bool auto_exposure = false, tonable = false, measured = false;
-        size_t bytes = 0;
-    };
-    std::vector<Retained> retained_;
-    std::shared_ptr<Image> pending_image_;  // what render() is moving to, while it retains the last
-    uint64_t pending_generation_ = 0;
-    void retain_current();                                       // the current image's, into retained_
-    bool restore(const std::shared_ptr<Image>& image, uint64_t generation);  // from retained_, if it's there
-    size_t current_bytes() const;
+    std::vector<Source> retained_;
+    // `s`'s image into retained_, leaving `s` empty (not when it's `next`
+    // with its data changed: a raw's develop replacing its preview leaves
+    // what's on the device stale).
+    void retain(Source& s, const std::shared_ptr<Image>& next = nullptr, uint64_t next_generation = 0);
+    bool restore(Source& s, const std::shared_ptr<Image>& image, uint64_t generation);  // from retained_, if it's there
+
+    // The frame's target (one of two, in turn) and what it holds.
+    bool begin_frame(const Frame& f, rap::gpu::texture_ptr& frame, rap::frame_color& colour, std::string& error);
+    // Raw and HDR images measured once (their peak, their extent in each
+    // hue), on the device: the mapping reads them there. Any image when
+    // the histogram counts it (`always`).
+    void measure(Source& s, std::span<const std::byte> params, bool always);
+    // The histogram of `s` as `f` shows it: counted again when that changed.
+    void count(Source& s, const Frame& f);
+    // `s` (a `width` x `height` image) resampled and composed into the
+    // frame's columns x0..x1.
+    bool draw(Source& s, int width, int height, bool alpha, const Frame& f, const rap::gpu::texture_ptr& frame, int x0, int x1,
+              rap::gpu::ticket& ready, std::string& error);
 
     std::shared_ptr<rap::gpu::device> device_;
     rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
-    rap::gpu::program_ptr decode_, resample_, compose_, stats_program_, peak_, histogram_program_, histogram_max_, histogram_view_;
+    rap::gpu::program_ptr decode_, resample_, compose_, difference_program_, stats_program_, peak_, histogram_program_,
+        histogram_max_, histogram_view_;
     rap::gpu::texture_ptr panels_[2];  // the docked histogram, drawn
     int next_panel_ = 0;
-    rap::gpu::buffer_ptr stats_;      // the image's measures (view.hlsli's layout), for raw and HDR images
-    bool measured_ = false;           // `stats_` is this image's
     rap::gpu::buffer_ptr histogram_;  // R, G, B, Y counts of what's shown, and the tallest
-    double histogram_exposure_ = -1e9;  // what it was counted at (and the image's generation below)
+    // What it was counted from (nothing while the generation is 0), and what
+    // the docked panel's numbers need of that.
+    std::weak_ptr<Image> histogram_image_;
     uint64_t histogram_generation_ = 0;
+    double histogram_exposure_ = -1e9;
     float histogram_scale_ = 1;  // the scene's scale it was counted at
+    bool histogram_scene_ = false, histogram_auto_ = false;
+    rap::gpu::buffer_ptr histogram_stats_;
 
-    std::weak_ptr<Image> image_;
-    uint64_t generation_ = 0;
-    std::vector<rap::gpu::texture_ptr> levels_;  // linear, premultiplied, half float
-    rap::gpu::texture_ptr tone_;                  // a raw's camera-matched curve, 4096 x 1
-    float scene_gain_ = 1;                        // the scene's scale before exposure (a raw's gain without a curve)
-    float input_to_xyz_[3][3] = {};               // the image's data -> XYZ (a raw's: its colour matrix, before white balance)
-    float as_shot_[3] = {1, 1, 1};                // a raw's: what its level 0 was developed with, the least 1
-    bool auto_exposure_ = false;                  // a raw developed here: scaled by its own 99th percentile
+    // The difference (render_difference) as an image of its own, made again
+    // when A, the errors, the gain or how A is shown change.
+    Source difference_;
+    std::shared_ptr<const ImageDifference> difference_of_;
+    rap::gpu::texture_ptr errors_;  // the errors, a byte a pixel
+    int difference_gain_ = 0;
+    double difference_exposure_ = 0;
+    float difference_wb_[3] = {};
+
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_;
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_;
-    bool tonable_ = false;                        // exposure applies
-    rap::gpu::texture_ptr rows_;                  // the first pass's output, reused while big enough
+    rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)
     rap::gpu::texture_ptr frames_[2];
     int next_frame_ = 0;
 };

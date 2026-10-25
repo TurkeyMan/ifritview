@@ -37,7 +37,8 @@ cbuffer Params : register(b0)
     float4 input_y;
     float4 input_z;
     int auto_exposure;  // 1: a raw developed on the GPU, its scale from its own 99th percentile (auto_gain)
-    int3 unused2;
+    int gain;           // the difference pass: its errors amplified by this (1..255)
+    int2 unused2;
 };
 
 Texture2D<float4> source : register(t0);

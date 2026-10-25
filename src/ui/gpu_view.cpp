@@ -1,5 +1,6 @@
 #include "gpu_view.h"
 
+#include "../compare.h"
 #include "../image.h"
 #include "../decoders/decoder.h"
 #include "../decoders/ljpeg.h"
@@ -9,6 +10,7 @@
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_ycc.h"
+#include "shaders/difference.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
 #include "shaders/histogram_view.h"
@@ -65,7 +67,7 @@ struct ComposeParams
     uint32_t histogram_channels;
     float panel[4];
     float input_x[4], input_y[4], input_z[4];
-    int32_t auto_exposure, unused2[3];
+    int32_t auto_exposure, gain, unused2[2];
 };
 static_assert(sizeof(ComposeParams) == 240, "as view.hlsli's cbuffer packs");
 
@@ -147,17 +149,17 @@ GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(d
 
 void GpuView::read_details(std::function<void(const Details&)> done)
 {
-    if (!histogram_generation_ || !measured_)
+    if (!histogram_generation_ || !histogram_stats_)
         return;
     struct Read
     {
         std::vector<std::byte> stats = std::vector<std::byte>(1101 * 4), histogram = std::vector<std::byte>(1032 * 4);
     };
     auto read = std::make_shared<Read>();
-    const bool scene = tonable_;
+    const bool scene = histogram_scene_;
     const float exposure = histogram_scale_;
-    const bool automatic = auto_exposure_;
-    device_->readback(stats_, read->stats);
+    const bool automatic = histogram_auto_;
+    device_->readback(histogram_stats_, read->stats);
     device_->readback(histogram_, read->histogram,
                       [read, scene, exposure, automatic, done = std::move(done)]
                       {
@@ -264,10 +266,10 @@ bool GpuView::programs(std::string& error)
     if (compose_)
         return true;
     for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
-                                 std::pair{&compose_, shaders::compose}, std::pair{&histogram_view_, shaders::histogram_view},
+                                 std::pair{&compose_, shaders::compose}, std::pair{&difference_program_, shaders::difference},
+                                 std::pair{&histogram_view_, shaders::histogram_view},
                                  std::pair{&develop_, shaders::develop}, std::pair{&develop_linear_, shaders::develop_linear},
-                                 std::pair{&develop_ycc_, shaders::develop_ycc},
-                                 std::pair{&mosaic_, shaders::mosaic}})
+                                 std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -495,17 +497,17 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     return true;
 }
 
-bool GpuView::upload(const Image& image, std::string& error)
+bool GpuView::upload(const Image& image, Source& s, std::string& error)
 {
-    levels_.clear();
-    tone_.reset();
+    s.levels.clear();
+    s.tone.reset();
     const int w = image.width, h = image.height;
     rap::gpu::texture_ptr data;
     DecodeParams dp{1, 3, 0, 0};
-    scene_gain_ = 1;
-    tonable_ = image.tonable();
-    auto_exposure_ = false;
-    std::memcpy(input_to_xyz_, kXyzFrom709, sizeof input_to_xyz_);
+    s.scene_gain = 1;
+    s.tonable = image.tonable();
+    s.auto_exposure = false;
+    std::memcpy(s.input_to_xyz, kXyzFrom709, sizeof s.input_to_xyz);
     if (const RawMosaic* m = image.mosaic.get())
     {
         // A raw, developed here: the mosaic up as it is, then demosaiced into
@@ -575,7 +577,7 @@ bool GpuView::upload(const Image& image, std::string& error)
         pass.uniforms = bytes(p);
         pass.target = top;
         device_->run(std::span(&pass, 1));
-        levels_.push_back(top);
+        s.levels.push_back(top);
         // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame
         // puts its white balance in front (render()).
         for (int i = 0; i < 3; ++i)
@@ -584,12 +586,11 @@ bool GpuView::upload(const Image& image, std::string& error)
                 float v = 0;
                 for (int k = 0; k < 3; ++k)
                     v += kXyzFrom709[i][k] * m->rgb_cam[k][j];
-                input_to_xyz_[i][j] = v;
+                s.input_to_xyz[i][j] = v;
             }
-        std::memcpy(as_shot_, m->as_shot, sizeof as_shot_);
-        auto_exposure_ = true;
-        measured_ = false;
-        histogram_generation_ = 0;
+        std::memcpy(s.as_shot, m->as_shot, sizeof s.as_shot);
+        s.auto_exposure = true;
+        s.measured = false;
         return true;
     }
     if (const LinearData* raw = image.linear.get(); raw && raw->rgb.size() == size_t(w) * h * 3)
@@ -602,12 +603,12 @@ bool GpuView::upload(const Image& image, std::string& error)
         {
             std::vector<float> curve(4096, raw->tone.back());
             std::copy_n(raw->tone.begin(), std::min<size_t>(4096, raw->tone.size()), curve.begin());
-            tone_ = device_->create({4096, 1, rap::gpu::format::r32f});
-            if (tone_)
-                device_->upload(tone_, std::as_bytes(std::span(curve)), {1, rap::gpu::sample_type::f32});
+            s.tone = device_->create({4096, 1, rap::gpu::format::r32f});
+            if (s.tone)
+                device_->upload(s.tone, std::as_bytes(std::span(curve)), {1, rap::gpu::sample_type::f32});
         }
         else
-            scene_gain_ = float(raw->auto_gain);
+            s.scene_gain = float(raw->auto_gain);
     }
     else if (const SourceData* s = image.source.get(); s && s->width == w && s->height == h)
     {
@@ -642,7 +643,7 @@ bool GpuView::upload(const Image& image, std::string& error)
         dp = {0, 4, 1, 0};
     }
     auto top = device_->create({w, h, rap::gpu::format::rgba16f, 1, true});
-    if (!data || !top || (image.linear && !image.linear->tone.empty() && !tone_))
+    if (!data || !top || (image.linear && !image.linear->tone.empty() && !s.tone))
     {
         error = "too big for the GPU";
         return false;
@@ -653,55 +654,33 @@ bool GpuView::upload(const Image& image, std::string& error)
     p.uniforms = bytes(dp);
     p.target = top;
     device_->run(std::span(&p, 1));
-    levels_.push_back(top);
-    measured_ = false;
-    histogram_generation_ = 0;
+    s.levels.push_back(top);
+    s.measured = false;
     return true;
 }
 
-size_t GpuView::current_bytes() const
+size_t GpuView::Source::bytes() const
 {
     size_t n = 0;
-    for (const rap::gpu::texture_ptr& t : levels_)
+    for (const rap::gpu::texture_ptr& t : levels)
         n += size_t(t->width()) * t->height() * 8;  // half float RGBA
     return n;
 }
 
-void GpuView::retain_current()
+void GpuView::retain(Source& s, const std::shared_ptr<Image>& next, uint64_t next_generation)
 {
-    // Not when it's the same image with its data changed (a raw's develop
-    // replacing its preview): what's on the device is stale then.
-    std::shared_ptr<Image> image = image_.lock();
-    if (image && !levels_.empty() && !(image == pending_image_ && pending_generation_ != generation_))
-    {
-        Retained r;
-        r.image = image;
-        r.generation = generation_;
-        r.levels = std::move(levels_);
-        r.tone = std::move(tone_);
-        r.stats = std::move(stats_);
-        r.scene_gain = scene_gain_;
-        std::memcpy(r.input_to_xyz, input_to_xyz_, sizeof r.input_to_xyz);
-        std::memcpy(r.as_shot, as_shot_, sizeof r.as_shot);
-        r.auto_exposure = auto_exposure_;
-        r.tonable = tonable_;
-        r.measured = measured_;
-        for (const rap::gpu::texture_ptr& t : r.levels)
-            r.bytes += size_t(t->width()) * t->height() * 8;
-        retained_.insert(retained_.begin(), std::move(r));
-    }
-    levels_.clear();
-    tone_.reset();
-    stats_.reset();
-    measured_ = false;
+    std::shared_ptr<Image> image = s.image.lock();
+    if (image && !s.levels.empty() && !(image == next && next_generation != s.generation))
+        retained_.insert(retained_.begin(), std::move(s));
+    s = Source{};
     // What's gone (images closed), and the oldest past the budget.
-    std::erase_if(retained_, [](const Retained& r) { return r.image.expired(); });
+    std::erase_if(retained_, [](const Source& r) { return r.image.expired(); });
     const rap::gpu::memory_budget m = device_->memory();
     const size_t budget = m.budget ? size_t(m.budget / 2) : size_t(2) << 30;
     size_t used = 0;
     for (size_t i = 0; i < retained_.size(); ++i)
     {
-        used += retained_[i].bytes;
+        used += retained_[i].bytes();
         if (used > budget)
         {
             retained_.resize(i);
@@ -710,7 +689,7 @@ void GpuView::retain_current()
     }
 }
 
-bool GpuView::restore(const std::shared_ptr<Image>& image, uint64_t generation)
+bool GpuView::restore(Source& s, const std::shared_ptr<Image>& image, uint64_t generation)
 {
     for (auto it = retained_.begin(); it != retained_.end(); ++it)
         if (it->image.lock() == image)
@@ -720,44 +699,71 @@ bool GpuView::restore(const std::shared_ptr<Image>& image, uint64_t generation)
                 retained_.erase(it);  // its data changed since: made again
                 return false;
             }
-            levels_ = std::move(it->levels);
-            tone_ = std::move(it->tone);
-            stats_ = std::move(it->stats);
-            scene_gain_ = it->scene_gain;
-            std::memcpy(input_to_xyz_, it->input_to_xyz, sizeof input_to_xyz_);
-            std::memcpy(as_shot_, it->as_shot, sizeof as_shot_);
-            auto_exposure_ = it->auto_exposure;
-            tonable_ = it->tonable;
-            measured_ = it->measured;
-            histogram_generation_ = 0;  // counted for another image since
+            s = std::move(*it);
             retained_.erase(it);
             return true;
         }
     return false;
 }
 
-rap::gpu::texture_ptr GpuView::counted_level()
+bool GpuView::hold(int n, const std::shared_ptr<Image>& image, uint64_t generation, std::string& error)
 {
-    int n = 0;
-    while (std::max(levels_[0]->width(), levels_[0]->height()) >> n > 2048)
-        ++n;
-    return level(n);
+    Source& s = shown_[n];
+    const auto holds = [&](const Source& in) { return in.image.lock() == image && in.generation == generation && !in.levels.empty(); };
+    if (holds(s))
+        return true;
+    if (holds(shown_[n ^ 1]))
+    {
+        std::swap(s, shown_[n ^ 1]);  // A and B changed places
+        return true;
+    }
+    retain(s, image, generation);
+    const bool kept = restore(s, image, generation);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "gpu: %s %dx%d (%zu kept, %zu MB)\n", kept ? "kept on the GPU:" : "uploading", image->width, image->height,
+                     retained_.size(), [&] { size_t b = 0; for (auto& r : retained_) b += r.bytes(); return b >> 20; }());
+    if (!kept)
+    {
+        const int64_t t0 = g_get_monotonic_time();
+        s.stats = device_->create_buffer(1101 * 4);  // this image's measures
+        if (!s.stats || !upload(*image, s, error))
+        {
+            if (error.empty())
+                error = "no room for the measures";
+            s = Source{};
+            return false;
+        }
+        if (std::getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "gpu: %s in %.1f ms on the UI thread\n", image->mosaic ? "mosaic uploaded and developed" : "uploaded",
+                         (g_get_monotonic_time() - t0) / 1000.0);
+    }
+    s.image = image;
+    s.generation = generation;
+    return true;
 }
 
-rap::gpu::texture_ptr GpuView::level(int n)
+rap::gpu::texture_ptr GpuView::counted_level(Source& s)
 {
-    while (int(levels_.size()) <= n)
+    int n = 0;
+    while (std::max(s.levels[0]->width(), s.levels[0]->height()) >> n > 2048)
+        ++n;
+    return level(s, n);
+}
+
+rap::gpu::texture_ptr GpuView::level(Source& s, int n)
+{
+    while (int(s.levels.size()) <= n)
     {
-        const rap::gpu::texture_ptr& above = levels_.back();
+        const rap::gpu::texture_ptr& above = s.levels.back();
         const int w = above->width(), h = above->height();
         const int nw = std::max(1, w / 2), nh = std::max(1, h / 2);
         if (nw == w && nh == h)
-            return levels_.back();
+            return s.levels.back();
         // Halved with Lanczos-3, across then down, in linear light.
         auto across = device_->create({nw, h, rap::gpu::format::rgba16f, 1, true});
         auto next = device_->create({nw, nh, rap::gpu::format::rgba16f, 1, true});
         if (!across || !next)
-            return levels_.back();
+            return s.levels.back();
         const ResampleParams px{0, int32_t(ScaleFilter::Lanczos3), float(w) / nw, 0, w, 0, {}};
         const ResampleParams py{1, int32_t(ScaleFilter::Lanczos3), float(h) / nh, 0, h, 0, {}};
         rap::gpu::pass passes[2];
@@ -770,9 +776,211 @@ rap::gpu::texture_ptr GpuView::level(int n)
         passes[1].uniforms = bytes(py);
         passes[1].target = next;
         device_->run(passes);
-        levels_.push_back(next);
+        s.levels.push_back(next);
     }
-    return levels_[size_t(n)];
+    return s.levels[size_t(n)];
+}
+
+bool GpuView::begin_frame(const Frame& f, rap::gpu::texture_ptr& out, rap::frame_color& colour, std::string& error)
+{
+    static constexpr rap::gpu::format kFormats[] = {rap::gpu::format::rgba8, rap::gpu::format::rgb10a2, rap::gpu::format::rgb10a2,
+                                                    rap::gpu::format::rgba16f};
+    const rap::gpu::format format = kFormats[int(f.front)];
+    rap::gpu::texture_ptr& frame = frames_[next_frame_];
+    if (!frame || frame->width() != f.width || frame->height() != f.height || frame->format() != format)
+        frame = device_->create({f.width, f.height, format, 1, true});
+    if (!frame)
+    {
+        error = "no room for the frame";
+        return false;
+    }
+    next_frame_ ^= 1;
+    out = frame;
+    colour = {};
+    colour.premultiplied = false;  // opaque: composited over the background
+    colour.sdr_white_nits = f.sdr_white_nits;
+    if (f.front == FrontBuffer::Pq10)
+        colour.curve = rap::transfer::pq;  // BT.709 primaries until the gamut is mapped to the display's
+    else if (f.front == FrontBuffer::ScRgb16)
+        colour.curve = rap::transfer::linear;
+    return true;
+}
+
+// The compose pass's parameters for showing `s` as `f` has it, but for
+// the image's place and the resampling.
+static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure,
+                        const float input_to_xyz[3][3], const float as_shot[3], bool measured, ComposeParams& cp)
+{
+    set_linear(cp.background, f.background);
+    set_linear(cp.checker_a, rap::color{102, 102, 102});
+    set_linear(cp.checker_b, rap::color{140, 140, 140});
+    cp.exposure = scene_gain * float(tonable ? std::pow(2.0, f.exposure) : 1.0);
+    cp.tone = tone ? 1 : 0;
+    cp.output = int32_t(f.front);
+    cp.white = f.sdr_white_nits;
+    // A raw's white balance (the frame's, else as shot), in front of its matrix.
+    float wb[3] = {1, 1, 1};
+    if (auto_exposure)
+        for (int j = 0; j < 3; ++j)
+            wb[j] = f.white_balance[0] > 0 ? f.white_balance[j] : as_shot[j];
+    for (int j = 0; j < 3; ++j)
+    {
+        cp.input_x[j] = input_to_xyz[0][j] * wb[j];
+        cp.input_y[j] = input_to_xyz[1][j] * wb[j];
+        cp.input_z[j] = input_to_xyz[2][j] * wb[j];
+    }
+    cp.auto_exposure = auto_exposure ? 1 : 0;
+    cp.measured = measured ? 1 : 0;
+    // The display: sRGB at SDR white until rapport describes the real one.
+    std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
+    std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
+    std::memcpy(cp.display_b, kSrgbB, sizeof cp.display_b);
+    cp.display_peak = 1;
+    if (f.histogram)
+    {
+        cp.show_histogram = 1;
+        cp.histogram_channels = uint32_t(f.histogram_channels);
+        cp.panel[0] = float(f.panel[0]), cp.panel[1] = float(f.panel[1]);
+        cp.panel[2] = float(f.panel[0] + f.panel[2]), cp.panel[3] = float(f.panel[1] + f.panel[3]);
+    }
+}
+
+void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
+{
+    if (s.measured || !(s.tonable || always))
+        return;
+    const rap::gpu::texture_ptr counted = counted_level(s);
+    device_->clear(s.stats, 0);
+    rap::gpu::dispatch d[2];
+    for (int i = 0; i < 2; ++i)
+    {
+        d[i].program = i ? peak_ : stats_program_;
+        d[i].inputs = {counted, s.tone ? s.tone : blank_};
+        d[i].buffers = {histogram_, s.stats};
+        d[i].uniforms = params;  // copied at run()
+        d[i].groups[0] = i ? 1 : (counted->width() + 15) / 16;
+        d[i].groups[1] = i ? 1 : (counted->height() + 15) / 16;
+    }
+    device_->run(std::span(d));
+    s.measured = true;
+}
+
+void GpuView::count(Source& s, const Frame& f)
+{
+    ComposeParams cp{};
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+    const bool fresh = !s.measured;
+    measure(s, bytes(cp), true);
+    cp.measured = 1;
+    // The histogram of what's shown: again when exposure or the image change.
+    const std::shared_ptr<Image> image = s.image.lock();
+    if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure && !fresh)
+        return;
+    const rap::gpu::texture_ptr counted = counted_level(s);
+    device_->clear(histogram_, 0);
+    rap::gpu::dispatch d[2];
+    d[0].program = histogram_program_;
+    d[0].inputs = {counted, s.tone ? s.tone : blank_};
+    d[0].buffers = {histogram_, s.stats};
+    d[0].uniforms = bytes(cp);
+    d[0].groups[0] = (counted->width() + 15) / 16;
+    d[0].groups[1] = (counted->height() + 15) / 16;
+    d[1].program = histogram_max_;
+    d[1].buffers = {histogram_};
+    d[1].uniforms = bytes(cp);
+    device_->run(std::span(d));
+    histogram_image_ = image;
+    histogram_generation_ = s.generation;
+    histogram_exposure_ = f.exposure;
+    histogram_scale_ = cp.exposure;
+    histogram_scene_ = s.tonable;
+    histogram_auto_ = s.auto_exposure;
+    histogram_stats_ = s.stats;
+}
+
+bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f, const rap::gpu::texture_ptr& frame, int x0, int x1,
+                   rap::gpu::ticket& ready, std::string& error)
+{
+    x0 = std::clamp(x0, 0, f.width), x1 = std::clamp(x1, 0, f.width);
+    if (x1 <= x0)
+        return true;  // `ready` left as it was
+    ComposeParams cp{};
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+    measure(s, bytes(cp), false);
+    cp.measured = s.measured ? 1 : 0;
+    const double shown_w = width * f.zoom, shown_h = height * f.zoom;
+    cp.image_rect[0] = float(f.pan_x), cp.image_rect[1] = float(f.pan_y);
+    cp.image_rect[2] = float(f.pan_x + shown_w), cp.image_rect[3] = float(f.pan_y + shown_h);
+    cp.checker_size = f.checkerboard && alpha ? std::max(1, f.checker_size) : 0;
+
+    // A whole-pixel 1:1 is a copy; enlarging with no filter is nearest.
+    const bool one_to_one = std::fabs(f.zoom - 1) < 1e-9 && f.pan_x == std::floor(f.pan_x) && f.pan_y == std::floor(f.pan_y);
+    const ScaleFilter filter = f.zoom > 1 ? f.enlarge : f.shrink;
+    std::vector<rap::gpu::pass> passes;
+    rap::gpu::pass last;
+    last.program = compose_;
+    last.target = frame;
+    last.region = {x0, 0, x1 - x0, f.height};
+    if (one_to_one || filter == ScaleFilter::Nearest)
+    {
+        cp.nearest = 1;
+        cp.inv = cp.inv_x = float(1 / f.zoom);
+        cp.offset_x = float(-f.pan_x / f.zoom);
+        cp.offset = float(-f.pan_y / f.zoom);
+        cp.columns = width;
+        cp.rows = height;
+        last.inputs = {s.levels[0]};
+    }
+    else
+    {
+        // The level at most twice the size it's shown at.
+        int n = 0;
+        while (f.zoom * double(1 << (n + 1)) <= 1.0 + 1e-9 && n < 30)
+            ++n;
+        const rap::gpu::texture_ptr src = level(s, n);
+        const int lw = src->width(), lh = src->height();
+        const double inv_x = lw / shown_w, inv_y = lh / shown_h;  // level texels per frame pixel
+
+        // The frame columns the image covers (of those drawn), and the level
+        // rows the second pass reads for the frame rows it covers.
+        const int c0 = std::clamp(int(std::floor(f.pan_x)), x0, x1), c1 = std::clamp(int(std::ceil(f.pan_x + shown_w)), x0, x1);
+        const int y0 = std::clamp(int(std::floor(f.pan_y)), 0, f.height), y1 = std::clamp(int(std::ceil(f.pan_y + shown_h)), 0, f.height);
+        const double r = reach(filter, inv_y) + 1;
+        const int r0 = std::clamp(int(std::floor((y0 - f.pan_y) * inv_y - r)), 0, lh);
+        const int r1 = std::clamp(int(std::ceil((y1 - f.pan_y) * inv_y + r)), 0, lh);
+        const int cols = std::max(1, c1 - c0), rows = std::max(1, r1 - r0);
+        // A swipe's two images each have their own (the GPU may still be
+        // reading the first's when the second's is drawn into).
+        rap::gpu::texture_ptr& across = rows_[&s == &shown_[1] ? 1 : 0];
+        if (!across || across->width() < cols || across->height() < rows)
+            across = device_->create({std::max(cols, across ? across->width() : 0), std::max(rows, across ? across->height() : 0),
+                                      rap::gpu::format::rgba16f, 1, true});
+        if (!across)
+        {
+            error = "no room for the first pass";
+            return false;
+        }
+        const ResampleParams first_params{0, int32_t(filter), float(inv_x), float((c0 - f.pan_x) * inv_x), lw, r0, {}};
+        rap::gpu::pass first;
+        first.program = resample_;
+        first.inputs = {src};
+        first.uniforms = bytes(first_params);
+        first.target = across;
+        first.region = {0, 0, cols, rows};
+        passes.push_back(std::move(first));
+        cp.filter = int32_t(filter);
+        cp.inv = float(inv_y);
+        cp.offset = float(-f.pan_y * inv_y - r0);  // into the rows, which start at level row r0
+        cp.rows = rows;
+        cp.column = c0;
+        last.inputs = {across};
+    }
+    last.inputs.push_back(s.tone ? s.tone : blank_);
+    last.buffers = {s.stats, histogram_};
+    last.uniforms = bytes(cp);
+    passes.push_back(std::move(last));
+    ready = device_->run(passes);
+    return true;
 }
 
 bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, const Frame& f, rap::gpu::texture_ptr& out,
@@ -788,200 +996,104 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         error = "the GPU went away";
         return false;
     }
-    if (!programs(error))
+    if (!programs(error) || !hold(0, image, generation, error))
         return false;
-    if (image_.lock() != image || generation_ != generation || levels_.empty())
-    {
-        pending_image_ = image;
-        pending_generation_ = generation;
-        retain_current();
-        pending_image_.reset();
-        image_.reset();
-        const bool kept = restore(image, generation);
-        if (std::getenv("IFRIT_TRACE"))
-            std::fprintf(stderr, "gpu: %s %dx%d (%zu kept, %zu MB)\n", kept ? "kept on the GPU:" : "uploading", image->width, image->height,
-                         retained_.size(), [&] { size_t n = 0; for (auto& r : retained_) n += r.bytes; return n >> 20; }());
-        if (!kept)
-        {
-            const int64_t t0 = g_get_monotonic_time();
-            stats_ = device_->create_buffer(1101 * 4);  // this image's measures
-            if (!stats_ || !upload(*image, error))
-            {
-                if (error.empty())
-                    error = "no room for the measures";
-                return false;
-            }
-            if (std::getenv("IFRIT_TRACE"))
-                std::fprintf(stderr, "gpu: %s in %.1f ms on the UI thread\n", image->mosaic ? "mosaic uploaded and developed" : "uploaded",
-                             (g_get_monotonic_time() - t0) / 1000.0);
-        }
-        image_ = image;
-        generation_ = generation;
-    }
+    retain(shown_[1]);  // not comparing (or showing only one of them)
+    if (!begin_frame(f, out, colour, error))
+        return false;
+    if (f.count_histogram)
+        count(shown_[0], f);
+    return draw(shown_[0], image->width, image->height, image->has_alpha, f, out, 0, f.width, ready, error);
+}
 
-    // The front buffer.
-    static constexpr rap::gpu::format kFormats[] = {rap::gpu::format::rgba8, rap::gpu::format::rgb10a2, rap::gpu::format::rgb10a2,
-                                                    rap::gpu::format::rgba16f};
-    const rap::gpu::format format = kFormats[int(f.front)];
-    rap::gpu::texture_ptr& frame = frames_[next_frame_];
-    if (!frame || frame->width() != f.width || frame->height() != f.height || frame->format() != format)
-        frame = device_->create({f.width, f.height, format, 1, true});
-    if (!frame)
+bool GpuView::render_swipe(const std::shared_ptr<Image>& a, uint64_t a_generation, const Frame& fa, const std::shared_ptr<Image>& b,
+                           uint64_t b_generation, const Frame& fb, int split, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready,
+                           rap::frame_color& colour, std::string& error)
+{
+    if (!a || !b || a->width <= 0 || a->height <= 0 || b->width <= 0 || b->height <= 0 || fa.width <= 0 || fa.height <= 0)
     {
-        error = "no room for the frame";
+        error = "nothing to draw";
         return false;
     }
-    next_frame_ ^= 1;
-    colour = {};
-    colour.premultiplied = false;  // opaque: composited over the background
-    colour.sdr_white_nits = f.sdr_white_nits;
-    if (f.front == FrontBuffer::Pq10)
-        colour.curve = rap::transfer::pq;  // BT.709 primaries until the gamut is mapped to the display's
-    else if (f.front == FrontBuffer::ScRgb16)
-        colour.curve = rap::transfer::linear;
+    if (device_->lost())
+    {
+        error = "the GPU went away";
+        return false;
+    }
+    if (!programs(error) || !hold(0, a, a_generation, error) || !hold(1, b, b_generation, error) || !begin_frame(fa, out, colour, error))
+        return false;
+    if (fa.count_histogram)
+        count(shown_[0], fa);  // A's, as the view's own image
+    // Each into its columns of the same frame (a side with none isn't drawn,
+    // and the ticket is the last drawn's).
+    return draw(shown_[0], a->width, a->height, a->has_alpha, fa, out, 0, split, ready, error) &&
+           draw(shown_[1], b->width, b->height, b->has_alpha, fb, out, split, fa.width, ready, error);
+}
 
-    ComposeParams cp{};
-    set_linear(cp.background, f.background);
-    set_linear(cp.checker_a, rap::color{102, 102, 102});
-    set_linear(cp.checker_b, rap::color{140, 140, 140});
-    const double shown_w = image->width * f.zoom, shown_h = image->height * f.zoom;
-    cp.image_rect[0] = float(f.pan_x), cp.image_rect[1] = float(f.pan_y);
-    cp.image_rect[2] = float(f.pan_x + shown_w), cp.image_rect[3] = float(f.pan_y + shown_h);
-    cp.checker_size = f.checkerboard && image->has_alpha ? std::max(1, f.checker_size) : 0;
-    cp.exposure = scene_gain_ * float(tonable_ ? std::pow(2.0, f.exposure) : 1.0);
-    cp.tone = tone_ ? 1 : 0;
-    cp.output = int32_t(f.front);
-    cp.white = f.sdr_white_nits;
-    // A raw's white balance (the frame's, else as shot), in front of its matrix.
-    float wb[3] = {1, 1, 1};
-    if (auto_exposure_)
-        for (int j = 0; j < 3; ++j)
-            wb[j] = f.white_balance[0] > 0 ? f.white_balance[j] : as_shot_[j];
-    for (int j = 0; j < 3; ++j)
+bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_generation, const std::shared_ptr<const ImageDifference>& d,
+                                int gain, const Frame& f, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready, rap::frame_color& colour,
+                                std::string& error)
+{
+    if (!a || !d || d->width != a->width || d->height != a->height || d->errors.empty() || f.width <= 0 || f.height <= 0)
     {
-        cp.input_x[j] = input_to_xyz_[0][j] * wb[j];
-        cp.input_y[j] = input_to_xyz_[1][j] * wb[j];
-        cp.input_z[j] = input_to_xyz_[2][j] * wb[j];
+        error = "no difference to draw";
+        return false;
     }
-    cp.auto_exposure = auto_exposure_ ? 1 : 0;
-    // The display: sRGB at SDR white until rapport describes the real one.
-    std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
-    std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
-    std::memcpy(cp.display_b, kSrgbB, sizeof cp.display_b);
-    cp.display_peak = 1;
-
-    // Raw and HDR images measured once (their peak, their extent in each
-    // hue), on the device: the mapping reads them there.
-    std::vector<rap::gpu::dispatch> counts;
-    const bool measure = !measured_ && (tonable_ || f.count_histogram);  // the panel shows them for any image
-    const rap::gpu::texture_ptr counted = measure || f.count_histogram ? counted_level() : nullptr;
-    const auto over = [&](rap::gpu::program_ptr program, std::vector<rap::gpu::buffer_ptr> buffers)
+    if (device_->lost())
     {
-        rap::gpu::dispatch d;
-        d.program = std::move(program);
-        d.inputs = {counted, tone_ ? tone_ : blank_};
-        d.buffers = std::move(buffers);
-        d.uniforms = bytes(cp);  // copied at run(); `cp` is final for what they read
-        d.groups[0] = (counted->width() + 15) / 16;
-        d.groups[1] = (counted->height() + 15) / 16;
-        return d;
-    };
-    if (measure)
-    {
-        device_->clear(stats_, 0);
-        counts.push_back(over(stats_program_, {histogram_, stats_}));
-        rap::gpu::dispatch peak = over(peak_, {histogram_, stats_});
-        peak.groups[0] = peak.groups[1] = 1;
-        counts.push_back(std::move(peak));
-        measured_ = true;
+        error = "the GPU went away";
+        return false;
     }
-    cp.measured = measured_ ? 1 : 0;
-    // The histogram of what's shown: again when exposure or the image change.
-    if (f.count_histogram && (histogram_generation_ != generation || histogram_exposure_ != f.exposure || counts.size()))
+    if (!programs(error) || !hold(0, a, a_generation, error) || !begin_frame(f, out, colour, error))
+        return false;
+    Source& s = shown_[0];
+    if (f.count_histogram)
+        count(s, f);  // A's: the difference has nothing to measure
+    if (difference_of_ != d || !errors_)
     {
-        device_->clear(histogram_, 0);
-        counts.push_back(over(histogram_program_, {histogram_, stats_}));
-        rap::gpu::dispatch tallest = over(histogram_max_, {histogram_});
-        tallest.inputs.clear();
-        tallest.groups[0] = tallest.groups[1] = 1;
-        counts.push_back(std::move(tallest));
-        histogram_generation_ = generation;
-        histogram_exposure_ = f.exposure;
-        histogram_scale_ = cp.exposure;
-    }
-    if (f.histogram)
-    {
-        cp.show_histogram = 1;
-        cp.histogram_channels = uint32_t(f.histogram_channels);
-        cp.panel[0] = float(f.panel[0]), cp.panel[1] = float(f.panel[1]);
-        cp.panel[2] = float(f.panel[0] + f.panel[2]), cp.panel[3] = float(f.panel[1] + f.panel[3]);
-    }
-
-    // A whole-pixel 1:1 is a copy; enlarging with no filter is nearest.
-    const bool one_to_one = std::fabs(f.zoom - 1) < 1e-9 && f.pan_x == std::floor(f.pan_x) && f.pan_y == std::floor(f.pan_y);
-    const ScaleFilter filter = f.zoom > 1 ? f.enlarge : f.shrink;
-    std::vector<rap::gpu::pass> passes;
-    rap::gpu::pass last;
-    last.program = compose_;
-    last.target = frame;
-    if (one_to_one || filter == ScaleFilter::Nearest)
-    {
-        cp.nearest = 1;
-        cp.inv = cp.inv_x = float(1 / f.zoom);
-        cp.offset_x = float(-f.pan_x / f.zoom);
-        cp.offset = float(-f.pan_y / f.zoom);
-        cp.columns = image->width;
-        cp.rows = image->height;
-        last.inputs = {levels_[0]};
-    }
-    else
-    {
-        // The level at most twice the size it's shown at.
-        int n = 0;
-        while (f.zoom * double(1 << (n + 1)) <= 1.0 + 1e-9 && n < 30)
-            ++n;
-        const rap::gpu::texture_ptr src = level(n);
-        const int lw = src->width(), lh = src->height();
-        const double inv_x = lw / shown_w, inv_y = lh / shown_h;  // level texels per frame pixel
-
-        // The frame columns the image covers, and the level rows the second
-        // pass reads for the frame rows it covers.
-        const int x0 = std::clamp(int(std::floor(f.pan_x)), 0, f.width), x1 = std::clamp(int(std::ceil(f.pan_x + shown_w)), 0, f.width);
-        const int y0 = std::clamp(int(std::floor(f.pan_y)), 0, f.height), y1 = std::clamp(int(std::ceil(f.pan_y + shown_h)), 0, f.height);
-        const double r = reach(filter, inv_y) + 1;
-        const int r0 = std::clamp(int(std::floor((y0 - f.pan_y) * inv_y - r)), 0, lh);
-        const int r1 = std::clamp(int(std::ceil((y1 - f.pan_y) * inv_y + r)), 0, lh);
-        const int cols = std::max(1, x1 - x0), rows = std::max(1, r1 - r0);
-        if (!rows_ || rows_->width() < cols || rows_->height() < rows)
-            rows_ = device_->create({std::max(cols, rows_ ? rows_->width() : 0), std::max(rows, rows_ ? rows_->height() : 0),
-                                     rap::gpu::format::rgba16f, 1, true});
-        if (!rows_)
+        errors_ = device_->create({d->width, d->height, rap::gpu::format::r8});
+        if (!errors_)
         {
-            error = "no room for the first pass";
+            error = "too big for the GPU";
             return false;
         }
-        const ResampleParams across{0, int32_t(filter), float(inv_x), float((x0 - f.pan_x) * inv_x), lw, r0, {}};
-        rap::gpu::pass first;
-        first.program = resample_;
-        first.inputs = {src};
-        first.uniforms = bytes(across);
-        first.target = rows_;
-        first.region = {0, 0, cols, rows};
-        passes.push_back(std::move(first));
-        cp.filter = int32_t(filter);
-        cp.inv = float(inv_y);
-        cp.offset = float(-f.pan_y * inv_y - r0);  // into the rows, which start at level row r0
-        cp.rows = rows;
-        cp.column = x0;
-        last.inputs = {rows_};
+        device_->upload(errors_, std::as_bytes(std::span(d->errors)), {1, rap::gpu::sample_type::u8});
+        difference_of_ = d;
+        difference_.levels.clear();
     }
-    last.inputs.push_back(tone_ ? tone_ : blank_);
-    last.buffers = {stats_, histogram_};
-    last.uniforms = bytes(cp);
-    passes.push_back(std::move(last));
-    if (!counts.empty())
-        device_->run(counts);
-    ready = device_->run(passes);
-    out = frame;
-    return true;
+    // Made at A's size when what it's made from changed, then shown as an
+    // image (sRGB colours, nothing to tone).
+    const bool same_wb = std::equal(std::begin(difference_wb_), std::end(difference_wb_), std::begin(f.white_balance));
+    if (difference_.levels.empty() || difference_.image.lock() != a || difference_.generation != a_generation || difference_gain_ != gain ||
+        (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
+    {
+        ComposeParams cp{};
+        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+        measure(s, bytes(cp), false);
+        cp.measured = s.measured ? 1 : 0;
+        cp.gain = std::clamp(gain, 1, 255);
+        auto top = device_->create({a->width, a->height, rap::gpu::format::rgba16f, 1, true});
+        if (!top)
+        {
+            error = "too big for the GPU";
+            return false;
+        }
+        rap::gpu::pass p;
+        p.program = difference_program_;
+        p.inputs = {s.levels[0], s.tone ? s.tone : blank_, errors_};
+        p.buffers = {s.stats, histogram_};
+        p.uniforms = bytes(cp);
+        p.target = top;
+        device_->run(std::span(&p, 1));
+        difference_ = Source{};
+        difference_.image = a;
+        difference_.generation = a_generation;
+        difference_.levels = {top};
+        difference_.stats = s.stats;  // bound, not read: it isn't measured
+        std::memcpy(difference_.input_to_xyz, kXyzFrom709, sizeof difference_.input_to_xyz);
+        difference_gain_ = gain;
+        difference_exposure_ = f.exposure;
+        std::copy(std::begin(f.white_balance), std::end(f.white_balance), difference_wb_);
+    }
+    return draw(difference_, a->width, a->height, false, f, out, 0, f.width, ready, error);
 }
