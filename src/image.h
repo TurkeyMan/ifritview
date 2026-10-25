@@ -21,56 +21,47 @@ namespace ljpeg
 {
 struct Prepared;
 }
+namespace rawblocks
+{
+struct Prepared;
+}
+namespace rawpacked
+{
+struct Prepared;
+}
 
 struct RawMosaic
 {
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
-    // A readout uncompressed, as the file stores it: samples of `bits` bits
-    // one after another, most significant bit first, rows `row_bits` apart,
-    // the bytes read in groups of `group` taken as little-endian words (1:
-    // as they come; 2: 16-bit little-endian samples). Each is shifted right
-    // by `shift` and put through `curve` if there is one; `swap`: each pair
-    // of columns the other way round. The GPU unpacks it (unpack.hlsl),
-    // unpack() the same on the CPU.
-    struct Packed
-    {
-        std::shared_ptr<const void> owner;  // keeps `file` alive: the whole file, read into memory
-        const uint8_t* file = nullptr;
-        size_t offset = 0;                  // the first row's, in `file`
-        size_t bytes = 0;                   // all the rows', whole groups
-        uint32_t row_bits = 0;
-        int bits = 16, group = 1, shift = 0;
-        bool swap = false;
-        std::vector<uint16_t> curve;        // 65536 entries, or none
-        int readout_w = 0, readout_h = 0;
-        // The readout, readout_w x readout_h, into `out`.
-        void unpack(std::vector<uint16_t>& out) const;
-    };
-    // Or, with `data` null, the readout still compressed, for the GPU to
-    // decode: its lossless JPEG prepared (ljpeg.h), how that lays out
-    // (Canon's slices, a DNG's tiles), where the active area sits in it, and where the
-    // sensor is masked (the black level, measured as LibRaw does).
+    // Or, with `data` null, the readout as the file has it, for the GPU to
+    // decode: its lossless JPEG prepared (ljpeg.h), its blocks (rawblocks.h)
+    // or its samples stored uncompressed (rawpacked.h); how that lays out
+    // (Canon's slices, a DNG's tiles), where the active area sits in it, and
+    // where the sensor is masked (the black level, measured as LibRaw does).
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
-        std::shared_ptr<const Packed> packed;  // or the readout packed, for the GPU to unpack
+        std::shared_ptr<const rawpacked::Prepared> packed;  // or the readout uncompressed, for the GPU to unpack
+        std::shared_ptr<const rawblocks::Prepared> blocks;  // or its blocks, for the GPU to decode
         int readout_w = 0, readout_h = 0;
         unsigned slices[3] = {};  // how many, each one's width, the last one's (none: rows as they come)
         int left = 0, top = 0;    // the active area's corner in the readout
         unsigned filters = 0;     // LibRaw's: the colour at (row, col) of the readout
         int mask[8][4] = {};      // masked areas: top, left, bottom, right (LibRaw's), in the readout
+        std::shared_ptr<const void> file;  // holds the file's bytes (`file_size` of them), which `packed` and `blocks` point into
+        size_t file_size = 0;
         // A DNG's tiles (its one strip a tile the readout's width): each
         // one's width and height, how many across; their streams' samples
         // one tile's after another's. None: Canon's slices, or rows as they come.
         unsigned tile[3] = {};
-        // Where the readout's (x, y) is among the decoded samples (`frame`:
-        // a stream's, a tile's).
-        size_t index(unsigned x, unsigned y, size_t frame) const
+        // Where the readout's (x, y) is among the decoded samples (as
+        // ljpeg.hlsli's readout_index).
+        size_t index(unsigned x, unsigned y) const
         {
             if (tile[0])
             {
                 const unsigned tx = x / tile[0], ty = y / tile[1];
-                return (size_t(ty) * tile[2] + tx) * frame + size_t(y - ty * tile[1]) * tile[0] + (x - tx * tile[0]);
+                return (size_t(ty) * tile[2] + tx) * tile[0] * tile[1] + size_t(y - ty * tile[1]) * tile[0] + (x - tx * tile[0]);
             }
             if (!slices[0])
                 return size_t(y) * readout_w + x;

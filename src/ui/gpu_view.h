@@ -26,6 +26,7 @@
 
 struct Image;
 struct ImageDifference;
+struct LjpegParams;  // ljpeg.hlsli's block (gpu_view.cpp)
 struct RawMosaic;
 
 // What the front buffer holds.
@@ -135,6 +136,19 @@ private:
     // The same for a readout stored uncompressed (RawMosaic::Packed): the
     // file's bytes up as they are, unpacked here.
     bool unpack_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
+    // The same for a raw in blocks (rawblocks.h).
+    bool decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
+    // What those three share: whether to decode on the CPU instead, the
+    // file's bytes up, where a readout's decode goes, its black level and
+    // active area after the decode, and the check against the CPU.
+    bool decode_on_cpu() const;
+    rap::gpu::buffer_ptr upload_bytes(const uint8_t* data, size_t n, size_t slack);
+    bool readout_buffers(const RawMosaic& m, uint64_t samples, rap::gpu::buffer_ptr& values, rap::gpu::buffer_ptr& levels, rap::gpu::texture_ptr& sites,
+                         std::string& error);
+    void finish_readout(const RawMosaic& m, const LjpegParams& p, std::vector<rap::gpu::dispatch> work, const rap::gpu::buffer_ptr& values,
+                        const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites);
+    void check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& values, const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites,
+                       const std::function<bool(std::vector<uint16_t>&, std::string&)>& cpu);
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(Source& s, int n);
     // The level the measures and the histogram count: at most 2048 pixels.
@@ -194,8 +208,7 @@ private:
     float difference_wb_[3] = {};
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;
-    rap::gpu::program_ptr unpack_;
-    rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_;
+    rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)
     rap::gpu::texture_ptr frames_[2];
     int next_frame_ = 0;

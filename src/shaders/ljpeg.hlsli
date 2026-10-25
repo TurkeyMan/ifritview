@@ -60,7 +60,7 @@ uint readout_index(uint x, uint y)
     if (tile_w != 0)
     {
         const uint tx = x / tile_w, ty = y / tile_h;
-        return (ty * tiles_across + tx) * samples + (y - ty * tile_h) * tile_w + (x - tx * tile_w);
+        return (ty * tiles_across + tx) * tile_w * tile_h + (y - ty * tile_h) * tile_w + (x - tx * tile_w);
     }
     if (slice_n == 0)
         return y * readout_w + x;

@@ -1,8 +1,11 @@
+#include "../i18n.h"
+#include "../parallel.h"
+#include "../platform.h"
 #include "decoder.h"
 #include "dng_opcodes.h"
 #include "ljpeg.h"
-#include "../i18n.h"
-#include "../platform.h"
+#include "rawblocks.h"
+#include "rawpacked.h"
 
 #include <libraw/libraw.h>
 
@@ -260,24 +263,18 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     return true;
 }
 
-// Rows [0, n) split among the cores: copies of tens of megabytes, mostly
-// the first touch of new memory, go as fast as the cores fault them in.
-template <typename F>
-void rows_in_parallel(unsigned n, F f)
-{
-    const unsigned t = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
-    std::vector<std::thread> pool;
-    for (unsigned k = 0; k < t; ++k)
-        pool.emplace_back([&, k] { for (unsigned r = n * k / t; r < n * (k + 1) / t; ++r) f(r); });
-    for (std::thread& th : pool)
-        th.join();
-}
-
 // LibRaw with the step of its unpack that reads the black level from the
 // sensor's masked border, for a readout unpacked here instead.
 class RawAccess : public LibRaw
 {
 public:
+    // LibRaw's loader for this file's readout, as get_decoder_info names it
+    // ("nikon_load_raw()"); empty before one's chosen.
+    std::string loader() const
+    {
+        libraw_decoder_info_t info{};
+        return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name ? info.decoder_name : "";
+    }
     // A compressed Phase One's black (its level, less each row's and
     // column's offset) and its flat-field corrections, which LibRaw makes
     // in raw2image, not as it unpacks: into a buffer of their own that
@@ -311,9 +308,7 @@ public:
             {0, 1, 4, 3, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 5, 6, 4, 7, 8, 3, 9, 2, 1, 0, 10, 11, 12, 13, 14},  // 14-bit lossy
             {0, 1, 5, 1, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 8, 0x5c, 0x4b, 0x3a, 0x29, 7, 6, 5, 4, 3, 2, 1, 0, 13, 14},  // after a split
             {0, 1, 4, 2, 2, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 7, 6, 8, 5, 9, 4, 10, 3, 11, 12, 2, 0, 1, 13, 14}};  // 14-bit lossless
-        libraw_decoder_info_t info{};
-        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name ||
-            std::strcmp(info.decoder_name, "nikon_load_raw()") != 0)
+        if (loader() != "nikon_load_raw()")
             return false;
         const auto& u = libraw_internal_data.unpacker_data;
         const bool le = u.order == 0x4949;
@@ -342,79 +337,6 @@ public:
                                     imgdata.color.curve, 0x4000, p, error);
     }
 
-    // A DNG's lossless JPEG readout (Compression 7) as LibRaw's
-    // lossless_dng_load_raw reads it: its tiles' streams (or its one
-    // strip's), each a frame's samples in rows `tile[0]` wide filling a
-    // tile `tile[1]` high, `tile[2]` tiles across (as RawMosaic::Stream's
-    // tile), and its linearisation curve. False for others, and for
-    // anything that wouldn't come out as LibRaw has it (two samples a
-    // photosite, a DNG before 1.1 (a 16-bit difference read as bits), tiles
-    // that aren't their frames' size, a strip short of the readout): LibRaw
-    // unpacks those. `check_only`: the first stream's header only, for its
-    // predictor.
-    bool dng(const uint8_t* file, size_t size, ljpeg::Prepared& p, unsigned tile[3], std::string& error, bool check_only = false) const
-    {
-        libraw_decoder_info_t info{};
-        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name ||
-            std::strcmp(info.decoder_name, "lossless_dng_load_raw()") != 0)
-            return false;
-        const auto& u = libraw_internal_data.unpacker_data;
-        const auto& sz = imgdata.sizes;
-        const auto& id = imgdata.idata;
-        if (!(id.filters || id.colors == 1) || u.tiff_samples != 1)
-            return error = "not a sample a photosite", false;
-        if (id.dng_version < 0x01010000)
-            return error = "a DNG before 1.1", false;
-        const unsigned rw = sz.raw_width, rh = sz.raw_height;
-        const bool tiled = u.tile_length < INT_MAX;
-        if (!rw || !rh || !u.tile_width || !u.tile_length)
-            return false;
-        const unsigned across = tiled ? (rw + u.tile_width - 1) / u.tile_width : 1, down = tiled ? (rh + u.tile_length - 1) / u.tile_length : 1;
-        // The tiles' offsets, a word each where the first would be (as get4 reads them).
-        std::vector<uint64_t> offsets;
-        if (!tiled)
-            offsets.push_back(uint64_t(u.data_offset));
-        else
-        {
-            const bool le = u.order == 0x4949;
-            for (size_t k = 0; k < size_t(across) * down; ++k)
-            {
-                const size_t at = size_t(u.data_offset) + 4 * k;
-                if (u.data_offset < 0 || at + 4 > size)
-                    return error = "tile offsets past the file's end", false;
-                const uint8_t* b = file + at;
-                offsets.push_back(le ? uint32_t(b[0] | b[1] << 8 | b[2] << 16 | uint32_t(b[3]) << 24)
-                                     : uint32_t(uint32_t(b[0]) << 24 | b[1] << 16 | b[2] << 8 | b[3]));
-            }
-        }
-        int predictor = 0;
-        if (offsets[0] >= size || !ljpeg::takes(file + offsets[0], size_t(size - offsets[0]), &predictor))
-            return error = "not a lossless JPEG taken here", false;
-        if (check_only)
-        {
-            p.predictor = predictor;
-            return true;
-        }
-        if (!ljpeg::prepare_tiles(file, size, offsets, p, error))
-            return false;
-        // A JPEG row's samples fill the tile's rows (the readout's, if
-        // narrower) one after another, as adobe_copy_pixel places them.
-        const unsigned wrap = std::min(u.tile_width, rw);
-        const uint64_t jwide = uint64_t(p.width) * p.components, frame = jwide * p.height;
-        if (p.components > 1 && jwide * p.components == rw)
-            return error = "a JPEG LibRaw reads past its rows", false;
-        if (tiled ? frame != uint64_t(wrap) * u.tile_length : frame < uint64_t(rw) * rh)
-            return error = "tiles not their frames' size", false;
-        tile[0] = wrap, tile[1] = tiled ? u.tile_length : rh, tile[2] = across;
-        const ushort* curve = imgdata.color.curve;
-        for (int v = 0; v < 0x10000; ++v)
-            if (curve[v] != v)
-            {
-                p.curve.assign(curve, curve + 0x10000);
-                break;
-            }
-        return true;
-    }
     // A readout stored uncompressed, as LibRaw's packed_dng_load_raw (a DNG's
     // strips: rows whole bytes, 16-bit samples in the file's byte order, the
     // rest most significant bit first; its linearisation curve),
@@ -424,12 +346,9 @@ public:
     // others, and for what they read some other way (tiles, two samples a
     // photosite, interlaced rows, a padding byte every ten samples, a Fuji's
     // turned sensor) or past the file's end: LibRaw unpacks those.
-    bool packed(const uint8_t* file, size_t size, RawMosaic::Packed& p, std::string& error) const
+    bool packed(const uint8_t* file, size_t size, rawpacked::Prepared& p, std::string& error) const
     {
-        libraw_decoder_info_t info{};
-        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name)
-            return false;
-        const std::string name = info.decoder_name;
+        const std::string name = loader();
         const auto& u = libraw_internal_data.unpacker_data;
         const auto& sz = imgdata.sizes;
         const bool le = u.order == 0x4949;
@@ -490,11 +409,115 @@ public:
     }
     // Whether LibRaw's crop_masked_pixels measures the sides of the active
     // area (a packed readout's flag says so).
-    bool packed_sides() const
+    bool packed_sides() const { return loader() == "packed_load_raw()" && libraw_internal_data.unpacker_data.load_flags & 32; }
+    // A DNG's lossless JPEG readout (Compression 7) as LibRaw's
+    // lossless_dng_load_raw reads it: its tiles' streams (or its one
+    // strip's), each a frame's samples in rows `tile[0]` wide filling a
+    // tile `tile[1]` high, `tile[2]` tiles across (as RawMosaic::Stream's
+    // tile), and its linearisation curve. False for others, and for
+    // anything that wouldn't come out as LibRaw has it (two samples a
+    // photosite, a DNG before 1.1 (a 16-bit difference read as bits), tiles
+    // that aren't their frames' size, a strip short of the readout): LibRaw
+    // unpacks those. `check_only`: the first stream's header only, for its
+    // predictor.
+    bool dng(const uint8_t* file, size_t size, ljpeg::Prepared& p, unsigned tile[3], std::string& error, bool check_only = false) const
     {
-        libraw_decoder_info_t info{};
-        return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name &&
-               std::strcmp(info.decoder_name, "packed_load_raw()") == 0 && libraw_internal_data.unpacker_data.load_flags & 32;
+        if (loader() != "lossless_dng_load_raw()")
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        const auto& id = imgdata.idata;
+        if (!(id.filters || id.colors == 1) || u.tiff_samples != 1)
+            return error = "not a sample a photosite", false;
+        if (id.dng_version < 0x01010000)
+            return error = "a DNG before 1.1", false;
+        const unsigned rw = sz.raw_width, rh = sz.raw_height;
+        const bool tiled = u.tile_length < INT_MAX;
+        if (!rw || !rh || !u.tile_width || !u.tile_length)
+            return false;
+        const unsigned across = tiled ? (rw + u.tile_width - 1) / u.tile_width : 1, down = tiled ? (rh + u.tile_length - 1) / u.tile_length : 1;
+        // The tiles' offsets, a word each where the first would be (as get4 reads them).
+        std::vector<uint64_t> offsets;
+        if (!tiled)
+            offsets.push_back(uint64_t(u.data_offset));
+        else
+        {
+            const bool le = u.order == 0x4949;
+            for (size_t k = 0; k < size_t(across) * down; ++k)
+            {
+                const size_t at = size_t(u.data_offset) + 4 * k;
+                if (u.data_offset < 0 || at + 4 > size)
+                    return error = "tile offsets past the file's end", false;
+                const uint8_t* b = file + at;
+                offsets.push_back(le ? uint32_t(b[0] | b[1] << 8 | b[2] << 16 | uint32_t(b[3]) << 24)
+                                     : uint32_t(uint32_t(b[0]) << 24 | b[1] << 16 | b[2] << 8 | b[3]));
+            }
+        }
+        int predictor = 0;
+        if (offsets[0] >= size || !ljpeg::takes(file + offsets[0], size_t(size - offsets[0]), &predictor))
+            return error = "not a lossless JPEG taken here", false;
+        if (check_only)
+        {
+            p.predictor = predictor;
+            return true;
+        }
+        if (!ljpeg::prepare_tiles(file, size, offsets, p, error))
+            return false;
+        // A JPEG row's samples fill the tile's rows (the readout's, if
+        // narrower) one after another, as adobe_copy_pixel places them.
+        const unsigned wrap = std::min(u.tile_width, rw);
+        const uint64_t jwide = uint64_t(p.width) * p.components, frame = jwide * p.height;
+        if (p.components > 1 && jwide * p.components == rw)
+            return error = "a JPEG LibRaw reads past its rows", false;
+        if (tiled ? frame != uint64_t(wrap) * u.tile_length : frame < uint64_t(rw) * rh)
+            return error = "tiles not their frames' size", false;
+        tile[0] = wrap, tile[1] = tiled ? u.tile_length : rh, tile[2] = across;
+        const ushort* curve = imgdata.color.curve;
+        for (int v = 0; v < 0x10000; ++v)
+            if (curve[v] != v)
+            {
+                p.curve.assign(curve, curve + 0x10000);
+                break;
+            }
+        return true;
+    }
+
+    // A raw compressed in blocks (rawblocks.h): Sony's compressed ARW,
+    // Panasonic's RW2 but for encoding 8. False for others; and, with why,
+    // for a layout LibRaw would read some other way than rawblocks does.
+    bool blocks(const uint8_t* file, size_t size, rawblocks::Prepared& p, std::string& error) const
+    {
+        const std::string name = loader();
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        p.readout_w = sz.raw_width, p.readout_h = sz.raw_height;
+        p.bits = u.pana_bpp;
+        if (name == "sony_arw2_load_raw()")
+        {
+            if (u.order != 0x4949 || imgdata.rawparams.specials & LIBRAW_RAWSPECIAL_SONYARW2_ALLFLAGS)
+                return error = "an ARW read another way", false;
+            p.format = rawblocks::Format::sony;
+            p.rows = sz.height;
+        }
+        else if (name == "panasonic_load_raw()")
+        {
+            p.format = u.pana_encoding == 5 ? rawblocks::Format::packed : rawblocks::Format::panasonic;
+            p.rows = sz.raw_height;
+            p.rotated = true;
+            p.rotation = u.load_flags;
+        }
+        else if (name == "panasonicC6_load_raw()" || name == "panasonicC7_load_raw()")
+        {
+            // Read 16 rows at a time, a last few short of 16 not at all.
+            const bool c6 = name == "panasonicC6_load_raw()";
+            p.format = c6 ? rawblocks::Format::panasonic6 : rawblocks::Format::packed;
+            if (c6)
+                p.bits = u.pana_bpp == 12 ? 12 : 14;
+            p.rows = sz.raw_height / 16 * 16;
+        }
+        else
+            return false;
+        return rawblocks::prepare(file, size, uint64_t(u.data_offset), imgdata.color.curve, p, error);
     }
 
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
@@ -519,6 +542,18 @@ public:
     }
     // The areas crop_masked_pixels measures, for a lossless JPEG readout
     // (LibRaw 0.22's rule), for the GPU to measure instead.
+    // A readout for the GPU: its size, where the active area sits, the
+    // filter pattern, and where it's masked (masked_areas' `sides`, `inset`).
+    std::shared_ptr<RawMosaic::Stream> readout_stream(bool sides, bool inset = true) const
+    {
+        const auto& sz = imgdata.sizes;
+        auto st = std::make_shared<RawMosaic::Stream>();
+        st->readout_w = sz.raw_width, st->readout_h = sz.raw_height;
+        st->left = sz.left_margin, st->top = sz.top_margin;
+        st->filters = imgdata.idata.filters;
+        masked_areas(st->mask, sides, inset);
+        return st;
+    }
     void masked_areas(int m[8][4], bool sides, bool inset = true) const
     {
         const auto& sz = imgdata.sizes;
@@ -557,9 +592,8 @@ public:
 // Canon's CR2: the sensor's readout is a lossless JPEG, the fourth IFD's
 // strip, its rows cut into vertical slices (tag 0xC640: how many slices, each
 // one's width, the last one's). Decoded here on several threads (ljpeg.h)
-// into the readout as LibRaw lays it out, raw_width x raw_height, as are a
-// NEF's and a lossless DNG's (unpack_cr2). False for anything else (or
-// anything odd), which LibRaw unpacks.
+// into the readout as LibRaw lays it out, raw_width x raw_height. False for
+// anything else (or anything odd), which LibRaw unpacks.
 // Where a CR2's readout is: its lossless JPEG's offset and length, and the
 // slices. False for anything else.
 bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& length, unsigned slices[3])
@@ -592,12 +626,33 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
     return offset && length && uint64_t(offset) + length <= size;
 }
 
-bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error)
+// The readout unpacked here, on every core, as LibRaw's loader would: a raw
+// in blocks (rawblocks), one stored uncompressed (rawpacked), a NEF's, a
+// DNG's or a CR2's lossless JPEG. False for others, and (with why) for one of those
+// laid out in a way this doesn't take. `blocks`: a raw in blocks' layout,
+// which says what of the readout LibRaw writes (the rest it leaves as it is).
+bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
+                 std::shared_ptr<rawblocks::Prepared>* blocks = nullptr)
 {
+    error.clear();
+    if (auto b = std::make_shared<rawblocks::Prepared>(); raw.blocks(file, size, *b, error))
+    {
+        rawblocks::decode(*b, out);
+        if (blocks)
+            *blocks = std::move(b);
+        return true;
+    }
+    if (rawpacked::Prepared packed; raw.packed(file, size, packed, error))
+    {
+        rawpacked::unpack(packed, out);
+        return true;
+    }
+    if (!error.empty())
+        return false;
     uint32_t offset, length;
-    unsigned slices[3];
+    unsigned slices[3], tile[3];
     // A NEF: its rows as they come (raw_width wide, `height` of them), the rest of the readout none.
-    if (ljpeg::Prepared nef; static_cast<const RawAccess&>(raw).nikon(file, size, nef, error))
+    if (ljpeg::Prepared nef; raw.nikon(file, size, nef, error))
     {
         ljpeg::Image j;
         if (!ljpeg::decode(nef, j, error))
@@ -610,34 +665,25 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
         return true;
     }
     // A DNG: each tile's rows into its place, what lies past the readout's edges dropped.
-    unsigned tile[3];
-    if (ljpeg::Prepared dng; static_cast<const RawAccess&>(raw).dng(file, size, dng, tile, error))
+    if (ljpeg::Prepared dng; raw.dng(file, size, dng, tile, error))
     {
         ljpeg::Image j;
         if (!ljpeg::decode(dng, j, error))
             return false;
+        RawMosaic::Stream st;  // where the samples lie, as the GPU's would
+        std::copy_n(tile, 3, st.tile);
         const unsigned rw = raw.imgdata.sizes.raw_width, rh = raw.imgdata.sizes.raw_height;
-        const size_t frame = size_t(j.width) * j.components * j.height;
         out.resize(size_t(rw) * rh);
-        rows_in_parallel(rh,
-                         [&](unsigned y)
-                         {
-                             const unsigned ty = y / tile[1];
-                             for (unsigned tx = 0; tx < tile[2]; ++tx)
-                             {
-                                 const unsigned x = tx * tile[0], n = std::min(tile[0], rw - x);
-                                 std::memcpy(out.data() + size_t(y) * rw + x,
-                                             j.samples.data() + (size_t(ty) * tile[2] + tx) * frame + size_t(y - ty * tile[1]) * tile[0], size_t(n) * 2);
-                             }
-                         });
+        parallel(rh,
+                 [&](unsigned y)
+                 {
+                     for (unsigned x = 0; x < rw; x += tile[0])  // a tile's row at a time
+                         std::memcpy(out.data() + size_t(y) * rw + x, j.samples.data() + st.index(x, y), size_t(std::min(tile[0], rw - x)) * 2);
+                 });
         return true;
     }
-    // Stored uncompressed: unpacked as LibRaw's loaders read it.
-    if (RawMosaic::Packed packed; static_cast<const RawAccess&>(raw).packed(file, size, packed, error))
-    {
-        packed.unpack(out);
-        return true;
-    }
+    if (!error.empty())
+        return false;
     if (!locate_cr2(file, size, offset, length, slices))
         return false;
     ljpeg::Image j;
@@ -660,27 +706,27 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
     // As LibRaw's lossless_jpeg_load_raw: the stream fills each slice top to
     // bottom, slice after slice.
     const uint16_t* from = j.samples.data();
-    rows_in_parallel(rh,
-                     [&](unsigned row)
-                     {
-                         if (!slices[0])
-                         {
-                             std::memcpy(out.data() + size_t(row) * rw, from + size_t(row) * rw, size_t(rw) * 2);
-                             return;
-                         }
-                         for (unsigned i = 0; i <= slices[0]; ++i)
-                         {
-                             const unsigned w = i < slices[0] ? slices[1] : slices[2];
-                             std::memcpy(out.data() + size_t(row) * rw + size_t(i) * slices[1], from + size_t(i) * slices[1] * rh + size_t(row) * w,
-                                         size_t(w) * 2);
-                         }
-                     });
+    parallel(rh,
+             [&](unsigned row)
+             {
+                 if (!slices[0])
+                 {
+                     std::memcpy(out.data() + size_t(row) * rw, from + size_t(row) * rw, size_t(rw) * 2);
+                     return;
+                 }
+                 for (unsigned i = 0; i <= slices[0]; ++i)
+                 {
+                     const unsigned w = i < slices[0] ? slices[1] : slices[2];
+                     std::memcpy(out.data() + size_t(row) * rw + size_t(i) * slices[1], from + size_t(i) * slices[1] * rh + size_t(row) * w, size_t(w) * 2);
+                 }
+             });
     return true;
 }
 
-// IFRIT_RAW_CHECK: a CR2, NEF or DNG unpacked both ways, ours and LibRaw's,
-// and every sample compared (and what LibRaw knows only after unpacking).
-void check_cr2(const uint8_t* file, size_t size, const std::string& path)
+// IFRIT_RAW_CHECK: a raw unpack_here takes unpacked both ways, ours and
+// LibRaw's, and every sample compared (and what LibRaw knows only after
+// unpacking).
+void check_unpack(const uint8_t* file, size_t size, const std::string& path)
 {
     // On the heap: a LibRaw is hundreds of KB, and a Windows thread's stack 1 MB.
     auto mine_ptr = std::make_unique<RawAccess>(), theirs_ptr = std::make_unique<RawAccess>();
@@ -690,7 +736,8 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     std::vector<uint16_t> ours;
     std::string error;
     const gint64 t0 = g_get_monotonic_time();
-    const bool ok = unpack_cr2(mine, file, size, ours, error);
+    std::shared_ptr<rawblocks::Prepared> blocks;  // where it's one of these, what LibRaw writes (the rest it leaves as it finds it)
+    const bool ok = unpack_here(mine, file, size, ours, error, &blocks);
     if (ok)
         mine.black_from_masked(ours);
     const gint64 t1 = g_get_monotonic_time();
@@ -703,7 +750,7 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     if (ok && raw)
         for (unsigned y = 0; y < sz.raw_height && verdict == "same"; ++y)
             for (unsigned x = 0; x < sz.raw_width; ++x)
-                if (ours[size_t(y) * sz.raw_width + x] != raw[size_t(y) * sz.raw_pitch / 2 + x])
+                if (ours[size_t(y) * sz.raw_width + x] != raw[size_t(y) * sz.raw_pitch / 2 + x] && (!blocks || rawblocks::written(*blocks, int(x), int(y))))
                 {
                     verdict = "DIFFERENT at " + std::to_string(x) + "," + std::to_string(y) + ": ours " +
                               std::to_string(ours[size_t(y) * sz.raw_width + x]) + ", LibRaw's " + std::to_string(raw[size_t(y) * sz.raw_pitch / 2 + x]);
@@ -731,6 +778,13 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's %.0f ms (%s, %s %s); levels %s\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
                  (t2 - t1) / 1000.0, info.decoder_name ? info.decoder_name : "?", theirs.imgdata.idata.make, theirs.imgdata.idata.model,
                  levels ? "same" : "DIFFERENT");
+    if (blocks)
+        std::fprintf(stderr, "rawcheck:   blocks: %s, %d bits, %d samples a block, %d of %d rows written, %d wide\n",
+                     blocks->format == rawblocks::Format::sony        ? "Sony's"
+                     : blocks->format == rawblocks::Format::panasonic ? "Panasonic's"
+                     : blocks->format == rawblocks::Format::packed    ? "Panasonic's packed"
+                                                                      : "Panasonic's C6",
+                     blocks->format == rawblocks::Format::sony ? 11 : blocks->bits, blocks->per, blocks->rows, blocks->readout_h, blocks->readout_w);
     if (!levels)
         std::fprintf(stderr, "rawcheck:   black %u / %u, maximum %u / %u, cblack %u %u %u %u / %u %u %u %u\n", a.black, b.black, a.maximum, b.maximum,
                      a.cblack[0], a.cblack[1], a.cblack[2], a.cblack[3], b.cblack[0], b.cblack[1], b.cblack[2], b.cblack[3]);
@@ -762,14 +816,14 @@ bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
     m->height = sz.height;
     m->channels = 3;
     auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height * 3);
-    rows_in_parallel(unsigned(m->height),
-                     [&](unsigned y)
-                     {
-                         uint16_t* o = data->data() + size_t(y) * m->width * 3;
-                         const ushort(*i)[4] = image + size_t(y) * m->width;
-                         for (int x = 0; x < m->width; ++x, o += 3)
-                             o[0] = i[x][0], o[1] = i[x][1], o[2] = i[x][2];
-                     });
+    parallel(unsigned(m->height),
+             [&](unsigned y)
+             {
+                 uint16_t* o = data->data() + size_t(y) * m->width * 3;
+                 const ushort(*i)[4] = image + size_t(y) * m->width;
+                 for (int x = 0; x < m->width; ++x, o += 3)
+                     o[0] = i[x][0], o[1] = i[x][1], o[2] = i[x][2];
+             });
     if (ycc)
     {
         // Which rows and columns the colour's at (the first block's corner):
@@ -812,14 +866,12 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     {
         // Canon's sRAW as stored (its YCbCr), not LibRaw's RGB made from it:
         // the develop converts it (RawMosaic::Ycc).
-        libraw_decoder_info_t info{};
-        raw.get_decoder_info(&info);
-        const bool ycc = info.decoder_name && std::strcmp(info.decoder_name, "canon_sraw_load_raw()") == 0;
+        const bool ycc = raw.loader() == "canon_sraw_load_raw()";
         if (ycc)
             raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
         return decode_linear(raw, out, error, ycc);
     }
-    // A CR2, NEF or lossless DNG here, on the GPU or every core; the rest by LibRaw.
+    // A CR2, a NEF or a raw in blocks on the GPU, or here on every core; the rest by LibRaw.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
     std::string ours_error;
@@ -828,8 +880,7 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     bool phase_one = false;  // its black taken off first (RawAccess::phase_one_prepare)
     std::shared_ptr<RawMosaic::Stream> stream;
     uint32_t offset, length;
-    unsigned slices[3];
-    unsigned tile[3] = {};
+    unsigned slices[3], tile[3];
     if (decode_options().gpu_decode && locate_cr2(file, size, offset, length, slices))
     {
         auto prepared = std::make_shared<ljpeg::Prepared>();
@@ -838,54 +889,43 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             uint64_t(prepared->width) * prepared->components * prepared->height == uint64_t(sz.raw_width) * sz.raw_height &&
             (!slices[0] || size_t(slices[0]) * slices[1] + slices[2] == sz.raw_width))
         {
-            stream = std::make_shared<RawMosaic::Stream>();
+            stream = raw.readout_stream(true);
             stream->jpeg = std::move(prepared);
-            stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
             std::copy_n(slices, 3, stream->slices);
-            stream->left = sz.left_margin, stream->top = sz.top_margin;
-            stream->filters = raw.imgdata.idata.filters;
-            raw.masked_areas(stream->mask, true);
         }
     }
     else if (ljpeg::Prepared nef; decode_options().gpu_decode && raw.nikon(file, size, nef, ours_error))
     {
-        const auto& sz = raw.imgdata.sizes;
-        stream = std::make_shared<RawMosaic::Stream>();
+        stream = raw.readout_stream(false);
         stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(nef));
-        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
-        stream->left = sz.left_margin, stream->top = sz.top_margin;
-        stream->filters = raw.imgdata.idata.filters;
-        raw.masked_areas(stream->mask, false);
     }
     else if (ljpeg::Prepared head, dng; decode_options().gpu_decode && raw.dng(file, size, head, tile, ours_error, true) && head.predictor == 1 &&
                                          raw.dng(file, size, dng, tile, ours_error))
     {
         // A DNG predicted from the left: its tiles on the GPU (predicted
         // from above, unpacked here on every core).
-        const auto& sz = raw.imgdata.sizes;
-        stream = std::make_shared<RawMosaic::Stream>();
+        stream = raw.readout_stream(false);
         stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(dng));
-        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
         std::copy_n(tile, 3, stream->tile);
-        stream->left = sz.left_margin, stream->top = sz.top_margin;
-        stream->filters = raw.imgdata.idata.filters;
-        raw.masked_areas(stream->mask, false);
     }
-    else if (auto packed = std::make_shared<RawMosaic::Packed>(); decode_options().gpu_decode && raw.packed(file, size, *packed, ours_error))
+    else if (auto packed = std::make_shared<rawpacked::Prepared>(); decode_options().gpu_decode && raw.packed(file, size, *packed, ours_error))
     {
         // Up as the file stores it, from the bytes already read: no copy.
-        const auto& sz = raw.imgdata.sizes;
-        packed->owner = file_bytes_owner();
-        stream = std::make_shared<RawMosaic::Stream>();
+        stream = raw.readout_stream(raw.packed_sides(), false);
         stream->packed = std::move(packed);
-        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
-        stream->left = sz.left_margin, stream->top = sz.top_margin;
-        stream->filters = raw.imgdata.idata.filters;
-        raw.masked_areas(stream->mask, raw.packed_sides(), false);
+        stream->file = file_bytes_owner(), stream->file_size = size;
+    }
+    else if (auto blocks = std::make_shared<rawblocks::Prepared>();
+             decode_options().gpu_decode && raw.blocks(file, size, *blocks, ours_error) && rawblocks::fits_gpu(*blocks))
+    {
+        // Read where they lie in the file: no copy.
+        stream = raw.readout_stream(false);
+        stream->blocks = std::move(blocks);
+        stream->file = file_bytes_owner(), stream->file_size = size;
     }
     if (stream)
         ;  // decoded on the GPU
-    else if (unpack_cr2(raw, file, size, readout, ours_error))
+    else if (unpack_here(raw, file, size, readout, ours_error))
     {
         raw.black_from_masked(readout);
         src = readout.data();
@@ -918,12 +958,8 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     {
         auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height);
         // The active area, out of the readout with its margins.
-        rows_in_parallel(unsigned(m->height),
-                         [&](unsigned y)
-                         {
-                             std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * pitch + sz.left_margin,
-                                         size_t(m->width) * 2);
-                         });
+        parallel(unsigned(m->height), [&](unsigned y)
+                 { std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * pitch + sz.left_margin, size_t(m->width) * 2); });
         m->data = std::move(data);
     }
     if (phase_one)
@@ -1113,7 +1149,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     }
     if (const char* check = std::getenv("IFRIT_RAW_CHECK"))
     {
-        check_cr2(bytes, size, path);
+        check_unpack(bytes, size, path);
         if (std::strcmp(check, "only") == 0)
         {
             error = "checked only (IFRIT_RAW_CHECK=only)";
@@ -1266,51 +1302,9 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// As unpack.hlsl does on the GPU, a row a thread, each row's bits read in
-// order (rows start on a byte).
-void RawMosaic::Packed::unpack(std::vector<uint16_t>& out) const
-{
-    out.resize(size_t(readout_w) * readout_h);
-    const uint8_t* rows = file + offset;
-    const size_t n = bytes, g = size_t(group);
-    // The q-th byte as the loaders take it: within each group of `g`, from its last.
-    const auto byte = [&](size_t q) -> uint64_t
-    {
-        const size_t k = q % g, at = q - k + (g - 1 - k);
-        return at < n ? rows[at] : 0;
-    };
-    const uint64_t mask = (1u << bits) - 1;
-    const unsigned flip = swap ? 1 : 0;
-    rows_in_parallel(unsigned(readout_h),
-                     [&](unsigned y)
-                     {
-                         uint16_t* o = out.data() + size_t(y) * readout_w;
-                         size_t q = size_t(uint64_t(y) * row_bits / 8);
-                         if (bits == 16 && g <= 2 && q % 2 == 0)  // whole 16-bit samples, either order
-                         {
-                             const uint8_t* s = rows + q;
-                             for (unsigned x = 0; x < unsigned(readout_w); ++x, s += 2)
-                             {
-                                 const uint32_t v = uint32_t(g == 2 ? s[0] | s[1] << 8 : s[0] << 8 | s[1]) >> shift;
-                                 o[x ^ flip] = curve.empty() ? uint16_t(v) : curve[v];
-                             }
-                             return;
-                         }
-                         uint64_t held = 0;
-                         int have = 0;
-                         for (unsigned x = 0; x < unsigned(readout_w); ++x)
-                         {
-                             for (; have < bits; have += 8)
-                                 held = held << 8 | (g == 1 ? (q < n ? rows[q] : 0) : byte(q)), ++q;
-                             have -= bits;
-                             const uint32_t v = uint32_t(held >> have & mask) >> shift;
-                             o[x ^ flip] = curve.empty() ? uint16_t(v) : curve[v];
-                         }
-                     });
-}
-
-// A raw whose readout the GPU decodes (a CR2, a NEF, a DNG predicted from the left, one
-// uncompressed): ready as soon as its preview would be.
+// A raw whose readout the GPU decodes (a CR2, a NEF, a DNG predicted from the
+// left, one uncompressed, Sony's and Panasonic's blocks): ready as soon as
+// its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1318,7 +1312,7 @@ bool quick(const std::string& path)
     const uint8_t* bytes = nullptr;
     size_t size = 0;
     uint32_t offset, length;
-    unsigned slices[3];
+    unsigned slices[3], tile[3];
     if (!file_bytes(path, bytes, size))
         return false;
     int predictor = 0;
@@ -1328,15 +1322,16 @@ bool quick(const std::string& path)
     // uncompressed (opening it reads only its headers). On the heap: a
     // LibRaw is hundreds of KB.
     auto raw = std::make_unique<RawAccess>();
-    ljpeg::Prepared head;
-    RawMosaic::Packed packed;
+    ljpeg::Prepared unused;  // a NEF's or DNG's header
+    rawpacked::Prepared packed;
+    rawblocks::Prepared blocks;
     std::string error;
-    unsigned tile[3];
     if (raw->open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
     const auto& id = raw->imgdata.idata;
-    return raw->nikon(bytes, size, head, error, true) || (raw->dng(bytes, size, head, tile, error, true) && head.predictor == 1) ||
-           (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error));
+    return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
+           (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error)) ||
+           (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
 }
 
 const Decoder& raw_decoder()
