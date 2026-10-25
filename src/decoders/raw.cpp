@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <ctime>
 #include <thread>
 
@@ -279,7 +280,7 @@ public:
     // the version, the tree for it and its depth, the first rows' starting
     // samples, the curve. False for others, and for a stream that changes
     // tree partway down ("split"): LibRaw unpacks those.
-    bool nikon(const uint8_t* file, size_t size, ljpeg::Prepared& p, std::string& error) const
+    bool nikon(const uint8_t* file, size_t size, ljpeg::Prepared& p, std::string& error, bool check_only = false) const
     {
         static const uint8_t trees[6][32] = {
             {0, 1, 5, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 5, 4, 3, 6, 2, 7, 1, 0, 8, 9, 11, 10, 12},  // 12-bit lossy
@@ -312,6 +313,8 @@ public:
             error = "a split Nikon stream";
             return false;
         }
+        if (check_only)
+            return true;
         const auto& sz = imgdata.sizes;
         return ljpeg::prepare_nikon(file + u.data_offset, size - size_t(u.data_offset), sz.raw_width, sz.height, trees[tree], start,
                                     imgdata.color.curve, 0x4000, p, error);
@@ -469,7 +472,9 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
 // sample compared (and what LibRaw knows only after unpacking).
 void check_cr2(const uint8_t* file, size_t size, const std::string& path)
 {
-    RawAccess mine, theirs;
+    // On the heap: a LibRaw is hundreds of KB, and a Windows thread's stack 1 MB.
+    auto mine_ptr = std::make_unique<RawAccess>(), theirs_ptr = std::make_unique<RawAccess>();
+    RawAccess &mine = *mine_ptr, &theirs = *theirs_ptr;
     if (mine.open_buffer(file, size) != LIBRAW_SUCCESS || theirs.open_buffer(file, size) != LIBRAW_SUCCESS)
         return;
     std::vector<uint16_t> ours;
@@ -793,7 +798,8 @@ bool preview(const std::string& path, Image& out)
 {
     if (decode_options().raw_mode == DecodeOptions::RawMode::Preview)
         return false;
-    LibRaw raw;
+    auto raw_ptr = std::make_unique<LibRaw>();  // on the heap: hundreds of KB
+    LibRaw& raw = *raw_ptr;
     double bias = 0;
     raw.set_exifparser_handler(on_exif_tag, &bias);  // the slider rests at the camera's compensation even on the preview
     const uint8_t* bytes = nullptr;
@@ -843,7 +849,8 @@ void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, 
 bool decode_raw(const std::string& path, Image& out, std::string& error)
 {
     const DecodeOptions options = decode_options();
-    RawAccess raw;
+    auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB, and a Windows thread's stack is 1 MB
+    RawAccess& raw = *raw_ptr;
     double bias = 0;
     raw.set_exifparser_handler(on_exif_tag, &bias);
     raw.imgdata.params.use_camera_wb = 1;
@@ -993,7 +1000,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// A CR2 whose readout the GPU decodes: ready as soon as its preview would be.
+// A raw whose readout the GPU decodes (a CR2, a NEF): ready as soon as its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1002,7 +1009,16 @@ bool quick(const std::string& path)
     size_t size = 0;
     uint32_t offset, length;
     unsigned slices[3];
-    return file_bytes(path, bytes, size) && locate_cr2(bytes, size, offset, length, slices) && ljpeg::takes(bytes + offset, length);
+    if (!file_bytes(path, bytes, size))
+        return false;
+    if (locate_cr2(bytes, size, offset, length, slices))
+        return ljpeg::takes(bytes + offset, length);
+    // A NEF of the kind decoded on the GPU (opening it reads only its
+    // headers). On the heap: a LibRaw is hundreds of KB.
+    auto raw = std::make_unique<RawAccess>();
+    ljpeg::Prepared unused;
+    std::string error;
+    return raw->open_buffer(bytes, size) == LIBRAW_SUCCESS && raw->nikon(bytes, size, unused, error, true);
 }
 
 const Decoder& raw_decoder()
