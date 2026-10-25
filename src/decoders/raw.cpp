@@ -242,6 +242,9 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     out.allocate(w, h);
     out.linear = std::move(linear);
     out.retone(0.0);
+    // dcraw_process leaves the sensor's orientation (only LibRaw's image
+    // export turns it): turned as the camera held it, as the preview is.
+    out.apply_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
     if (framed)
     {
         const auto& c = raw.imgdata.sizes.raw_inset_crops[0];
