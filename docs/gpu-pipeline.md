@@ -80,9 +80,10 @@ an 8-bit buffer rules out HDR.
 1. **GPU core in IfritView** (no window): context, upload in native formats,
    the viewing passes, readback. Checked against today's CPU rendering with
    `--process FILE [exposure:EV] gpu diff:cpu.png`, so it starts as a
-   drop-in. *First pass done (src/gpu.cpp): 16-bit, half and float sources
-   and a raw's linear data with its tone curve render identically to the
-   CPU (a raw within one level on a few pixels, float against double).*
+   drop-in. *Done (src/gpu.cpp on rapport's rap::gpu, shaders/render.hlsl):
+   16-bit, half and float sources and a raw's linear data with its tone
+   curve render identically to the CPU on Vulkan (lavapipe) and Direct3D 11,
+   or within a level or two on a few pixels (float against double).*
 2. **GPU canvas in rapport**: a canvas that presents a GPU frame under the
    painter's overlay, SDR, in all four backends with the fallback.
 3. **IfritView on the GPU canvas**: zoom, pan, mip filtering and exposure

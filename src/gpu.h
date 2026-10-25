@@ -1,7 +1,7 @@
 #pragma once
 
-// The image pipeline on the GPU (docs/gpu-pipeline.md): OpenGL ES 3 in a
-// context of our own, offscreen, usable from any thread (one at a time).
+// The image pipeline on the GPU (docs/gpu-pipeline.md): rapport's device
+// (rap::gpu; Direct3D 11 or Vulkan), headless, usable from any thread.
 // For now it renders an image's 8-bit pixels from its own samples, as
 // Image::retone_buffer() and render_source() do, so the two can be checked
 // against each other; the view and HDR presentation come later.
@@ -17,7 +17,7 @@ namespace gpu
 
 // A context could be made (tried once, on first use). IFRIT_NO_GPU=1 says no.
 bool available();
-// What the GPU is, for traces and --version ("llvmpipe", "Mesa Intel …").
+// What the GPU is, for traces ("vulkan", "d3d11 (software)").
 std::string renderer();
 
 // The image's 8-bit premultiplied ARGB from its own samples (a raw's linear

@@ -13,6 +13,8 @@ if [ -d "$SYSROOT" ]; then
   # Some runtime libs live only in the sysroot; DT_RPATH (unlike RUNPATH)
   # also covers their own dependencies.
   set -- "$@" "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags"
+  # A shader compiler unpacked there too (DXC's release).
+  [ -x "$SYSROOT/opt/dxc/bin/dxc" ] && PATH="$SYSROOT/opt/dxc/bin:$PATH"
 fi
 
 cmake -S . -B build -G Ninja "$@"

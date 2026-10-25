@@ -346,16 +346,29 @@ else()
   message(STATUS "pdf: not found (poppler-glib headers), skipping")
 endif()
 
-# The GPU image pipeline (docs/gpu-pipeline.md): OpenGL ES 3 through EGL.
-# Optional while it grows. Windows gets its own on Direct3D 11.
-pkg_check_modules(GPU IMPORTED_TARGET egl glesv2)
-if(GPU_FOUND AND NOT WIN32)
+# The GPU image pipeline (docs/gpu-pipeline.md), on rapport's GPU device
+# (Direct3D 11 on Windows, Vulkan elsewhere): its HLSL compiled at build
+# time, so it needs a shader compiler (fxc on Windows; dxc or glslang).
+if(NOT RAPPORT_SHADER_COMPILER)
+  if(WIN32)
+    file(GLOB IFRIT_KITS "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/bin/*/x64")
+    list(SORT IFRIT_KITS ORDER DESCENDING)
+    find_program(RAPPORT_SHADER_COMPILER fxc HINTS ${IFRIT_KITS})
+  else()
+    find_program(RAPPORT_SHADER_COMPILER NAMES dxc glslangValidator glslang)
+  endif()
+endif()
+if(RAPPORT_SHADER_COMPILER)
   target_sources(ifrit_core PRIVATE src/gpu.cpp)
   target_compile_definitions(ifrit_core PUBLIC HAVE_GPU)
-  target_link_libraries(ifrit_core PUBLIC PkgConfig::GPU)
-  message(STATUS "gpu: enabled (OpenGL ES 3 through EGL)")
+  rapport_add_shader(ifrit_core NAME render_float SOURCE src/shaders/render.hlsl)
+  rapport_add_shader(ifrit_core NAME render_signed SOURCE src/shaders/render.hlsl DEFINES SIGNED)
+  rapport_add_shader(ifrit_core NAME render_linear SOURCE src/shaders/render.hlsl DEFINES LINEAR)
+  rapport_add_shader(ifrit_core NAME render_raw SOURCE src/shaders/render.hlsl DEFINES RAW)
+  rapport_add_shader(ifrit_core NAME render_raw_tone SOURCE src/shaders/render.hlsl DEFINES RAW TONE)
+  message(STATUS "gpu: enabled (shaders with ${RAPPORT_SHADER_COMPILER})")
 else()
-  message(STATUS "gpu: not found (egl, glesv2), skipping")
+  message(STATUS "gpu: no shader compiler (fxc; dxc or glslang), skipping")
 endif()
 
 # Reverse geocoding of GPS positions (optional): an HTTPS request through
