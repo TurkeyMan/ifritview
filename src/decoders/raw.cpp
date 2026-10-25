@@ -320,6 +320,88 @@ public:
                                     imgdata.color.curve, 0x4000, p, error);
     }
 
+    // A readout stored uncompressed, as LibRaw's packed_dng_load_raw (a DNG's
+    // strips: rows whole bytes, 16-bit samples in the file's byte order, the
+    // rest most significant bit first; its linearisation curve),
+    // unpacked_load_raw (16-bit words in the file's order, shifted down) and
+    // packed_load_raw (a stream of words of 8 to 32 bits, little-endian,
+    // read most significant bit first; rows padded) read it. False for
+    // others, and for what they read some other way (tiles, two samples a
+    // photosite, interlaced rows, a padding byte every ten samples, a Fuji's
+    // turned sensor) or past the file's end: LibRaw unpacks those.
+    bool packed(const uint8_t* file, size_t size, RawMosaic::Packed& p, std::string& error) const
+    {
+        libraw_decoder_info_t info{};
+        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name)
+            return false;
+        const std::string name = info.decoder_name;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        const bool le = u.order == 0x4949;
+        if (name != "packed_dng_load_raw()" && name != "unpacked_load_raw()" && name != "packed_load_raw()")
+            return false;
+        if (libraw_internal_data.internal_output_params.fuji_width || sz.left_margin + sz.width > sz.raw_width ||
+            sz.top_margin + sz.height > sz.raw_height)
+            return error = "a readout laid out another way", false;
+        p.readout_w = sz.raw_width, p.readout_h = sz.raw_height;
+        p.bits = int(u.tiff_bps);
+        if (name == "packed_dng_load_raw()")
+        {
+            if (u.tile_length < INT_MAX || u.tiff_samples != 1 || u.zero_after_ff)
+                return error = "a DNG's readout in tiles, or more than a sample a photosite", false;
+            p.group = p.bits == 16 && le ? 2 : 1;
+            p.row_bits = (uint32_t(sz.raw_width) * p.bits + 7) / 8 * 8;  // each row from a fresh byte
+            const ushort* curve = imgdata.color.curve;
+            for (int i = 0; i < 0x10000; ++i)
+                if (curve[i] != i)
+                {
+                    p.curve.assign(curve, curve + 0x10000);
+                    break;
+                }
+        }
+        else if (name == "unpacked_load_raw()")
+        {
+            if (u.load_flags >= 16)
+                return error = "an odd shift", false;
+            p.bits = 16;
+            p.group = le ? 2 : 1;
+            p.row_bits = uint32_t(sz.raw_width) * 16;
+            p.shift = int(u.load_flags);
+        }
+        else
+        {
+            const unsigned flags = u.load_flags;
+            if (flags & 3)
+                return error = "interlaced rows, or padding bytes", false;
+            unsigned row_bytes = unsigned(sz.raw_width) * u.tiff_bps / 8;
+            row_bytes += row_bytes & flags >> 7;
+            if (row_bytes * 8 < unsigned(sz.raw_width) * u.tiff_bps)
+                return error = "rows shorter than their samples", false;
+            p.row_bits = row_bytes * 8;
+            p.group = int(8 + (flags & 24)) / 8;
+            p.swap = flags >> 6 & 1;
+            if (p.swap && sz.raw_width % 2)
+                return error = "an odd width swapped in pairs", false;
+        }
+        if (p.bits < 1 || p.bits > 16)
+            return error = "samples of " + std::to_string(p.bits) + " bits", false;
+        const uint64_t bits = uint64_t(p.row_bits) * sz.raw_height;
+        p.bytes = size_t((bits + 7) / 8 + p.group - 1) / p.group * p.group;
+        p.offset = size_t(u.data_offset);
+        if (bits >= (uint64_t(1) << 32) || u.data_offset < 0 || p.offset > size || p.bytes > size - p.offset)
+            return error = "a readout past the file's end", false;
+        p.file = file;
+        return true;
+    }
+    // Whether LibRaw's crop_masked_pixels measures the sides of the active
+    // area (a packed readout's flag says so).
+    bool packed_sides() const
+    {
+        libraw_decoder_info_t info{};
+        return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name &&
+               std::strcmp(info.decoder_name, "packed_load_raw()") == 0 && libraw_internal_data.unpacker_data.load_flags & 32;
+    }
+
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
     // which formula and hue for this camera and firmware, and sraw_mul.
     void canon_ycc(RawMosaic::Ycc& y) const
@@ -342,14 +424,17 @@ public:
     }
     // The areas crop_masked_pixels measures, for a lossless JPEG readout
     // (LibRaw 0.22's rule), for the GPU to measure instead.
-    void masked_areas(int m[8][4], bool sides) const
+    void masked_areas(int m[8][4], bool sides, bool inset = true) const
     {
         const auto& sz = imgdata.sizes;
         std::memcpy(m, sz.mask, sizeof sz.mask);
         if (m[0][3] > 0 || !sides)  // the sides measured for Canon's lossless JPEG readouts, not Nikon's
             return;
-        m[0][1] = m[1][1] += 2;
-        m[0][3] -= 2;
+        if (inset)  // two columns in, Canon's lossless JPEG's (not a packed readout's)
+        {
+            m[0][1] = m[1][1] += 2;
+            m[0][3] -= 2;
+        }
         m[0][0] = m[1][0] = sz.top_margin;
         m[0][2] = m[1][2] = sz.top_margin + sz.height;
         m[0][3] += sz.left_margin;
@@ -426,6 +511,12 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
             return error = "unexpected layout", false;
         out.assign(size_t(sz.raw_width) * sz.raw_height, 0);
         std::copy(j.samples.begin(), j.samples.end(), out.begin());
+        return true;
+    }
+    // Stored uncompressed: unpacked as LibRaw's loaders read it.
+    if (RawMosaic::Packed packed; static_cast<const RawAccess&>(raw).packed(file, size, packed, error))
+    {
+        packed.unpack(out);
         return true;
     }
     if (!locate_cr2(file, size, offset, length, slices))
@@ -643,6 +734,18 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         stream->left = sz.left_margin, stream->top = sz.top_margin;
         stream->filters = raw.imgdata.idata.filters;
         raw.masked_areas(stream->mask, false);
+    }
+    else if (auto packed = std::make_shared<RawMosaic::Packed>(); decode_options().gpu_decode && raw.packed(file, size, *packed, ours_error))
+    {
+        // Up as the file stores it, from the bytes already read: no copy.
+        const auto& sz = raw.imgdata.sizes;
+        packed->owner = file_bytes_owner();
+        stream = std::make_shared<RawMosaic::Stream>();
+        stream->packed = std::move(packed);
+        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
+        stream->left = sz.left_margin, stream->top = sz.top_margin;
+        stream->filters = raw.imgdata.idata.filters;
+        raw.masked_areas(stream->mask, raw.packed_sides(), false);
     }
     if (stream)
         ;  // decoded on the GPU
@@ -1000,7 +1103,50 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// A raw whose readout the GPU decodes (a CR2, a NEF): ready as soon as its preview would be.
+// As unpack.hlsl does on the GPU, a row a thread, each row's bits read in
+// order (rows start on a byte).
+void RawMosaic::Packed::unpack(std::vector<uint16_t>& out) const
+{
+    out.resize(size_t(readout_w) * readout_h);
+    const uint8_t* rows = file + offset;
+    const size_t n = bytes, g = size_t(group);
+    // The q-th byte as the loaders take it: within each group of `g`, from its last.
+    const auto byte = [&](size_t q) -> uint64_t
+    {
+        const size_t k = q % g, at = q - k + (g - 1 - k);
+        return at < n ? rows[at] : 0;
+    };
+    const uint64_t mask = (1u << bits) - 1;
+    const unsigned flip = swap ? 1 : 0;
+    rows_in_parallel(unsigned(readout_h),
+                     [&](unsigned y)
+                     {
+                         uint16_t* o = out.data() + size_t(y) * readout_w;
+                         size_t q = size_t(uint64_t(y) * row_bits / 8);
+                         if (bits == 16 && g <= 2 && q % 2 == 0)  // whole 16-bit samples, either order
+                         {
+                             const uint8_t* s = rows + q;
+                             for (unsigned x = 0; x < unsigned(readout_w); ++x, s += 2)
+                             {
+                                 const uint32_t v = uint32_t(g == 2 ? s[0] | s[1] << 8 : s[0] << 8 | s[1]) >> shift;
+                                 o[x ^ flip] = curve.empty() ? uint16_t(v) : curve[v];
+                             }
+                             return;
+                         }
+                         uint64_t held = 0;
+                         int have = 0;
+                         for (unsigned x = 0; x < unsigned(readout_w); ++x)
+                         {
+                             for (; have < bits; have += 8)
+                                 held = held << 8 | (g == 1 ? (q < n ? rows[q] : 0) : byte(q)), ++q;
+                             have -= bits;
+                             const uint32_t v = uint32_t(held >> have & mask) >> shift;
+                             o[x ^ flip] = curve.empty() ? uint16_t(v) : curve[v];
+                         }
+                     });
+}
+
+// A raw whose readout the GPU decodes (a CR2, a NEF, one uncompressed): ready as soon as its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1013,12 +1159,17 @@ bool quick(const std::string& path)
         return false;
     if (locate_cr2(bytes, size, offset, length, slices))
         return ljpeg::takes(bytes + offset, length);
-    // A NEF of the kind decoded on the GPU (opening it reads only its
-    // headers). On the heap: a LibRaw is hundreds of KB.
+    // A NEF of the kind decoded on the GPU, or a Bayer readout stored
+    // uncompressed (opening it reads only its headers). On the heap: a
+    // LibRaw is hundreds of KB.
     auto raw = std::make_unique<RawAccess>();
     ljpeg::Prepared unused;
+    RawMosaic::Packed packed;
     std::string error;
-    return raw->open_buffer(bytes, size) == LIBRAW_SUCCESS && raw->nikon(bytes, size, unused, error, true);
+    if (raw->open_buffer(bytes, size) != LIBRAW_SUCCESS)
+        return false;
+    const auto& id = raw->imgdata.idata;
+    return raw->nikon(bytes, size, unused, error, true) || (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error));
 }
 
 const Decoder& raw_decoder()
