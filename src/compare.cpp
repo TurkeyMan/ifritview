@@ -11,6 +11,10 @@ ImageDifference compare_images(const Image& a, const Image& b)
     ImageDifference d;
     if (a.width != b.width || a.height != b.height || a.width <= 0 || a.height <= 0)
         return d;
+    // Pixels for the CPU there must be (a raw prepared for the GPU has none until it's developed).
+    if (a.pixels.size() < size_t(a.stride) * a.height || b.pixels.size() < size_t(b.stride) * b.height || a.stride < a.width * 4 ||
+        b.stride < b.width * 4)
+        return d;
     d.width = a.width;
     d.height = a.height;
     d.errors.resize(size_t(a.width) * a.height);

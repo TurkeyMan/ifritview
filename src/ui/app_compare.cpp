@@ -151,7 +151,11 @@ void App::open_diff(const std::string& a_path, const std::string& b_path, const 
             } done{*state};
             auto a = std::make_shared<Image>(), b = std::make_shared<Image>();
             std::string error;
+            // Compared pixel for pixel, here: raws developed on the CPU, with
+            // their pixels (for the GPU they'd have none until shown).
+            develop_raws_on_cpu(true);
             const bool ok = decode_image(a_path, *a, error) && decode_image(b_path, *b, error);
+            develop_raws_on_cpu(false);
             std::shared_ptr<const ImageDifference> difference;
             if (ok)
             {

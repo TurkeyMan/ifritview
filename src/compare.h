@@ -21,7 +21,7 @@ struct ImageDifference
     std::string summary;          // said in place of the numbers, where they'd mislead
 };
 
-// `a` and `b` must be the same size (an empty result otherwise). The
+// `a` and `b` must be the same size, with their pixels (an empty result otherwise). The
 // work of a moment per megapixel: for a worker thread on big images.
 ImageDifference compare_images(const Image& a, const Image& b);
 
