@@ -25,6 +25,27 @@ struct Prepared;
 struct RawMosaic
 {
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
+    // A readout uncompressed, as the file stores it: samples of `bits` bits
+    // one after another, most significant bit first, rows `row_bits` apart,
+    // the bytes read in groups of `group` taken as little-endian words (1:
+    // as they come; 2: 16-bit little-endian samples). Each is shifted right
+    // by `shift` and put through `curve` if there is one; `swap`: each pair
+    // of columns the other way round. The GPU unpacks it (unpack.hlsl),
+    // unpack() the same on the CPU.
+    struct Packed
+    {
+        std::shared_ptr<const void> owner;  // keeps `file` alive: the whole file, read into memory
+        const uint8_t* file = nullptr;
+        size_t offset = 0;                  // the first row's, in `file`
+        size_t bytes = 0;                   // all the rows', whole groups
+        uint32_t row_bits = 0;
+        int bits = 16, group = 1, shift = 0;
+        bool swap = false;
+        std::vector<uint16_t> curve;        // 65536 entries, or none
+        int readout_w = 0, readout_h = 0;
+        // The readout, readout_w x readout_h, into `out`.
+        void unpack(std::vector<uint16_t>& out) const;
+    };
     // Or, with `data` null, the readout still compressed, for the GPU to
     // decode: its lossless JPEG prepared (ljpeg.h), how that lays out
     // (Canon's slices, a DNG's tiles), where the active area sits in it, and where the
@@ -32,6 +53,7 @@ struct RawMosaic
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
+        std::shared_ptr<const Packed> packed;  // or the readout packed, for the GPU to unpack
         int readout_w = 0, readout_h = 0;
         unsigned slices[3] = {};  // how many, each one's width, the last one's (none: rows as they come)
         int left = 0, top = 0;    // the active area's corner in the readout
@@ -77,10 +99,14 @@ struct RawMosaic
     int filter[4] = {};          // the colour there as LibRaw counts them: 0 R, 1 G, 2 B, 3 the other G
     float white = 65535;         // saturation, in data units
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
+    bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height
     int orientation = 1;         // EXIF 1..8: how the camera was held
+    // A DNG's corrections (its lens shading, vignetting), as the develop
+    // reads them (dng_opcodes.h); null when it has none.
+    std::shared_ptr<const std::vector<uint32_t>> corrections;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be

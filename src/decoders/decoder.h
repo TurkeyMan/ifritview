@@ -68,6 +68,9 @@ bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size);
 FILE* open_file(const std::string& path);
 // Forget the cached bytes (the next file_bytes reads afresh).
 void release_file_bytes();
+// What holds the bytes file_bytes gave last, for what keeps pointing into
+// them after the decode (a raw's readout, uploaded as the file stores it).
+std::shared_ptr<const void> file_bytes_owner();
 // A whole file read into memory, to hand to whichever thread decodes it.
 struct FileBlob
 {
