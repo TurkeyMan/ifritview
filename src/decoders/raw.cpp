@@ -1,6 +1,7 @@
 #include "decoder.h"
 #include "dng_opcodes.h"
 #include "ljpeg.h"
+#include "rawblocks.h"
 #include "../i18n.h"
 #include "../platform.h"
 
@@ -342,6 +343,47 @@ public:
                                     imgdata.color.curve, 0x4000, p, error);
     }
 
+    // A raw compressed in blocks (rawblocks.h): Sony's compressed ARW,
+    // Panasonic's RW2 but for encoding 8. False for others; and, with why,
+    // for a layout LibRaw would read some other way than rawblocks does.
+    bool blocks(const uint8_t* file, size_t size, rawblocks::Prepared& p, std::string& error) const
+    {
+        libraw_decoder_info_t info{};
+        if (const_cast<RawAccess*>(this)->get_decoder_info(&info) != LIBRAW_SUCCESS || !info.decoder_name)
+            return false;
+        const std::string name = info.decoder_name;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        p.readout_w = sz.raw_width, p.readout_h = sz.raw_height;
+        p.bits = u.pana_bpp;
+        if (name == "sony_arw2_load_raw()")
+        {
+            if (u.order != 0x4949 || imgdata.rawparams.specials & LIBRAW_RAWSPECIAL_SONYARW2_ALLFLAGS)
+                return error = "an ARW read another way", false;
+            p.format = rawblocks::Format::sony;
+            p.rows = sz.height;
+        }
+        else if (name == "panasonic_load_raw()")
+        {
+            p.format = u.pana_encoding == 5 ? rawblocks::Format::packed : rawblocks::Format::panasonic;
+            p.rows = sz.raw_height;
+            p.rotated = true;
+            p.rotation = u.load_flags;
+        }
+        else if (name == "panasonicC6_load_raw()" || name == "panasonicC7_load_raw()")
+        {
+            // Read 16 rows at a time, a last few short of 16 not at all.
+            const bool c6 = name == "panasonicC6_load_raw()";
+            p.format = c6 ? rawblocks::Format::panasonic6 : rawblocks::Format::packed;
+            if (c6)
+                p.bits = u.pana_bpp == 12 ? 12 : 14;
+            p.rows = sz.raw_height / 16 * 16;
+        }
+        else
+            return false;
+        return rawblocks::prepare(file, size, uint64_t(u.data_offset), imgdata.color.curve, p, error);
+    }
+
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
     // which formula and hue for this camera and firmware, and sraw_mul.
     void canon_ycc(RawMosaic::Ycc& y) const
@@ -490,8 +532,22 @@ bool unpack_cr2(LibRaw& raw, const uint8_t* file, size_t size, std::vector<uint1
     return true;
 }
 
-// IFRIT_RAW_CHECK: a CR2 unpacked both ways, ours and LibRaw's, and every
-// sample compared (and what LibRaw knows only after unpacking).
+// A raw compressed in blocks (rawblocks.h), on every core. False for others.
+bool unpack_blocks(const RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
+                   std::shared_ptr<rawblocks::Prepared>* kept = nullptr)
+{
+    auto p = std::make_shared<rawblocks::Prepared>();
+    if (!raw.blocks(file, size, *p, error))
+        return false;
+    rawblocks::decode(*p, out);
+    if (kept)
+        *kept = std::move(p);
+    return true;
+}
+
+// IFRIT_RAW_CHECK: a CR2, a NEF or a raw in blocks unpacked both ways, ours
+// and LibRaw's, and every sample compared (and what LibRaw knows only after
+// unpacking).
 void check_cr2(const uint8_t* file, size_t size, const std::string& path)
 {
     // On the heap: a LibRaw is hundreds of KB, and a Windows thread's stack 1 MB.
@@ -502,7 +558,8 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     std::vector<uint16_t> ours;
     std::string error;
     const gint64 t0 = g_get_monotonic_time();
-    const bool ok = unpack_cr2(mine, file, size, ours, error);
+    std::shared_ptr<rawblocks::Prepared> blocks;  // where it's one of these, what LibRaw writes (the rest it leaves as it finds it)
+    const bool ok = unpack_blocks(mine, file, size, ours, error, &blocks) || (error.empty() && unpack_cr2(mine, file, size, ours, error));
     if (ok)
         mine.black_from_masked(ours);
     const gint64 t1 = g_get_monotonic_time();
@@ -515,7 +572,7 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     if (ok && raw)
         for (unsigned y = 0; y < sz.raw_height && verdict == "same"; ++y)
             for (unsigned x = 0; x < sz.raw_width; ++x)
-                if (ours[size_t(y) * sz.raw_width + x] != raw[size_t(y) * sz.raw_pitch / 2 + x])
+                if (ours[size_t(y) * sz.raw_width + x] != raw[size_t(y) * sz.raw_pitch / 2 + x] && (!blocks || rawblocks::written(*blocks, int(x), int(y))))
                 {
                     verdict = "DIFFERENT at " + std::to_string(x) + "," + std::to_string(y) + ": ours " +
                               std::to_string(ours[size_t(y) * sz.raw_width + x]) + ", LibRaw's " + std::to_string(raw[size_t(y) * sz.raw_pitch / 2 + x]);
@@ -543,6 +600,13 @@ void check_cr2(const uint8_t* file, size_t size, const std::string& path)
     std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's %.0f ms (%s, %s %s); levels %s\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
                  (t2 - t1) / 1000.0, info.decoder_name ? info.decoder_name : "?", theirs.imgdata.idata.make, theirs.imgdata.idata.model,
                  levels ? "same" : "DIFFERENT");
+    if (blocks)
+        std::fprintf(stderr, "rawcheck:   blocks: %s, %d bits, %d samples a block, %d of %d rows written, %d wide\n",
+                     blocks->format == rawblocks::Format::sony        ? "Sony's"
+                     : blocks->format == rawblocks::Format::panasonic ? "Panasonic's"
+                     : blocks->format == rawblocks::Format::packed    ? "Panasonic's packed"
+                                                                      : "Panasonic's C6",
+                     blocks->format == rawblocks::Format::sony ? 11 : blocks->bits, blocks->per, blocks->rows, blocks->readout_h, blocks->readout_w);
     if (!levels)
         std::fprintf(stderr, "rawcheck:   black %u / %u, maximum %u / %u, cblack %u %u %u %u / %u %u %u %u\n", a.black, b.black, a.maximum, b.maximum,
                      a.cblack[0], a.cblack[1], a.cblack[2], a.cblack[3], b.cblack[0], b.cblack[1], b.cblack[2], b.cblack[3]);
@@ -611,8 +675,9 @@ bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
 // Unpacked only: the sensor's Bayer mosaic and what developing it needs,
 // for the GPU to develop (gpu_view's develop pass). The CPU's part of a raw
 // is just this, a fraction of a second. False for sensors it doesn't take
-// (X-Trans, Foveon, linear DNGs): those develop here, on the CPU.
-bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out, std::string& error)
+// (X-Trans, Foveon, linear DNGs): those develop here, on the CPU. `owner`
+// holds `file`, for a stream the GPU reads where it lies.
+bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, std::shared_ptr<const void> owner, Image& out, std::string& error)
 {
     const auto& id = raw.imgdata.idata;
     // A 2 x 2 Bayer pattern, or already three colours a photosite (a linear
@@ -631,7 +696,7 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
         return decode_linear(raw, out, error, ycc);
     }
-    // A CR2 here, on every core; the rest by LibRaw.
+    // A CR2, a NEF or a raw in blocks on the GPU, or here on every core; the rest by LibRaw.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
     std::string ours_error;
@@ -668,9 +733,21 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         stream->filters = raw.imgdata.idata.filters;
         raw.masked_areas(stream->mask, false);
     }
+    else if (auto blocks = std::make_shared<rawblocks::Prepared>(); decode_options().gpu_decode && raw.blocks(file, size, *blocks, ours_error) &&
+                                                                     rawblocks::fits_gpu(*blocks))
+    {
+        blocks->owner = std::move(owner);  // read where they lie, after this decode
+        const auto& sz = raw.imgdata.sizes;
+        stream = std::make_shared<RawMosaic::Stream>();
+        stream->blocks = std::move(blocks);
+        stream->readout_w = sz.raw_width, stream->readout_h = sz.raw_height;
+        stream->left = sz.left_margin, stream->top = sz.top_margin;
+        stream->filters = raw.imgdata.idata.filters;
+        raw.masked_areas(stream->mask, false);
+    }
     if (stream)
         ;  // decoded on the GPU
-    else if (unpack_cr2(raw, file, size, readout, ours_error))
+    else if (unpack_blocks(raw, file, size, readout, ours_error) || unpack_cr2(raw, file, size, readout, ours_error))
     {
         raw.black_from_masked(readout);
         src = readout.data();
@@ -926,7 +1003,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     // Developed on the GPU where there is one: only unpacked here.
     if (!ok && options.raw_mode == RawMode::Full && options.gpu_develop)
     {
-        ok = decode_mosaic(raw, bytes, size, out, error);
+        ok = decode_mosaic(raw, bytes, size, file_blob(path), out, error);
         mode = "full size, GPU";
     }
     if (!ok)
@@ -1051,7 +1128,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// A raw whose readout the GPU decodes (a CR2, a NEF): ready as soon as its preview would be.
+// A raw whose readout the GPU decodes (a CR2, a NEF, Sony's and Panasonic's
+// blocks): ready as soon as its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1068,8 +1146,9 @@ bool quick(const std::string& path)
     // headers). On the heap: a LibRaw is hundreds of KB.
     auto raw = std::make_unique<RawAccess>();
     ljpeg::Prepared unused;
+    rawblocks::Prepared blocks;
     std::string error;
-    return raw->open_buffer(bytes, size) == LIBRAW_SUCCESS && raw->nikon(bytes, size, unused, error, true);
+    return raw->open_buffer(bytes, size) == LIBRAW_SUCCESS && (raw->nikon(bytes, size, unused, error, true) || (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks)));
 }
 
 const Decoder& raw_decoder()

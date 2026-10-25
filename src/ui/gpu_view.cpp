@@ -4,6 +4,7 @@
 #include "../image.h"
 #include "../decoders/decoder.h"
 #include "../decoders/ljpeg.h"
+#include "../decoders/rawblocks.h"
 #include <glib.h>
 #include "shaders/compose.h"
 #include "shaders/decode.h"
@@ -24,6 +25,7 @@
 #include "shaders/ljpeg_sync.h"
 #include "shaders/mosaic.h"
 #include "shaders/peak.h"
+#include "shaders/raw_blocks.h"
 #include "shaders/resample.h"
 #include "shaders/stats.h"
 
@@ -105,6 +107,14 @@ struct LjpegParams
     uint32_t initial[4];
 };
 static_assert(sizeof(LjpegParams) == 112, "ljpeg.hlsli's layout");
+
+// raw_blocks.hlsl's block.
+struct BlocksParams
+{
+    uint32_t format, bits, per, units;
+    uint32_t blocks, readout_w, row_blocks, span;
+    uint32_t rotated, rotation, size, unused;
+};
 
 // BT.709 (sRGB) linear to XYZ, D65.
 constexpr float kXyzFrom709[3][3] = {
@@ -295,7 +305,8 @@ bool GpuView::programs(std::string& error)
                                  std::pair{&histogram_max_, shaders::histogram_max}, std::pair{&ljpeg_guess_, shaders::ljpeg_guess},
                                  std::pair{&ljpeg_sync_, shaders::ljpeg_sync}, std::pair{&ljpeg_resolve_, shaders::ljpeg_resolve},
                                  std::pair{&ljpeg_decode_, shaders::ljpeg_decode}, std::pair{&ljpeg_columns_, shaders::ljpeg_columns},
-                                 std::pair{&ljpeg_rows_, shaders::ljpeg_rows}, std::pair{&ljpeg_black_, shaders::ljpeg_black}})
+                                 std::pair{&ljpeg_rows_, shaders::ljpeg_rows}, std::pair{&ljpeg_black_, shaders::ljpeg_black},
+                                 std::pair{&raw_blocks_, shaders::raw_blocks}})
     {
         auto r = device_->compute_program(make());
         if (!r.program)
@@ -317,16 +328,53 @@ bool GpuView::programs(std::string& error)
     return true;
 }
 
+namespace
+{
+
+// A raw's readout decoded on the CPU, up as a photosite a texel: the active
+// area out of it (`sample` the readout's (x, y)), and the masked areas
+// summed for the black level just as ljpeg_black does on the GPU.
+template <typename Sample>
+bool upload_decoded(rap::gpu::device& device, const RawMosaic& m, Sample sample, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels,
+                    std::string& error)
+{
+    const RawMosaic::Stream& st = *m.stream;
+    std::vector<uint16_t> area(size_t(m.width) * m.height);
+    for (int y = 0; y < m.height; ++y)
+        for (int x = 0; x < m.width; ++x)
+            area[size_t(y) * m.width + x] = sample(unsigned(x + st.left), unsigned(y + st.top));
+    uint32_t sums[9] = {};  // sum R G B G2, count R G B G2, zeros
+    for (const auto& r : st.mask)
+        for (int y = std::max(r[0], 0); y < std::min(r[2], st.readout_h); ++y)
+            for (int x = std::max(r[1], 0); x < std::min(r[3], st.readout_w); ++x)
+            {
+                const unsigned c = (st.filters >> ((((y << 1) & 14) | (x & 1)) << 1)) & 3;
+                const uint16_t v = sample(unsigned(x), unsigned(y));
+                sums[c] += v;
+                sums[4 + c] += 1;
+                sums[8] += v == 0;
+            }
+    sites = device.create({m.width, m.height, rap::gpu::format::r16});
+    levels = device.create_buffer(sizeof sums);
+    if (!sites || !levels)
+        return error = "too big for the GPU", false;
+    device.upload(sites, std::as_bytes(std::span(area)), {1, rap::gpu::sample_type::u16});
+    device.upload(levels, std::as_bytes(std::span(sums)));
+    return true;
+}
+
+}  // namespace
+
 bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
 {
     const RawMosaic::Stream& st = *m.stream;
+    if (st.blocks)
+        return decode_blocks(m, sites, levels, error);
     const ljpeg::Prepared& j = *st.jpeg;
     static const bool keep = std::getenv("IFRIT_GPU_DECODE_ON_SOFTWARE") != nullptr;
     if (device_->software() && !keep)
     {
-        // On the CPU's cores, then up as a photosite a texel: the active area
-        // out of the readout (Canon's slices undone), and the masked areas
-        // summed for the black level just as ljpeg_black does on the GPU.
+        // On the CPU's cores (Canon's slices undone).
         ljpeg::Image cpu;
         if (!ljpeg::decode(j, cpu, error))
             return false;
@@ -340,28 +388,7 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
             }
             return i < cpu.samples.size() ? cpu.samples[i] : 0;
         };
-        std::vector<uint16_t> area(size_t(m.width) * m.height);
-        for (int y = 0; y < m.height; ++y)
-            for (int x = 0; x < m.width; ++x)
-                area[size_t(y) * m.width + x] = sample(unsigned(x + st.left), unsigned(y + st.top));
-        uint32_t sums[9] = {};  // sum R G B G2, count R G B G2, zeros
-        for (const auto& r : st.mask)
-            for (int y = std::max(r[0], 0); y < std::min(r[2], st.readout_h); ++y)
-                for (int x = std::max(r[1], 0); x < std::min(r[3], st.readout_w); ++x)
-                {
-                    const unsigned c = (st.filters >> ((((y << 1) & 14) | (x & 1)) << 1)) & 3;
-                    const uint16_t v = sample(unsigned(x), unsigned(y));
-                    sums[c] += v;
-                    sums[4 + c] += 1;
-                    sums[8] += v == 0;
-                }
-        sites = device_->create({m.width, m.height, rap::gpu::format::r16});
-        levels = device_->create_buffer(sizeof sums);
-        if (!sites || !levels)
-            return error = "too big for the GPU", false;
-        device_->upload(sites, std::as_bytes(std::span(area)), {1, rap::gpu::sample_type::u16});
-        device_->upload(levels, std::as_bytes(std::span(sums)));
-        return true;
+        return upload_decoded(*device_, m, sample, sites, levels, error);
     }
     const uint64_t samples = uint64_t(j.width) * j.components * j.height;
     const uint32_t row = uint32_t(j.width * j.components);
@@ -516,6 +543,125 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
                          cpu.samples.size(), wrong ? (", first at " + std::to_string(first)).c_str() : "", (t1 - t0) / 1000.0,
                          w[4] ? w[0] / w[4] : 0, w[5] ? w[1] / w[5] : 0, w[6] ? w[2] / w[6] : 0, w[8]);
         }
+    }
+    return true;
+}
+
+bool GpuView::decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
+{
+    const RawMosaic::Stream& st = *m.stream;
+    const rawblocks::Prepared& b = *st.blocks;
+    static const bool keep = std::getenv("IFRIT_GPU_DECODE_ON_SOFTWARE") != nullptr;
+    const uint64_t samples = uint64_t(st.readout_w) * st.readout_h;
+    const uint64_t extent = b.extent();
+    // On the CPU's cores where the GPU is software (one too big for it the loader unpacked).
+    if ((device_->software() && !keep) || !rawblocks::fits_gpu(b))
+    {
+        std::vector<uint16_t> readout;
+        rawblocks::decode(b, readout);
+        const auto sample = [&](unsigned x, unsigned y) { return readout[size_t(y) * st.readout_w + x]; };
+        return upload_decoded(*device_, m, sample, sites, levels, error);
+    }
+    BlocksParams p{};
+    p.format = uint32_t(b.format);
+    p.bits = uint32_t(b.bits);
+    p.per = uint32_t(b.per);
+    p.units = b.units();
+    p.blocks = b.blocks;
+    p.readout_w = uint32_t(st.readout_w);
+    p.row_blocks = uint32_t(b.row_blocks);
+    p.rotated = b.rotated ? 1 : 0;
+    p.rotation = b.rotation;
+    p.size = uint32_t(extent);  // past it, none of the file is read
+    // A thread a pair of blocks, 64 a group: in rows of 1024 groups when
+    // there are more than a dispatch's 65535 across.
+    const uint64_t groups = (uint64_t(p.units) + 63) / 64;
+    const uint64_t gx = groups <= 65535 ? std::max<uint64_t>(groups, 1) : 1024, gy = (groups + gx - 1) / gx;
+    p.span = uint32_t(gx * 64);
+
+    // The file where the blocks lie (whole words, its tail padded), as LibRaw reads it.
+    const size_t whole = size_t(extent) & ~size_t(3);
+    auto data = device_->create_buffer(whole + 32);
+    std::vector<uint32_t> curve_words(b.curve.begin(), b.curve.end());
+    if (curve_words.empty())
+        curve_words.push_back(0);
+    auto curve = device_->create_buffer(curve_words.size() * 4);
+    auto values = device_->create_buffer((samples * 2 + 3) & ~uint64_t(3));
+    levels = device_->create_buffer(36);
+    sites = device_->create({m.width, m.height, rap::gpu::format::r16, 1, true});
+    if (!data || !curve || !values || !levels || !sites)
+        return error = "too big for the GPU", false;
+    device_->clear(data, 0);
+    device_->upload(data, std::as_bytes(std::span(b.data, whole)));
+    uint8_t tail[4] = {};
+    std::copy(b.data + whole, b.data + extent, tail);
+    device_->upload(data, std::as_bytes(std::span(tail)), whole);
+    device_->upload(curve, std::as_bytes(std::span(curve_words)));
+    device_->clear(values, 0);
+    device_->clear(levels, 0);
+
+    // Then as a lossless JPEG's readout: the masked areas summed, the active area out.
+    LjpegParams q{};
+    q.readout_w = uint32_t(st.readout_w), q.readout_h = uint32_t(st.readout_h);
+    q.left = uint32_t(st.left), q.top = uint32_t(st.top);
+    q.filters = st.filters;
+    q.mosaic_w = uint32_t(m.width), q.mosaic_h = uint32_t(m.height);
+    std::vector<rap::gpu::dispatch> work(1);
+    work[0].program = raw_blocks_;
+    work[0].buffers = {data, curve, values};
+    work[0].uniforms = bytes(p);
+    work[0].groups[0] = int(gx);
+    work[0].groups[1] = int(gy);
+    std::vector<LjpegParams> masks;
+    masks.reserve(8);  // the dispatches point into it
+    for (const auto& r : st.mask)
+    {
+        const int top = std::max(r[0], 0), left = std::max(r[1], 0);
+        const int bottom = std::min(r[2], st.readout_h), right = std::min(r[3], st.readout_w);
+        if (bottom <= top || right <= left)
+            continue;
+        LjpegParams& k = masks.emplace_back(q);
+        k.rect[0] = top, k.rect[1] = left, k.rect[2] = bottom, k.rect[3] = right;
+        rap::gpu::dispatch d;
+        d.program = ljpeg_black_;
+        d.buffers = {values, levels};
+        d.uniforms = bytes(k);
+        d.groups[0] = (right - left + 15) / 16;
+        d.groups[1] = (bottom - top + 15) / 16;
+        work.push_back(std::move(d));
+    }
+    device_->run(std::span(work));
+    rap::gpu::pass pass;
+    pass.program = mosaic_;
+    pass.buffers = {values};
+    pass.uniforms = bytes(q);
+    pass.target = sites;
+    device_->run(std::span(&pass, 1));
+
+    // Compared with the CPU's decode on request (IFRIT_GPU_RAW_CHECK).
+    static const bool check = std::getenv("IFRIT_GPU_RAW_CHECK") != nullptr;
+    if (check)
+    {
+        const gint64 t0 = g_get_monotonic_time();
+        std::vector<std::byte> gpu(values->size()), sums(levels->size());
+        device_->readback(values, gpu).wait();
+        device_->readback(levels, sums).wait();
+        const gint64 t1 = g_get_monotonic_time();
+        std::vector<uint16_t> cpu;
+        rawblocks::decode(b, cpu);
+        size_t wrong = 0, first = 0;
+        for (size_t i = 0; i < cpu.size(); ++i)
+        {
+            uint16_t v;
+            std::memcpy(&v, gpu.data() + i * 2, 2);
+            if (v != cpu[i] && !wrong++)
+                first = i;
+        }
+        uint32_t w[9];
+        std::memcpy(w, sums.data(), sizeof w);
+        std::fprintf(stderr, "gpu raw check: %zu of %zu samples differ%s (read back in %.0f ms); black R %u G %u B %u (%u zero)\n", wrong, cpu.size(),
+                     wrong ? (", first at " + std::to_string(first)).c_str() : "", (t1 - t0) / 1000.0, w[4] ? w[0] / w[4] : 0,
+                     w[5] ? w[1] / w[5] : 0, w[6] ? w[2] / w[6] : 0, w[8]);
     }
     return true;
 }

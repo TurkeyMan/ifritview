@@ -196,6 +196,14 @@ bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size)
     return t_file.blob->ok;
 }
 
+std::shared_ptr<const FileBlob> file_blob(const std::string& path)
+{
+    const uint8_t* data;
+    size_t size;
+    file_bytes(path, data, size);
+    return t_file.blob;
+}
+
 FILE* open_file(const std::string& path)
 {
     const uint8_t* data = nullptr;

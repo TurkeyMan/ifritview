@@ -20,17 +20,23 @@ namespace ljpeg
 {
 struct Prepared;
 }
+namespace rawblocks
+{
+struct Prepared;
+}
 
 struct RawMosaic
 {
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
     // Or, with `data` null, the readout still compressed, for the GPU to
-    // decode: its lossless JPEG prepared (ljpeg.h), how that lays out
-    // (Canon's slices), where the active area sits in it, and where the
-    // sensor is masked (the black level, measured as LibRaw does).
+    // decode: its lossless JPEG prepared (ljpeg.h) or its blocks
+    // (rawblocks.h), how that lays out (Canon's slices), where the active
+    // area sits in it, and where the sensor is masked (the black level,
+    // measured as LibRaw does).
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
+        std::shared_ptr<const rawblocks::Prepared> blocks;  // or this
         int readout_w = 0, readout_h = 0;
         unsigned slices[3] = {};  // how many, each one's width, the last one's (none: rows as they come)
         int left = 0, top = 0;    // the active area's corner in the readout

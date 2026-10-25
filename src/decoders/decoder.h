@@ -64,6 +64,10 @@ void develop_raws_on_cpu(bool on);
 // rather than opening the path again, which matters on slow filesystems.
 // Returns false if the file can't be read.
 bool file_bytes(const std::string& path, const uint8_t*& data, size_t& size);
+// What holds those bytes, for keeping them past this decode (a raw's
+// stream the GPU decodes later, read where it lies in the file).
+struct FileBlob;
+std::shared_ptr<const FileBlob> file_blob(const std::string& path);
 // A FILE* over those bytes, for libraries that want one (libjpeg, libpng).
 FILE* open_file(const std::string& path);
 // Forget the cached bytes (the next file_bytes reads afresh).
