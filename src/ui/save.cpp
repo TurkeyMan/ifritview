@@ -66,7 +66,8 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
         return nullptr;
 
     // Every format's settings are built, and the chosen one's shown. The
-    // dialog doesn't resize, so it's tall enough for the format with most.
+    // dialog doesn't resize, so it's tall enough for the format with most;
+    // with fewer, the metadata follows them and the room left is at the foot.
     size_t most = 1;
     for (const Page& p : d->pages_)
         most = std::max(most, p.encoder->settings.size());
@@ -90,9 +91,9 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
                                                                         .bind(s->preview_)}}},
                                          L::separator{},
                                          rap::node{rap::spec::box{rap::orientation::vertical, pages, false, {}}, {}},
-                                         L::spacer{},
                                          L::separator{},
                                          d->metadata_node(metadata),
+                                         L::spacer{},  // what a format with fewer settings leaves, above the buttons
                                          L::buttons{L::ok(_("_Save…")), L::cancel},
                                      }}}
                                .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(13 + 2.5 * double(most)), rap::extent::unit::lines})
