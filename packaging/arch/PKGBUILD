@@ -18,7 +18,7 @@ options=('!lto')
 depends=('cairo' 'exempi' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'json-glib' 'lcms2' 'libexif'
          'libgcc' 'libgomp' 'libheif' 'libiptcdata' 'libjpeg-turbo' 'libjxl' 'libpng' 'libraw'
          'libstdc++' 'libtiff' 'libwebp' 'zlib' 'zstd')
-makedepends=('cmake' 'git' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs')
+makedepends=('cmake' 'git' 'wayland-protocols' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs')
 # Loaded at runtime when present.
 optdepends=('gtk4: the GTK 4 interface, preferred on GNOME'
             'qt6-base: the Qt 6 interface, preferred on KDE Plasma'
