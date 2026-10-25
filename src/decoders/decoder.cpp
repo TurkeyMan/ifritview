@@ -223,6 +223,11 @@ void release_file_bytes()
     t_file = FileBuffer{};
 }
 
+std::shared_ptr<const void> file_bytes_owner()
+{
+    return t_file.blob;
+}
+
 namespace
 {
 thread_local bool t_cpu_develop = false;
