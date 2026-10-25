@@ -43,14 +43,20 @@ uint4 load16(uint at)
     return r;
 }
 
-// A byte of panasonic_load_raw's buffer, `at` bytes into the stream: each
-// 16 KB of the file goes in `rotation` bytes on, the rest at its start; where
-// the file ends first, the buffer keeps what it had (zero to begin with).
+// Where in the file panasonic_load_raw's buffer has the stream's byte `at`
+// from: each 16 KB of the file goes in `rotation` bytes on, the rest at its start.
+uint file_offset(uint at)
+{
+    const uint o = at % kBuffer;
+    return at - o + (o >= rotation ? o - rotation : o + kBuffer - rotation);
+}
+
+// A byte of that buffer; where the file ends first, the buffer keeps what
+// it had (zero to begin with).
 uint buffer_byte(uint at)
 {
     uint c = at / kBuffer;
-    const uint o = at % kBuffer;
-    uint f = c * kBuffer + (o >= rotation ? o - rotation : o + kBuffer - rotation);
+    uint f = file_offset(at);
     while (f >= size)
     {
         if (c == 0)
@@ -69,10 +75,10 @@ uint4 load_block(uint b)
     const uint at = b * 16;
     if (rotated == 0)
         return load16(at);
-    const uint c = at / kBuffer, o = at % kBuffer;
-    if (o >= rotation || o + 16 <= rotation)
+    const uint o = at % kBuffer;
+    if (o >= rotation || o + 16 <= rotation)  // its 16 bytes together in the file
     {
-        const uint f = c * kBuffer + (o >= rotation ? o - rotation : o + kBuffer - rotation);
+        const uint f = file_offset(at);
         if (f + 16 <= size)
             return load16(f);
     }
