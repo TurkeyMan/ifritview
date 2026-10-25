@@ -278,6 +278,26 @@ void rows_in_parallel(unsigned n, F f)
 class RawAccess : public LibRaw
 {
 public:
+    // A compressed Phase One's black (its level, less each row's and
+    // column's offset) and its flat-field corrections, which LibRaw makes
+    // in raw2image, not as it unpacks: into a buffer of their own that
+    // raw_image then points at, until phase_one_done(). False when it isn't one.
+    bool phase_one_prepare()
+    {
+        if (!is_phaseone_compressed() || !imgdata.rawdata.raw_alloc)
+            return false;
+        phase_one_allocate_tempbuffer();
+        int rc = phase_one_subtract_black(static_cast<ushort*>(imgdata.rawdata.raw_alloc), imgdata.rawdata.raw_image);
+        if (rc == 0 && imgdata.params.use_p1_correction)
+            rc = phase_one_correct();
+        if (rc != 0)
+        {
+            phase_one_free_tempbuffer();
+            return false;
+        }
+        return true;
+    }
+    void phase_one_done() { phase_one_free_tempbuffer(); }
     // A Nikon NEF's compressed readout as LibRaw's nikon_load_raw reads it:
     // the version, the tree for it and its depth, the first rows' starting
     // samples, the curve. False for others, and for a stream that changes
@@ -617,6 +637,7 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     std::string ours_error;
     const ushort* src = nullptr;
     size_t pitch = 0;
+    bool phase_one = false;  // its black taken off first (RawAccess::phase_one_prepare)
     std::shared_ptr<RawMosaic::Stream> stream;
     uint32_t offset, length;
     unsigned slices[3];
@@ -665,6 +686,7 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             error = libraw_strerror(r);
             return false;
         }
+        phase_one = raw.phase_one_prepare();
         src = raw.imgdata.rawdata.raw_image;
         pitch = raw.imgdata.sizes.raw_pitch / 2;
     }
@@ -689,6 +711,8 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
                          });
         m->data = std::move(data);
     }
+    if (phase_one)
+        raw.phase_one_done();
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "raw: %s in %.0f ms, active area copied in %.0f ms\n",
                      m->stream ? "prepared for the GPU" : readout.empty() ? "unpacked by LibRaw" : "unpacked here", (t1 - t0) / 1000.0,
@@ -726,9 +750,10 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
         }
     m->white = float(col.maximum);
     if (std::getenv("IFRIT_TRACE"))
-        std::fprintf(stderr, "raw: black %u + %u %u %u %u, pattern %ux%u: %u %u %u %u, white %u, mul %g %g %g, filters %08x\n", col.black, col.cblack[0],
+        std::fprintf(stderr, "raw: black %u + %u %u %u %u, pattern %ux%u: %u %u %u %u, white %u, mul %g %g %g, filters %08x, active %ux%u at %u,%u, COLOR %d%d%d%d\n", col.black, col.cblack[0],
                      col.cblack[1], col.cblack[2], col.cblack[3], col.cblack[4], col.cblack[5], col.cblack[6], col.cblack[7], col.cblack[8],
-                     col.cblack[9], col.maximum, col.cam_mul[0], col.cam_mul[1], col.cam_mul[2], id.filters);
+                     col.cblack[9], col.maximum, col.cam_mul[0], col.cam_mul[1], col.cam_mul[2], id.filters, sz.width, sz.height,
+                     sz.left_margin, sz.top_margin, raw.COLOR(0, 0), raw.COLOR(0, 1), raw.COLOR(1, 0), raw.COLOR(1, 1));
     // As shot, scaled so the least is 1: a channel clips at 1 after it, and
     // clipping all at 1 keeps highlights neutral.
     float mul[3] = {col.cam_mul[0], col.cam_mul[1], col.cam_mul[2]};
