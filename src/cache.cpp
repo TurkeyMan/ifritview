@@ -22,8 +22,8 @@ size_t ImageCache::image_bytes(const Image& image)
         n += image.mosaic->data->size() * sizeof(uint16_t);
     if (image.mosaic && image.mosaic->stream && image.mosaic->stream->jpeg)
         n += image.mosaic->stream->jpeg->bits.size() + 4 * 65536 * sizeof(uint16_t);
-    if (image.mosaic && image.mosaic->stream && image.mosaic->stream->packed)  // the file it's in, about
-        n += image.mosaic->stream->packed->offset + image.mosaic->stream->packed->bytes;
+    if (image.mosaic && image.mosaic->stream && image.mosaic->stream->file)  // the file it's read from, kept
+        n += image.mosaic->stream->file_size;
     if (image.animation)
         for (const Animation::Frame& f : image.animation->frames)
             n += f.pixels.size();

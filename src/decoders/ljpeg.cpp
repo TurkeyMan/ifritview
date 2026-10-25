@@ -1,5 +1,7 @@
 #include "ljpeg.h"
 
+#include "../parallel.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -110,28 +112,6 @@ inline bool next(const Stream& s, uint64_t& pos, int c, int& diff)
         diff = v < (1u << (size - 1)) ? int(v) - int((1u << size) - 1) : int(v);
     }
     return true;
-}
-
-template <typename F>
-void parallel(unsigned threads, size_t n, F f)
-{
-    if (threads <= 1 || n <= 1)
-    {
-        for (size_t i = 0; i < n; ++i)
-            f(i);
-        return;
-    }
-    std::vector<std::thread> pool;
-    const unsigned t = unsigned(std::min<size_t>(threads, n));
-    for (unsigned k = 0; k < t; ++k)
-        pool.emplace_back(
-            [&, k]
-            {
-                for (size_t i = k; i < n; i += t)
-                    f(i);
-            });
-    for (std::thread& th : pool)
-        th.join();
 }
 
 // Where a stretch of the stream ends: the first code boundary at or past its
@@ -264,53 +244,59 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     const size_t ranges = std::max<size_t>(1, std::min<size_t>(threads * 4, span / 65536));
     const size_t range = (span + ranges - 1) / ranges;
     std::vector<size_t> marker(ranges, size), kept(ranges + 1, 0);
-    parallel(threads, ranges,
-             [&](size_t r)
-             {
-                 const size_t a = scan + r * range, b = std::min(size, a + range);
-                 for (const uint8_t* p = data + a; (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
-                     if (size_t(p - data) + 1 >= size || p[1] != 0x00)
-                     {
-                         marker[r] = size_t(p - data);
-                         break;
-                     }
-             });
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = scan + r * range, b = std::min(size, a + range);
+            for (const uint8_t* p = data + a; (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
+                if (size_t(p - data) + 1 >= size || p[1] != 0x00)
+                {
+                    marker[r] = size_t(p - data);
+                    break;
+                }
+        },
+        threads);
     const size_t end = *std::min_element(marker.begin(), marker.end());
     const auto stuffed = [&](size_t j) { return j > scan && data[j] == 0x00 && data[j - 1] == 0xFF; };
-    parallel(threads, ranges,
-             [&](size_t r)
-             {
-                 const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
-                 size_t n = b - a;
-                 for (const uint8_t* p = data + a; p < data + b && (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
-                     if (stuffed(size_t(p - data) + 1) && size_t(p - data) + 1 < b)
-                         --n;
-                 if (a < b && stuffed(a))
-                     --n;  // its 0xFF ended the range before
-                 kept[r + 1] = n;
-             });
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
+            size_t n = b - a;
+            for (const uint8_t* p = data + a; p < data + b && (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
+                if (stuffed(size_t(p - data) + 1) && size_t(p - data) + 1 < b)
+                    --n;
+            if (a < b && stuffed(a))
+                --n;  // its 0xFF ended the range before
+            kept[r + 1] = n;
+        },
+        threads);
     for (size_t r = 0; r < ranges; ++r)
         kept[r + 1] += kept[r];
     std::vector<uint8_t> bits(kept[ranges] + 8, 0);
-    parallel(threads, ranges,
-             [&](size_t r)
-             {
-                 const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
-                 uint8_t* o = bits.data() + kept[r];
-                 for (size_t j = a; j < b;)
-                 {
-                     if (stuffed(j))
-                     {
-                         ++j;
-                         continue;
-                     }
-                     const uint8_t* ff = static_cast<const uint8_t*>(std::memchr(data + j, 0xFF, b - j));
-                     const size_t until = ff ? size_t(ff - data) + 1 : b;  // through the 0xFF
-                     std::memcpy(o, data + j, until - j);
-                     o += until - j;
-                     j = until;
-                 }
-             });
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
+            uint8_t* o = bits.data() + kept[r];
+            for (size_t j = a; j < b;)
+            {
+                if (stuffed(j))
+                {
+                    ++j;
+                    continue;
+                }
+                const uint8_t* ff = static_cast<const uint8_t*>(std::memchr(data + j, 0xFF, b - j));
+                const size_t until = ff ? size_t(ff - data) + 1 : b;  // through the 0xFF
+                std::memcpy(o, data + j, until - j);
+                o += until - j;
+                j = until;
+            }
+        },
+        threads);
     p.width = width, p.height = height, p.components = ncomp, p.precision = precision;
     p.step = 1;
     for (int c = 0; c < 4; ++c)
@@ -407,21 +393,23 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
     const size_t chunks = std::clamp<size_t>(size_t(threads) * 4, 1, std::max<uint64_t>(1, total_bits / 4096));
     const uint64_t chunk_bits = (total_bits + chunks - 1) / chunks;
     std::vector<Exit> guess(chunks * ncomp);
-    parallel(threads, chunks * ncomp,
-             [&](size_t g)
-             {
-                 const size_t k = g / ncomp;
-                 uint64_t pos = k * chunk_bits, n = 0;
-                 const uint64_t end = std::min(total_bits, (k + 1) * chunk_bits);
-                 int c = int(g % ncomp), diff;
-                 while (pos < end)
-                 {
-                     next(s, pos, c, diff);
-                     c = c + 1 == ncomp ? 0 : c + 1;
-                     ++n;
-                 }
-                 guess[g] = {pos, c, n};
-             });
+    parallel(
+        chunks * ncomp,
+        [&](size_t g)
+        {
+            const size_t k = g / ncomp;
+            uint64_t pos = k * chunk_bits, n = 0;
+            const uint64_t end = std::min(total_bits, (k + 1) * chunk_bits);
+            int c = int(g % ncomp), diff;
+            while (pos < end)
+            {
+                next(s, pos, c, diff);
+                c = c + 1 == ncomp ? 0 : c + 1;
+                ++n;
+            }
+            guess[g] = {pos, c, n};
+        },
+        threads);
     mark("guessed");
     // -- Pass 2: the true decode's way into each chunk is the true way out of
     // the one before. Followed alongside the guess until the two meet on a
@@ -515,26 +503,28 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
     if (first[chunks] < samples)
         return error = "too few samples", false;
     bool bad = false;
-    parallel(threads, chunks,
-             [&](size_t k)
-             {
-                 if (first[k] >= samples)
-                     return;
-                 uint64_t pos = entry[k].pos;
-                 int c = entry[k].component, diff;
-                 const uint64_t n = std::min(exit[k].count, samples - first[k]);
-                 uint16_t* o = d + first[k];
-                 for (uint64_t j = 0; j < n; ++j)
-                 {
-                     if (!next(s, pos, c, diff))
-                     {
-                         bad = true;
-                         return;
-                     }
-                     o[j] = uint16_t(diff);
-                     c = c + 1 == ncomp ? 0 : c + 1;
-                 }
-             });
+    parallel(
+        chunks,
+        [&](size_t k)
+        {
+            if (first[k] >= samples)
+                return;
+            uint64_t pos = entry[k].pos;
+            int c = entry[k].component, diff;
+            const uint64_t n = std::min(exit[k].count, samples - first[k]);
+            uint16_t* o = d + first[k];
+            for (uint64_t j = 0; j < n; ++j)
+            {
+                if (!next(s, pos, c, diff))
+                {
+                    bad = true;
+                    return;
+                }
+                o[j] = uint16_t(diff);
+                c = c + 1 == ncomp ? 0 : c + 1;
+            }
+        },
+        threads);
     if (bad)
         return error = "corrupt data", false;
 
@@ -553,16 +543,18 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
         }
     const uint16_t* curve = p.curve.empty() ? nullptr : p.curve.data();
     const int top = int(p.curve.size()) - 1;
-    parallel(threads, size_t(height),
-             [&](size_t y)
-             {
-                 uint16_t* r = d + y * row;
-                 for (size_t x = ncomp; x < row; ++x)
-                     r[x] = uint16_t(r[x - ncomp] + r[x]);
-                 if (curve)
-                     for (size_t x = 0; x < row; ++x)
-                         r[x] = curve[std::clamp(int(int16_t(r[x])), 0, top)];
-             });
+    parallel(
+        size_t(height),
+        [&](size_t y)
+        {
+            uint16_t* r = d + y * row;
+            for (size_t x = ncomp; x < row; ++x)
+                r[x] = uint16_t(r[x - ncomp] + r[x]);
+            if (curve)
+                for (size_t x = 0; x < row; ++x)
+                    r[x] = curve[std::clamp(int(int16_t(r[x])), 0, top)];
+        },
+        threads);
     mark("summed");
     if (trace)
         std::fprintf(stderr, "ljpeg: %dx%d x%d, %zu chunks on %u threads: %s\n", width, height, ncomp, chunks, threads, times.c_str());
