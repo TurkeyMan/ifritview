@@ -167,7 +167,10 @@ private:
     rap::widget* exposure_box_ = nullptr;
     rap::slider* exposure_ = nullptr;
     rap::tool_button* smooth_toggle_ = nullptr;
-    rap::subscription retone_later_;  // the 8-bit pixels' new exposure, once the slider rests (the GPU shows it already)
+    // The image's 8-bit pixels at its exposure, made again if the GPU's drawing
+    // left them behind (Image::pixels_stale): before saving, printing,
+    // copying, comparing, or the CPU drawing it.
+    void pixels_for_cpu();
     ScaleFilter smooth_enlarge_ = ScaleFilter::Lanczos3;  // what the toolbar toggle turns enlarging back on with
     rap::tool_button* xmp_toggle_ = nullptr;
     std::function<void(bool)> end_settings_;  // while Settings is open

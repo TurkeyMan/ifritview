@@ -24,6 +24,7 @@
 
 void App::set_compare(View::Compare mode)
 {
+    pixels_for_cpu();
     if (mode == View::Compare::Difference && !view_->compare_difference())
         mode = view_->compare_mode();  // not for images of different sizes
     view_->set_compare(mode);
@@ -79,6 +80,8 @@ void App::set_side_by_side(bool on)
     view_->view_size(vw, vh);
     const rap::size_f before = window_->size();
     const bool sized = !fullscreen_ && !window_->maximized();
+    if (on)
+        pixels_for_cpu();  // the side view draws on the CPU
     side_by_side_ = on;
     side_pane_->set_visible(on);
     side_settle_.reset();

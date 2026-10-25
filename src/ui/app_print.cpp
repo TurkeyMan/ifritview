@@ -12,6 +12,7 @@ void App::print_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
+    pixels_for_cpu();
     // A selection prints alone, as Ctrl+C copies it.
     std::shared_ptr<const Image> image = image_;
     if (int x, y, w, h; view_->selection(x, y, w, h))

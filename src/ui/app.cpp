@@ -404,6 +404,7 @@ void App::build_ui()
                              .margins(false));
     platform::trace("ui: window created");
     view_->attach(view_->canvas());
+    view_->on_needs_pixels = [this] { pixels_for_cpu(); };
     histogram_box_->set_visible(false);
     // The docked histogram: drawn again when its canvas changes size, and
     // its numbers when the view has counted.
@@ -590,10 +591,20 @@ void App::open_url(const std::string& url)
 
 // Ctrl+C: the selection if there is one, otherwise the whole image. The
 // selection is dropped afterwards as the visible sign that it was copied.
+void App::pixels_for_cpu()
+{
+    if (!image_ || !image_->pixels_stale)
+        return;
+    image_->pixels_stale = false;
+    image_->retone(image_->exposure_edit);
+    view_->retoned();
+}
+
 void App::copy_to_clipboard()
 {
     if (!image_)
         return;
+    pixels_for_cpu();
     int x, y, w, h;
     const Image region = view_->selection(x, y, w, h) ? image_->crop(x, y, w, h) : *image_;
     ui_.set_clipboard_image(region.width, region.height, APixelFormat::bgra8_premultiplied, region.pixels.data(), region.stride);
@@ -1185,16 +1196,11 @@ void App::retone()
     image_->exposure_edit = exposure_->value() - image_->exposure_bias;
     if (view_->drawn_on_gpu())
     {
-        // Drawn from the image's own data: the view shows the new exposure at
-        // once. The 8-bit pixels (for saving, comparing, the side view) catch
-        // up once the slider rests.
+        // Drawn from the image's own data: the view shows the new exposure,
+        // and nothing reaches the CPU. Its 8-bit pixels are made again only
+        // if something needs them (pixels_for_cpu).
+        image_->pixels_stale = true;
         view_->redraw();
-        retone_later_ = ui_.timer(400, false,
-                                  [this]
-                                  {
-                                      retone_later_ = {};
-                                      request_retone();
-                                  });
         return;
     }
     request_retone();
@@ -1232,12 +1238,7 @@ void App::request_retone()
                     if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
                     {
                         if (view_->drawn_on_gpu())
-                            retone_later_ = ui_.timer(400, false,
-                                                      [this]
-                                                      {
-                                                          retone_later_ = {};
-                                                          request_retone();
-                                                      });  // once the slider rests: the GPU shows it meanwhile
+                            image_->pixels_stale = true;  // the GPU shows it; made again when needed
                         else
                             request_retone();  // the slider moved on while we rendered
                     }

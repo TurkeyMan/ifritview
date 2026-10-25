@@ -28,6 +28,7 @@ void App::save_as()
 {
     if (!image_ || save_dialog_)
         return;
+    pixels_for_cpu();
     // Comparing two files, Save saves where they differ, as it's shown.
     save_source_ = diff_session_ ? view_->difference_shown() : image_;
     if (!save_source_)

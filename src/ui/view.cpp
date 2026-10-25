@@ -988,6 +988,8 @@ void View::paint(rap::painter& p, rap::size_f)
 #else
     const bool on_gpu = false;
 #endif
+    if (!on_gpu && image_ && image_->pixels_stale && on_needs_pixels)
+        on_needs_pixels();
     if (!on_gpu)
         p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
     if (divided_)
