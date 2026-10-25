@@ -127,7 +127,9 @@ GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(d
     // A GPU in software decodes a raw's stream slower than the CPU's cores:
     // the loader unpacks them from now on (the ones it already prepared are
     // decoded on the CPU here, decode_stream).
-    if (device_->software())
+    // (IFRIT_GPU_DECODE_ON_SOFTWARE keeps the GPU's decode, for testing it there.)
+    static const bool keep = std::getenv("IFRIT_GPU_DECODE_ON_SOFTWARE") != nullptr;
+    if (device_->software() && !keep)
     {
         DecodeOptions o = decode_options();
         if (o.gpu_decode)
@@ -299,7 +301,8 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
 {
     const RawMosaic::Stream& st = *m.stream;
     const ljpeg::Prepared& j = *st.jpeg;
-    if (device_->software())
+    static const bool keep = std::getenv("IFRIT_GPU_DECODE_ON_SOFTWARE") != nullptr;
+    if (device_->software() && !keep)
     {
         // On the CPU's cores, then up as a photosite a texel: the active area
         // out of the readout (Canon's slices undone). Its black level is the
@@ -328,7 +331,10 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     }
     const uint64_t samples = uint64_t(j.width) * j.components * j.height;
     const uint32_t row = uint32_t(j.width * j.components);
-    constexpr uint32_t kChunkBits = 8192;  // ~700 samples: the true decode meets a guess within a few dozen
+    // ~1400 samples: the true decode mostly meets a guess within a few dozen
+    // (where it doesn't, the sync goes on into the next chunks), and the
+    // resolve walks the chunks one by one.
+    constexpr uint32_t kChunkBits = 16384;
     const uint64_t chunks = std::max<uint64_t>(1, (j.total_bits + kChunkBits - 1) / kChunkBits);
     if (row % 2 || j.components > 4 || samples * 2 > (uint64_t(128) << 20) || j.total_bits > 0xFFFF0000u || j.height > 65535 ||
         chunks * j.components > 64 * 65535)
@@ -360,7 +366,7 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         std::copy(j.lookup[c].begin(), j.lookup[c].end(), lookup.begin() + size_t(c) * 65536);
     auto table = device_->create_buffer(lookup.size() * 4);
     auto guesses = device_->create_buffer(chunks * j.components * 12);
-    auto ways = device_->create_buffer(chunks * j.components * 8);
+    auto ways = device_->create_buffer(chunks * j.components * 16);
     auto plan = device_->create_buffer(16 + chunks * 16);
     auto values = device_->create_buffer(samples * 2);
     levels = device_->create_buffer(36);

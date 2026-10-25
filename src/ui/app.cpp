@@ -1121,6 +1121,15 @@ void App::on_loaded(Loader::Result& r)
     if (tracing() && r.image)
         std::fprintf(stderr, "loaded %s %dx%d preview=%d cache=%zuMB\n", key_text(r.path).c_str(), r.image->width, r.image->height, int(r.image->is_preview()),
                      cache_.bytes() >> 20);
+    // A develop that failed (a raw LibRaw can't decode) for what's on screen
+    // as its stand-in: the stand-in stays, said to be all there is.
+    if (!r.image && !r.preview && image_ && image_->is_preview() && image_key_ == r.path)
+    {
+        status_message_ = rap::i18n::format(_("Can't develop this raw ({0}): showing the camera's embedded JPEG"), r.error);
+        busy_message_.clear();
+        update_status();
+        return;
+    }
     if (!r.image)
     {
         image_.reset();

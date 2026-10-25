@@ -2037,3 +2037,7 @@ msgstr "Entwicklung mit LibRaw…"
 #: src/ui/app.cpp
 msgid "LibRaw couldn't develop it: {0}"
 msgstr "LibRaw konnte es nicht entwickeln: {0}"
+
+#: src/ui/app.cpp
+msgid "Can't develop this raw ({0}): showing the camera's embedded JPEG"
+msgstr "Dieses Raw lässt sich nicht entwickeln ({0}): gezeigt wird das eingebettete JPEG der Kamera"
