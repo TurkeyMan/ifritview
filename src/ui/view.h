@@ -231,6 +231,7 @@ private:
         double zoom = 0, pan_x = 0, pan_y = 0, exposure = 0;
         uint32_t background = 0;
         bool checkerboard = false;
+        ScaleFilter enlarge = ScaleFilter::Nearest, shrink = ScaleFilter::Nearest;
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;

@@ -1903,3 +1903,39 @@ msgstr ""
 #, c++-format
 msgid "Difference ×{0}"
 msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Enlarging"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Shrinking"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "How an image is resampled when shown bigger than it is"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "How an image is resampled when shown smaller than it is"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Lanczos-3 (sharpest)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Catmull-Rom (sharp)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Mitchell (smooth, no halos)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Area (averaging)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "Nearest (the pixels as they are)"
+msgstr ""

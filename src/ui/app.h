@@ -164,6 +164,7 @@ private:
     rap::widget* exposure_box_ = nullptr;
     rap::slider* exposure_ = nullptr;
     rap::tool_button* smooth_toggle_ = nullptr;
+    ScaleFilter smooth_enlarge_ = ScaleFilter::Lanczos3;  // what the toolbar toggle turns enlarging back on with
     rap::tool_button* xmp_toggle_ = nullptr;
     std::function<void(bool)> end_settings_;  // while Settings is open
     rap::tool_button* crop_button_ = nullptr;

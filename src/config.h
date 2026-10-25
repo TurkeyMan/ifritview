@@ -6,6 +6,19 @@
 #include <vector>
 
 // User settings, stored as a GKeyFile at $XDG_CONFIG_HOME/ifritview/ifritview.conf.
+// How the view resamples a zoomed image (on the GPU; the CPU's drawing has
+// only smooth or not, which is anything but Nearest).
+enum class ScaleFilter
+{
+    Nearest,
+    Area,
+    Mitchell,
+    CatmullRom,
+    Lanczos3,
+};
+const char* scale_filter_name(ScaleFilter);  // as the settings file has it: "lanczos3"
+ScaleFilter scale_filter_named(const std::string& name, ScaleFilter otherwise);
+
 struct Config
 {
     // Files
@@ -26,8 +39,11 @@ struct Config
     int metadata_pane_width = 420;  // the docked info pane, logical pixels; the divider is draggable
 
     // Viewing
-    bool smooth_upscale = true;
-    bool smooth_downscale = true;
+    ScaleFilter enlarge_filter = ScaleFilter::Lanczos3;
+    ScaleFilter shrink_filter = ScaleFilter::Lanczos3;
+    // What the CPU's drawing can do of those: smooth, or nearest.
+    bool smooth_upscale() const { return enlarge_filter != ScaleFilter::Nearest; }
+    bool smooth_downscale() const { return shrink_filter != ScaleFilter::Nearest; }
     bool fullscreen_upscale = false;  // scale small images up to fill the screen in fullscreen
     bool checkerboard = true;         // show transparency over a checkerboard
     bool animate = true;

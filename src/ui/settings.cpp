@@ -42,6 +42,44 @@ const struct
 
 const char* const kRawModes[] = {"full", "half", "preview"};
 
+// The scaling filters as offered, sharpest first; enlarging can also show
+// the pixels themselves.
+constexpr ScaleFilter kEnlargeFilters[] = {ScaleFilter::Lanczos3, ScaleFilter::CatmullRom, ScaleFilter::Mitchell, ScaleFilter::Area,
+                                           ScaleFilter::Nearest};
+constexpr ScaleFilter kShrinkFilters[] = {ScaleFilter::Lanczos3, ScaleFilter::CatmullRom, ScaleFilter::Mitchell, ScaleFilter::Area,
+                                          ScaleFilter::Nearest};
+
+std::string filter_label(ScaleFilter f)
+{
+    switch (f)
+    {
+        case ScaleFilter::Lanczos3: return _("Lanczos-3 (sharpest)");
+        case ScaleFilter::CatmullRom: return _("Catmull-Rom (sharp)");
+        case ScaleFilter::Mitchell: return _("Mitchell (smooth, no halos)");
+        case ScaleFilter::Area: return _("Area (averaging)");
+        case ScaleFilter::Nearest: return _("Nearest (the pixels as they are)");
+    }
+    return {};
+}
+
+template <size_t N>
+std::vector<std::string> filter_names(const ScaleFilter (&filters)[N])
+{
+    std::vector<std::string> out;
+    for (ScaleFilter f : filters)
+        out.push_back(filter_label(f));
+    return out;
+}
+
+template <size_t N>
+int filter_index(const ScaleFilter (&filters)[N], ScaleFilter f)
+{
+    for (size_t i = 0; i < N; ++i)
+        if (filters[i] == f)
+            return int(i);
+    return 0;
+}
+
 rap::extent chars(float n)
 {
     return rap::extent{n, rap::extent::unit::chars};
@@ -133,7 +171,8 @@ struct State
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
-    rap::check *smooth_upscale = nullptr, *smooth_downscale = nullptr, *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
+    rap::drop_down *enlarge_filter = nullptr, *shrink_filter = nullptr;
+    rap::check *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
     rap::check *video_autoplay = nullptr, *video_muted = nullptr, *video_loop = nullptr;
     rap::spin *ss_seconds = nullptr, *ss_zoom = nullptr, *ss_fade = nullptr;
     rap::check *ss_motion = nullptr, *ss_shuffle = nullptr;
@@ -159,7 +198,7 @@ struct State
     {
         if (fit_window)
             apply_general();
-        if (smooth_upscale)
+        if (enlarge_filter)
             apply_viewing();
         if (controls[0])
             apply_controls();
@@ -196,8 +235,10 @@ struct State
 
     void apply_viewing()
     {
-        cfg.smooth_upscale = smooth_upscale->checked();
-        cfg.smooth_downscale = smooth_downscale->checked();
+        if (const int i = enlarge_filter->current(); i >= 0)
+            cfg.enlarge_filter = kEnlargeFilters[size_t(i)];
+        if (const int i = shrink_filter->current(); i >= 0)
+            cfg.shrink_filter = kShrinkFilters[size_t(i)];
         cfg.fullscreen_upscale = fullscreen_upscale->checked();
         cfg.checkerboard = checkerboard->checked();
         cfg.animate = animate->checked();
@@ -361,8 +402,12 @@ rap::node viewing_page(const Config& cfg, State& st)
     return L::scroll{L::vbox{
         L::group{_("Scaling"),
                  L::form{
-                     {"", L::check{_("Smooth when zoomed in"), cfg.smooth_upscale}.bind(st.smooth_upscale)},
-                     {"", L::check{_("Smooth when zoomed out"), cfg.smooth_downscale}.bind(st.smooth_downscale)},
+                     {_("Enlarging"), L::drop_down{filter_names(kEnlargeFilters), filter_index(kEnlargeFilters, cfg.enlarge_filter)}
+                                          .tooltip(_("How an image is resampled when shown bigger than it is"))
+                                          .bind(st.enlarge_filter)},
+                     {_("Shrinking"), L::drop_down{filter_names(kShrinkFilters), filter_index(kShrinkFilters, cfg.shrink_filter)}
+                                          .tooltip(_("How an image is resampled when shown smaller than it is"))
+                                          .bind(st.shrink_filter)},
                      {"", L::check{_("In fullscreen, enlarge small images to fill the screen"), cfg.fullscreen_upscale}.bind(st.fullscreen_upscale)},
                  }},
         L::group{_("Background"),

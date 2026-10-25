@@ -55,6 +55,30 @@ std::string get_string(GKeyFile* kf, const char* group, const char* key, const s
 
 }  // namespace
 
+namespace
+{
+constexpr std::pair<ScaleFilter, const char*> kScaleFilters[] = {
+    {ScaleFilter::Nearest, "nearest"},   {ScaleFilter::Area, "area"},         {ScaleFilter::Mitchell, "mitchell"},
+    {ScaleFilter::CatmullRom, "catmull-rom"}, {ScaleFilter::Lanczos3, "lanczos3"},
+};
+}  // namespace
+
+const char* scale_filter_name(ScaleFilter f)
+{
+    for (auto [filter, name] : kScaleFilters)
+        if (filter == f)
+            return name;
+    return "lanczos3";
+}
+
+ScaleFilter scale_filter_named(const std::string& name, ScaleFilter otherwise)
+{
+    for (auto [filter, n] : kScaleFilters)
+        if (name == n)
+            return filter;
+    return otherwise;
+}
+
 std::string Config::path()
 {
     gchar* p = g_build_filename(g_get_user_config_dir(), "ifritview", "ifritview.conf", nullptr);
@@ -153,8 +177,13 @@ void Config::load()
     min_window_height = std::max(150, get_int(kf, kWindow, "min_height", min_window_height));
     metadata_pane_width = std::clamp(get_int(kf, kWindow, "metadata_pane_width", metadata_pane_width), 240, 1600);
 
-    smooth_upscale = get_bool(kf, kView, "smooth_upscale", smooth_upscale);
-    smooth_downscale = get_bool(kf, kView, "smooth_downscale", smooth_downscale);
+    // The filters by name; settings from before them said only smooth or not.
+    if (!get_bool(kf, kView, "smooth_upscale", true))
+        enlarge_filter = ScaleFilter::Nearest;
+    if (!get_bool(kf, kView, "smooth_downscale", true))
+        shrink_filter = ScaleFilter::Nearest;
+    enlarge_filter = scale_filter_named(get_string(kf, kView, "enlarge_filter", scale_filter_name(enlarge_filter)), enlarge_filter);
+    shrink_filter = scale_filter_named(get_string(kf, kView, "shrink_filter", scale_filter_name(shrink_filter)), shrink_filter);
     fullscreen_upscale = get_bool(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     checkerboard = get_bool(kf, kView, "checkerboard", checkerboard);
     animate = get_bool(kf, kView, "animate", animate);
@@ -230,8 +259,10 @@ bool Config::save() const
     g_key_file_set_integer(kf, kWindow, "min_height", min_window_height);
     g_key_file_set_integer(kf, kWindow, "metadata_pane_width", metadata_pane_width);
 
-    g_key_file_set_boolean(kf, kView, "smooth_upscale", smooth_upscale);
-    g_key_file_set_boolean(kf, kView, "smooth_downscale", smooth_downscale);
+    g_key_file_set_string(kf, kView, "enlarge_filter", scale_filter_name(enlarge_filter));
+    g_key_file_set_string(kf, kView, "shrink_filter", scale_filter_name(shrink_filter));
+    g_key_file_remove_key(kf, kView, "smooth_upscale", nullptr);
+    g_key_file_remove_key(kf, kView, "smooth_downscale", nullptr);
     g_key_file_set_boolean(kf, kView, "fullscreen_upscale", fullscreen_upscale);
     g_key_file_set_boolean(kf, kView, "checkerboard", checkerboard);
     g_key_file_set_boolean(kf, kView, "animate", animate);

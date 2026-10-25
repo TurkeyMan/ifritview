@@ -266,11 +266,14 @@ void App::build_ui()
                 tool_button("zoom-original-symbolic", _("Actual pixels (1)"), &App::zoom_original),
                 tool_button("zoom-fit-best-symbolic", _("Fit to window (F)"), &App::zoom_fit),
                 L::tool_button{rap::icon::named("view-grid-symbolic"), _("Smooth when zoomed in (off shows crisp pixels)")}
-                    .toggle(cfg_.smooth_upscale)
+                    .toggle(cfg_.smooth_upscale())
                     .on_toggled(
                         [this](bool on)
                         {
-                            cfg_.smooth_upscale = on;
+                            // Back on: the smooth filter it had, else Lanczos-3.
+                            if (cfg_.smooth_upscale())
+                                smooth_enlarge_ = cfg_.enlarge_filter;
+                            cfg_.enlarge_filter = on ? smooth_enlarge_ : ScaleFilter::Nearest;
                             cfg_.save();
                             view_->config_changed();
                         })
@@ -1323,7 +1326,7 @@ void App::open_settings_page(int page)
             video_.set_muted(cfg_.video_muted);
             view_->set_video_muted(cfg_.video_muted);
             folder_.rescan(cfg_);
-            smooth_toggle_->set_checked(cfg_.smooth_upscale);
+            smooth_toggle_->set_checked(cfg_.smooth_upscale());
             xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
             window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
             view_->config_changed();

@@ -8,6 +8,8 @@
 // exposed and tone-mapped, composited over the checkerboard or the
 // background, and encoded for the front buffer, which says what it holds.
 
+#include "../config.h"
+
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
 
@@ -16,15 +18,6 @@
 #include <vector>
 
 struct Image;
-
-enum class ScaleFilter
-{
-    Nearest,
-    Area,
-    Mitchell,
-    CatmullRom,
-    Lanczos3,
-};
 
 // What the front buffer holds.
 enum class FrontBuffer

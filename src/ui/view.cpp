@@ -469,7 +469,7 @@ void View::draw_layer(rap::painter& p, Layer& layer, float alpha, double rel)
     const auto L = [scale](double device) { return float(device / scale); };
     if (!layer.base)
         layer.base = ui_.create_image(im.width, im.height, APixelFormat::bgra8_premultiplied, im.pixels.data(), im.stride);
-    if (zoom < 1.0 && cfg_.smooth_downscale && !im.is_video)
+    if (zoom < 1.0 && cfg_.smooth_downscale() && !im.is_video)
     {
         const int w = std::max(1, int(std::ceil(im.width * zoom))), h = std::max(1, int(std::ceil(im.height * zoom)));
         if (!layer.scaled || layer.scaled_zoom != zoom)
@@ -481,7 +481,7 @@ void View::draw_layer(rap::painter& p, Layer& layer, float alpha, double rel)
         p.image(*layer.scaled, {0, 0, float(w), float(h)}, {L(pan_x_), L(pan_y_), L(w), L(h)}, rap::filter::nearest, alpha);
         return;
     }
-    const bool smooth = zoom > 1.0 && cfg_.smooth_upscale;
+    const bool smooth = zoom > 1.0 && cfg_.smooth_upscale();
     p.image(*layer.base, {0, 0, float(im.width), float(im.height)}, {L(pan_x_), L(pan_y_), L(im.width * zoom), L(im.height * zoom)},
             smooth ? rap::filter::linear : rap::filter::nearest, alpha);
 }
@@ -1025,7 +1025,7 @@ void View::paint(rap::painter& p, rap::size_f)
         if (src)
             p.image(*src, {0, 0, float(src->width()), float(src->height())}, dst, rap::filter::linear, alpha);
     }
-    else if (zoom_ < 1.0 && cfg_.smooth_downscale && !image_->is_video && !image_->vector)
+    else if (zoom_ < 1.0 && cfg_.smooth_downscale() && !image_->is_video && !image_->vector)
     {
         rap::image* src = scaled_image(zoom_);
         if (src)
@@ -1033,7 +1033,7 @@ void View::paint(rap::painter& p, rap::size_f)
     }
     else
     {
-        const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale) || (zoom_ < 1.0 && image_->is_video) || image_->vector;
+        const bool smooth = (zoom_ > 1.0 && cfg_.smooth_upscale()) || (zoom_ < 1.0 && image_->is_video) || image_->vector;
         if (rap::image* base = base_image())  // the full-size upload, only when it's what gets drawn
             p.image(*base, {0, 0, float(image_->width), float(image_->height)}, dst, smooth ? rap::filter::linear : rap::filter::nearest, alpha);
     }
@@ -1069,7 +1069,7 @@ bool View::draw_on_gpu(rap::color background)
     GpuKey key{image_.get(), generation_, target.width, target.height, zoom_, pan_x_, pan_y_,
                image_->tonable() ? image_->exposure_edit : 0.0,
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
-               cfg_.checkerboard};
+               cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter};
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
@@ -1083,8 +1083,8 @@ bool View::draw_on_gpu(rap::color background)
     f.background = background;
     f.checkerboard = cfg_.checkerboard;
     f.checker_size = int(std::lround(8 * scale_factor()));
-    f.enlarge = cfg_.smooth_upscale ? ScaleFilter::Lanczos3 : ScaleFilter::Nearest;
-    f.shrink = cfg_.smooth_downscale ? ScaleFilter::Lanczos3 : ScaleFilter::Nearest;
+    f.enlarge = cfg_.enlarge_filter;
+    f.shrink = cfg_.shrink_filter;
     rap::gpu::texture_ptr frame;
     rap::gpu::ticket ready;
     rap::frame_color colour;
