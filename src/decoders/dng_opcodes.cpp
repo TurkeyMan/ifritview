@@ -1,7 +1,5 @@
 #include "dng_opcodes.h"
 
-#include "bytes.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -218,16 +216,8 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
     {
         if (!raw->list[l])
             continue;
-        const uint8_t* p = file + raw->list[l];
-        const size_t end = raw->list_size[l];
-        const uint32_t count = be32(p);
-        size_t at = 4;
-        for (uint32_t i = 0; i < count && at + 16 <= end; ++i)
+        each_opcode(file + raw->list[l], raw->list_size[l], [&](uint32_t id, uint32_t flags, const uint8_t* d, size_t bytes)
         {
-            const uint32_t id = be32(p + at), flags = be32(p + at + 8), bytes = be32(p + at + 12);
-            const uint8_t* d = p + at + 16;
-            if (bytes > end - at - 16)
-                break;
             bool used = false;
             GainMap m;
             if (id == 9 && gain_map(d, bytes, m) && (l == 2 || (m.plane == 0 && m.planes == 1 && m.map_planes == 1)))
@@ -257,8 +247,8 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
             }
             std::string& to = used ? applied : skipped;
             to += std::string(to.empty() ? "" : ", ") + name(id) + " (list " + std::to_string(l + 1) + (flags & 1 ? ", optional" : "") + ")";
-            at += 16 + bytes;
-        }
+            return true;
+        });
     }
     c.summary = applied.empty() ? "" : "applied: " + applied;
     if (!skipped.empty())

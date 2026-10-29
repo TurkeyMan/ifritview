@@ -22,14 +22,15 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     const uint4 part = meta.Load4(p * PART_WORDS * 4);
     const uint first = part.z, last = part.z + part.w, base = p * samples;
+    const uint held = meta.Load((p * PART_WORDS + 8) * 4);  // its frame's, fewer in a strip's last restart interval
     // The stream's first chunk starts at its start, with component 0: its guess 0 is true.
-    uint at = min(guesses.Load(first * components * 12 + 8), samples), s = 0, next = first + 1;
+    uint at = min(guesses.Load(first * components * 12 + 8), held), s = 0, next = first + 1;
     plan.Store4(16 + first * 16, uint4(part.x, 0, base, at));
     bool failed = false;
     for (uint k = first + 1; k < last; ++k)
     {
         uint4 e = uint4(0, 0, base + at, 0);  // none of its own: run over, or past the last sample
-        if (k == next && at < samples)
+        if (k == next && at < held)
         {
             const uint2 out_of = guesses.Load2(((k - 1) * components + s) * 12);
             const uint4 w = ways.Load4((k * components + s) * 16);
@@ -51,12 +52,12 @@ void main(uint3 id : SV_DispatchThreadID)
                 failed = true;
                 next = last;
             }
-            n = min(n, samples - at);
+            n = min(n, held - at);
             e = uint4(out_of.x, out_of.y, base + at, n);
             at += n;
         }
         plan.Store4(16 + k * 16, e);
     }
-    if (failed || at < samples)
+    if (failed || at < held)
         plan.Store(0, 1);
 }

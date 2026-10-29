@@ -29,6 +29,43 @@ bool read_file(const std::string& path, std::vector<uint8_t>& data)
     return true;
 }
 
+// A decoder on `size` bytes at `data` (all there is of it), the events
+// subscribed; on threads of its own unless `threaded` is false, as many as
+// the image's size suggests once its basic info is in (threads_for).
+struct Decoding
+{
+    std::unique_ptr<JxlDecoder, decltype(&JxlDecoderDestroy)> dec{JxlDecoderCreate(nullptr), JxlDecoderDestroy};
+#ifdef HAVE_JXL_THREADS
+    std::unique_ptr<void, decltype(&JxlResizableParallelRunnerDestroy)> runner{nullptr, JxlResizableParallelRunnerDestroy};
+#endif
+    bool start(const uint8_t* data, size_t size, int events, bool threaded = true)
+    {
+#ifdef HAVE_JXL_THREADS
+        if (threaded)
+        {
+            runner.reset(JxlResizableParallelRunnerCreate(nullptr));
+            JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner.get());
+        }
+#else
+        (void)threaded;
+#endif
+        if (!dec || JxlDecoderSubscribeEvents(dec.get(), events) != JXL_DEC_SUCCESS)
+            return false;
+        JxlDecoderSetInput(dec.get(), data, size);
+        JxlDecoderCloseInput(dec.get());
+        return true;
+    }
+    void threads_for(const JxlBasicInfo& info)
+    {
+#ifdef HAVE_JXL_THREADS
+        if (runner)
+            JxlResizableParallelRunnerSetThreads(runner.get(), JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
+#else
+        (void)info;
+#endif
+    }
+};
+
 bool decode(const std::string& path, Image& out, std::string& error)
 {
     std::vector<uint8_t> file;
@@ -37,18 +74,13 @@ bool decode(const std::string& path, Image& out, std::string& error)
         error = "cannot read file";
         return false;
     }
-    std::unique_ptr<JxlDecoder, decltype(&JxlDecoderDestroy)> dec(JxlDecoderCreate(nullptr), JxlDecoderDestroy);
-#ifdef HAVE_JXL_THREADS
-    std::unique_ptr<void, decltype(&JxlResizableParallelRunnerDestroy)> runner(JxlResizableParallelRunnerCreate(nullptr), JxlResizableParallelRunnerDestroy);
-    JxlDecoderSetParallelRunner(dec.get(), JxlResizableParallelRunner, runner.get());
-#endif
-    if (JxlDecoderSubscribeEvents(dec.get(), JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS)
+    Decoding decoding;
+    const auto& dec = decoding.dec;
+    if (!decoding.start(file.data(), file.size(), JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE))
     {
         error = "JXL decoder setup failed";
         return false;
     }
-    JxlDecoderSetInput(dec.get(), file.data(), file.size());
-    JxlDecoderCloseInput(dec.get());
 
     const JxlPixelFormat format{4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
     JxlBasicInfo info{};
@@ -62,9 +94,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 error = "JXL: cannot read basic info";
                 return false;
             }
-#ifdef HAVE_JXL_THREADS
-            JxlResizableParallelRunnerSetThreads(runner.get(), JxlResizableParallelRunnerSuggestThreads(info.xsize, info.ysize));
-#endif
+            decoding.threads_for(info);
             out.allocate(int(info.xsize), int(info.ysize));
         }
         else if (status == JXL_DEC_COLOR_ENCODING)
@@ -157,6 +187,43 @@ bool decode(const std::string& path, Image& out, std::string& error)
 }
 
 }  // namespace
+
+bool decode_jxl_samples(const uint8_t* data, size_t size, std::vector<uint16_t>& samples, int& width, int& height, int& channels, int& bits,
+                        std::string& error, bool threaded)
+{
+    Decoding decoding;
+    const auto& dec = decoding.dec;
+    if (!decoding.start(data, size, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE, threaded))
+        return error = "JXL decoder setup failed", false;
+    JxlPixelFormat format{1, JXL_TYPE_UINT16, JXL_NATIVE_ENDIAN, 0};
+    for (;;)
+    {
+        const JxlDecoderStatus status = JxlDecoderProcessInput(dec.get());
+        if (status == JXL_DEC_BASIC_INFO)
+        {
+            JxlBasicInfo info{};
+            if (JxlDecoderGetBasicInfo(dec.get(), &info) != JXL_DEC_SUCCESS)
+                return error = "JXL: cannot read basic info", false;
+            if (info.num_extra_channels || uint64_t(info.xsize) * info.ysize * info.num_color_channels > (uint64_t(1) << 30))
+                return error = "JXL: extra channels, or too large", false;
+            decoding.threads_for(info);
+            width = int(info.xsize), height = int(info.ysize), channels = int(info.num_color_channels);
+            bits = info.exponent_bits_per_sample ? 0 : int(info.bits_per_sample);
+            format.num_channels = info.num_color_channels;
+        }
+        else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER)
+        {
+            size_t n = 0;
+            JxlDecoderImageOutBufferSize(dec.get(), &format, &n);
+            samples.resize(n / 2);
+            JxlDecoderSetImageOutBuffer(dec.get(), &format, samples.data(), n);
+        }
+        else if (status == JXL_DEC_FULL_IMAGE || status == JXL_DEC_SUCCESS)
+            return true;
+        else
+            return error = status == JXL_DEC_NEED_MORE_INPUT ? "JXL: truncated" : "JXL decode error", false;
+    }
+}
 
 const Decoder& jxl_decoder()
 {

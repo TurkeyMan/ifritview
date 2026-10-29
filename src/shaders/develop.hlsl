@@ -4,10 +4,11 @@
 // first, where the raw has its own corrections of its mosaic: CORRECT):
 // black taken off and scaled to saturation, the as-shot white balance
 // applied (the demosaic follows colour edges far better on balanced data),
-// the two missing colours from Malvar-He-Cutler's 5 x 5 kernels, clipped
-// at saturation (all channels at 1: highlights stay neutral), and the
-// balance taken off again. Linear camera RGB out; the frame's own white
-// balance and the camera's colour matrix are the view's, per frame.
+// the two missing colours from Malvar-He-Cutler's 5 x 5 kernels (none for a
+// monochrome sensor's: grey), clipped at saturation (all channels at 1:
+// highlights stay neutral), and the balance taken off again. Linear camera
+// RGB out; the frame's own white balance and the camera's colour matrix are
+// the view's, per frame.
 cbuffer Params : register(b0)
 {
     int4 colour;         // the filter over (row & 1, col & 1), row-major: 0 R, 1 G, 2 B
@@ -20,7 +21,7 @@ cbuffer Params : register(b0)
     int4 ycc;            // YCC: block height, formula, hue, luma offset (RawMosaic::Ycc)
     int4 ycc_at;         // YCC: the first block's x, y
     float4 ycc_mul;      // YCC: sraw_mul; w: the guided fill's regularisation, in luma units squared
-    int4 flags;          // x: the data is white balanced already (the camera did it): not again
+    int4 flags;          // x: the data is white balanced already (the camera did it): not again; y: grey, no filter (a monochrome sensor)
 };
 
 // The as-shot balance, as it's still to be applied to the data.
@@ -414,7 +415,9 @@ float4 main(float4 position : SV_Position) : SV_Target
     const float far = site(x - 2, y) + site(x + 2, y) + site(x, y - 2) + site(x, y + 2);
     const float diag = site(x - 1, y - 1) + site(x + 1, y - 1) + site(x - 1, y + 1) + site(x + 1, y + 1);
     float3 rgb;
-    if (c == 1)
+    if (flags.y)
+        rgb = m;  // grey: no other colours to find
+    else if (c == 1)
     {
         // Green: the colour on either side, and the one above and below.
         const float h = (5 * m + 4 * (site(x - 1, y) + site(x + 1, y)) - diag - (site(x - 2, y) + site(x + 2, y)) +

@@ -26,6 +26,7 @@
 #include "shaders/ljpeg_rows.h"
 #include "shaders/ljpeg_sync.h"
 #include "shaders/mosaic.h"
+#include "shaders/mosaic_linear.h"
 #include "shaders/peak.h"
 #include "shaders/raw_blocks.h"
 #include "shaders/resample.h"
@@ -103,7 +104,7 @@ struct DevelopParams
     int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
     int32_t ycc_at[4];  // YCC: the first block's x, y
     float ycc_mul[4];   // YCC: sraw_mul; w: the guided fill's regularisation
-    int32_t flags[4];   // x: the data is white balanced already
+    int32_t flags[4];   // x: the data is white balanced already; y: grey, no filter
 };
 
 // warp.hlsl's block.
@@ -305,6 +306,7 @@ bool GpuView::programs(std::string& error)
                                  std::pair{&develop_, shaders::develop}, std::pair{&develop_correct_, shaders::develop_correct},
                                  std::pair{&develop_linear_, shaders::develop_linear},
                                  std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
+                                 std::pair{&mosaic_linear_, shaders::mosaic_linear},
                                  std::pair{&warp_, shaders::warp}})
     {
         auto r = device_->program(make());
@@ -352,25 +354,28 @@ bool raw_check()
     return on;
 }
 
-// The readout's (x, y) in a decode's samples, laid out as the Stream says.
-uint16_t sample_at(const RawMosaic::Stream& st, const std::vector<uint16_t>& samples, unsigned x, unsigned y)
+// The readout's (x, y) in a decode's samples, laid out as the Stream says:
+// sample `c` of the photosite's `n` (a linear DNG's three colours).
+uint16_t sample_at(const RawMosaic::Stream& st, const std::vector<uint16_t>& samples, unsigned x, unsigned y, unsigned n = 1, unsigned c = 0)
 {
-    const size_t i = st.index(x, y);
+    const size_t i = st.index(x, y) * n + c;
     return i < samples.size() ? samples[i] : 0;
 }
 
-// A raw's readout decoded on the CPU, up as a photosite a texel: the active
-// area out of it, and the masked areas summed for the black level just as
-// ljpeg_black does on the GPU.
+// A raw's readout decoded on the CPU, up as a photosite a texel (its
+// colours, a linear DNG's): the active area out of it, and the masked areas
+// summed for the black level just as ljpeg_black does on the GPU.
 bool upload_decoded(rap::gpu::device& device, const RawMosaic& m, const std::vector<uint16_t>& samples, rap::gpu::texture_ptr& sites,
                     rap::gpu::buffer_ptr& levels, std::string& error)
 {
     const RawMosaic::Stream& st = *m.stream;
     const auto sample = [&](unsigned x, unsigned y) { return sample_at(st, samples, x, y); };
-    std::vector<uint16_t> area(size_t(m.width) * m.height);
+    const unsigned n = unsigned(m.channels);
+    std::vector<uint16_t> area(size_t(m.width) * m.height * n);
     for (int y = 0; y < m.height; ++y)
         for (int x = 0; x < m.width; ++x)
-            area[size_t(y) * m.width + x] = sample(unsigned(x + st.left), unsigned(y + st.top));
+            for (unsigned c = 0; c < n; ++c)
+                area[(size_t(y) * m.width + x) * n + c] = sample_at(st, samples, unsigned(x + st.left), unsigned(y + st.top), n, c);
     uint32_t sums[9] = {};  // sum R G B G2, count R G B G2, zeros
     for (const auto& r : st.mask)
         for (int y = std::max(r[0], 0); y < std::min(r[2], st.readout_h); ++y)
@@ -382,11 +387,11 @@ bool upload_decoded(rap::gpu::device& device, const RawMosaic& m, const std::vec
                 sums[4 + c] += 1;
                 sums[8] += v == 0;
             }
-    sites = device.create({m.width, m.height, rap::gpu::format::r16});
+    sites = device.create({m.width, m.height, n == 1 ? rap::gpu::format::r16 : rap::gpu::format::rgba16});
     levels = device.create_buffer(sizeof sums);
     if (!sites || !levels)
         return error = "too big for the GPU", false;
-    device.upload(sites, std::as_bytes(std::span(area)), {1, rap::gpu::sample_type::u16});
+    device.upload(sites, std::as_bytes(std::span(area)), {int(n), rap::gpu::sample_type::u16});
     device.upload(levels, std::as_bytes(std::span(sums)));
     return true;
 }
@@ -436,13 +441,14 @@ rap::gpu::buffer_ptr GpuView::upload_bytes(const uint8_t* data, size_t n, size_t
 
 // Where a readout's decode goes: its samples (`samples`, 16 bits each, two
 // to a word; what a decode leaves unwritten reads 0), the masked areas'
-// sums (ljpeg_black's), and the active area as a photosite a texel.
+// sums (ljpeg_black's), and the active area as a photosite a texel (R, G, B
+// for a linear DNG's three colours).
 bool GpuView::readout_buffers(const RawMosaic& m, uint64_t samples, rap::gpu::buffer_ptr& values, rap::gpu::buffer_ptr& levels, rap::gpu::texture_ptr& sites,
                               std::string& error)
 {
     values = device_->create_buffer((samples * 2 + 3) & ~uint64_t(3));
     levels = device_->create_buffer(36);
-    sites = device_->create({m.width, m.height, rap::gpu::format::r16, 1, true});
+    sites = device_->create({m.width, m.height, m.channels == 1 ? rap::gpu::format::r16 : rap::gpu::format::rgba16, 1, true});
     if (!values || !levels || !sites)
         return error = "too big for the GPU", false;
     device_->clear(values, 0);
@@ -477,7 +483,7 @@ void GpuView::finish_readout(const RawMosaic& m, const LjpegParams& p, std::vect
     }
     device_->run(std::span(work));
     rap::gpu::pass pass;
-    pass.program = mosaic_;
+    pass.program = m.channels == 1 ? mosaic_ : mosaic_linear_;
     pass.buffers = {values};
     pass.uniforms = bytes(p);
     pass.target = sites;
@@ -517,13 +523,15 @@ void GpuView::check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& valu
                  wrong ? (", first at " + std::to_string(first)).c_str() : "", (t1 - t0) / 1000.0, w[4] ? w[0] / w[4] : 0, w[5] ? w[1] / w[5] : 0,
                  w[6] ? w[2] / w[6] : 0, w[8]);
     const RawMosaic::Stream& st = *m.stream;
-    std::vector<uint16_t> area(size_t(m.width) * m.height);
-    device_->readback(sites, std::as_writable_bytes(std::span(area)), size_t(m.width) * 2).wait();
+    const unsigned n = unsigned(m.channels), texel = n == 1 ? 1 : 4;  // as readout_buffers made it
+    std::vector<uint16_t> area(size_t(m.width) * m.height * texel);
+    device_->readback(sites, std::as_writable_bytes(std::span(area)), size_t(m.width) * 2 * texel).wait();
     size_t off = 0;
     for (int y = 0; y < m.height; ++y)
         for (int x = 0; x < m.width; ++x)
-            off += area[size_t(y) * m.width + x] != sample_at(st, samples, unsigned(x + st.left), unsigned(y + st.top));
-    std::fprintf(stderr, "gpu raw check: %zu of %zu photosites of the active area differ\n", off, area.size());
+            for (unsigned c = 0; c < n; ++c)
+                off += area[(size_t(y) * m.width + x) * texel + c] != sample_at(st, samples, unsigned(x + st.left), unsigned(y + st.top), n, c);
+    std::fprintf(stderr, "gpu raw check: %zu of %zu samples of the active area differ\n", off, size_t(m.width) * m.height * n);
 }
 
 // LibRaw rounds down after each of its corrections, the develop not at all:
@@ -594,18 +602,20 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     // the resolve walks a stream's chunks one by one.
     constexpr uint32_t kChunkBits = 16384;
     // The streams (ljpeg.hlsli's PART_WORDS each), then their tables.
-    constexpr size_t kTableWords = sizeof(ljpeg::Table) / 4;
-    const size_t part_words = j.parts.size() * 8;
+    constexpr size_t kTableWords = sizeof(ljpeg::Table) / 4, kPartWords = 12;
+    const size_t part_words = j.parts.size() * kPartWords;
     std::vector<uint32_t> meta(part_words + j.tables.size() * kTableWords);
-    uint64_t chunks = 0;
+    uint64_t chunks = 0, held = 0;  // held: the samples up to the last stream's last
     for (size_t k = 0; k < j.parts.size(); ++k)
     {
         const ljpeg::Prepared::Part& part = j.parts[k];
         const uint64_t n = std::max<uint64_t>(1, (part.bits + kChunkBits - 1) / kChunkBits);
-        uint32_t* w = meta.data() + k * 8;
+        uint32_t* w = meta.data() + k * kPartWords;
         w[0] = uint32_t(part.start), w[1] = uint32_t(part.start + part.bits), w[2] = uint32_t(chunks), w[3] = uint32_t(n);
         for (int c = 0; c < 4; ++c)
             w[4 + c] = uint32_t(part_words + part.table[c < j.components ? c : 0] * kTableWords);
+        w[8] = uint32_t(row) * uint32_t(part.rows);
+        held = k * frame + w[8];
         chunks += n;
     }
     std::memcpy(meta.data() + part_words, j.tables.data(), j.tables.size() * sizeof(ljpeg::Table));
@@ -695,6 +705,7 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
                           if (!ljpeg::decode(j, cpu, why))
                               return false;
                           out = std::move(cpu.samples);
+                          out.resize(held);  // past it (a short last restart interval) neither decodes the stream
                           return true;
                       });
     return true;
@@ -876,7 +887,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         for (int c = 0; c < 3; ++c)
             p.as_shot[c] = m->as_shot[c];
         p.as_shot[3] = m->white;
-        p.flags[0] = m->balanced;
+        p.flags[0] = m->balanced, p.flags[1] = m->grey;
         p.size[0] = m->width, p.size[1] = m->height, p.size[2] = levels ? 1 : 0;
         rap::gpu::buffer_ptr corrections;
         if (m->corrections && m->channels == 1 && !m->ycc.block_h &&

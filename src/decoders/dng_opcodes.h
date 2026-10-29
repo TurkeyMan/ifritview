@@ -8,6 +8,8 @@
 // fields, phase_one.h). LibRaw applies none of a DNG's. What's here is
 // what the GPU reads (develop.hlsl's `corrections`).
 
+#include "../bytes.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -100,6 +102,22 @@ void lay_out(Corrections& c, const std::vector<GainMap>& mosaic, const std::vect
 // `lens` (lenses::corrections: words 2 and 4..37 alone, or none) in place
 // of any it had; none at all when that leaves nothing.
 std::vector<uint32_t> with_lens(std::vector<uint32_t> own, const std::vector<uint32_t>& lens);
+
+// Each opcode of the opcode list at `list`, `size` bytes (big-endian
+// whatever the file's order): f(its id, flags, parameters and their size),
+// until f says to stop (false) or the list ends.
+template <typename F>
+void each_opcode(const uint8_t* list, size_t size, F f)
+{
+    const uint32_t count = size >= 4 ? be32(list) : 0;
+    for (size_t i = 0, at = 4; i < count && at + 16 <= size; ++i)
+    {
+        const uint32_t id = be32(list + at), flags = be32(list + at + 8), bytes = be32(list + at + 12);
+        if (bytes > size - at - 16 || !f(id, flags, list + at + 16, size_t(bytes)))
+            return;
+        at += 16 + bytes;
+    }
+}
 
 // The opcode lists of the raw image `width` x `height` (as stored) in the
 // DNG `file`, in the coordinates of its active area (`active_w` x

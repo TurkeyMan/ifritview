@@ -73,9 +73,11 @@ uint readout_index(uint x, uint y)
 
 #define SAMPLE(buffer, i) ((buffer.Load(((i) >> 1) * 4) >> (((i) & 1) * 16)) & 0xFFFF)
 
-// Per stream, 8 words: its first bit, the bit after its last, its first
-// chunk, how many chunks, then each component's table (its first word).
-#define PART_WORDS 8
+// Per stream, 12 words: its first bit, the bit after its last, its first
+// chunk, how many chunks, then each component's table (its first word), then
+// how many samples it holds (a frame's, fewer in a strip's last restart
+// interval) and three unused.
+#define PART_WORDS 12
 
 #ifdef LJPEG_BITS
 RWByteAddressBuffer stream : register(u0);  // big-endian bytes, each stream's padded

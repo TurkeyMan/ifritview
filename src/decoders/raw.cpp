@@ -1,3 +1,4 @@
+#include "../bytes.h"
 #include "../i18n.h"
 #include "../lens_database.h"
 #include "../gpu.h"
@@ -6,6 +7,7 @@
 #include "crx.h"
 #include "decoder.h"
 #include "dng_opcodes.h"
+#include "dngtiles.h"
 #include "ljpeg.h"
 #include "phase_one.h"
 #include "rawblocks.h"
@@ -409,6 +411,8 @@ public:
         const bool le = u.order == 0x4949;
         if (name != "packed_dng_load_raw()" && name != "unpacked_load_raw()" && name != "packed_load_raw()")
             return false;
+        if (samples() != 1)
+            return error = "more than a sample a photosite", false;
         if (libraw_internal_data.internal_output_params.fuji_width || sz.left_margin + sz.width > sz.raw_width ||
             sz.top_margin + sz.height > sz.raw_height)
             return error = "a readout laid out another way", false;
@@ -465,11 +469,38 @@ public:
     // Whether LibRaw's crop_masked_pixels measures the sides of the active
     // area (a packed readout's flag says so).
     bool packed_sides() const { return loader() == "packed_load_raw()" && libraw_internal_data.unpacker_data.load_flags & 32; }
+    // Samples a photosite in the readout: one (a mosaic, a monochrome
+    // sensor), or a linear DNG's colours.
+    unsigned samples() const { return imgdata.idata.filters ? 1 : imgdata.idata.colors; }
+    // A DNG's tiles as LibRaw's loaders step through them (`tile_length`
+    // INT_MAX: its one strip, a tile the readout's size): how many across,
+    // and where each one's data starts, the words from data_offset on (as
+    // get4 reads them). None, with why, for any past the file's end.
+    std::vector<uint64_t> tiles(const uint8_t* file, size_t size, unsigned& across, std::string& error) const
+    {
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        const bool tiled = u.tile_length < INT_MAX;
+        if (!sz.raw_width || !sz.raw_height || !u.tile_width || !u.tile_length || u.data_offset < 0)
+            return {};
+        across = tiled ? (sz.raw_width + u.tile_width - 1) / u.tile_width : 1;
+        const unsigned down = tiled ? (sz.raw_height + u.tile_length - 1) / u.tile_length : 1;
+        if (!tiled)
+            return {uint64_t(u.data_offset)};
+        const FileReader r{file, size, u.order != 0x4949};
+        if (!r.fits(size_t(u.data_offset), size_t(across) * down * 4))
+            return error = "tile offsets past the file's end", std::vector<uint64_t>{};
+        std::vector<uint64_t> offsets(size_t(across) * down);
+        for (size_t k = 0; k < offsets.size(); ++k)
+            offsets[k] = r.u32(size_t(u.data_offset) + 4 * k);
+        return offsets;
+    }
     // A DNG's lossless JPEG readout (Compression 7) as LibRaw's
     // lossless_dng_load_raw reads it: its tiles' streams (or its one
-    // strip's), each a frame's samples in rows `tile[0]` wide filling a
+    // strip's), each a frame's photosites in rows `tile[0]` wide filling a
     // tile `tile[1]` high, `tile[2]` tiles across (as RawMosaic::Stream's
-    // tile), and its linearisation curve. False for others, and for
+    // tile), a sample each or a linear DNG's three (a JPEG component
+    // each), and its linearisation curve. False for others, and for
     // anything that wouldn't come out as LibRaw has it (two samples a
     // photosite, a DNG before 1.1 (a 16-bit difference read as bits), tiles
     // that aren't their frames' size, a strip short of the readout): LibRaw
@@ -482,32 +513,17 @@ public:
         const auto& u = libraw_internal_data.unpacker_data;
         const auto& sz = imgdata.sizes;
         const auto& id = imgdata.idata;
-        if (!(id.filters || id.colors == 1) || u.tiff_samples != 1)
-            return error = "not a sample a photosite", false;
+        const unsigned n = samples();
+        if (u.tiff_samples != n || (n != 1 && n != 3))
+            return error = "not a sample a photosite, nor three", false;
         if (id.dng_version < 0x01010000)
             return error = "a DNG before 1.1", false;
         const unsigned rw = sz.raw_width, rh = sz.raw_height;
         const bool tiled = u.tile_length < INT_MAX;
-        if (!rw || !rh || !u.tile_width || !u.tile_length)
+        unsigned across = 1;
+        const std::vector<uint64_t> offsets = tiles(file, size, across, error);
+        if (offsets.empty())
             return false;
-        const unsigned across = tiled ? (rw + u.tile_width - 1) / u.tile_width : 1, down = tiled ? (rh + u.tile_length - 1) / u.tile_length : 1;
-        // The tiles' offsets, a word each where the first would be (as get4 reads them).
-        std::vector<uint64_t> offsets;
-        if (!tiled)
-            offsets.push_back(uint64_t(u.data_offset));
-        else
-        {
-            const bool le = u.order == 0x4949;
-            for (size_t k = 0; k < size_t(across) * down; ++k)
-            {
-                const size_t at = size_t(u.data_offset) + 4 * k;
-                if (u.data_offset < 0 || at + 4 > size)
-                    return error = "tile offsets past the file's end", false;
-                const uint8_t* b = file + at;
-                offsets.push_back(le ? uint32_t(b[0] | b[1] << 8 | b[2] << 16 | uint32_t(b[3]) << 24)
-                                     : uint32_t(uint32_t(b[0]) << 24 | b[1] << 16 | b[2] << 8 | b[3]));
-            }
-        }
         int predictor = 0;
         if (offsets[0] >= size || !ljpeg::takes(file + offsets[0], size_t(size - offsets[0]), &predictor))
             return error = "not a lossless JPEG taken here", false;
@@ -519,12 +535,18 @@ public:
         if (!ljpeg::prepare_tiles(file, size, offsets, p, error))
             return false;
         // A JPEG row's samples fill the tile's rows (the readout's, if
-        // narrower) one after another, as adobe_copy_pixel places them.
+        // narrower) one after another, as adobe_copy_pixel places them: a
+        // linear DNG's a pixel (its components) at a time.
         const unsigned wrap = std::min(u.tile_width, rw);
         const uint64_t jwide = uint64_t(p.width) * p.components, frame = jwide * p.height;
-        if (p.components > 1 && jwide * p.components == rw)
+        if (n == 1 && p.components > 1 && jwide * p.components == rw)
             return error = "a JPEG LibRaw reads past its rows", false;
-        if (tiled ? frame != uint64_t(wrap) * u.tile_length : frame < uint64_t(rw) * rh)
+        if (n > 1 && unsigned(p.components) != n)
+            return error = "a JPEG of other than a component a colour", false;
+        uint64_t held = 0;  // a strip's samples, in all its restart intervals
+        for (const auto& part : p.parts)
+            held += jwide * part.rows;
+        if (tiled ? frame != uint64_t(wrap) * u.tile_length * n : held < uint64_t(rw) * rh * n)
             return error = "tiles not their frames' size", false;
         tile[0] = wrap, tile[1] = tiled ? u.tile_length : rh, tile[2] = across;
         const ushort* curve = imgdata.color.curve;
@@ -534,6 +556,167 @@ public:
                 p.curve.assign(curve, curve + 0x10000);
                 break;
             }
+        return true;
+    }
+
+    // A DNG's readout LibRaw reads a tile after another (dngtiles.h): a
+    // lossy DNG's JPEG tiles (lossy_dng_load_raw: the readout's corner the
+    // active area's size, through the curves its MapPolynomial opcodes give
+    // each colour, sRGB's without them), floats deflated or stored as they
+    // are (deflate_dng_load_raw, uncompressed_fp_dng_load_raw); or JPEG XL
+    // tiles, which it reads only with the DNG SDK (a linearisation table
+    // not taken: nothing to say how they'd go together). False for others,
+    // and, with why, for what LibRaw would read another way.
+    // (Not const: LibRaw's sRGB curve is made in its curve, put back after.)
+    bool dng_tiles(const uint8_t* file, size_t size, dngtiles::Prepared& p, std::string& error)
+    {
+        const std::string name = loader();
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& sz = imgdata.sizes;
+        const unsigned n = samples();
+        p.file = file, p.size = size;
+        p.samples = n;
+        p.tile_w = u.tile_length < INT_MAX ? u.tile_width : sz.raw_width;
+        p.tile_h = u.tile_length < INT_MAX ? u.tile_length : sz.raw_height;
+        if (name == "lossy_dng_load_raw()")
+        {
+            if (n != 1 && n != 3)
+                return error = "a lossy DNG of " + std::to_string(n) + " colours", false;
+            p.format = dngtiles::Format::lossy;
+            p.width = sz.width, p.height = sz.height;
+            // Each colour's curve as LibRaw makes it: its MapPolynomial
+            // (the plane it names, the area and pitch whatever they are).
+            p.curves.assign(4 * 256, 0);
+            bool have[4] = {};
+            if (u.meta_offset && size_t(u.meta_offset) < size)
+                dng::each_opcode(file + u.meta_offset, size - size_t(u.meta_offset), [&](uint32_t id, uint32_t, const uint8_t* d, size_t bytes)
+                {
+                    if (id != 8)
+                        return true;
+                    const FileReader r{d, bytes, true};
+                    const uint32_t c = r.u32(16), degree = r.u32(32);
+                    if (c > 3 || degree > 8)
+                        return false;
+                    double coeff[9];
+                    for (uint32_t j = 0; j <= degree; ++j)
+                        coeff[j] = r.f64(36 + 8 * j);
+                    for (int v = 0; v < 256; ++v)
+                    {
+                        double total = 0;
+                        for (uint32_t j = 0; j <= degree; ++j)
+                            total += coeff[j] * std::pow(v / 255.0, int(j));
+                        p.curves[c * 256 + v] = uint16_t(std::clamp(total * 0xffff, 0.0, 65535.0));
+                    }
+                    have[c] = true;
+                    return true;
+                });
+            else
+            {
+                std::vector<ushort> kept(imgdata.color.curve, imgdata.color.curve + 0x10000);
+                gamma_curve(1 / 2.4, 12.92, 1, 255);
+                for (int c = 0; c < 4; ++c)
+                    std::copy_n(imgdata.color.curve, 256, p.curves.begin() + c * 256), have[c] = true;
+                std::copy(kept.begin(), kept.end(), imgdata.color.curve);
+            }
+            if (!std::all_of(have, have + n, [](bool h) { return h; }))
+                return error = "a lossy DNG without a curve for each colour", false;
+        }
+        else if (name == "deflate_dng_load_raw()" || name == "uncompressed_fp_dng_load_raw()" || name == "jxl_dng_load_raw_placeholder()")
+        {
+            const tiff_ifd_t* ifd = nullptr;  // the raw's, as LibRaw's find_ifd_by_offset finds it
+            for (unsigned i = 0; i < libraw_internal_data.identify_data.tiff_nifds && i < LIBRAW_IFD_MAXCOUNT; ++i)
+                if (tiff_ifd[i].offset == u.data_offset)
+                {
+                    ifd = &tiff_ifd[i];
+                    break;
+                }
+            const bool jxl = name == "jxl_dng_load_raw_placeholder()", deflated = name == "deflate_dng_load_raw()";
+            if (!ifd || ifd->samples != int(n) || u.tiff_samples != n || (n != 1 && n != 3))
+                return error = "other than a sample a photosite or three", false;
+            // Tiles as LibRaw's loaders for floats take them, as tiles() does.
+            const bool tiled = u.tile_width <= sz.raw_width && u.tile_length <= sz.raw_height;
+            if (tiled != (u.tile_length < INT_MAX) || (ifd->rows_per_strip > 0 && ifd->rows_per_strip < int(sz.raw_height) && ifd->strip_byte_counts_count > 0))
+                return error = "strips", false;
+            p.width = sz.raw_width, p.height = sz.raw_height;
+            p.big_endian = u.order != 0x4949;
+            if (jxl)
+            {
+                const ushort* curve = imgdata.color.curve;
+                for (int v = 0; v < 0x10000; ++v)
+                    if (curve[v] != v)
+                        return error = "JPEG XL with a linearisation table", false;
+                p.format = dngtiles::Format::jxl;
+            }
+            else
+            {
+                if (ifd->sample_format != 3)
+                    return error = "integers deflated", false;
+                p.format = deflated ? dngtiles::Format::deflated : dngtiles::Format::floats;
+                p.bytes = (ifd->bps + 7) / 8;
+                p.factor = !deflated ? 1 : ifd->predictor == 34894 ? 2 : ifd->predictor == 34895 ? 4 : 1;
+                if ((deflated && ifd->bps % 8) || p.bytes < 2 || p.bytes > 4 || p.tile_w % p.factor)
+                    return error = "floats of " + std::to_string(ifd->bps) + " bits", false;
+            }
+            p.offsets = tiles(file, size, p.across, error);
+            // How long each tile is: a table of them where there are more than one.
+            const FileReader r{file, size, p.big_endian};
+            if (p.offsets.size() > 1 && !r.fits(size_t(ifd->bytes), p.offsets.size() * 4))
+                return error = "tile lengths past the file's end", false;
+            for (size_t k = 0; k < p.offsets.size(); ++k)
+                p.lengths.push_back(p.offsets.size() > 1 ? r.u32(size_t(ifd->bytes) + 4 * k) : uint64_t(ifd->bytes));
+            return !p.offsets.empty();
+        }
+        else
+            return false;
+        p.offsets = tiles(file, size, p.across, error);
+        return !p.offsets.empty();
+    }
+    // The readout of dng_tiles' tiles (raw.samples() a photosite) and the
+    // levels with it, as LibRaw's unpack leaves them: a lossy DNG's, the
+    // active area alone with nothing over 65535; floats', as its
+    // convertFloatToInt makes them (its defaults): scaled to 16383 at the
+    // greatest where that's outside 4096..32767, the levels with them, held
+    // at 0 and truncated. JPEG XL's as they are.
+    bool unpack_tiles(const dngtiles::Prepared& p, std::vector<uint16_t>& out, std::string& error)
+    {
+        auto& col = imgdata.color;
+        if (p.format == dngtiles::Format::jxl)
+            return dngtiles::decode(p, out, error);
+        if (p.format == dngtiles::Format::lossy)
+        {
+            if (!dngtiles::decode(p, out, error))
+                return false;
+            auto& sz = imgdata.sizes;
+            col.maximum = 0xffff;
+            sz.raw_width = sz.width, sz.raw_height = sz.height;
+            sz.left_margin = sz.top_margin = 0;
+            return true;
+        }
+        std::vector<float> floats;
+        float largest = 0;
+        if (!dngtiles::decode(p, floats, largest, error))
+            return false;
+        const auto most = [](float a, float b) { return a > b ? a : b; };  // LibRaw's MAX, NaN and all
+        float top = most(most(float(std::max(col.maximum, 1u)), largest), 1.f), scale = 1.f;
+        col.fmaximum = largest;
+        col.fnorm = 0;
+        if (top < 4096.f || top > 32767.f)
+        {
+            col.fnorm = scale = 16383.f / top;
+            col.maximum = 16383;
+            col.black = unsigned(float(col.black) * scale);
+            for (int i = 0; i < LIBRAW_CBLACK_SIZE; ++i)
+                if (i != 4 && i != 5)
+                    col.cblack[i] = unsigned(float(col.cblack[i]) * scale);
+        }
+        out.resize(floats.size());
+        const size_t row = size_t(p.width) * p.samples;
+        parallel(p.height,
+                 [&](size_t y)
+                 {
+                     for (size_t i = y * row; i < (y + 1) * row; ++i)
+                         out[i] = uint16_t(most(floats[i], 0.f) * scale);
+                 });
         return true;
     }
 
@@ -651,16 +834,20 @@ public:
         m[1][3] += sz.raw_width;
     }
     // As LibRaw's unpack leaves them (0.22's): measured where the sensor is
-    // masked in `readout` (raw_width x raw_height), and the least of the
-    // four channels' levels then moved into the common one.
+    // masked in `readout` (raw_width x raw_height; a sample a photosite
+    // only), and the least of the four channels' levels then moved into the
+    // common one.
     void black_from_masked(std::vector<uint16_t>& readout)
     {
         auto& sz = imgdata.sizes;
         auto& col = imgdata.color;
-        sz.raw_pitch = sz.raw_width * 2;
-        imgdata.rawdata.raw_image = readout.data();
-        crop_masked_pixels();
-        imgdata.rawdata.raw_image = nullptr;  // ours, not LibRaw's to free
+        if (samples() == 1)
+        {
+            sz.raw_pitch = sz.raw_width * 2;
+            imgdata.rawdata.raw_image = readout.data();
+            crop_masked_pixels();
+            imgdata.rawdata.raw_image = nullptr;  // ours, not LibRaw's to free
+        }
         const unsigned least = std::min({col.cblack[0], col.cblack[1], col.cblack[2], col.cblack[3]});
         for (int c = 0; c < 4; ++c)
             col.cblack[c] -= least;
@@ -707,10 +894,11 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
 
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
 // in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), a
-// NEF's, a DNG's or a CR2's lossless JPEG. False for others, and (with why) for one of those
-// laid out in a way this doesn't take. `blocks`: a raw in blocks' layout,
-// which says what of the readout LibRaw writes (the rest it leaves as it is).
-bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
+// NEF's, a DNG's or a CR2's lossless JPEG; raw.samples() a photosite. False
+// for others, and (with why) for one of those laid out in a way this
+// doesn't take. `blocks`: a raw in blocks' layout, which says what of the
+// readout LibRaw writes (the rest it leaves as it is).
+bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
                  std::shared_ptr<rawblocks::Prepared>* blocks = nullptr)
 {
     error.clear();
@@ -757,18 +945,22 @@ bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::ve
         ljpeg::Image j;
         if (!ljpeg::decode(dng, j, error))
             return false;
-        RawMosaic::Stream st;  // where the samples lie, as the GPU's would
+        RawMosaic::Stream st;  // where the photosites lie, as the GPU's would
         std::copy_n(tile, 3, st.tile);
-        const unsigned rw = raw.imgdata.sizes.raw_width, rh = raw.imgdata.sizes.raw_height;
-        out.resize(size_t(rw) * rh);
+        const unsigned rw = raw.imgdata.sizes.raw_width, rh = raw.imgdata.sizes.raw_height, n = raw.samples();
+        out.resize(size_t(rw) * rh * n);
         parallel(rh,
                  [&](unsigned y)
                  {
                      for (unsigned x = 0; x < rw; x += tile[0])  // a tile's row at a time
-                         std::memcpy(out.data() + size_t(y) * rw + x, j.samples.data() + st.index(x, y), size_t(std::min(tile[0], rw - x)) * 2);
+                         std::memcpy(out.data() + (size_t(y) * rw + x) * n, j.samples.data() + st.index(x, y) * n,
+                                     size_t(std::min(tile[0], rw - x)) * n * 2);
                  });
         return true;
     }
+    // A DNG's lossy JPEG tiles, or its floats: a tile a thread.
+    if (dngtiles::Prepared t; error.empty() && raw.dng_tiles(file, size, t, error))
+        return raw.unpack_tiles(t, out, error);
     if (!error.empty())
         return false;
     if (!locate_cr2(file, size, offset, length, slices))
@@ -825,24 +1017,40 @@ void check_unpack(const uint8_t* file, size_t size, const std::string& path)
     const gint64 t0 = g_get_monotonic_time();
     std::shared_ptr<rawblocks::Prepared> blocks;  // where it's one of these, what LibRaw writes (the rest it leaves as it finds it)
     const bool ok = unpack_here(mine, file, size, ours, error, &blocks);
+    const unsigned n = mine.samples();
     if (ok)
         mine.black_from_masked(ours);
     const gint64 t1 = g_get_monotonic_time();
-    if (theirs.unpack() != LIBRAW_SUCCESS)
+    const std::string loader = theirs.loader();
+    if (const int r = theirs.unpack(); r != LIBRAW_SUCCESS)
+    {
+        const std::string verdict = ok ? "ours alone" : "not ours: " + error;
+        std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's unpack fails (%s, %s)\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
+                     loader.c_str(), libraw_strerror(r));
         return;
+    }
     const gint64 t2 = g_get_monotonic_time();
     const auto& sz = theirs.imgdata.sizes;
-    const ushort* raw = theirs.imgdata.rawdata.raw_image;
+    const auto& rd = theirs.imgdata.rawdata;
+    // LibRaw's readout: a sample a photosite, or three or four (a linear DNG's colours).
+    const ushort* raw = rd.raw_image ? rd.raw_image : rd.color3_image ? rd.color3_image[0] : rd.color4_image ? rd.color4_image[0] : nullptr;
+    const unsigned stride = rd.raw_image ? 1 : rd.color3_image ? 3 : 4;
     std::string verdict = ok ? "same" : "not ours: " + error;
-    if (ok && raw)
+    if (ok && raw && (stride == 1) == (n == 1) && ours.size() == size_t(sz.raw_width) * sz.raw_height * n)
         for (unsigned y = 0; y < sz.raw_height && verdict == "same"; ++y)
-            for (unsigned x = 0; x < sz.raw_width; ++x)
-                if (ours[size_t(y) * sz.raw_width + x] != raw[size_t(y) * sz.raw_pitch / 2 + x] && (!blocks || rawblocks::written(*blocks, int(x), int(y))))
+            for (unsigned x = 0; x < sz.raw_width * n; ++x)
+            {
+                const uint16_t mine_v = ours[size_t(y) * sz.raw_width * n + x];
+                const uint16_t their_v = raw[size_t(y) * sz.raw_pitch / 2 + x / n * stride + x % n];
+                if (mine_v != their_v && (!blocks || rawblocks::written(*blocks, int(x), int(y))))
                 {
-                    verdict = "DIFFERENT at " + std::to_string(x) + "," + std::to_string(y) + ": ours " +
-                              std::to_string(ours[size_t(y) * sz.raw_width + x]) + ", LibRaw's " + std::to_string(raw[size_t(y) * sz.raw_pitch / 2 + x]);
+                    verdict = "DIFFERENT at " + std::to_string(x / n) + "," + std::to_string(y) + (n > 1 ? " (" + std::to_string(x % n) + ")" : "") +
+                              ": ours " + std::to_string(mine_v) + ", LibRaw's " + std::to_string(their_v);
                     break;
                 }
+            }
+    else if (ok)
+        verdict = "NOT COMPARED: LibRaw's readout laid out otherwise";
     const auto& a = mine.imgdata.color;
     const auto& b = theirs.imgdata.color;
     const bool levels = a.black == b.black && a.maximum == b.maximum && std::memcmp(a.cblack, b.cblack, 4 * sizeof a.cblack[0]) == 0;
@@ -850,10 +1058,10 @@ void check_unpack(const uint8_t* file, size_t size, const std::string& path)
     theirs.get_decoder_info(&info);
     // Whether the GPU's develop would take it (decode_mosaic's test), and if not why.
     const auto& id = theirs.imgdata.idata;
-    const auto& rd = theirs.imgdata.rawdata;
     const char* gpu = !id.filters ? (rd.float3_image || rd.float4_image ? "no: float, demosaiced" : rd.float_image ? "no: float mosaic"
-                                     : (rd.color3_image || rd.color4_image) && id.colors == 3     ? "yes: linear or sRAW"
+                                     : (rd.color3_image || rd.color4_image) && id.colors == 3     ? (ok ? "yes: linear, here too" : "yes: linear or sRAW")
                                      : rd.color3_image || rd.color4_image                         ? "no: demosaiced, not three colours"
+                                     : id.colors == 1 && rd.raw_image                             ? (ok ? "yes: monochrome, here too" : "yes: monochrome")
                                                                                                     : "no: no colour filter")
                       : id.filters == 9    ? "no: X-Trans"
                       : id.filters < 1000  ? "no: other filter pattern"
@@ -895,10 +1103,10 @@ std::shared_ptr<const std::vector<uint16_t>> libraw_corrected(const uint8_t* fil
 
 bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out);
 
-// Three colours a photosite already (a linear DNG, Canon's sRAW and mRAW):
-// LibRaw unpacks them, its raw2image takes the active area out, and they go
-// up as they are, the develop taking off black and scaling (develop.hlsl's
-// LINEAR) with no demosaic.
+// Three colours a photosite already (Canon's sRAW and mRAW, a linear DNG not
+// unpacked here): LibRaw unpacks them, its raw2image takes the active area
+// out, and they go up as they are, the develop taking off black and scaling
+// (develop.hlsl's LINEAR) with no demosaic.
 bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
 {
     const int64_t t0 = g_get_monotonic_time();
@@ -960,22 +1168,22 @@ bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
 bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out, std::string& error)
 {
     const auto& id = raw.imgdata.idata;
-    // A 2 x 2 Bayer pattern, or already three colours a photosite (a linear
-    // DNG, Canon's sRAW): no X-Trans, Foveon or four-colour filters yet.
-    const bool linear = !id.filters && id.colors == 3;
-    if (!linear && (id.filters == 9 || id.filters < 1000 || id.colors != 3))
+    // A 2 x 2 Bayer pattern, already three colours a photosite (a linear
+    // DNG, Canon's sRAW), or no filter at all (a monochrome sensor): no
+    // X-Trans, Foveon or four-colour filters yet.
+    const bool linear = !id.filters && id.colors == 3, grey = !id.filters && id.colors == 1;
+    if (!linear && !grey && (id.filters == 9 || id.filters < 1000 || id.colors != 3))
         return false;
-    if (linear)
+    if (raw.loader() == "canon_sraw_load_raw()")
     {
         // Canon's sRAW as stored (its YCbCr), not LibRaw's RGB made from it:
         // the develop converts it (RawMosaic::Ycc).
-        const bool ycc = raw.loader() == "canon_sraw_load_raw()";
-        if (ycc)
-            raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
-        return decode_linear(raw, out, error, ycc);
+        raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
+        return decode_linear(raw, out, error, true);
     }
-    // A CR2, a NEF or a raw in blocks on the GPU (a CR3 put together there),
-    // or here on every core; the rest by LibRaw.
+    // A CR2, a NEF, a DNG or a raw in blocks on the GPU (a CR3 put together
+    // there), or here on every core; the rest by LibRaw. A linear DNG's three
+    // colours a photosite.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
     std::string ours_error;
@@ -1039,18 +1247,21 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             stream->planes = std::move(planes);
         }
     }
+    const unsigned n = raw.samples();
     if (stream)
         ;  // decoded on the GPU
     else if (unpack_here(raw, file, size, readout, ours_error))
     {
         raw.black_from_masked(readout);
         src = readout.data();
-        pitch = raw.imgdata.sizes.raw_width;
+        pitch = raw.imgdata.sizes.raw_width * n;
     }
     else
     {
         if (!ours_error.empty() && std::getenv("IFRIT_TRACE"))
             std::fprintf(stderr, "raw: not unpacked here (%s), LibRaw does\n", ours_error.c_str());
+        if (linear)
+            return decode_linear(raw, out, error, false);
         const int r = raw.unpack();
         if (r != LIBRAW_SUCCESS)
         {
@@ -1067,14 +1278,20 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
     auto m = std::make_shared<RawMosaic>();
     m->width = sz.width;
     m->height = sz.height;
+    m->channels = int(n);
+    m->grey = grey;
     if (stream)
         m->stream = std::move(stream);
     else
     {
-        auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height);
+        auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height * n);
         // The active area, out of the readout with its margins.
-        parallel(unsigned(m->height), [&](unsigned y)
-                 { std::memcpy(data->data() + size_t(y) * m->width, src + size_t(y + sz.top_margin) * pitch + sz.left_margin, size_t(m->width) * 2); });
+        parallel(unsigned(m->height),
+                 [&](unsigned y)
+                 {
+                     std::memcpy(data->data() + size_t(y) * m->width * n, src + size_t(y + sz.top_margin) * pitch + size_t(sz.left_margin) * n,
+                                 size_t(m->width) * n * 2);
+                 });
         m->data = std::move(data);
     }
     if (std::getenv("IFRIT_TRACE"))
@@ -1126,12 +1343,12 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
             mul[c] = col.pre_mul[c] > 0 ? col.pre_mul[c] : 1;
     const float least = std::min({mul[0], mul[1], mul[2]});
     for (int c = 0; c < 3; ++c)
-        m->as_shot[c] = mul[c] / least;
+        m->as_shot[c] = m->grey ? 1 : mul[c] / least;  // grey: no colours to balance
     m->balanced = (col.as_shot_wb_applied & LIBRAW_ASWB_APPLIED) != 0;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
         {
-            m->rgb_cam[i][j] = col.rgb_cam[i][j];
+            m->rgb_cam[i][j] = m->grey ? float(i == j) : col.rgb_cam[i][j];  // grey stays grey
             m->cam_xyz[i][j] = col.cam_xyz[i][j];
         }
     // A DNG's camera LibRaw has no table for: its own matrix, XYZ to camera
@@ -1412,7 +1629,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         }
         else
         {
-            out.pixel_format = PixelFormat::packed(PixelFormat::Model::RGB, "RGB", bits);
+            out.pixel_format = id.colors == 1 ? PixelFormat::packed(PixelFormat::Model::L, "L", bits)
+                                              : PixelFormat::packed(PixelFormat::Model::RGB, "RGB", bits);
             out.pixel_format.notes.push_back("linear");
         }
     }
@@ -1421,7 +1639,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     else if (id.filters)
         out.add(N_("Raw"), N_("Mosaic"), "Bayer");
     else
-        out.add(N_("Raw"), N_("Mosaic"), "none (linear)");
+        out.add(N_("Raw"), N_("Mosaic"), id.colors == 1 ? "none (monochrome)" : "none (linear)");
     const float* wb = raw.imgdata.color.cam_mul;
     if (wb[0] > 0 && wb[1] > 0)
         out.add(N_("Raw"), N_("Camera white balance"), fmt(wb[0] / wb[1], 3) + " / 1 / " + fmt(wb[2] / wb[1], 3));
@@ -1460,7 +1678,7 @@ bool quick(const std::string& path)
         return false;
     const auto& id = raw->imgdata.idata;
     return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
-           (id.filters >= 1000 && id.colors == 3 && raw->packed(bytes, size, packed, error)) ||
+           (((id.filters >= 1000 && id.colors == 3) || (!id.filters && id.colors == 1)) && raw->packed(bytes, size, packed, error)) ||
            (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
 }
 
