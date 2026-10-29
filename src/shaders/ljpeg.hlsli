@@ -43,7 +43,7 @@ cbuffer Ljpeg : register(b0)
     uint tile_w;      // a DNG's tiles: each one's width and height, how many across (0: none)
     uint tile_h;
     uint tiles_across;
-    uint unused;
+    uint planes;      // 1: a CR3's, decoded already: each place in the 2 x 2 a plane, one after another
 };
 
 uint start_of(uint r, uint c)  // initial[], row r (< step), component c
@@ -52,11 +52,13 @@ uint start_of(uint r, uint c)  // initial[], row r (< step), component c
     return (c & 1) ? w >> 16 : w & 0xFFFF;
 }
 
-// Where the readout's (x, y) is among the samples: a DNG's tiles one after
-// another, each filled a row after another; Canon's stream fills each slice
-// top to bottom, slice after slice (as RawMosaic::Stream::index).
+// Where the readout's (x, y) is among the samples: a CR3's planes; a DNG's
+// tiles one after another, each filled a row after another; Canon's stream
+// fills each slice top to bottom, slice after slice (as RawMosaic::Stream::index).
 uint readout_index(uint x, uint y)
 {
+    if (planes != 0)
+        return (((y & 1) * 2 + (x & 1)) * (readout_h / 2) + (y >> 1)) * (readout_w / 2) + (x >> 1);
     if (tile_w != 0)
     {
         const uint tx = x / tile_w, ty = y / tile_h;

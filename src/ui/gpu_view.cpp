@@ -47,7 +47,7 @@ struct LjpegParams
     int32_t rect[4];
     uint32_t mosaic_w, mosaic_h, scheme, curved;
     uint32_t initial[4];
-    uint32_t tile_w, tile_h, tiles_across, unused;
+    uint32_t tile_w, tile_h, tiles_across, planes;
 };
 static_assert(sizeof(LjpegParams) == 128, "ljpeg.hlsli's layout");
 
@@ -398,6 +398,7 @@ LjpegParams readout_params(const RawMosaic& m)
     p.readout_w = uint32_t(st.readout_w), p.readout_h = uint32_t(st.readout_h);
     p.slice_n = st.slices[0], p.slice_w = st.slices[1], p.slice_last = st.slices[2];
     p.tile_w = st.tile[0], p.tile_h = st.tile[1], p.tiles_across = st.tile[2];
+    p.planes = st.planes ? 1 : 0;
     p.left = uint32_t(st.left), p.top = uint32_t(st.top);
     p.filters = st.filters;
     p.mosaic_w = uint32_t(m.width), p.mosaic_h = uint32_t(m.height);
@@ -529,6 +530,8 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         return unpack_stream(m, sites, levels, error);
     if (st.blocks)
         return decode_blocks(m, sites, levels, error);
+    if (st.planes)
+        return assemble_planes(m, sites, levels, error);
     const ljpeg::Prepared& j = *st.jpeg;
     if (decode_on_cpu())
     {
@@ -752,6 +755,36 @@ bool GpuView::decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
                       [&](std::vector<uint16_t>& out, std::string&)
                       {
                           rawblocks::decode(b, out);
+                          return true;
+                      });
+    return true;
+}
+
+bool GpuView::assemble_planes(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
+{
+    const std::vector<uint16_t>& planes = *m.stream->planes;
+    if (decode_on_cpu())
+        return upload_decoded(*device_, m, planes, sites, levels, error);
+    if (planes.size() * 2 > (uint64_t(128) << 20))
+        return error = "a raw too big for the GPU", false;
+    const gint64 t0 = g_get_monotonic_time();
+    rap::gpu::buffer_ptr values;
+    if (!readout_buffers(m, planes.size(), values, levels, sites, error))
+        return false;
+    device_->upload(values, std::as_bytes(std::span(planes)));
+    finish_readout(m, readout_params(m), {}, values, levels, sites);
+    if (raw_check() || std::getenv("IFRIT_TRACE"))
+    {
+        // (Read back once the passes are done: how long they took, from the upload on.)
+        auto sums = std::make_shared<std::vector<std::byte>>(levels->size());
+        device_->readback(levels, *sums, [sums, t0]
+                          { std::fprintf(stderr, "gpu: a CR3's planes uploaded and put together in %.1f ms\n", (g_get_monotonic_time() - t0) / 1000.0); });
+    }
+    if (raw_check())
+        check_readout(m, values, levels, sites,
+                      [&](std::vector<uint16_t>& out, std::string&)
+                      {
+                          out = planes;
                           return true;
                       });
     return true;

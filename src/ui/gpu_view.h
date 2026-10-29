@@ -138,7 +138,10 @@ private:
     bool unpack_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
     // The same for a raw in blocks (rawblocks.h).
     bool decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
-    // What those three share: whether to decode on the CPU instead, the
+    // The same for a CR3's readout decoded already, as its planes (crx.h):
+    // up as they are, put together here.
+    bool assemble_planes(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
+    // What those share: whether to decode on the CPU instead, the
     // file's bytes up, where a readout's decode goes, its black level and
     // active area after the decode, and the check against the CPU.
     bool decode_on_cpu() const;
