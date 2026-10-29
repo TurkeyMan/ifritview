@@ -727,17 +727,14 @@ double View::fit_zoom() const
 
 void View::layout()
 {
+    const double before = zoom_;
     if (mode_ == ZoomMode::Fit)
-    {
-        const double z = fit_zoom();
-        if (z != zoom_)
-        {
-            zoom_ = z;
-            zoom_changed();
-        }
-    }
+        zoom_ = fit_zoom();
     checker_.reset();  // sized to the view
     clamp_pan();
+    // Told once the pan's settled too: what that sets off draws this framing.
+    if (zoom_ != before)
+        zoom_changed();
     invalidate();
 }
 
