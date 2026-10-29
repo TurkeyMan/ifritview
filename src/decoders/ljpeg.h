@@ -9,8 +9,11 @@
 // they agree from there on (ljpeg.cpp has the passes). A DNG's tiles are
 // streams of their own, decoded side by side.
 //
+// Restart intervals of whole rows predicted from the left (a phone's DNG)
+// are streams of their own too, as LibRaw reads them.
+//
 // Not taken (false, for the caller to decode another way): point
-// transforms, restart intervals, components sampled other than 1 x 1
+// transforms, other restart intervals, components sampled other than 1 x 1
 // (Canon's sRAW). Predictors other than the left neighbour (rows predicted
 // from the row above) are decoded on the CPU only.
 
@@ -60,8 +63,11 @@ struct Prepared
     {
         uint64_t start = 0, bits = 0;  // where in `bits` (in bits, a byte's start), how long
         uint32_t table[4] = {};        // components 0..components-1's, in `tables`
+        int rows = 0;                  // the frame's rows it holds: `height`, fewer in the last of a strip's restart intervals
     };
-    std::vector<Part> parts;  // one stream; a DNG's tiles, in its order
+    // One stream; a DNG's tiles, in its order; a strip's restart intervals
+    // (whole rows, `height` each), each a stream of its own.
+    std::vector<Part> parts;
     std::vector<Table> tables;
     // A row's first samples continue those `step` rows above; the first
     // `step` rows' from `initial` (per row and component).

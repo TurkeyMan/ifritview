@@ -142,6 +142,81 @@ struct Exit
 namespace
 {
 
+// Where the entropy-coded data from `from` on ends: the first 0xFF not
+// followed by a zero (a marker), or `size`. In ranges on `threads`.
+size_t data_end(const uint8_t* data, size_t from, size_t size, unsigned threads)
+{
+    const size_t span = size - from;
+    const size_t ranges = std::max<size_t>(1, std::min<size_t>(threads * 4, span / 65536));
+    const size_t range = (span + ranges - 1) / ranges;
+    std::vector<size_t> marker(ranges, size);
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = from + r * range, b = std::min(size, a + range);
+            for (const uint8_t* p = data + a; (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
+                if (size_t(p - data) + 1 >= size || p[1] != 0x00)
+                {
+                    marker[r] = size_t(p - data);
+                    break;
+                }
+        },
+        threads);
+    return *std::min_element(marker.begin(), marker.end());
+}
+
+// The entropy-coded data from `from` to `end` less the zeros stuffed after
+// each 0xFF, then 8 zero bytes. In ranges on `threads`: each range's bytes
+// counted, then copied to where the ones before it end.
+std::vector<uint8_t> unstuff(const uint8_t* data, size_t from, size_t end, unsigned threads)
+{
+    const size_t span = end - from;
+    const size_t ranges = std::max<size_t>(1, std::min<size_t>(threads * 4, span / 65536));
+    const size_t range = (span + ranges - 1) / ranges;
+    std::vector<size_t> kept(ranges + 1, 0);
+    const auto stuffed = [&](size_t j) { return j > from && data[j] == 0x00 && data[j - 1] == 0xFF; };
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = std::min(end, from + r * range), b = std::min(end, a + range);
+            size_t n = b - a;
+            for (const uint8_t* p = data + a; p < data + b && (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
+                if (stuffed(size_t(p - data) + 1) && size_t(p - data) + 1 < b)
+                    --n;
+            if (a < b && stuffed(a))
+                --n;  // its 0xFF ended the range before
+            kept[r + 1] = n;
+        },
+        threads);
+    for (size_t r = 0; r < ranges; ++r)
+        kept[r + 1] += kept[r];
+    std::vector<uint8_t> bits(kept[ranges] + 8, 0);
+    parallel(
+        ranges,
+        [&](size_t r)
+        {
+            const size_t a = std::min(end, from + r * range), b = std::min(end, a + range);
+            uint8_t* o = bits.data() + kept[r];
+            for (size_t j = a; j < b;)
+            {
+                if (stuffed(j))
+                {
+                    ++j;
+                    continue;
+                }
+                const uint8_t* ff = static_cast<const uint8_t*>(std::memchr(data + j, 0xFF, b - j));
+                const size_t until = ff ? size_t(ff - data) + 1 : b;  // through the 0xFF
+                std::memcpy(o, data + j, until - j);
+                o += until - j;
+                j = until;
+            }
+        },
+        threads);
+    return bits;
+}
+
 // prepare's work, or only its headers' (`header_only`: whether it takes the stream).
 bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, unsigned threads, bool header_only)
 {
@@ -155,7 +230,7 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     }
     Table tables[4];
     bool have_table[4] = {};
-    int precision = 0, width = 0, height = 0, ncomp = 0, predictor = 1;
+    int precision = 0, width = 0, height = 0, ncomp = 0, predictor = 1, restart = 0;
     int comp_id[4] = {}, comp_table[4] = {};
     size_t i = 2, scan = 0;
     while (!scan)
@@ -210,8 +285,11 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
                         return error = "subsampled components", false;
                 }
                 break;
-            case 0xDD:  // DRI: any, even none (LibRaw then neither resets the predictions nor the bits)
-                return error = "restart intervals", false;
+            case 0xDD:  // DRI (0: none, LibRaw neither resetting its predictions nor its bits)
+                if (body < 2)
+                    return error = "bad restart interval", false;
+                restart = seg[0] << 8 | seg[1];
+                break;
             case 0xDA:  // SOS
             {
                 const int ns = seg[0];
@@ -252,80 +330,50 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
     }
     if (!width || !height || !ncomp)
         return error = "no frame", false;
+    // LibRaw starts its predictions again only at a row whose first sample
+    // begins an interval, and predicts that row from the one above all the
+    // same: intervals of whole rows predicted from the left read as the
+    // standard has them.
+    if (restart && (restart % width || predictor != 1))
+        return error = "restart intervals other than whole rows predicted from the left", false;
     p.predictor = predictor;
     if (header_only)
         return true;
 
     // -- The entropy-coded data without its stuffed zero bytes, to the marker
-    // that ends it.
-    // In ranges on every thread: where the data ends (the first 0xFF not
-    // followed by a zero: a marker), then each range's bytes less the zeros
-    // stuffed after an 0xFF, each range copied to where the ones before it
-    // end.
-    const size_t span = size - scan;
-    const size_t ranges = std::max<size_t>(1, std::min<size_t>(threads * 4, span / 65536));
-    const size_t range = (span + ranges - 1) / ranges;
-    std::vector<size_t> marker(ranges, size), kept(ranges + 1, 0);
-    parallel(
-        ranges,
-        [&](size_t r)
-        {
-            const size_t a = scan + r * range, b = std::min(size, a + range);
-            for (const uint8_t* p = data + a; (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
-                if (size_t(p - data) + 1 >= size || p[1] != 0x00)
-                {
-                    marker[r] = size_t(p - data);
-                    break;
-                }
-        },
-        threads);
-    const size_t end = *std::min_element(marker.begin(), marker.end());
-    const auto stuffed = [&](size_t j) { return j > scan && data[j] == 0x00 && data[j - 1] == 0xFF; };
-    parallel(
-        ranges,
-        [&](size_t r)
-        {
-            const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
-            size_t n = b - a;
-            for (const uint8_t* p = data + a; p < data + b && (p = static_cast<const uint8_t*>(std::memchr(p, 0xFF, size_t(data + b - p)))) != nullptr; ++p)
-                if (stuffed(size_t(p - data) + 1) && size_t(p - data) + 1 < b)
-                    --n;
-            if (a < b && stuffed(a))
-                --n;  // its 0xFF ended the range before
-            kept[r + 1] = n;
-        },
-        threads);
-    for (size_t r = 0; r < ranges; ++r)
-        kept[r + 1] += kept[r];
-    std::vector<uint8_t> bits(kept[ranges] + 8, 0);
-    parallel(
-        ranges,
-        [&](size_t r)
-        {
-            const size_t a = std::min(end, scan + r * range), b = std::min(end, a + range);
-            uint8_t* o = bits.data() + kept[r];
-            for (size_t j = a; j < b;)
-            {
-                if (stuffed(j))
-                {
-                    ++j;
-                    continue;
-                }
-                const uint8_t* ff = static_cast<const uint8_t*>(std::memchr(data + j, 0xFF, b - j));
-                const size_t until = ff ? size_t(ff - data) + 1 : b;  // through the 0xFF
-                std::memcpy(o, data + j, until - j);
-                o += until - j;
-                j = until;
-            }
-        },
-        threads);
-    p.width = width, p.height = height, p.components = ncomp, p.precision = precision;
+    // that ends it; with restart intervals, each interval's to its RST marker
+    // (LibRaw's ljpeg_row reads on past it), a stream of its own.
+    const int rows = restart ? restart / width : height, intervals = (height + rows - 1) / rows;
+    std::vector<std::pair<size_t, size_t>> spans{{scan, data_end(data, scan, size, restart ? 1 : threads)}};
+    while (int(spans.size()) < intervals && spans.back().second + 1 < size && (data[spans.back().second + 1] & 0xF8) == 0xD0)
+    {
+        const size_t from = spans.back().second + 2;
+        spans.emplace_back(from, data_end(data, from, size, 1));
+    }
+    if (int(spans.size()) != intervals)
+        return error = "restart intervals not the frame's", false;
+    std::vector<std::vector<uint8_t>> pieces(spans.size());
+    parallel(spans.size(), [&](size_t k) { pieces[k] = unstuff(data, spans[k].first, spans[k].second, spans.size() > 1 ? 1 : threads); }, threads);
+    p.width = width, p.height = rows, p.components = ncomp, p.precision = precision;
     p.step = 1;
     for (int c = 0; c < 4; ++c)
         p.initial[0][c] = p.initial[1][c] = uint16_t(1u << (precision - 1));
-    p.bits = std::move(bits);
-    p.parts.assign(1, {});
-    p.parts[0].bits = uint64_t(kept[ranges]) * 8;
+    p.parts.assign(pieces.size(), {});
+    std::vector<size_t> at(pieces.size() + 1, 0);
+    for (size_t k = 0; k < pieces.size(); ++k)
+    {
+        at[k + 1] = at[k] + pieces[k].size();  // each with its padding
+        p.parts[k].start = uint64_t(at[k]) * 8;
+        p.parts[k].bits = uint64_t(pieces[k].size() - 8) * 8;
+        p.parts[k].rows = std::min(rows, height - int(k) * rows);
+    }
+    if (pieces.size() == 1)
+        p.bits = std::move(pieces[0]);
+    else
+    {
+        p.bits.resize(at.back());
+        parallel(pieces.size(), [&](size_t k) { std::memcpy(p.bits.data() + at[k], pieces[k].data(), pieces[k].size()); }, threads);
+    }
     p.tables.clear();
     int index[4] = {-1, -1, -1, -1};
     for (int c = 0; c < ncomp; ++c)
@@ -336,7 +384,8 @@ bool parse(const uint8_t* data, size_t size, Prepared& p, std::string& error, un
             i = int(p.tables.size());
             p.tables.push_back(tables[comp_table[c]]);
         }
-        p.parts[0].table[c] = uint32_t(i);
+        for (Prepared::Part& part : p.parts)
+            part.table[c] = uint32_t(i);
     }
     return true;
 }
@@ -372,7 +421,7 @@ bool prepare_tiles(const uint8_t* file, size_t size, const std::vector<uint64_t>
     {
         const Prepared& t = tiles[k];
         if (t.parts.size() != 1)
-            return error = "tile " + std::to_string(k) + ": " + errors[k], false;
+            return error = "tile " + std::to_string(k) + ": " + (errors[k].empty() ? "restart intervals" : errors[k]), false;
         if (t.width != tiles[0].width || t.height != tiles[0].height || t.components != tiles[0].components || t.precision != tiles[0].precision ||
             t.predictor != tiles[0].predictor)
             return error = "tiles not alike", false;
@@ -422,6 +471,7 @@ bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, cons
     p.bits.resize(size + 8, 0);
     p.parts.assign(1, {});
     p.parts[0].bits = uint64_t(size) * 8;
+    p.parts[0].rows = rows;
     p.tables.assign(1, t);
     if (curve && curve_size)
     {
@@ -491,7 +541,7 @@ bool decode_differences(const Prepared& p, const Prepared::Part& part, uint16_t*
     Stream s{p.bits.data() + part.start / 8, total_bits, {}, ncomp, p.nikon};
     for (int c = 0; c < ncomp; ++c)
         s.table[c] = &p.tables[part.table[c]];
-    const uint64_t samples = uint64_t(p.width) * p.height * ncomp;
+    const uint64_t samples = uint64_t(p.width) * part.rows * ncomp;
 
     // -- Pass 1: each chunk decoded from its start as if a code began there,
     // once for each component that could be due (each has its own table), to
@@ -664,14 +714,15 @@ inline int predict(int predictor, int a, int b, int c)
     }
 }
 
-// One stream's differences to samples. Each row's first samples continue
-// down from those `step` rows above (the first rows' from where the stream
-// says they start); the rest from their left, so the rows go in parallel.
+// One stream's differences (its `height` rows) to samples. Each row's first
+// samples continue down from those `step` rows above (the first rows' from
+// where the stream says they start); the rest from their left, so the rows
+// go in parallel.
 // Arithmetic modulo 2^16, as the standard has it. A predictor from the row
 // above (all but the first row's, LibRaw's way) goes a row after another.
-void sum(const Prepared& p, uint16_t* d, unsigned threads)
+void sum(const Prepared& p, int height, uint16_t* d, unsigned threads)
 {
-    const int height = p.height, ncomp = p.components;
+    const int ncomp = p.components;
     const size_t row = size_t(p.width) * ncomp;
     for (int c = 0; c < ncomp; ++c)
         for (int y = 0; y < height; ++y)
@@ -741,7 +792,7 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
         return error = "not prepared", false;
     for (const Prepared::Part& part : p.parts)
     {
-        if (part.start % 8 || part.start / 8 + (part.bits + 7) / 8 + 8 > p.bits.size())
+        if (part.start % 8 || part.start / 8 + (part.bits + 7) / 8 + 8 > p.bits.size() || part.rows < 1 || part.rows > height)
             return error = "not prepared", false;
         for (int c = 0; c < ncomp; ++c)
             if (part.table[c] >= p.tables.size())
@@ -755,7 +806,7 @@ bool decode(const Prepared& p, Image& out, std::string& error, unsigned threads)
     const auto finish = [&](size_t k, unsigned on)
     {
         uint16_t* d = out.samples.data() + k * frame;
-        sum(p, d, on);
+        sum(p, p.parts[k].rows, d, on);
         if (!p.curve.empty())
             for (size_t i = 0; i < frame; ++i)
                 d[i] = p.curve[d[i]];

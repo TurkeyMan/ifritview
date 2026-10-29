@@ -60,4 +60,11 @@ struct FileReader
         std::memcpy(&f, &v, 4);
         return f;
     }
+    double f64(size_t at) const
+    {
+        const uint64_t v = fits(at, 8) ? big_endian ? be64(p + at) : le64(p + at) : 0;
+        double d;
+        std::memcpy(&d, &v, 8);
+        return d;
+    }
 };
