@@ -561,8 +561,10 @@ public:
     // lossy DNG's JPEG tiles (lossy_dng_load_raw: the readout's corner the
     // active area's size, through the curves its MapPolynomial opcodes give
     // each colour, sRGB's without them), floats deflated or stored as they
-    // are (deflate_dng_load_raw, uncompressed_fp_dng_load_raw). False for
-    // others, and, with why, for what LibRaw would read another way.
+    // are (deflate_dng_load_raw, uncompressed_fp_dng_load_raw); or JPEG XL
+    // tiles, which it reads only with the DNG SDK (a linearisation table
+    // not taken: nothing to say how they'd go together). False for others,
+    // and, with why, for what LibRaw would read another way.
     // (Not const: LibRaw's sRGB curve is made in its curve, put back after.)
     bool dng_tiles(const uint8_t* file, size_t size, dngtiles::Prepared& p, std::string& error)
     {
@@ -625,7 +627,7 @@ public:
             if (!std::all_of(have, have + n, [](bool h) { return h; }))
                 return error = "a lossy DNG without a curve for each colour", false;
         }
-        else if (name == "deflate_dng_load_raw()" || name == "uncompressed_fp_dng_load_raw()")
+        else if (name == "deflate_dng_load_raw()" || name == "uncompressed_fp_dng_load_raw()" || name == "jxl_dng_load_raw_placeholder()")
         {
             const tiff_ifd_t* ifd = nullptr;  // the raw's, as LibRaw's find_ifd_by_offset finds it
             for (unsigned i = 0; i < libraw_internal_data.identify_data.tiff_nifds && i < LIBRAW_IFD_MAXCOUNT; ++i)
@@ -634,20 +636,33 @@ public:
                     ifd = &tiff_ifd[i];
                     break;
                 }
-            const bool deflated = name == "deflate_dng_load_raw()";
-            if (!ifd || ifd->samples != int(n) || u.tiff_samples != n || (n != 1 && n != 3) || ifd->sample_format != 3)
-                return error = "floats other than a sample a photosite or three", false;
+            const bool jxl = name == "jxl_dng_load_raw_placeholder()", deflated = name == "deflate_dng_load_raw()";
+            if (!ifd || ifd->samples != int(n) || u.tiff_samples != n || (n != 1 && n != 3))
+                return error = "other than a sample a photosite or three", false;
             // Tiles as LibRaw's loaders for floats take them, as tiles() does.
             const bool tiled = u.tile_width <= sz.raw_width && u.tile_length <= sz.raw_height;
             if (tiled != (u.tile_length < INT_MAX) || (ifd->rows_per_strip > 0 && ifd->rows_per_strip < int(sz.raw_height) && ifd->strip_byte_counts_count > 0))
-                return error = "floats in strips", false;
-            p.format = deflated ? dngtiles::Format::deflated : dngtiles::Format::floats;
+                return error = "strips", false;
             p.width = sz.raw_width, p.height = sz.raw_height;
-            p.bytes = (ifd->bps + 7) / 8;
             p.big_endian = u.order != 0x4949;
-            p.factor = !deflated ? 1 : ifd->predictor == 34894 ? 2 : ifd->predictor == 34895 ? 4 : 1;
-            if ((deflated && ifd->bps % 8) || p.bytes < 2 || p.bytes > 4 || p.tile_w % p.factor)
-                return error = "floats of " + std::to_string(ifd->bps) + " bits", false;
+            if (jxl)
+            {
+                const ushort* curve = imgdata.color.curve;
+                for (int v = 0; v < 0x10000; ++v)
+                    if (curve[v] != v)
+                        return error = "JPEG XL with a linearisation table", false;
+                p.format = dngtiles::Format::jxl;
+            }
+            else
+            {
+                if (ifd->sample_format != 3)
+                    return error = "integers deflated", false;
+                p.format = deflated ? dngtiles::Format::deflated : dngtiles::Format::floats;
+                p.bytes = (ifd->bps + 7) / 8;
+                p.factor = !deflated ? 1 : ifd->predictor == 34894 ? 2 : ifd->predictor == 34895 ? 4 : 1;
+                if ((deflated && ifd->bps % 8) || p.bytes < 2 || p.bytes > 4 || p.tile_w % p.factor)
+                    return error = "floats of " + std::to_string(ifd->bps) + " bits", false;
+            }
             p.offsets = tiles(file, size, p.across, error);
             // How long each tile is: a table of them where there are more than one.
             const FileReader r{file, size, p.big_endian};
@@ -667,10 +682,12 @@ public:
     // active area alone with nothing over 65535; floats', as its
     // convertFloatToInt makes them (its defaults): scaled to 16383 at the
     // greatest where that's outside 4096..32767, the levels with them, held
-    // at 0 and truncated.
+    // at 0 and truncated. JPEG XL's as they are.
     bool unpack_tiles(const dngtiles::Prepared& p, std::vector<uint16_t>& out, std::string& error)
     {
         auto& col = imgdata.color;
+        if (p.format == dngtiles::Format::jxl)
+            return dngtiles::decode(p, out, error);
         if (p.format == dngtiles::Format::lossy)
         {
             if (!dngtiles::decode(p, out, error))
@@ -978,8 +995,14 @@ void check_unpack(const uint8_t* file, size_t size, const std::string& path)
     if (ok)
         mine.black_from_masked(ours);
     const gint64 t1 = g_get_monotonic_time();
-    if (theirs.unpack() != LIBRAW_SUCCESS)
+    const std::string loader = theirs.loader();
+    if (const int r = theirs.unpack(); r != LIBRAW_SUCCESS)
+    {
+        const std::string verdict = ok ? "ours alone" : "not ours: " + error;
+        std::fprintf(stderr, "rawcheck: %s %s; ours %.0f ms, LibRaw's unpack fails (%s, %s)\n", path.c_str(), verdict.c_str(), (t1 - t0) / 1000.0,
+                     loader.c_str(), libraw_strerror(r));
         return;
+    }
     const gint64 t2 = g_get_monotonic_time();
     const auto& sz = theirs.imgdata.sizes;
     const auto& rd = theirs.imgdata.rawdata;

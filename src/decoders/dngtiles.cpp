@@ -73,42 +73,74 @@ bool first_error(const std::vector<std::string>& errors, std::string& error)
     return true;
 }
 
+// Tile k's samples, `components` a pixel: a lossy DNG's JPEG through each
+// colour's curve; a JPEG XL's as stored, 16 bits (no reference says how
+// another depth would be scaled), on threads of the decoder's own when
+// `threaded`.
+bool tile_samples(const Prepared& p, size_t k, std::vector<uint16_t>& s, int& w, int& h, int& components, std::string& error, bool threaded)
+{
+    if (p.offsets[k] >= p.size)
+        return error = "past the file's end", false;
+    const uint8_t* data = p.file + p.offsets[k];
+    if (p.format == Format::lossy)
+    {
+#ifdef HAVE_JPEG
+        std::vector<uint8_t> bytes;
+        if (!decode_jpeg_samples(data, p.size - p.offsets[k], bytes, w, h, components, error))
+            return false;
+        if (unsigned(components) != p.samples)
+            return error = "a JPEG of " + std::to_string(components) + " components", false;
+        s.resize(bytes.size());
+        for (size_t i = 0; i < bytes.size(); ++i)
+            s[i] = p.curves[i % p.samples * 256 + bytes[i]];
+        return true;
+#else
+        return error = "lossy DNGs need JPEG support", false;
+#endif
+    }
+#ifdef HAVE_JXL
+    int bits = 0;
+    if (p.lengths[k] > p.size - p.offsets[k])
+        return error = "past the file's end", false;
+    if (!decode_jxl_samples(data, size_t(p.lengths[k]), s, w, h, components, bits, error, threaded))
+        return false;
+    if (bits != 16)
+        return error = "JPEG XL of " + (bits ? std::to_string(bits) + "-bit integers" : std::string("floats")), false;
+    return true;
+#else
+    (void)threaded;
+    return error = "JPEG XL DNGs need JPEG XL support", false;
+#endif
+}
+
 }  // namespace
 
 bool decode(const Prepared& p, std::vector<uint16_t>& out, std::string& error)
 {
-#ifdef HAVE_JPEG
-    if (p.format != Format::lossy || p.curves.size() < size_t(p.samples) * 256)
+    if ((p.format != Format::lossy && p.format != Format::jxl) || (p.format == Format::lossy && p.curves.size() < size_t(p.samples) * 256) ||
+        (p.format == Format::jxl && p.lengths.size() != p.offsets.size()))
         return error = "not prepared", false;
     out.assign(size_t(p.width) * p.height * p.samples, 0);
     std::vector<std::string> errors(p.offsets.size());
+    // A tile a thread; one alone (a strip) on the decoder's own threads.
     parallel(p.offsets.size(),
              [&](size_t k)
              {
-                 std::vector<uint8_t> s;
+                 std::vector<uint16_t> s;
                  int w = 0, h = 0, components = 0;
-                 if (p.offsets[k] >= p.size || !decode_jpeg_samples(p.file + p.offsets[k], p.size - p.offsets[k], s, w, h, components, errors[k]))
+                 if (!tile_samples(p, k, s, w, h, components, errors[k], p.offsets.size() == 1))
                      return;
                  if (unsigned(components) != p.samples)
                  {
-                     errors[k] = "a JPEG of " + std::to_string(components) + " components";
+                     errors[k] = std::to_string(components) + " components";
                      return;
                  }
                  const Place at = place(p, k);
                  const unsigned n = p.samples, rows = std::min(at.rows, unsigned(h)), cols = std::min(at.cols, unsigned(w));
                  for (unsigned y = 0; y < rows; ++y)
-                 {
-                     const uint8_t* i = s.data() + size_t(y) * w * n;
-                     uint16_t* o = out.data() + (size_t(at.y + y) * p.width + at.x) * n;
-                     for (unsigned x = 0; x < cols * n; ++x)
-                         o[x] = p.curves[x % n * 256 + i[x]];
-                 }
+                     std::copy_n(s.data() + size_t(y) * w * n, size_t(cols) * n, out.data() + (size_t(at.y + y) * p.width + at.x) * n);
              });
     return first_error(errors, error);
-#else
-    (void)p, (void)out;
-    return error = "lossy DNGs need JPEG support", false;
-#endif
 }
 
 bool decode(const Prepared& p, std::vector<float>& out, float& largest, std::string& error)

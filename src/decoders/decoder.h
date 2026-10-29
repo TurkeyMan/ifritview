@@ -181,6 +181,14 @@ bool decode_jpeg_samples(const uint8_t* data, size_t size, std::vector<uint8_t>&
                          int& components, std::string& error);
 #endif
 
+#ifdef HAVE_JXL
+// The samples as stored, `channels` a pixel, 16 bits each (as libjxl gives
+// them: scaled to 65535 from `bits` bits; 0 for floats); on threads of its
+// own when `threaded`.
+bool decode_jxl_samples(const uint8_t* data, size_t size, std::vector<uint16_t>& samples, int& width, int& height, int& channels, int& bits,
+                        std::string& error, bool threaded = true);
+#endif
+
 #ifdef HAVE_IPTC
 void read_iptc_jpeg(const uint8_t* data, size_t size, Image& out);
 void read_iptc_blob(const uint8_t* data, size_t size, Image& out);
