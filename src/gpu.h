@@ -8,12 +8,17 @@
 
 #include "pixel_buffer.h"
 
+#include <cstdint>
+
 #include <string>
 
 struct Image;
 
 namespace gpu
 {
+// The most a buffer of a raw's readout (its samples, its stream) holds:
+// what every device gives a shader's storage buffer.
+constexpr uint64_t kMaxBuffer = uint64_t(128) << 20;
 
 // A context could be made (tried once, on first use). IFRIT_NO_GPU=1 says no.
 bool available();

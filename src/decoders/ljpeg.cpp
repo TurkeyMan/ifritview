@@ -1,5 +1,6 @@
 #include "ljpeg.h"
 
+#include "../bytes.h"
 #include "../parallel.h"
 
 #include <algorithm>
@@ -9,25 +10,10 @@
 #include <cstring>
 #include <thread>
 
-#ifdef _MSC_VER
-#include <stdlib.h>
-#endif
-
 namespace ljpeg
 {
 namespace
 {
-
-uint64_t load_be64(const uint8_t* p)
-{
-    uint64_t v;
-    std::memcpy(&v, p, 8);
-#ifdef _MSC_VER
-    return _byteswap_uint64(v);
-#else
-    return __builtin_bswap64(v);
-#endif
-}
 
 bool build_table(const uint8_t counts[16], const uint8_t* symbols, size_t n, Table& t)
 {
@@ -75,7 +61,7 @@ struct Stream
 // one-bit symbol and goes on (it's a deterministic path all the same).
 inline bool next(const Stream& s, uint64_t& pos, int c, int& diff)
 {
-    uint64_t w = load_be64(s.bits + (pos >> 3)) << (pos & 7);
+    uint64_t w = be64(s.bits + (pos >> 3)) << (pos & 7);
     const Table& t = *s.table[c];
     const uint16_t e = t.fast[w >> (64 - Table::kFast)];
     unsigned len = e >> 8, size = e & 0xff;

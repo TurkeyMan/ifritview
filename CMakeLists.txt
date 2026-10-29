@@ -55,6 +55,7 @@ add_library(ifrit_core STATIC
   src/white_balance.cpp
   src/decoders/decoder.cpp
   src/decoders/icc.cpp
+  src/decoders/crx.cpp
   src/decoders/ljpeg.cpp
   src/decoders/dng_opcodes.cpp
   src/decoders/phase_one.cpp

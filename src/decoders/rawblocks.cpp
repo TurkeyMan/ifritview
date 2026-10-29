@@ -1,5 +1,6 @@
 #include "rawblocks.h"
 
+#include "../gpu.h"
 #include "../parallel.h"
 
 #include <algorithm>
@@ -317,7 +318,7 @@ void decode(const Prepared& p, std::vector<uint16_t>& readout, unsigned threads)
 
 bool fits_gpu(const Prepared& p)
 {
-    return uint64_t(p.readout_w) * p.readout_h * 2 <= (uint64_t(128) << 20) && p.extent() <= (uint64_t(256) << 20);
+    return uint64_t(p.readout_w) * p.readout_h * 2 <= gpu::kMaxBuffer && p.extent() <= (uint64_t(256) << 20);
 }
 
 bool written(const Prepared& p, int x, int y)

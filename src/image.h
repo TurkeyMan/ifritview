@@ -39,14 +39,18 @@ struct RawMosaic
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
     // Or, with `data` null, the readout as the file has it, for the GPU to
     // decode: its lossless JPEG prepared (ljpeg.h), its blocks (rawblocks.h)
-    // or its samples stored uncompressed (rawpacked.h); how that lays out
-    // (Canon's slices, a DNG's tiles), where the active area sits in it, and
-    // where the sensor is masked (the black level, measured as LibRaw does).
+    // or its samples stored uncompressed (rawpacked.h), or decoded already as
+    // a CR3's planes (crx.h); how that lays out (Canon's slices, a DNG's
+    // tiles), where the active area sits in it, and where the sensor is
+    // masked (the black level, measured as LibRaw does).
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
         std::shared_ptr<const rawpacked::Prepared> packed;  // or the readout uncompressed, for the GPU to unpack
         std::shared_ptr<const rawblocks::Prepared> blocks;  // or its blocks, for the GPU to decode
+        // Or its samples decoded already, a plane each place in the 2 x 2 (a
+        // CR3's), for the GPU to put together.
+        std::shared_ptr<const std::vector<uint16_t>> planes;
         int readout_w = 0, readout_h = 0;
         unsigned slices[3] = {};  // how many, each one's width, the last one's (none: rows as they come)
         int left = 0, top = 0;    // the active area's corner in the readout
@@ -62,6 +66,8 @@ struct RawMosaic
         // ljpeg.hlsli's readout_index).
         size_t index(unsigned x, unsigned y) const
         {
+            if (planes)
+                return ((size_t(y & 1) * 2 + (x & 1)) * unsigned(readout_h / 2) + y / 2) * unsigned(readout_w / 2) + x / 2;
             if (tile[0])
             {
                 const unsigned tx = x / tile[0], ty = y / tile[1];

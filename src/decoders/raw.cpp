@@ -1,7 +1,9 @@
 #include "../i18n.h"
 #include "../lens_database.h"
+#include "../gpu.h"
 #include "../parallel.h"
 #include "../platform.h"
+#include "crx.h"
 #include "decoder.h"
 #include "dng_opcodes.h"
 #include "ljpeg.h"
@@ -573,6 +575,30 @@ public:
         return rawblocks::prepare(file, size, uint64_t(u.data_offset), imgdata.color.curve, p, error);
     }
 
+    // A CR3's raw track (crx.h), the one LibRaw chose. False for others; and,
+    // with why, for one crx doesn't take.
+    bool crx(const uint8_t* file, size_t size, crx::Prepared& p, std::string& error) const
+    {
+        if (loader() != "crxLoadRaw()")
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        if (u.crx_track_selected < 0 || u.crx_track_selected >= LIBRAW_CRXTRACKS_MAXCOUNT || u.data_offset < 0 || u.data_size < 0)
+            return error = "no CR3 track chosen", false;
+        const crx_data_header_t& d = u.crx_header[u.crx_track_selected];
+        if (d.f_width != int(imgdata.sizes.raw_width) || d.f_height != int(imgdata.sizes.raw_height))
+            return error = "a readout laid out another way", false;
+        crx::Header h;
+        h.version = d.version;
+        h.width = d.f_width, h.height = d.f_height;
+        h.tile_w = d.tileWidth, h.tile_h = d.tileHeight;
+        h.bits = d.nBits;
+        h.planes = d.nPlanes, h.cfa = d.cfaLayout;
+        h.encoding = d.encType, h.levels = d.imageLevels;
+        h.header_size = uint32_t(d.mdatHdrSize);
+        h.offset = uint64_t(u.data_offset), h.size = uint64_t(u.data_size);
+        return crx::prepare(file, size, h, p, error);
+    }
+
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
     // which formula and hue for this camera and firmware, and sraw_mul.
     void canon_ycc(RawMosaic::Ycc& y) const
@@ -680,8 +706,8 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
 }
 
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
-// in blocks (rawblocks), one stored uncompressed (rawpacked), a NEF's, a
-// DNG's or a CR2's lossless JPEG. False for others, and (with why) for one of those
+// in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), a
+// NEF's, a DNG's or a CR2's lossless JPEG. False for others, and (with why) for one of those
 // laid out in a way this doesn't take. `blocks`: a raw in blocks' layout,
 // which says what of the readout LibRaw writes (the rest it leaves as it is).
 bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
@@ -698,6 +724,14 @@ bool unpack_here(const RawAccess& raw, const uint8_t* file, size_t size, std::ve
     if (rawpacked::Prepared packed; raw.packed(file, size, packed, error))
     {
         rawpacked::unpack(packed, out);
+        return true;
+    }
+    if (crx::Prepared cr3; error.empty() && raw.crx(file, size, cr3, error))
+    {
+        std::vector<uint16_t> planes;
+        if (!crx::decode(cr3, planes, error))
+            return false;
+        crx::readout(cr3, planes, out);
         return true;
     }
     if (!error.empty())
@@ -940,7 +974,8 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
         return decode_linear(raw, out, error, ycc);
     }
-    // A CR2, a NEF or a raw in blocks on the GPU, or here on every core; the rest by LibRaw.
+    // A CR2, a NEF or a raw in blocks on the GPU (a CR3 put together there),
+    // or here on every core; the rest by LibRaw.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
     std::string ours_error;
@@ -990,6 +1025,19 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         stream = raw.readout_stream(false);
         stream->blocks = std::move(blocks);
         stream->file = file_bytes_owner(), stream->file_size = size;
+    }
+    else if (crx::Prepared cr3;
+             decode_options().gpu_decode && raw.crx(file, size, cr3, ours_error) && uint64_t(cr3.header.width) * cr3.header.height * 2 <= gpu::kMaxBuffer)
+    {
+        // A CR3 decoded here on every core, a plane each place in the 2 x 2
+        // (at most the 128 MB the GPU takes); the GPU puts them together and
+        // measures the black.
+        auto planes = std::make_shared<std::vector<uint16_t>>();
+        if (crx::decode(cr3, *planes, ours_error))
+        {
+            stream = raw.readout_stream(true);
+            stream->planes = std::move(planes);
+        }
     }
     if (stream)
         ;  // decoded on the GPU

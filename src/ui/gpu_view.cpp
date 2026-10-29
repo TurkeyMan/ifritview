@@ -6,6 +6,7 @@
 #include "../decoders/ljpeg.h"
 #include "../decoders/rawblocks.h"
 #include "../decoders/rawpacked.h"
+#include "../gpu.h"
 #include "../image.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
@@ -48,7 +49,7 @@ struct LjpegParams
     int32_t rect[4];
     uint32_t mosaic_w, mosaic_h, scheme, curved;
     uint32_t initial[4];
-    uint32_t tile_w, tile_h, tiles_across, unused;
+    uint32_t tile_w, tile_h, tiles_across, planes;
 };
 static_assert(sizeof(LjpegParams) == 128, "ljpeg.hlsli's layout");
 
@@ -400,6 +401,7 @@ LjpegParams readout_params(const RawMosaic& m)
     p.readout_w = uint32_t(st.readout_w), p.readout_h = uint32_t(st.readout_h);
     p.slice_n = st.slices[0], p.slice_w = st.slices[1], p.slice_last = st.slices[2];
     p.tile_w = st.tile[0], p.tile_h = st.tile[1], p.tiles_across = st.tile[2];
+    p.planes = st.planes ? 1 : 0;
     p.left = uint32_t(st.left), p.top = uint32_t(st.top);
     p.filters = st.filters;
     p.mosaic_w = uint32_t(m.width), p.mosaic_h = uint32_t(m.height);
@@ -576,6 +578,8 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         return unpack_stream(m, sites, levels, error);
     if (st.blocks)
         return decode_blocks(m, sites, levels, error);
+    if (st.planes)
+        return assemble_planes(m, sites, levels, error);
     const ljpeg::Prepared& j = *st.jpeg;
     if (decode_on_cpu())
     {
@@ -605,7 +609,7 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         chunks += n;
     }
     std::memcpy(meta.data() + part_words, j.tables.data(), j.tables.size() * sizeof(ljpeg::Table));
-    if (j.predictor != 1 || row % 2 || j.components > 4 || samples * 2 > (uint64_t(128) << 20) || j.bits.size() * 8 >= (uint64_t(1) << 32) ||
+    if (j.predictor != 1 || row % 2 || j.components > 4 || samples * 2 > gpu::kMaxBuffer || j.bits.size() * 8 >= (uint64_t(1) << 32) ||
         meta.size() >= (uint64_t(1) << 30) || j.height > 65535 || j.parts.size() > 65535 || chunks * j.components > 64 * 65535)
     {
         error = "a raw too big, or laid out in a way, the GPU doesn't decode";
@@ -710,7 +714,7 @@ bool GpuView::unpack_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     // sample's bits are read three bytes at a time, and whole groups.
     const size_t start = pk.offset & ~size_t(3), lead = pk.offset - start;
     const uint64_t samples = uint64_t(pk.readout_w) * pk.readout_h, words = (samples + 1) / 2;
-    if (lead + pk.bytes + 16 > (uint64_t(128) << 20) || words * 4 > (uint64_t(128) << 20) || words > uint64_t(65536) * 65535 ||
+    if (lead + pk.bytes + 16 > gpu::kMaxBuffer || words * 4 > gpu::kMaxBuffer || words > uint64_t(65536) * 65535 ||
         uint64_t(lead) * 8 + uint64_t(pk.row_bits) * pk.readout_h >= (uint64_t(1) << 32))
         return error = "a raw too big for the GPU to unpack", false;
     auto stored = upload_bytes(pk.file + start, lead + pk.bytes, 16);
@@ -799,6 +803,28 @@ bool GpuView::decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
                       [&](std::vector<uint16_t>& out, std::string&)
                       {
                           rawblocks::decode(b, out);
+                          return true;
+                      });
+    return true;
+}
+
+bool GpuView::assemble_planes(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
+{
+    const std::vector<uint16_t>& planes = *m.stream->planes;
+    if (decode_on_cpu())
+        return upload_decoded(*device_, m, planes, sites, levels, error);
+    if (planes.size() * 2 > gpu::kMaxBuffer)
+        return error = "a raw too big for the GPU", false;
+    rap::gpu::buffer_ptr values;
+    if (!readout_buffers(m, planes.size(), values, levels, sites, error))
+        return false;
+    device_->upload(values, std::as_bytes(std::span(planes)));
+    finish_readout(m, readout_params(m), {}, values, levels, sites);
+    if (raw_check())
+        check_readout(m, values, levels, sites,
+                      [&](std::vector<uint16_t>& out, std::string&)
+                      {
+                          out = planes;
                           return true;
                       });
     return true;
