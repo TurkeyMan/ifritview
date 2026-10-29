@@ -99,13 +99,16 @@ struct RawMosaic
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height
     int orientation = 1;         // EXIF 1..8: how the camera was held
-    // A DNG's corrections (its lens shading, vignetting), as the develop
-    // reads them (dng_opcodes.h); null when it has none.
+    // A raw's own corrections (a DNG's lens shading and vignetting, a Phase
+    // One's black and sensor corrections), as the develop reads them
+    // (dng_opcodes.h); null when it has none.
     std::shared_ptr<const std::vector<uint32_t>> corrections;
+    // IFRIT_GPU_CORRECTIONS_CHECK: the active area as LibRaw corrects it,
+    // for the develop's corrections to be compared with.
+    std::shared_ptr<const std::vector<uint16_t>> corrected;
     // How it was taken, for lensfun's corrections where it has none of its
-    // own (lens_database.h: the app puts them in `corrections`, `lensfun`).
+    // own for the lens (lens_database.h: the app puts them in `corrections`).
     std::shared_ptr<const lenses::Shot> shot;
-    bool lensfun = false;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be

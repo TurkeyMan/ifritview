@@ -403,6 +403,15 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
             ok = try_decode(*d, path, out, error, part);
         }
     };
+#ifdef HAVE_RAW
+    // A raw in a TIFF can be named .tif (a Phase One's): the raw decoder's,
+    // which knows it by its content, before any by its name.
+    if (raw_decoder().sniff(head, head_len))
+    {
+        tried.insert(&raw_decoder());
+        ok = try_decode(raw_decoder(), path, out, error, part);
+    }
+#endif
     attempt(decoders());
     // Nothing built in took it, but a plugin may: wait for them to load
     // (only such files ever wait) and try theirs.

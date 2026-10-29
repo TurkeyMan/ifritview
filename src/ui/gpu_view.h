@@ -149,6 +149,9 @@ private:
                         const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites);
     void check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& values, const rap::gpu::buffer_ptr& levels, const rap::gpu::texture_ptr& sites,
                        const std::function<bool(std::vector<uint16_t>&, std::string&)>& cpu);
+    // IFRIT_GPU_CORRECTIONS_CHECK: the corrected mosaic (develop.hlsl's CORRECT)
+    // read back and compared with LibRaw's (RawMosaic::corrected).
+    void check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr& corrected);
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(Source& s, int n);
     // The level the measures and the histogram count: at most 2048 pixels.
@@ -208,6 +211,7 @@ private:
     float difference_wb_[3] = {};
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;
+    rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)
     rap::gpu::texture_ptr frames_[2];

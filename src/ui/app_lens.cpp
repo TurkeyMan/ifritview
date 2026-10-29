@@ -62,11 +62,11 @@ void App::correct_lens(bool redevelop)
     // likely in before the develop is.
     lenses::want(&App::lenses_arrived);
     const std::shared_ptr<const RawMosaic> m = image_->mosaic;
-    if (!m || !m->shot || m->channels != 1 || m->ycc.block_h || (m->corrections && !m->lensfun))
-        return;  // not developed here, not a Bayer mosaic, or it has its own (a DNG's)
+    if (!m || !m->shot || m->channels != 1 || m->ycc.block_h)
+        return;  // not developed here, not a Bayer mosaic, or it corrects its lens itself (a DNG)
     const lenses::Shot& shot = *m->shot;
     std::string what;
-    std::shared_ptr<const std::vector<uint32_t>> words;
+    std::vector<uint32_t> words;
     const std::shared_ptr<const lenses::Database> db = lenses::database();
     if (!cfg_.lens_correction)
         what = "off";
@@ -88,18 +88,19 @@ void App::correct_lens(bool redevelop)
             else
             {
                 what += c.summary;
-                words = std::make_shared<const std::vector<uint32_t>>(std::move(c.words));
+                words = std::move(c.words);
             }
         }
     }
     if (note(*image_, what))
         platform::trace("lenses: %s", what.c_str());
-    const bool same = words ? m->lensfun && m->corrections && *m->corrections == *words : !m->lensfun;
+    // In with the raw's own (a Phase One's sensor's), in place of any before.
+    std::vector<uint32_t> all = dng::with_lens(m->corrections ? *m->corrections : std::vector<uint32_t>(), words);
+    const bool same = m->corrections ? *m->corrections == all : all.empty();
     if (!same)
     {
         auto changed = std::make_shared<RawMosaic>(*m);
-        changed->corrections = words;
-        changed->lensfun = words != nullptr;
+        changed->corrections = all.empty() ? nullptr : std::make_shared<const std::vector<uint32_t>>(std::move(all));
         image_->mosaic = std::move(changed);
         image_->pixels_stale = true;  // any read back were of the develop before
         if (redevelop)

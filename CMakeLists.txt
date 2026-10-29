@@ -57,6 +57,7 @@ add_library(ifrit_core STATIC
   src/decoders/icc.cpp
   src/decoders/ljpeg.cpp
   src/decoders/dng_opcodes.cpp
+  src/decoders/phase_one.cpp
   src/decoders/rawblocks.cpp
   src/decoders/rawpacked.cpp
   src/lens_database.cpp
@@ -383,6 +384,7 @@ if(RAPPORT_SHADER_COMPILER)
   endforeach()
   rapport_add_shader(ifritview NAME develop_linear SOURCE src/shaders/develop.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME develop_ycc SOURCE src/shaders/develop.hlsl DEFINES YCC DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_correct SOURCE src/shaders/develop.hlsl DEFINES CORRECT DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME warp SOURCE src/shaders/warp.hlsl)
   foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
           ljpeg_black unpack raw_blocks)
