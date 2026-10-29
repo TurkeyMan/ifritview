@@ -161,15 +161,9 @@ void App::preview_lossless()
         show_save_preview(false);  // exactly the image as shown
         return;
     }
-    ++preview_->running;
     std::thread(
-        [this, generation, image = image_, plan, state = preview_]
+        [this, generation, image = image_, plan, state = preview_, running = preview_->start()]
         {
-            struct Done
-            {
-                PreviewState& s;
-                ~Done() { --s.running; }
-            } done{*state};
             platform::lower_thread_priority();
             std::shared_ptr<Image> saved = lossless_preview(*image, *plan);
             const auto difference = std::make_shared<ImageDifference>(compare_images(*image, *saved));
@@ -215,15 +209,9 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
         save_dialog_->set_info("…");
     std::shared_ptr<Image> source = save_source_;
     const Encoder* encoder = &e;
-    ++preview_->running;
     std::thread(
-        [this, generation, source, encoder, o, lossy, state = preview_]
+        [this, generation, source, encoder, o, lossy, state = preview_, running = preview_->start()]
         {
-            struct Done
-            {
-                PreviewState& s;
-                ~Done() { --s.running; }
-            } done{*state};
             std::this_thread::sleep_for(std::chrono::milliseconds(120));  // let a dragged slider settle
             if (state->generation.load() != generation)
                 return;
@@ -344,7 +332,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                                     {
                                         status_message_ = ok ? rap::i18n::format(_("Saved {0}"), name) : rap::i18n::format(_("Save failed: {0}"), error);
                                         if (ok)
-                                            folder_.rescan(cfg_);  // the new file may now be part of the folder
+                                            list_folder({});  // the new file may now be part of the folder
                                         update_status();
                                         update_title();
                                     });

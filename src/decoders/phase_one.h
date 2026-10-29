@@ -25,6 +25,7 @@ struct Sensor
     int raw_w = 0, raw_h = 0;                      // the readout
     int left = 0, top = 0, width = 0, height = 0;  // the active area in it
     int split[2] = {};                             // the column and the row its quarters meet at (ph1.split_col, split_row)
+    int black = 0;                                 // ph1.t_black
     float temperature = 0;                         // ph1.tag_210
     // Black offsets (LibRaw's ph1_cblack, ph1_rblack): per row of the
     // readout, left and right of the split column; per column, above and

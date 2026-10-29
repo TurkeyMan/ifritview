@@ -8,6 +8,7 @@ IfritView itself is GPL-3.0-or-later (see LICENSE).
   - etcdec, by Sergii Kudlai
   - bc7enc and rgbcx, by Richard Geldreich, Jr. (DDS saving)
   - Octicons, by GitHub (the GitHub mark in About)
+  - lensfun's lens database (downloaded when needed, not included; CC BY-SA 3.0)
 
 ==============================================================================
 rapport (UI toolkit)
@@ -510,3 +511,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+==============================================================================
+lensfun's lens database (downloaded when needed, not included; CC BY-SA 3.0)
+==============================================================================
+
+IfritView's lens corrections (distortion, lateral chromatic aberration and
+vignetting, for raws that carry none of their own) come from the lensfun
+project's lens database: https://lensfun.github.io/
+
+The database isn't part of IfritView. When a raw first needs it (and lens
+downloads are allowed in the settings), IfritView downloads it whole from
+lensfun's site, as lensfun's own lensfun-update-data does, and keeps it in
+the user's cache folder. IfritView reads the database; it doesn't use or
+include lensfun's library.
+
+The lensfun database is copyright the lensfun contributors, and licensed
+under the Creative Commons Attribution-ShareAlike 3.0 Unported licence
+(CC BY-SA 3.0): https://creativecommons.org/licenses/by-sa/3.0/

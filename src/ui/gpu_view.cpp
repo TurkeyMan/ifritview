@@ -526,7 +526,8 @@ void GpuView::check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& valu
 
 // LibRaw rounds down after each of its corrections, the develop not at all:
 // how far apart they are, over the whole and away from the edges (where
-// LibRaw reads the margins the develop doesn't have), and the farthest.
+// LibRaw reads the margins the develop doesn't have), and the farthest; up
+// to saturation, which the develop clips at.
 void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr& corrected)
 {
     const gint64 t0 = g_get_monotonic_time();
@@ -548,7 +549,8 @@ void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr&
         for (int x = 0; x < m.width; ++x)
         {
             const size_t i = size_t(y) * m.width + x;
-            const float d = std::min(ours[i], 65535.f) - float(theirs[i]), a = std::fabs(d);  // LibRaw's hold at 65535
+            const float white = m.white - m.black[(y & 1) * 2 + (x & 1)];
+            const float d = std::min(ours[i], white) - std::min(float(theirs[i]), white), a = std::fabs(d);
             const int inner = x >= kEdge && y >= kEdge && x < m.width - kEdge && y < m.height - kEdge;
             sum += d;
             for (int k = 0; k <= inner; ++k)
@@ -858,16 +860,19 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             p.size[3] = 1;
         }
         // Its own corrections of the mosaic (OpcodeList2's gain maps, a Phase
-        // One's readout corrections), made once a photosite into a mosaic of
-        // the same kind, which the develop reads as it would the raw's.
+        // One's readout corrections), made once a photosite into a mosaic
+        // the develop reads as it would the raw's: whole data units, as
+        // LibRaw makes a Phase One's; the gain maps' fractions kept (their
+        // gains lift the shadows of a phone's 10 bits) as halves.
         if (corrections && ((*m->corrections)[0] || (*m->corrections)[3]))
         {
+            const bool whole = (*m->corrections)[3];
             rap::gpu::pass c;
             c.program = develop_correct_;
             c.inputs = {sites};
             c.buffers = {levels ? levels : histogram_, corrections};
             c.uniforms = bytes(p);
-            c.target = device_->create({m->width, m->height, rap::gpu::format::r16, 1, true});
+            c.target = device_->create({m->width, m->height, whole ? rap::gpu::format::r16 : rap::gpu::format::r16f, 1, true});
             if (!c.target)
             {
                 error = "too big for the GPU";

@@ -140,15 +140,9 @@ void App::open_diff(const std::string& a_path, const std::string& b_path, const 
     status_message_ = busy_message_ = _("Comparing…");
     update_status();
     const uint64_t generation = ++load_generation_;
-    ++preview_->running;  // waited for on exit, as a save preview is
     std::thread(
-        [this, generation, a_path, b_path, a_label, b_label, state = preview_]
+        [this, generation, a_path, b_path, a_label, b_label, running = preview_->start()]
         {
-            struct Done
-            {
-                PreviewState& s;
-                ~Done() { --s.running; }
-            } done{*state};
             auto a = std::make_shared<Image>(), b = std::make_shared<Image>();
             std::string error;
             // Compared pixel for pixel, here: raws developed on the CPU, with

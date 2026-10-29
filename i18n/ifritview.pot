@@ -1183,6 +1183,14 @@ msgstr ""
 msgid "Apply edits from XMP sidecars (exposure, crop, rotation)"
 msgstr ""
 
+#: src/ui/settings.cpp
+msgid "Download lens corrections (lensfun's database, when a raw first needs it)"
+msgstr ""
+
+#: src/ui/settings.cpp
+msgid "The whole database is fetched from lensfun's site (about 0.5 MB), never a single lens, so it doesn't say which lenses you have; then checked for a newer one at most once a month. Off: only a copy already downloaded is used"
+msgstr ""
+
 #: src/ui/app.cpp:301
 msgid "Show A (Tab flips A and B)"
 msgstr ""
@@ -1568,6 +1576,10 @@ msgstr ""
 msgid "Wrap around at the end of the folder"
 msgstr ""
 
+#: src/ui/settings.cpp:349
+msgid "Interleave subfolders with images"
+msgstr ""
+
 #: src/ui/settings.cpp:304
 msgid "Include hidden files"
 msgstr ""
@@ -1883,6 +1895,10 @@ msgstr ""
 msgid "Third-party notices: the friends who lent a hand"
 msgstr ""
 
+#: src/ui/settings.cpp
+msgid "Lens corrections from the lensfun project's database (CC BY-SA 3.0)"
+msgstr ""
+
 #: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr ""
@@ -2010,6 +2026,14 @@ msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as de
 msgstr ""
 
 #: src/ui/app.cpp
+msgid "Lens correction"
+msgstr ""
+
+#: src/ui/app.cpp
+msgid "Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, for raws that carry no corrections of their own"
+msgstr ""
+
+#: src/ui/app.cpp
 msgid "Developing with LibRaw…"
 msgstr ""
 
@@ -2019,4 +2043,12 @@ msgstr ""
 
 #: src/ui/app.cpp
 msgid "Can't develop this raw ({0}): showing the camera's embedded JPEG"
+msgstr ""
+
+#: src/decoders/raw.cpp:1265
+msgid "Phase One corrections"
+msgstr ""
+
+#: src/decoders/raw.cpp:1265
+msgid "DNG corrections"
 msgstr ""

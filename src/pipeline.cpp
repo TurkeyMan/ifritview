@@ -444,6 +444,8 @@ USAGE
   ifritview --convert IN OUT [KEY=VALUE...]
                                      shorthand for --process IN save:OUT,KEY=VALUE,...
   ifritview --probe FILE...          decode files and report what they hold, no window
+  ifritview --lenses FILE...         which lens each raw was taken with, and what
+                                     lensfun's database (as cached) corrects of it
   ifritview --formats                list what opens, what saves, and every save setting
   ifritview --plugins                list format plugins, the folders searched, and any not loaded
   ifritview --version | --help

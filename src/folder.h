@@ -1,18 +1,34 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
 struct Config;
 
 // The sorted list of viewable files in one directory (Config::recursive:
-// and in the folders inside it, each folder's own first, then each folder
-// in it the same way), with a cursor. Names are relative to the directory.
+// and in the folders inside it, in order of their paths from it), with a
+// cursor. Names are relative to the directory.
 class Folder
 {
 public:
-    // `path` may be a file (which becomes current if it qualifies) or a
-    // directory (cursor goes to the first file).
+    // A folder's files, listed (on any thread: a big one takes a while),
+    // for adopt(): `dir`'s, and `want`, the file to be current (a file
+    // `opened` by name stays listed even where the list wouldn't have it).
+    struct Listing
+    {
+        std::string dir, want;
+        bool opened = false;
+        std::vector<std::string> files;
+    };
+    // `path` a file's folder, or a directory; `stop` asked as it goes (true: it's no longer wanted).
+    static Listing list(const std::string& path, const Config& cfg, const std::function<bool()>& stop = {});
+    // A listing made the folder: the cursor on `want`; else, the same folder
+    // again, where it was; else on the first.
+    void adopt(Listing listing);
+
+    // list() and adopt() at once. `path` may be a file (which becomes
+    // current if it qualifies) or a directory (cursor goes to the first file).
     void scan(const std::string& path, const Config& cfg);
     // Just this one file, until it's scanned: for showing it before the
     // folder has been listed.

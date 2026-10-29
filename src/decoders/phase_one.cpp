@@ -1,7 +1,8 @@
 #include "phase_one.h"
 
+#include "bytes.h"
+
 #include <algorithm>
-#include <cstring>
 #include <string>
 
 namespace phase_one
@@ -9,34 +10,11 @@ namespace phase_one
 namespace
 {
 
-// The file's bytes in its order (the tags' first two bytes say which);
-// what lies past its end reads 0.
-struct Reader
-{
-    const uint8_t* p;
-    size_t n;
-    bool little;
-    uint32_t u16(size_t at) const
-    {
-        if (at > n || n - at < 2)
-            return 0;
-        return little ? p[at] | p[at + 1] << 8 : p[at] << 8 | p[at + 1];
-    }
-    uint32_t u32(size_t at) const { return little ? u16(at) | u16(at + 2) << 16 : u16(at) << 16 | u16(at + 2); }
-    float f32(size_t at) const
-    {
-        const uint32_t v = u32(at);
-        float f;
-        std::memcpy(&f, &v, 4);
-        return f;
-    }
-};
-
 // A flat field (phase_one_flat_field): gains at points `step` apart from
 // `at` (x, y in the readout) over `span`, a gain a point (luma) or two (red's
 // and blue's: chroma); between them bilinear, as LibRaw steps through them.
 // It makes them over [at, at + span - step), as far as the readout goes.
-void flat_field(const Reader& r, size_t d, bool is_float, int nc, const Sensor& s, std::vector<dng::GainMap>& maps)
+void flat_field(const FileReader& r, size_t d, bool is_float, int nc, const Sensor& s, std::vector<dng::GainMap>& maps)
 {
     uint32_t head[8];
     for (int i = 0; i < 8; ++i)
@@ -109,6 +87,7 @@ dng::Corrections corrections(const Sensor& s)
         said(applied, "black per row and column");
     }
     readout.split[0] = s.split[0] - s.left, readout.split[1] = s.split[1] - s.top;
+    readout.black = s.black;
 
     // The curves, composed: each quarter's table (above left, above right,
     // below left, below right) through each in turn, as they come.
@@ -133,7 +112,7 @@ dng::Corrections corrections(const Sensor& s)
     size_t defects = 0;
 
     // phase_one_correct's walk through the tags.
-    const Reader r{s.file, s.size, s.meta + 1 < s.size && s.file[s.meta] == 'I'};
+    const FileReader r{s.file, s.size, !(s.meta < s.size && s.file[s.meta] == 'I')};  // the tags' first byte says which
     const size_t dir = s.meta + r.u32(s.meta + 8);
     uint32_t entries = s.meta_length ? r.u32(dir) : 0;
     bool qmult_applied = false, qlin_applied = false;

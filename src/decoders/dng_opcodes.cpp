@@ -1,5 +1,7 @@
 #include "dng_opcodes.h"
 
+#include "bytes.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -9,34 +11,10 @@ namespace dng
 namespace
 {
 
-struct Reader
-{
-    const uint8_t* p;
-    size_t n;
-    bool little;
-    bool fits(size_t at, size_t len) const { return at <= n && len <= n - at; }
-    uint16_t u16(size_t at) const
-    {
-        return little ? uint16_t(p[at] | p[at + 1] << 8) : uint16_t(p[at] << 8 | p[at + 1]);
-    }
-    uint32_t u32(size_t at) const
-    {
-        return little ? uint32_t(p[at]) | uint32_t(p[at + 1]) << 8 | uint32_t(p[at + 2]) << 16 | uint32_t(p[at + 3]) << 24
-                      : uint32_t(p[at]) << 24 | uint32_t(p[at + 1]) << 16 | uint32_t(p[at + 2]) << 8 | uint32_t(p[at + 3]);
-    }
-};
-
 // Opcodes are big-endian whatever the file's order.
-uint32_t be32(const uint8_t* p)
-{
-    return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
-}
-
 double be_double(const uint8_t* p)
 {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; ++i)
-        v = v << 8 | p[i];
+    const uint64_t v = be64(p);
     double d;
     std::memcpy(&d, &v, 8);
     return d;
@@ -50,20 +28,13 @@ float be_float(const uint8_t* p)
     return f;
 }
 
-uint32_t bits(float f)
-{
-    uint32_t v;
-    std::memcpy(&v, &f, 4);
-    return v;
-}
-
 struct Ifd
 {
     uint32_t subfile = 0, width = 0, height = 0;
     size_t list[3] = {}, list_size[3] = {};  // OpcodeList1..3: where, how long
 };
 
-void walk(const Reader& r, uint32_t at, std::vector<Ifd>& out, int depth)
+void walk(const FileReader& r, uint32_t at, std::vector<Ifd>& out, int depth)
 {
     for (int guard = 0; at && depth < 4 && guard < 64 && r.fits(at, 2); ++guard)
     {
@@ -147,6 +118,17 @@ const char* name(uint32_t id)
 
 }  // namespace
 
+std::vector<uint32_t> with_lens(std::vector<uint32_t> own, const std::vector<uint32_t>& lens)
+{
+    own.resize(std::max<size_t>(own.size(), 48));
+    for (size_t i = 2; i < 38; ++i)
+        if (i != 3)
+            own[i] = lens.empty() ? 0 : lens[i];
+    if (own.size() == 48 && std::all_of(own.begin(), own.end(), [](uint32_t w) { return w == 0; }))
+        own.clear();
+    return own;
+}
+
 void lay_out(Corrections& c, const std::vector<GainMap>& mosaic, const std::vector<GainMap>& rgb, const Readout* readout)
 {
     std::vector<uint32_t>& w = c.words;
@@ -209,6 +191,7 @@ void lay_out(Corrections& c, const std::vector<GainMap>& mosaic, const std::vect
             w[at + x / 16] |= uint32_t(r.bad_columns[x] & 3) << (x % 16 * 2);
         w[46] = uint32_t(at);
     }
+    w[47] = uint32_t(r.black);
 }
 
 Corrections corrections(const uint8_t* file, size_t size, int width, int height, int active_w, int active_h)
@@ -216,7 +199,7 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
     Corrections c;
     if (size < 8 || !(file[0] == 'I' || file[0] == 'M'))
         return c;
-    const Reader r{file, size, file[0] == 'I'};
+    const FileReader r{file, size, file[0] == 'M'};
     std::vector<Ifd> ifds;
     walk(r, r.u32(4), ifds, 0);
     const Ifd* raw = nullptr;

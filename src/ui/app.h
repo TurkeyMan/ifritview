@@ -56,7 +56,10 @@ public:
     void go_first();
     void go_last();
     void reload();
-    void set_recursive(bool on);  // Config::recursive, from the toolbar
+    void on_dropped(const std::vector<std::string>& paths);  // files or folders dropped on the window
+    void set_recursive(bool on, const std::string& root = {});                    // Config::recursive: the toolbar's toggle, a folder dropped
+    void list_folder(const std::string& path, std::function<void()> then = {});  // on a thread of its own, then folder_listed
+    void folder_listed(Folder::Listing listing, bool again, double ms);
     void toggle_fullscreen();
     void zoom_in();
     void zoom_out();
@@ -97,6 +100,7 @@ public:
     void script_compare(const std::string& how);
     void script_export(const std::string& path);
     void script_instead(const std::string& what);
+    void script_lens(bool on);  // the G panel's lens correction, for this run (not saved)
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
     void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 
@@ -206,6 +210,14 @@ private:
     std::shared_ptr<Image> instead_image_;  // the shown raw's, while it's shown instead
     uint64_t instead_request_ = 0;
     bool syncing_instead_ = false;  // its checks set here, not by the user
+    // Lens corrections from lensfun's database (lens_store.h) for the raw
+    // shown, when it has none of its own and the G panel's check is on: in
+    // its mosaic before it's developed, or developed again (`redevelop`)
+    // when the database arrives or the check changes (app_lens.cpp).
+    void correct_lens(bool redevelop);
+    void set_lens_correction(bool on, bool save);  // the check: saved, or (scripts) for this run
+    static void lenses_arrived();  // the database came in: the raw shown gets them
+    rap::check* lens_check_ = nullptr;
     void sync_white_balance();     // the sliders to the image's
     rap::tool_button* smooth_toggle_ = nullptr;
     // The image's 8-bit pixels at its exposure, made again if the GPU's drawing
@@ -311,14 +323,22 @@ private:
     std::shared_ptr<Image> preview_image_;  // the latest preview, compared while its toggle is on
     std::shared_ptr<const ImageDifference> preview_difference_;  // between image_ and preview_image_
     std::map<std::string, EncodeOptions> save_options_;  // per format, between saves
-    // Shared with the preview workers, which may outlive a request: the
-    // latest generation wins, and the app waits for running ones on exit.
-    struct PreviewState
+    // Shared with work on threads of its own, which may outlive a request:
+    // the latest generation wins, and the app waits for running ones on exit.
+    struct Background : std::enable_shared_from_this<Background>
     {
         std::atomic<uint64_t> generation{0};
         std::atomic<int> running{0};
+        // Counted as running until the last copy of this goes (a thread holds it).
+        std::shared_ptr<void> start()
+        {
+            ++running;
+            return std::shared_ptr<void>(nullptr, [self = shared_from_this()](void*) { --self->running; });
+        }
+        void wait_out();  // on exit: the latest generation moved on, those running waited for (a few seconds at most)
     };
-    std::shared_ptr<PreviewState> preview_ = std::make_shared<PreviewState>();
+    std::shared_ptr<Background> preview_ = std::make_shared<Background>();  // previews: a save's, the camera's JPEG, LibRaw's develop, a comparison
+    std::shared_ptr<Background> listing_ = std::make_shared<Background>();  // the folder, listed
     bool refit_after_layout_ = false;
     bool refit_when_laid_out_ = false;  // a fit guessed the chrome: fit again once laid out
     double fitted_scale_ = 0;           // the device scale the window was last fitted at

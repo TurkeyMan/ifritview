@@ -2,6 +2,7 @@
 #include "platform.h"
 #include "first_image.h"
 #include "i18n.h"
+#include "lens_store.h"
 #include "pipeline.h"
 #include "plugins.h"
 #include "probe.h"
@@ -52,7 +53,8 @@ namespace
 // without a human, one step every IFRIT_SCRIPT_MS (default 400). Screenshots:
 // run with RAPPORT_SNAPSHOT=file.png (and RAPPORT_SNAPSHOT_DELAY) set; what a
 // GPU drew isn't in them, but export:file.png writes the image as saving would
-// (instead:jpeg, instead:libraw, instead:none first: the G panel's checks).
+// (instead:jpeg, instead:libraw, instead:none, lens:on, lens:off first: the
+// G panel's checks).
 void run_step(App& app, const std::string& step)
 {
     std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
@@ -93,6 +95,8 @@ void run_step(App& app, const std::string& step)
         app.toggle_histogram();
     else if (step == "copy")
         app.copy_to_clipboard();
+    else if (step.rfind("drop:", 0) == 0)
+        app.on_dropped({step.substr(5)});
     else if (step == "recursive:on" || step == "recursive:off")
         app.set_recursive(step == "recursive:on");
     else if (step == "xmp")
@@ -148,6 +152,8 @@ void run_step(App& app, const std::string& step)
         app.save_as();
     else if (step.rfind("instead:", 0) == 0)
         app.script_instead(step.substr(8));
+    else if (step == "lens:on" || step == "lens:off")
+        app.script_lens(step == "lens:on");
     else if (step.rfind("export:", 0) == 0)
         app.script_export(step.substr(7));
     else if (step.rfind("compare:", 0) == 0)
@@ -202,6 +208,8 @@ int main(int argc, char** argv)
         return plugins::print_report();
     if (argc > 2 && std::strcmp(argv[1], "--probe") == 0)
         return probe(argc - 2, argv + 2);
+    if (argc > 2 && std::strcmp(argv[1], "--lenses") == 0)
+        return lenses::report(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0)
         return process(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--formats") == 0)

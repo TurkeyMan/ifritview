@@ -25,13 +25,16 @@ struct Config
     std::vector<std::string> extensions;  // lowercase, no dot; which files count when cycling a folder
     bool wrap_around = true;              // next after the last image goes to the first
     bool show_hidden = false;
-    bool recursive = false;               // the folders inside too: each folder's own images, then its folders' the same way
+    bool recursive = false;               // the folders inside too, in order of their paths
+    bool interleave_folders = false;      // and the folders inside among a folder's images, by name (else after them)
     int prefetch_ahead = 3;  // images decoded in advance in the browsing direction
     int prefetch_behind = 1;
     int cache_megabytes = 0;        // decoded image cache; 0 = a share of free memory
     std::string raw_mode = "full";  // full | half | preview; half bins 2x2 (fast, no demosaic)
     bool raw_camera_crop = true;    // crop the sensor margins to the camera's own framing
     bool apply_xmp_edits = true;    // honour exposure/crop/orientation from XMP
+    bool lens_correction = true;    // a raw without its own lens corrections takes lensfun's (the G panel's check)
+    bool lens_downloads = true;     // lensfun's database may be fetched (and refreshed) from its site
 
     // Window
     bool fit_window_to_image = true;

@@ -15,7 +15,7 @@ options=('!lto')
 # What the exe and its private core link; the toolkit comes as a plugin
 # chosen for the desktop (GTK 4 on GNOME, Qt 6 on KDE), falling back to
 # GTK 3, which every order includes.
-depends=('cairo' 'exempi' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'json-glib' 'lcms2' 'libexif'
+depends=('bzip2' 'cairo' 'exempi' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'json-glib' 'lcms2' 'libexif'
          'libgcc' 'libgomp' 'libheif' 'libiptcdata' 'libjpeg-turbo' 'libjxl' 'libpng' 'libraw'
          'libstdc++' 'libtiff' 'libwebp' 'zlib' 'zstd')
 makedepends=('cmake' 'git' 'wayland-protocols' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs')

@@ -1,4 +1,4 @@
-// A raw's readout stored uncompressed (RawMosaic::Packed; gpu_view.cpp's
+// A raw's readout stored uncompressed (rawpacked.h; gpu_view.cpp's
 // unpack_stream) unpacked into samples as LibRaw's loaders read it, 16 bits
 // each, two to a word as the ljpeg passes leave theirs (mosaic and
 // ljpeg_black take them from there). A word a thread.

@@ -183,7 +183,8 @@ float4 black_levels()
 
 #ifdef CORRECT
 // The raw's own corrections of its mosaic, each photosite once, into a
-// mosaic of the same kind (unorm 16, its black still in) that the develop
+// mosaic of the same kind (data / 65535, its black still in: unorm 16, or
+// half floats where gains leave fractions, as gpu_view says) that the develop
 // then reads as it would the raw's: the readout's own (a Phase One's) and
 // the gain maps over the mosaic (OpcodeList2, a Phase One's flat fields),
 // exact at every photosite. Made in the develop the demosaic would make
@@ -207,9 +208,9 @@ float mosaic_gain(int x, int y)
 
 // The photosite at (x, y) less its black, data units. With the readout's
 // own corrections (a Phase One's: dng_opcodes.h's Readout), as LibRaw's
-// phase_one_subtract_black and phase_one_correct make them: its black less
-// its row's and its column's offsets, held at 0, then through its quarter's
-// curve.
+// phase_one_subtract_black and phase_one_correct make them: its own black
+// too, less its row's and its column's offsets, held at 0, then through its
+// quarter's curve.
 float level(int x, int y)
 {
     const int i = (y & 1) * 2 + (x & 1);
@@ -217,7 +218,7 @@ float level(int x, int y)
     if (!word(3))
         return d;
     const bool right = x >= int(word(42)), below = y >= int(word(43));
-    int v = int(round(d));
+    int v = int(round(d)) - int(word(47));
     if (word(40))
     {
         const uint r = word(word(40) + y), c = word(word(41) + x);  // int16 pairs
@@ -363,7 +364,9 @@ float4 main(float4 position : SV_Position) : SV_Target
     return (corrected(x, y) + black_level[(y & 1) * 2 + (x & 1)]) / 65535;
 }
 #else
-// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette.
+// OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette;
+// or lensfun's vignetting (pa), the same polynomial as the fall-off to
+// divide out (lens_database.h).
 float3 rgb_gain(int x, int y)
 {
     float3 g = 1;
@@ -373,11 +376,13 @@ float3 rgb_gain(int x, int y)
         const uint d = 48 + (n2 + i) * 16;
         g *= float3(map_gain(d, x, y, 0), map_gain(d, x, y, 1), map_gain(d, x, y, 2));
     }
-    if (word(2))
+    const uint vignette = word(2);
+    if (vignette)
     {
         const float dx = x + 0.5 - word_f(9), dy = y + 0.5 - word_f(10);
         const float r2 = (dx * dx + dy * dy) * word_f(11);
-        g *= 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
+        const float p = 1 + r2 * (word_f(4) + r2 * (word_f(5) + r2 * (word_f(6) + r2 * (word_f(7) + r2 * word_f(8)))));
+        g *= vignette == 2 ? 1 / p : p;
     }
     return g;
 }
@@ -425,9 +430,16 @@ float4 main(float4 position : SV_Position) : SV_Target
         const float other = (6 * m + 2 * diag - 1.5 * far) / 8;  // blue at red, red at blue
         rgb = c == 0 ? float3(m, g, other) : float3(other, g, m);
     }
-    if (size.w)
-        rgb *= rgb_gain(x, y);
-    rgb = clamp(rgb, 0, 1);
+    // lensfun's vignetting brings up what the lens darkened: what the sensor
+    // clipped stays clipped (neutral), and the rest may pass it.
+    if (size.w && word(2) == 2)
+        rgb = clamp(rgb, 0, 1) * rgb_gain(x, y);
+    else
+    {
+        if (size.w)
+            rgb *= rgb_gain(x, y);
+        rgb = clamp(rgb, 0, 1);
+    }
     return float4(rgb / as_shot.rgb, 1);
 }
 #endif

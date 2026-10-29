@@ -13,6 +13,7 @@
 #include "first_image.h"
 #include "integration.h"
 #include "jpeg_lossless.h"
+#include "lens_store.h"
 #include "encoders/encoder.h"
 
 #include <gio/gio.h>
@@ -34,6 +35,12 @@ using APixelFormat = rap::pixel_format;
 // after it's gone (both sides on the main thread).
 static App* s_app = nullptr;
 
+void App::lenses_arrived()
+{
+    if (s_app)
+        s_app->correct_lens(true);
+}
+
 std::shared_future<Config> App::read_settings()
 {
     return std::async(std::launch::async,
@@ -54,6 +61,7 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     cfg_ = settings.get();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
+    lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
     // Format plugins load on a thread of their own, the first image never
     // waiting for them; once they're in, their formats join the folder.
@@ -70,16 +78,13 @@ void App::plugins_loaded()
         return;
     cfg_.add_new_extensions(extensions);
     // A file opened by name stays even if its type isn't listed; scan() keeps it.
-    const std::string current = folder_.current();
     const bool was_empty = folder_.empty();
-    if (!current.empty())
-        folder_.scan(current, cfg_);
-    else
-        folder_.rescan(cfg_);
-    if (was_empty && !folder_.empty())
-        load_current();  // a folder of nothing but plugin formats
-    update_title();
-    update_status();
+    list_folder(folder_.current(),
+                [this, was_empty]
+                {
+                    if (was_empty && !folder_.empty())
+                        load_current();  // a folder of nothing but plugin formats
+                });
 }
 
 App::~App()
@@ -90,8 +95,14 @@ App::~App()
     outgoing_video_.stop();
     // A save preview still encoding uses the encoders' and decoders' statics,
     // which go when the process does: let it finish (or give up) first.
-    ++preview_->generation;
-    for (int i = 0; i < 600 && preview_->running.load(); ++i)
+    preview_->wait_out();
+    listing_->wait_out();
+}
+
+void App::Background::wait_out()
+{
+    ++generation;
+    for (int i = 0; i < 600 && running.load(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
@@ -310,7 +321,12 @@ void App::build_ui()
                      {"", L::check{_("LibRaw's develop")}
                               .on_toggled([this](bool on) { show_instead(on ? Instead::LibRaw : Instead::Nothing); })
                               .bind(libraw_check_)
-                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))}},
+                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))},
+                     {"", L::check{_("Lens correction"), cfg_.lens_correction}
+                              .on_toggled([this](bool on) { set_lens_correction(on, true); })
+                              .bind(lens_check_)
+                              .tooltip(_("Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, "
+                                         "for raws that carry no corrections of their own"))}},
         }
             .handle(exposure_box_);
 
@@ -527,15 +543,7 @@ void App::build_ui()
     view_->on_framing_changed = [this, follow] { follow(*view_, *side_view_); };
     side_view_->on_framing_changed = [this, follow] { follow(*side_view_, *view_); };
     window_->on_key([this](const rap::key_event& e) { return on_key(e); });
-    // A dropped file opens with its folder, as if opened from the menu.
-    window_->on_files_dropped(
-        [this](const std::vector<std::string>& paths)
-        {
-            if (paths.size() == 2)
-                open_diff(paths[0], paths[1]);
-            else if (!paths.empty())
-                open_path(paths.front());
-        });
+    window_->on_files_dropped([this](const std::vector<std::string>& paths) { on_dropped(paths); });
     // A width the user drags the info pane to is kept for next time.
     splitter_->on_moved([this] { remember_pane_width(); });
     window_->on_fullscreen_changed([this](bool fs) { on_fullscreen_changed(fs); });
@@ -805,10 +813,16 @@ void App::open_path(const std::string& path, FirstImage* first)
     g_free(canonical);
     if (!first)
     {
-        platform::trace("reading the folder");
-        folder_.scan(file, cfg_);
-        platform::trace("folder read: %d files", folder_.count());
-        load_current();
+        // A file shows at once, its folder listed meanwhile; a folder, from
+        // its first image once it's listed.
+        if (g_file_test(file.c_str(), G_FILE_TEST_IS_DIR))
+            list_folder(file, [this] { load_current(); });
+        else
+        {
+            folder_.set_single(file);
+            load_current();
+            list_folder(file);
+        }
         return;
     }
     // The image is being decoded already: the window opens with it, and the
@@ -867,9 +881,9 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     if (folder_.directory() != watched_dir_ || diff_session_)
         return;  // a different folder by now, or comparing two files
     const std::filesystem::path dir = rap::sys::path_from_utf8(watched_dir_).lexically_normal();
-    bool listed = batch.overflow, reload_shown = false;
+    bool listed = false, reload_shown = false;
     if (batch.overflow)
-        folder_.rescan(cfg_);  // events were lost: what's there now
+        list_folder({});  // events were lost: what's there now
     // Names as the folder lists them: relative to it (with subfolders, a
     // path inside it); none for what's outside what's listed.
     const auto listed_name = [&](const std::filesystem::path& p) -> std::optional<std::string>
@@ -923,10 +937,7 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         cache_.erase(full);  // what was cached of it is out of date
     }
     if (rescan)
-    {
-        folder_.rescan(cfg_);
-        listed = true;
-    }
+        list_folder({});
     if (reload_shown)
     {
         // Rewritten: read it again. Not via the cache, which leaving it would
@@ -1043,12 +1054,7 @@ void App::image_presented()
                     deferred_scan_.clear();
                     if (folder_.empty() || folder_.current() != file)
                         return;  // something else was opened meanwhile
-                    folder_.scan(file, cfg_);
-                    platform::trace("folder read: %d files", folder_.count());
-                    watch_folder();
-                    update_title();
-                    update_status();
-                    schedule_prefetch();
+                    list_folder(file);
                 });
     }
     awaiting_present_ = false;
@@ -1078,27 +1084,84 @@ void App::go_last()
 
 void App::reload()
 {
-    folder_.rescan(cfg_);
     load_current();
+    list_folder({});
 }
 
-// Subfolders browsed too, or not: the list again, the image shown staying.
-// Off, from an image in a folder inside: that image's folder is the one browsed.
-void App::set_recursive(bool on)
+// A dropped file opens with its folder, as if opened from the menu; a
+// dropped folder is browsed with the folders inside it, from its first; two
+// dropped are compared.
+void App::on_dropped(const std::vector<std::string>& paths)
 {
-    if (on == cfg_.recursive)
+    if (paths.size() == 2)
+        open_diff(paths[0], paths[1]);
+    else if (!paths.empty() && g_file_test(paths.front().c_str(), G_FILE_TEST_IS_DIR))
+        set_recursive(true, paths.front());
+    else if (!paths.empty())
+        open_path(paths.front());
+}
+
+// Subfolders browsed too, or not: the list again, the image shown staying
+// (off, from an image in a folder inside, that image's folder is the one
+// browsed); or, given a `root`, that folder browsed from its first image.
+void App::set_recursive(bool on, const std::string& root)
+{
+    if (on != cfg_.recursive)
+    {
+        cfg_.recursive = on;
+        cfg_.save();
+        if (recursive_toggle_)
+            recursive_toggle_->set_checked(on);  // when not from the button
+    }
+    else if (root.empty())
         return;
-    cfg_.recursive = on;
-    cfg_.save();
-    if (recursive_toggle_)
-        recursive_toggle_->set_checked(on);  // when not from the button
+    if (!root.empty())
+    {
+        open_path(root);
+        return;
+    }
     const std::string shown = folder_.current();
-    const gint64 t0 = g_get_monotonic_time();
-    if (!on && !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename())
-        folder_.scan(shown, cfg_);
-    else
-        folder_.rescan(cfg_);
-    platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), on ? ", with subfolders," : "", (g_get_monotonic_time() - t0) / 1000.0);
+    const bool inside = !shown.empty() && folder_.current_name() != std::filesystem::path(rap::sys::path_from_utf8(shown)).filename();
+    list_folder(!on && inside ? shown : std::string());
+}
+
+// The folder of `path` (a file's, or a directory; empty: the one browsed,
+// again) listed on a thread of its own, a big one taking a while, then
+// adopted here (the cursor kept on the image shown), and `then`. A newer
+// listing makes this one's moot.
+void App::list_folder(const std::string& path, std::function<void()> then)
+{
+    const bool again = path.empty();
+    const std::string target = again ? folder_.directory() : path;
+    if (target.empty())
+        return;
+    const uint64_t generation = ++listing_->generation;
+    std::thread(
+        [state = listing_, running = listing_->start(), generation, target, again, cfg = cfg_, then = std::move(then)]
+        {
+            platform::lower_thread_priority();
+            const gint64 t0 = g_get_monotonic_time();
+            auto listing = std::make_shared<Folder::Listing>(Folder::list(target, cfg, [&] { return state->generation.load() != generation; }));
+            const double ms = (g_get_monotonic_time() - t0) / 1000.0;
+            platform::post_main(
+                [state, generation, listing, again, ms, then]
+                {
+                    if (!s_app || state->generation.load() != generation)
+                        return;
+                    s_app->folder_listed(std::move(*listing), again, ms);
+                    if (then)
+                        then();
+                });
+        })
+        .detach();
+}
+
+void App::folder_listed(Folder::Listing listing, bool again, double ms)
+{
+    if (again)
+        listing.want = folder_.current_name();  // where the cursor is now, not when it was asked for
+    folder_.adopt(std::move(listing));
+    platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), cfg_.recursive ? ", with subfolders," : "", ms);
     watch_folder();
     update_title();
     update_status();
@@ -1153,6 +1216,7 @@ void App::on_loaded(Loader::Result& r)
             std::fprintf(stderr, "developed %s %dx%d: decoded in %.0f ms, %.0f ms to reach the UI\n", key_text(r.path).c_str(), image_->width,
                          image_->height, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
         status_message_.clear();
+        correct_lens(false);
         view_->image_changed();
         fit_window_to_image();
         sync_exposure_slider();
@@ -1242,6 +1306,7 @@ void App::on_loaded(Loader::Result& r)
     }
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
+    correct_lens(false);
     view_->set_image(image_);
     instead_image_.reset();
     show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
@@ -1289,6 +1354,7 @@ void App::sync_white_balance()
     wb_box_->set_visible(raw);
     camera_jpeg_check_->set_visible(image_ && image_->is_raw);
     libraw_check_->set_visible(image_ && image_->is_raw);
+    lens_check_->set_visible(image_ && image_->is_raw);
     if (!raw)
         return;
     double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
@@ -1344,15 +1410,9 @@ void App::show_instead()
         status_message_ = busy_message_ = _("Developing with LibRaw…");
         update_status();
     }
-    ++preview_->running;  // waited for on exit
     std::thread(
-        [this, request, what, path = image_path_, raw = image_, state = preview_]
+        [this, request, what, path = image_path_, raw = image_, running = preview_->start()]
         {
-            struct Done
-            {
-                PreviewState& s;
-                ~Done() { --s.running; }
-            } done{*state};
             auto other = std::make_shared<Image>();
             std::string error;
             bool ok;
@@ -1788,12 +1848,13 @@ void App::open_settings_page(int page)
             set_decode_options(decode_options_for(cfg_));
             cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
             geocoder_.set_provider(cfg_.geocoder_url);
+            lenses::allow_downloads(cfg_.lens_downloads);
             if (image_)
                 request_place(image_);
             video_.set_loop(cfg_.video_loop);
             video_.set_muted(cfg_.video_muted);
             view_->set_video_muted(cfg_.video_muted);
-            folder_.rescan(cfg_);
+            list_folder({});
             smooth_toggle_->set_checked(cfg_.smooth_upscale());
             xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
             window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});

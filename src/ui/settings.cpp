@@ -165,7 +165,8 @@ struct State
     std::unique_ptr<rap::window> window;
     bool finished = false;
 
-    rap::check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *raw_crop = nullptr, *apply_xmp = nullptr;
+    rap::check *fit_window = nullptr, *wrap_around = nullptr, *show_hidden = nullptr, *interleave_folders = nullptr, *raw_crop = nullptr,
+               *apply_xmp = nullptr, *lens_downloads = nullptr;
     rap::spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
     rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
@@ -216,6 +217,7 @@ struct State
         cfg.min_window_height = int(min_height->value());
         cfg.wrap_around = wrap_around->checked();
         cfg.show_hidden = show_hidden->checked();
+        cfg.interleave_folders = interleave_folders->checked();
         cfg.prefetch_ahead = int(prefetch_ahead->value());
         cfg.prefetch_behind = int(prefetch_behind->value());
         cfg.cache_megabytes = int(cache_mb->value());
@@ -223,6 +225,7 @@ struct State
             cfg.raw_mode = kRawModes[raw_mode->current()];
         cfg.raw_camera_crop = raw_crop->checked();
         cfg.apply_xmp_edits = apply_xmp->checked();
+        cfg.lens_downloads = lens_downloads->checked();
         const std::string url = map_url->text();
         if (url.find("{lat}") != std::string::npos && url.find("{lon}") != std::string::npos)
             cfg.map_url = url;
@@ -345,6 +348,7 @@ rap::node general_page(const Config& cfg, State& st)
                  L::form{
                      {"", L::check{_("Wrap around at the end of the folder"), cfg.wrap_around}.bind(st.wrap_around)},
                      {"", L::check{_("Include hidden files"), cfg.show_hidden}.bind(st.show_hidden)},
+                     {"", L::check{_("Interleave subfolders with images"), cfg.interleave_folders}.bind(st.interleave_folders)},
                      {_("Preload images ahead"), L::spin{0, 16, double(cfg.prefetch_ahead)}.bind(st.prefetch_ahead)},
                      {_("Preload images behind"), L::spin{0, 16, double(cfg.prefetch_behind)}.bind(st.prefetch_behind)},
                      {_("Image cache (MB, 0 = auto)"),
@@ -356,6 +360,11 @@ rap::node general_page(const Config& cfg, State& st)
                                     st.raw_mode)},
                      {"", L::check{_("Frame as the camera did (crop the sensor margins the camera never shows)"), cfg.raw_camera_crop}.bind(st.raw_crop)},
                      {"", L::check{_("Apply edits from XMP sidecars (exposure, crop, rotation)"), cfg.apply_xmp_edits}.bind(st.apply_xmp)},
+                     {"", L::check{_("Download lens corrections (lensfun's database, when a raw first needs it)"), cfg.lens_downloads}
+                              .tooltip(_("The whole database is fetched from lensfun's site (about 0.5 MB), never a single lens, so it doesn't "
+                                         "say which lenses you have; then checked for a newer one at most once a month. Off: only a copy "
+                                         "already downloaded is used"))
+                              .bind(st.lens_downloads)},
                  }},
         L::group{_("Maps"),
                  L::form{
@@ -694,6 +703,9 @@ rap::node about_page(rap::ui& ui)
                     g_free(uri);
                 }
             }));
+    // Downloaded when wanted, not shipped, but theirs all the same.
+    text.push_back(L::label{_("Lens corrections from the lensfun project's database (CC BY-SA 3.0)")}.link(
+        [] { platform::open_uri("https://lensfun.github.io/"); }));
     return L::hbox{mascot(ui), rap::node{rap::spec::box{rap::orientation::vertical, text, false, {}}, {}}};
 }
 

@@ -24,6 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # vcpkg ports linked into ifritview.exe: (port, what it is).
 PORTS = [
     ("aom", "AOM AV1 codec (AVIF)"),
+    ("bzip2", "bzip2's libbz2 (the lens database's archive)"),
     ("gdk-pixbuf", "GdkPixbuf"),
     ("gettext-libintl", "GNU libintl"),
     ("glib", "GLib, GIO, GObject"),
@@ -69,6 +70,8 @@ def bundled():
         ("etcdec, by Sergii Kudlai", header_licence(third / "etcdec/etcdec.h", "This software is available under 2 licenses")),
         ("bc7enc and rgbcx, by Richard Geldreich, Jr. (DDS saving)", (third / "bc7enc/LICENSE").read_text()),
         ("Octicons, by GitHub (the GitHub mark in About)", (third / "licenses/octicons-LICENSE").read_text()),
+        ("lensfun's lens database (downloaded when needed, not included; CC BY-SA 3.0)",
+         (third / "licenses/lensfun-database.txt").read_text()),
     ]
 
 

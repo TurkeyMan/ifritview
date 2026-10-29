@@ -187,14 +187,20 @@ void panasonic6(const uint8_t* b, int bits, uint16_t* o)
     }
 }
 
-// A byte of panasonic_load_raw's buffer, `at` bytes into the stream: each
-// 16 KB of the file goes in `rotation` bytes on, the rest at its start; where
-// the file ends first, the buffer keeps what it had (zero to begin with).
+// Where in the file panasonic_load_raw's buffer has the stream's byte `at`
+// from: each 16 KB of the file goes in `rotation` bytes on, the rest at its start.
+uint64_t file_offset(const Prepared& p, uint64_t at)
+{
+    const uint32_t o = uint32_t(at % kBuffer), lf = p.rotation;
+    return at - o + (o >= lf ? o - lf : o + kBuffer - lf);
+}
+
+// A byte of that buffer; where the file ends first, the buffer keeps what
+// it had (zero to begin with).
 uint8_t buffer_byte(const Prepared& p, uint64_t at)
 {
     uint64_t c = at / kBuffer;
-    const uint32_t o = uint32_t(at % kBuffer), lf = p.rotation;
-    uint64_t f = c * kBuffer + (o >= lf ? o - lf : o + kBuffer - lf);
+    uint64_t f = file_offset(p, at);
     for (; f >= p.size; --c, f -= kBuffer)
         if (c == 0)
             return 0;
@@ -210,11 +216,10 @@ const uint8_t* block(const Prepared& p, uint32_t b, uint8_t tmp[16])
     const uint64_t at = uint64_t(b) * 16;
     if (!p.rotated)
         return p.data + at;
-    const uint64_t c = at / kBuffer;
-    const uint32_t o = uint32_t(at % kBuffer), lf = p.rotation;
-    if (o >= lf || o + 16 <= lf)
+    const uint32_t o = uint32_t(at % kBuffer);
+    if (o >= p.rotation || o + 16 <= p.rotation)  // its 16 bytes together in the file
     {
-        const uint64_t f = c * kBuffer + (o >= lf ? o - lf : o + kBuffer - lf);
+        const uint64_t f = file_offset(p, at);
         if (f + 16 <= p.size)
             return p.data + f;
     }

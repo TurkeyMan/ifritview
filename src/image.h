@@ -29,6 +29,10 @@ namespace rawpacked
 {
 struct Prepared;
 }
+namespace lenses
+{
+struct Shot;
+}
 
 struct RawMosaic
 {
@@ -102,6 +106,9 @@ struct RawMosaic
     // IFRIT_GPU_CORRECTIONS_CHECK: the active area as LibRaw corrects it,
     // for the develop's corrections to be compared with.
     std::shared_ptr<const std::vector<uint16_t>> corrected;
+    // How it was taken, for lensfun's corrections where it has none of its
+    // own for the lens (lens_database.h: the app puts them in `corrections`).
+    std::shared_ptr<const lenses::Shot> shot;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be
@@ -149,8 +156,10 @@ struct SourceData
 };
 
 // Orientations (EXIF 1..8) as turns and flips: `after` done to an image
-// already turned by `before`; and where a rectangle of a W × H image lands.
+// already turned by `before`; what undoes one; and where a rectangle of a
+// W × H image lands.
 int compose_orientation(int before, int after);
+int inverse_orientation(int o);
 void orient_rect(int orientation, int W, int H, int& x, int& y, int& w, int& h);
 
 // Edits found in XMP (embedded or sidecar) that the viewer can honour.
@@ -245,7 +254,7 @@ struct Image
     std::string encoded_as;
     std::map<std::string, int> encoding;
     std::shared_ptr<LinearData> linear;  // only for raw files
-    std::shared_ptr<const RawMosaic> mosaic;  // a raw the GPU develops (then `pixels` start stale); dropped by turns and crops, once baked
+    std::shared_ptr<const RawMosaic> mosaic;  // a raw the GPU develops (then `pixels` start stale); turns and crops join its framing
     std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null
     std::shared_ptr<const VectorSource> vector;  // can be drawn sharper; dropped by turns, flips and crops
     // More than the display shows (a linear source past 1): exposure applies.
