@@ -69,14 +69,7 @@ void enrich_metadata(const std::string& path, const uint8_t* data, size_t size, 
 #ifdef HAVE_IPTC
     read_iptc_jpeg(data, size, extra);
 #endif
-#ifdef HAVE_XMP
     read_xmp(path, data, size, extra);
-#else
-    (void)path;
-    (void)data;
-    (void)size;
-    (void)extra;
-#endif
 }
 
 // A space the file named but didn't embed a profile for: one made for it

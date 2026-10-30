@@ -2332,7 +2332,3 @@ msgstr ""
 #: src/ui/app_develop.cpp
 msgid "Couldn't save the develop settings: {0}"
 msgstr ""
-
-#: src/ui/app_develop.cpp
-msgid "This build can't write XMP"
-msgstr ""
