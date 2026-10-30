@@ -753,11 +753,25 @@ void App::script_export(const std::string& path)
     if (!image_)
         return;
     pixels_for_cpu();
-    std::string error;
     const Encoder* e = encoder_for_extension(file_extension(path));
-    const Image& shown = instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *image_;
-    if (!e || !e->encode(shown, path, EncodeOptions{}, error))
-        std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), e ? error.c_str() : "no encoder for that extension");
+    if (!e)
+    {
+        std::fprintf(stderr, "script: not exported to %s: no encoder for that extension\n", path.c_str());
+        return;
+    }
+    // Encoded on a thread of its own, as a save is (a raw's tens of
+    // megapixels took the UI thread seconds), from a copy of what's shown.
+    auto shown = std::make_shared<const Image>(instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *image_);
+    std::thread(
+        [e, shown, path, running = preview_->start()]
+        {
+            std::string error;
+            if (!e->encode(*shown, path, EncodeOptions{}, error))
+                std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), error.c_str());
+            else
+                std::fprintf(stderr, "script: exported %s\n", path.c_str());
+        })
+        .detach();
 }
 
 void App::script_instead(const std::string& what)
