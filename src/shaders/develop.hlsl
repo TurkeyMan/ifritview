@@ -1,33 +1,58 @@
-// A raw's level 0: its Bayer mosaic (RawMosaic, one photosite a texel)
-// developed. Each output pixel, in the image as shown (the camera's framing,
-// turned as it was held), comes from the photosite under it (corrected
-// first, where the raw has its own corrections of its mosaic: CORRECT):
-// black taken off and scaled to saturation, the as-shot white balance
-// applied (the demosaic follows colour edges far better on balanced data),
-// the two missing colours from Malvar-He-Cutler's 5 x 5 kernels (none for a
-// monochrome sensor's: grey), clipped at saturation (all channels at 1:
+// A raw's level 0: its mosaic (RawMosaic, one photosite a texel) developed.
+// Each output pixel, in the image as shown (the camera's framing, turned as
+// it was held), comes from the photosite under it (corrected first, where
+// the raw has its own corrections of its mosaic: CORRECT): black taken off
+// and scaled to saturation, the as-shot white balance applied (the demosaic
+// follows colour edges far better on balanced data), the two missing
+// colours found (a Bayer's from Malvar-He-Cutler's 5 x 5 kernels, X-Trans's
+// from its green made first, GREEN; none for a monochrome sensor's: grey),
+// clipped at saturation (all channels at 1:
 // highlights stay neutral), and the balance taken off again. Linear camera
 // RGB out; the frame's own white balance and the camera's colour matrix are
 // the view's, per frame.
 cbuffer Params : register(b0)
 {
-    int4 colour;         // the filter over (row & 1, col & 1), row-major: 0 R, 1 G, 2 B
-    float4 black;        // per photosite of the 2 x 2 (as colour), data units
+    // The filter pattern (RawMosaic's) over 6 x 6 photosites, a whole number
+    // of it (Bayer's 2 x 2 or X-Trans's 6 x 6): each site's colour as LibRaw
+    // counts them (0 R, 1 G, 2 B, 3 the other G), 2 bits a site, row-major,
+    // 16 a word; w: its period (2 or 6).
+    uint4 cfa;
     float4 as_shot;      // R, G, B multipliers, the least 1; w: saturation in data units
     int4 map_x;          // photosite x = map_x.x * out.x + map_x.y * out.y + map_x.z
     int4 map_y;          // photosite y = map_y.x * out.x + map_y.y * out.y + map_y.z
     int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels); w: the raw's own corrections
-    int4 filter;         // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G), as levels counts them
     int4 ycc;            // YCC: block height, formula, hue, luma offset (RawMosaic::Ycc)
     int4 ycc_at;         // YCC: the first block's x, y
     float4 ycc_mul;      // YCC: sraw_mul; w: the guided fill's regularisation, in luma units squared
     int4 flags;          // x: the data is white balanced already (the camera did it): not again; y: grey, no filter (a monochrome sensor)
+    float4 black[9];     // per site of the 6 x 6, data units (LINEAR, YCC: per channel, R, G, B in the first)
 };
 
 // The as-shot balance, as it's still to be applied to the data.
 float3 to_balance()
 {
     return flags.x ? 1 : as_shot.rgb;
+}
+
+// The pattern's site at photosite (x, y), x and y not negative (past the
+// right and bottom edges the pattern goes on). By 6, not the period: a
+// constant's remainder is a multiply, a uniform's a long division.
+uint site_at(int x, int y)
+{
+    return uint(y) % 6 * 6 + uint(x) % 6;
+}
+
+// LibRaw's colour at a site, as levels counts them.
+uint filter_of(uint i)
+{
+    return cfa[i / 16] >> (i % 16 * 2) & 3;
+}
+
+// The colour at (x, y): 0 R, 1 G, 2 B.
+int colour_at(int x, int y)
+{
+    const uint f = filter_of(site_at(x, y));
+    return f == 3 ? 1 : int(f);
 }
 
 ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count R G B G2, zeros
@@ -53,7 +78,7 @@ float luma(int x, int y)
     return pixels.Load(int3(at(x, y), 0)).r * 65535 - ycc.w;
 }
 
-float2 colour_at(int x, int y)
+float2 chroma_at(int x, int y)
 {
     const float2 v = round(pixels.Load(int3(at(x, y), 0)).gb * 65535);
     return v - 65536 * (v >= 32768) - 8192;  // as int16, less the neutral offset
@@ -80,7 +105,7 @@ float4 main(float4 position : SV_Position) : SV_Target
                 m = (m + luma(cx, cy + 1) + luma(cx + 1, cy + 1)) / 4;
             else
                 m /= 2;
-            const float2 c = colour_at(cx, cy);
+            const float2 c = chroma_at(cx, cy);
             n += 1;
             sy += m;
             syy += m * m;
@@ -100,7 +125,7 @@ float4 main(float4 position : SV_Position) : SV_Target
     else
         rgb = Y + float3(cd.y, (-778 * cd.x - cd.y * 2048) / 4096, cd.x);
     rgb *= ycc_mul.rgb;
-    rgb = (rgb - black.rgb) / (as_shot.w - black.rgb);
+    rgb = (rgb - black[0].rgb) / (as_shot.w - black[0].rgb);
     return float4(clamp(rgb * as_shot.rgb, 0, 1) / as_shot.rgb, 1);
 }
 #elif defined(LINEAR)
@@ -115,14 +140,12 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int x = clamp(map_x.x * o.x + map_x.y * o.y + map_x.z, 0, size.x - 1);
     const int y = clamp(map_y.x * o.x + map_y.y * o.y + map_y.z, 0, size.y - 1);
     const float3 d = pixels.Load(int3(x, y, 0)).rgb * 65535;
-    const float3 rgb = (d - black.rgb) / (as_shot.w - black.rgb);
+    const float3 rgb = (d - black[0].rgb) / (as_shot.w - black[0].rgb);
     return float4(clamp(rgb * to_balance(), 0, 1) / as_shot.rgb, 1);
 }
 #else
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
 ByteAddressBuffer corrections : register(t9);  // the raw's own (a DNG's opcodes, a Phase One's), as dng_opcodes.h lays them out
-
-static float4 black_level;
 
 uint word(uint i)
 {
@@ -162,24 +185,30 @@ float map_gain(uint d, int x, int y, uint p)
     return lerp(lerp(a, b, tx), lerp(c, e, tx), ty);
 }
 
-// Each photosite of the 2 x 2's, as LibRaw's: measured where the sensor is
-// masked (per colour), if those were read and not mostly zero; else what the
-// file says.
-float4 black_levels()
+// The black level as LibRaw's: measured where the sensor is masked (per
+// colour), if those were read and not mostly zero; else what the file says
+// for each site of the pattern. Read once a pixel (read_levels).
+static bool measured;
+static uint4 measured_sum, measured_count;
+
+void read_levels()
 {
+    measured = false;
     if (size.z != 0)
     {
-        const uint4 sum = levels.Load4(0), count = levels.Load4(16);
+        measured_sum = levels.Load4(0), measured_count = levels.Load4(16);
         const uint zero = levels.Load(32);
-        if (zero < count.x && count.y && count.z && count.w)
-        {
-            float4 b;
-            for (int i = 0; i < 4; ++i)
-                b[i] = sum[filter[i]] / count[filter[i]];
-            return b;
-        }
+        measured = zero < measured_count.x && measured_count.y && measured_count.z && measured_count.w;
     }
-    return black;
+}
+
+// At photosite (x, y), data units.
+float black_at(int x, int y)
+{
+    const uint i = site_at(x, y);
+    if (measured)
+        return measured_sum[filter_of(i)] / measured_count[filter_of(i)];
+    return black[i / 4][i % 4];
 }
 
 #ifdef CORRECT
@@ -214,8 +243,7 @@ float mosaic_gain(int x, int y)
 // quarter's curve.
 float level(int x, int y)
 {
-    const int i = (y & 1) * 2 + (x & 1);
-    const float d = mosaic.Load(int3(x, y, 0)) * 65535 - black_level[i];
+    const float d = mosaic.Load(int3(x, y, 0)) * 65535 - black_at(x, y);
     if (!word(3))
         return d;
     const bool right = x >= int(word(42)), below = y >= int(word(43));
@@ -257,7 +285,7 @@ float repaired(int x, int y)
         return level(x, y);
     static const int2 around[12] = {int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1), int2(0, -2), int2(-2, 0),
                                     int2(2, 0),   int2(0, 2),  int2(-2, -2), int2(2, -2), int2(-2, 2), int2(2, 2)};
-    const uint j = filter[(y & 1) * 2 + (x & 1)] != 1 ? 4 : 0;
+    const uint j = filter_of(site_at(x, y)) != 1 ? 4 : 0;
     uint sum = 0, n = 0;
     for (uint k = j; k < j + 8; ++k)
     {
@@ -360,9 +388,9 @@ float corrected(int x, int y)
 
 float4 main(float4 position : SV_Position) : SV_Target
 {
-    black_level = black_levels();
+    read_levels();
     const int x = int(position.x), y = int(position.y);
-    return (corrected(x, y) + black_level[(y & 1) * 2 + (x & 1)]) / 65535;
+    return (corrected(x, y) + black_at(x, y)) / 65535;
 }
 #else
 // OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette;
@@ -388,36 +416,120 @@ float3 rgb_gain(int x, int y)
     return g;
 }
 
-// The photosite at (x, y) as a balanced value, 1 = saturation.
+// The photosite at (x, y) as a balanced value, 1 = saturation (held at the
+// mosaic's edges).
 float site(int x, int y)
 {
     x = clamp(x, 0, size.x - 1);
     y = clamp(y, 0, size.y - 1);
-    const int i = (y & 1) * 2 + (x & 1), c = colour[i];
-    const float d = mosaic.Load(int3(x, y, 0)) * 65535;
-    return (d - black_level[i]) / (as_shot.w - black_level[i]) * (flags.x ? 1 : as_shot[c]);
+    const float d = mosaic.Load(int3(x, y, 0)) * 65535, b = black_at(x, y);
+    return (d - b) / (as_shot.w - b) * (flags.x ? 1 : as_shot[colour_at(x, y)]);
 }
 
-int colour_at(int x, int y)
+bool inside(int2 p)
 {
-    return colour[(y & 1) * 2 + (x & 1)];
+    return all(p >= 0) && all(p < size.xy);
 }
 
-float4 main(float4 position : SV_Position) : SV_Target
+#ifdef GREEN
+// X-Trans's green, everywhere, as the develop's colour step (xtrans())
+// reads it: a photosite of the mosaic a texel, balanced. Where the sensor
+// has no green, an estimate along each of four directions, across, down and
+// both diagonals: between the nearest greens either side, linear for their
+// distances, with the curvature of the photosite's own colour along it (as
+// Hamilton and Adams correct a Bayer's: the same colour's nearest either
+// side, scaled for its distances; a quadratic's exact), held within the
+// greens around it. The four are weighed by how little the mosaic changes
+// along each around here (same colours either side, over the 3 x 3; the
+// greens that made it), so an edge's estimate along it wins over those
+// across it: no zipper. X-Trans's greens are never more than a photosite
+// away across or down, its own colour at most six.
+
+// The steps from p along d to the nearest photosite of colour c, at most
+// `reach`; 0 for none inside the mosaic.
+int nearest(int2 p, int2 d, int c, int reach)
 {
-    black_level = black_levels();
-    const int2 o = int2(position.xy);
-    const int x = map_x.x * o.x + map_x.y * o.y + map_x.z;
-    const int y = map_y.x * o.x + map_y.y * o.y + map_y.z;
+    for (int k = 1; k <= reach; ++k)
+    {
+        const int2 q = p + k * d;
+        if (!inside(q))
+            return 0;
+        if (colour_at(q.x, q.y) == c)
+            return k;
+    }
+    return 0;
+}
+
+float green_at(int2 p)
+{
+    const int c = colour_at(p.x, p.y);
+    const float own = site(p.x, p.y);
+    if (c == 1)
+        return own;
+    float lo = 1e30, hi = -1e30;
+    for (int j = -1; j <= 1; ++j)
+        for (int i = -1; i <= 1; ++i)
+        {
+            const int2 q = p + int2(i, j);
+            if (inside(q) && colour_at(q.x, q.y) == 1)
+            {
+                lo = min(lo, site(q.x, q.y));
+                hi = max(hi, site(q.x, q.y));
+            }
+        }
+    static const int2 kDirections[4] = {int2(1, 0), int2(0, 1), int2(1, 1), int2(1, -1)};
+    float total = 0, weights = 0;
+    for (int k = 0; k < 4; ++k)
+    {
+        const int2 d = kDirections[k];
+        const int a = nearest(p, d, 1, 3), b = nearest(p, -d, 1, 3);
+        if (!a || !b)
+            continue;
+        const float ga = site(p.x + a * d.x, p.y + a * d.y), gb = site(p.x - b * d.x, p.y - b * d.y);
+        float g = (b * ga + a * gb) / (a + b);
+        const int s = nearest(p, d, c, 6), t = nearest(p, -d, c, 6);
+        if (s && t)
+            g += float(a * b) / float(s * t) * (own - (t * site(p.x + s * d.x, p.y + s * d.y) + s * site(p.x - t * d.x, p.y - t * d.y)) / (s + t));
+        if (lo <= hi)
+            g = clamp(g, lo, hi);
+        // The change along d a step, from the greens either side and each
+        // pair of photosites of one colour either side of the 3 x 3's.
+        float change = abs(ga - gb) / (a + b), n = 1;
+        for (int j = -1; j <= 1; ++j)
+            for (int i = -1; i <= 1; ++i)
+            {
+                const int2 q1 = p + int2(i, j) + d, q2 = p + int2(i, j) - d;
+                if (inside(q1) && inside(q2) && colour_at(q1.x, q1.y) == colour_at(q2.x, q2.y))
+                {
+                    change += abs(site(q1.x, q1.y) - site(q2.x, q2.y)) / 2;
+                    n += 1;
+                }
+            }
+        const float w = 1 / (1e-10 + change / n * (change / n));
+        total += w * g;
+        weights += w;
+    }
+    return weights > 0 ? total / weights : lo <= hi ? (lo + hi) / 2 : own;
+}
+
+float main(float4 position : SV_Position) : SV_Target
+{
+    read_levels();
+    return green_at(int2(position.xy));
+}
+#else
+Texture2D<float> green : register(t1);  // X-Trans's (GREEN's)
+
+// Malvar, He and Cutler's 5 x 5 kernels: a Bayer mosaic's missing colours at
+// (x, y).
+float3 bayer(int x, int y)
+{
     const int c = colour_at(x, y);
     const float m = site(x, y);
     const float cross = site(x - 1, y) + site(x + 1, y) + site(x, y - 1) + site(x, y + 1);
     const float far = site(x - 2, y) + site(x + 2, y) + site(x, y - 2) + site(x, y + 2);
     const float diag = site(x - 1, y - 1) + site(x + 1, y - 1) + site(x - 1, y + 1) + site(x + 1, y + 1);
-    float3 rgb;
-    if (flags.y)
-        rgb = m;  // grey: no other colours to find
-    else if (c == 1)
+    if (c == 1)
     {
         // Green: the colour on either side, and the one above and below.
         const float h = (5 * m + 4 * (site(x - 1, y) + site(x + 1, y)) - diag - (site(x - 2, y) + site(x + 2, y)) +
@@ -425,14 +537,51 @@ float4 main(float4 position : SV_Position) : SV_Target
         const float v = (5 * m + 4 * (site(x, y - 1) + site(x, y + 1)) - diag - (site(x, y - 2) + site(x, y + 2)) +
                          0.5 * (site(x - 2, y) + site(x + 2, y))) / 8;
         const bool red_row = colour_at(x + 1, y) == 0;
-        rgb = float3(red_row ? h : v, m, red_row ? v : h);
+        return float3(red_row ? h : v, m, red_row ? v : h);
     }
-    else
-    {
-        const float g = (4 * m + 2 * cross - far) / 8;
-        const float other = (6 * m + 2 * diag - 1.5 * far) / 8;  // blue at red, red at blue
-        rgb = c == 0 ? float3(m, g, other) : float3(other, g, m);
-    }
+    const float g = (4 * m + 2 * cross - far) / 8;
+    const float other = (6 * m + 2 * diag - 1.5 * far) / 8;  // blue at red, red at blue
+    return c == 0 ? float3(m, g, other) : float3(other, g, m);
+}
+
+// X-Trans's red and blue at (x, y), with its green (GREEN's): each the
+// green here plus the difference of colour and green at the photosites of
+// that colour within two, weighed by nearness and by how alike their green
+// is to this one's (within about 1% counts as alike), so a colour isn't
+// carried across an edge in the green. Colour differences change slowly
+// where the brightness doesn't: no moiré from the sparser red and blue.
+float from_differences(int x, int y, int k, float g)
+{
+    float total = 0, weights = 0;
+    for (int j = -2; j <= 2; ++j)
+        for (int i = -2; i <= 2; ++i)
+        {
+            const int2 q = int2(x + i, y + j);
+            if (!inside(q) || colour_at(q.x, q.y) != k)
+                continue;
+            const float gq = green.Load(int3(q, 0));
+            const float w = 1 / ((i * i + j * j) * (1e-4 + 0.005 * (g + gq) + abs(g - gq)));
+            total += w * (site(q.x, q.y) - gq);
+            weights += w;
+        }
+    return weights > 0 ? g + total / weights : g;
+}
+
+float3 xtrans(int x, int y)
+{
+    const int c = colour_at(x, y);
+    const float own = site(x, y), g = c == 1 ? own : green.Load(int3(x, y, 0));
+    return float3(c == 0 ? own : from_differences(x, y, 0, g), g, c == 2 ? own : from_differences(x, y, 2, g));
+}
+
+float4 main(float4 position : SV_Position) : SV_Target
+{
+    read_levels();
+    const int2 o = int2(position.xy);
+    const int x = map_x.x * o.x + map_x.y * o.y + map_x.z;
+    const int y = map_y.x * o.x + map_y.y * o.y + map_y.z;
+    // Grey: no other colours to find.
+    float3 rgb = flags.y ? site(x, y) : cfa.w == 6 ? xtrans(x, y) : bayer(x, y);
     // lensfun's vignetting brings up what the lens darkened: what the sensor
     // clipped stays clipped (neutral), and the rest may pass it.
     if (size.w && word(2) == 2)
@@ -445,5 +594,6 @@ float4 main(float4 position : SV_Position) : SV_Target
     }
     return float4(rgb / as_shot.rgb, 1);
 }
+#endif
 #endif
 #endif

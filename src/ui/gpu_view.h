@@ -138,9 +138,9 @@ private:
     bool unpack_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
     // The same for a raw in blocks (rawblocks.h).
     bool decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
-    // The same for a CR3's readout decoded already, as its planes (crx.h):
-    // up as they are, put together here.
-    bool assemble_planes(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
+    // The same for a readout decoded already (a CR3's planes, crx.h; a
+    // Fuji's rows, fuji.h): up as it is, put together here.
+    bool assemble_decoded(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error);
     // What those share: whether to decode on the CPU instead, the
     // file's bytes up, where a readout's decode goes, its black level and
     // active area after the decode, and the check against the CPU.
@@ -215,6 +215,7 @@ private:
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;
     rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
+    rap::gpu::program_ptr develop_green_;    // X-Trans's green, before the develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::program_ptr mosaic_linear_;  // a linear DNG's readout: three colours a photosite
     rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)

@@ -13,6 +13,7 @@
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_correct.h"
+#include "shaders/develop_green.h"
 #include "shaders/develop_ycc.h"
 #include "shaders/difference.h"
 #include "shaders/histogram.h"
@@ -95,17 +96,17 @@ static_assert(sizeof(ComposeParams) == 240, "as view.hlsli's cbuffer packs");
 
 struct DevelopParams
 {
-    int32_t colour[4];
-    float black[4];
+    uint32_t cfa[4];   // each site's LibRaw colour, 2 bits, 16 a word; w: the period
     float as_shot[4];  // w: saturation
     int32_t map_x[4], map_y[4];
     int32_t size[4];
-    int32_t filter[4];  // per photosite: LibRaw's colour (0 R, 1 G, 2 B, 3 the other G)
     int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
     int32_t ycc_at[4];  // YCC: the first block's x, y
     float ycc_mul[4];   // YCC: sraw_mul; w: the guided fill's regularisation
     int32_t flags[4];   // x: the data is white balanced already; y: grey, no filter
+    float black[36];    // per site of the pattern
 };
+static_assert(sizeof(DevelopParams) == 288, "develop.hlsl's layout");
 
 // warp.hlsl's block.
 struct WarpParams
@@ -304,6 +305,7 @@ bool GpuView::programs(std::string& error)
                                  std::pair{&compose_, shaders::compose}, std::pair{&difference_program_, shaders::difference},
                                  std::pair{&histogram_view_, shaders::histogram_view},
                                  std::pair{&develop_, shaders::develop}, std::pair{&develop_correct_, shaders::develop_correct},
+                                 std::pair{&develop_green_, shaders::develop_green},
                                  std::pair{&develop_linear_, shaders::develop_linear},
                                  std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
                                  std::pair{&mosaic_linear_, shaders::mosaic_linear},
@@ -547,7 +549,7 @@ void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr&
     std::vector<float> ours(read.size());  // black off, as LibRaw's
     for (int y = 0; y < m.height; ++y)
         for (int x = 0; x < m.width; ++x)
-            ours[size_t(y) * m.width + x] = float(read[size_t(y) * m.width + x]) - m.black[(y & 1) * 2 + (x & 1)];
+            ours[size_t(y) * m.width + x] = float(read[size_t(y) * m.width + x]) - m.black[m.site(x, y)];
     const std::vector<uint16_t>& theirs = *m.corrected;
     if (theirs.size() != ours.size())
         return;
@@ -559,7 +561,7 @@ void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr&
         for (int x = 0; x < m.width; ++x)
         {
             const size_t i = size_t(y) * m.width + x;
-            const float white = m.white - m.black[(y & 1) * 2 + (x & 1)];
+            const float white = m.white - m.black[m.site(x, y)];
             const float d = std::min(ours[i], white) - std::min(float(theirs[i]), white), a = std::fabs(d);
             const int inner = x >= kEdge && y >= kEdge && x < m.width - kEdge && y < m.height - kEdge;
             sum += d;
@@ -586,8 +588,8 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         return unpack_stream(m, sites, levels, error);
     if (st.blocks)
         return decode_blocks(m, sites, levels, error);
-    if (st.planes)
-        return assemble_planes(m, sites, levels, error);
+    if (st.decoded)
+        return assemble_decoded(m, sites, levels, error);
     const ljpeg::Prepared& j = *st.jpeg;
     if (decode_on_cpu())
     {
@@ -819,23 +821,23 @@ bool GpuView::decode_blocks(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
     return true;
 }
 
-bool GpuView::assemble_planes(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
+bool GpuView::assemble_decoded(const RawMosaic& m, rap::gpu::texture_ptr& sites, rap::gpu::buffer_ptr& levels, std::string& error)
 {
-    const std::vector<uint16_t>& planes = *m.stream->planes;
+    const std::vector<uint16_t>& decoded = *m.stream->decoded;
     if (decode_on_cpu())
-        return upload_decoded(*device_, m, planes, sites, levels, error);
-    if (planes.size() * 2 > gpu::kMaxBuffer)
+        return upload_decoded(*device_, m, decoded, sites, levels, error);
+    if (decoded.size() * 2 > gpu::kMaxBuffer)
         return error = "a raw too big for the GPU", false;
     rap::gpu::buffer_ptr values;
-    if (!readout_buffers(m, planes.size(), values, levels, sites, error))
+    if (!readout_buffers(m, decoded.size(), values, levels, sites, error))
         return false;
-    device_->upload(values, std::as_bytes(std::span(planes)));
+    device_->upload(values, std::as_bytes(std::span(decoded)));
     finish_readout(m, readout_params(m), {}, values, levels, sites);
     if (raw_check())
         check_readout(m, values, levels, sites,
                       [&](std::vector<uint16_t>& out, std::string&)
                       {
-                          out = planes;
+                          out = decoded;
                           return true;
                       });
     return true;
@@ -878,12 +880,14 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             return false;
         }
         DevelopParams p{};
-        for (int i = 0; i < 4; ++i)
+        // The pattern over 6 x 6, a whole number of it (as develop.hlsl reads it).
+        for (int i = 0; i < 36; ++i)
         {
-            p.colour[i] = m->colour[i];
-            p.filter[i] = m->filter[i];
-            p.black[i] = m->black[i];
+            const int s = m->channels == 3 ? i : m->site(i % 6, i / 6);
+            p.cfa[i / 16] |= uint32_t(m->filter[s]) << (i % 16 * 2);
+            p.black[i] = m->black[s];
         }
+        p.cfa[3] = uint32_t(m->period);
         for (int c = 0; c < 3; ++c)
             p.as_shot[c] = m->as_shot[c];
         p.as_shot[3] = m->white;
@@ -948,8 +952,25 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             const float e = 0.01f * m->white;  // colour follows luma changes larger than ~1% of the range
             p.ycc_mul[3] = e * e;
         }
+        // X-Trans's green first, everywhere, a photosite a texel (develop.hlsl's GREEN).
+        rap::gpu::texture_ptr green;
+        if (m->period == 6 && !m->grey)
+        {
+            rap::gpu::pass g;
+            g.program = develop_green_;
+            g.inputs = {sites};
+            g.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};
+            g.uniforms = bytes(p);
+            g.target = green = device_->create({m->width, m->height, rap::gpu::format::r16f, 1, true});
+            if (!green)
+            {
+                error = "too big for the GPU";
+                return false;
+            }
+            device_->run(std::span(&g, 1));
+        }
         pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
-        pass.inputs = {sites};
+        pass.inputs = {sites, green ? green : sites};  // the second read only for X-Trans
         pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};  // each read only when there
         // A DNG whose lens is corrected (WarpRectilinear): the whole active
         // area developed as it lies, then warped into the framing as shown.

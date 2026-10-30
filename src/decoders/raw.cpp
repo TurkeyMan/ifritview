@@ -8,6 +8,7 @@
 #include "decoder.h"
 #include "dng_opcodes.h"
 #include "dngtiles.h"
+#include "fuji.h"
 #include "ljpeg.h"
 #include "phase_one.h"
 #include "rawblocks.h"
@@ -399,7 +400,9 @@ public:
     // rest most significant bit first; its linearisation curve),
     // unpacked_load_raw (16-bit words in the file's order, shifted down) and
     // packed_load_raw (a stream of words of 8 to 32 bits, little-endian,
-    // read most significant bit first; rows padded) read it. False for
+    // read most significant bit first; rows padded) and fuji_14bit_load_raw
+    // (14-bit samples in 32-bit little-endian words, rows whole 28 bytes)
+    // read it. False for
     // others, and for what they read some other way (tiles, two samples a
     // photosite, interlaced rows, a padding byte every ten samples, a Fuji's
     // turned sensor) or past the file's end: LibRaw unpacks those.
@@ -409,7 +412,7 @@ public:
         const auto& u = libraw_internal_data.unpacker_data;
         const auto& sz = imgdata.sizes;
         const bool le = u.order == 0x4949;
-        if (name != "packed_dng_load_raw()" && name != "unpacked_load_raw()" && name != "packed_load_raw()")
+        if (name != "packed_dng_load_raw()" && name != "unpacked_load_raw()" && name != "packed_load_raw()" && name != "fuji_14bit_load_raw()")
             return false;
         if (samples() != 1)
             return error = "more than a sample a photosite", false;
@@ -441,6 +444,14 @@ public:
             p.row_bits = uint32_t(sz.raw_width) * 16;
             p.shift = int(u.load_flags);
         }
+        else if (name == "fuji_14bit_load_raw()")
+        {
+            if (sz.raw_width % 16)
+                return error = "rows not whole 28 bytes", false;
+            p.bits = 14;
+            p.group = 4;
+            p.row_bits = uint32_t(sz.raw_width) * 14;
+        }
         else
         {
             const unsigned flags = u.load_flags;
@@ -469,6 +480,13 @@ public:
     // Whether LibRaw's crop_masked_pixels measures the sides of the active
     // area (a packed readout's flag says so).
     bool packed_sides() const { return loader() == "packed_load_raw()" && libraw_internal_data.unpacker_data.load_flags & 32; }
+    // A filter of three colours the GPU's develop demosaics: Bayer's 2 x 2
+    // (LibRaw's filters, the other G its own) or X-Trans's 6 x 6 (filters 9).
+    bool developed_pattern() const
+    {
+        const auto& id = imgdata.idata;
+        return (id.filters >= 1000 || id.filters == 9) && id.colors == 3;
+    }
     // Samples a photosite in the readout: one (a mosaic, a monochrome
     // sensor), or a linear DNG's colours.
     unsigned samples() const { return imgdata.idata.filters ? 1 : imgdata.idata.colors; }
@@ -782,6 +800,35 @@ public:
         return crx::prepare(file, size, h, p, error);
     }
 
+    // A Fuji's compressed RAF (fuji.h), as LibRaw's
+    // parse_fuji_compressed_header read its header. False for others; and,
+    // with why, for one fuji doesn't take.
+    bool fuji(const uint8_t* file, size_t size, fuji::Prepared& p, std::string& error) const
+    {
+        if (loader() != "fuji_compressed_load_raw()")
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const auto& id = imgdata.idata;
+        fuji::Header h;
+        h.bits = u.fuji_bits;
+        h.lossless = u.fuji_lossless != 0;
+        h.xtrans = u.fuji_raw_type == 16;
+        if (h.xtrans != (id.filters == 9))
+            return error = "a pattern other than the header's", false;
+        h.block_width = u.fuji_block_width;
+        h.blocks = u.fuji_total_blocks;
+        h.lines = u.fuji_total_lines;
+        h.readout_w = imgdata.sizes.raw_width, h.readout_h = imgdata.sizes.raw_height;
+        h.offset = uint64_t(u.data_offset);
+        for (int r = 0; r < 6; ++r)
+            for (int c = 0; c < 6; ++c)
+            {
+                const int f = h.xtrans ? id.xtrans_abs[r][c] : int(id.filters >> ((((r << 1) & 14) | (c & 1)) << 1) & 3);  // FC(row, col)
+                h.colour[r][c] = f == 3 ? 1 : f;
+            }
+        return fuji::prepare(file, size, h, p, error);
+    }
+
     // A Canon sRAW's conversion as LibRaw's canon_sraw_load_raw makes it:
     // which formula and hue for this camera and firmware, and sraw_mul.
     void canon_ycc(RawMosaic::Ycc& y) const
@@ -894,7 +941,7 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
 
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
 // in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), a
-// NEF's, a DNG's or a CR2's lossless JPEG; raw.samples() a photosite. False
+// Fuji's compressed RAF (fuji), a NEF's, a DNG's or a CR2's lossless JPEG; raw.samples() a photosite. False
 // for others, and (with why) for one of those laid out in a way this
 // doesn't take. `blocks`: a raw in blocks' layout, which says what of the
 // readout LibRaw writes (the rest it leaves as it is).
@@ -920,6 +967,11 @@ bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<u
         if (!crx::decode(cr3, planes, error))
             return false;
         crx::readout(cr3, planes, out);
+        return true;
+    }
+    if (fuji::Prepared raf; error.empty() && raw.fuji(file, size, raf, error))
+    {
+        fuji::decode(raf, out);
         return true;
     }
     if (!error.empty())
@@ -1063,8 +1115,7 @@ void check_unpack(const uint8_t* file, size_t size, const std::string& path)
                                      : rd.color3_image || rd.color4_image                         ? "no: demosaiced, not three colours"
                                      : id.colors == 1 && rd.raw_image                             ? (ok ? "yes: monochrome, here too" : "yes: monochrome")
                                                                                                     : "no: no colour filter")
-                      : id.filters == 9    ? "no: X-Trans"
-                      : id.filters < 1000  ? "no: other filter pattern"
+                      : id.filters < 1000 && id.filters != 9 ? "no: other filter pattern"
                       : id.colors != 3     ? "no: four colours"
                       : rd.float_image     ? "no: float mosaic"
                       : !rd.raw_image      ? "no: unpacked elsewhere"
@@ -1164,15 +1215,15 @@ bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
 // Unpacked only: the sensor's Bayer mosaic and what developing it needs,
 // for the GPU to develop (gpu_view's develop pass). The CPU's part of a raw
 // is just this, a fraction of a second. False for sensors it doesn't take
-// (X-Trans, Foveon, linear DNGs): those develop here, on the CPU.
+// (Foveon, four colours, floats): those develop here, on the CPU.
 bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out, std::string& error)
 {
     const auto& id = raw.imgdata.idata;
-    // A 2 x 2 Bayer pattern, already three colours a photosite (a linear
-    // DNG, Canon's sRAW), or no filter at all (a monochrome sensor): no
-    // X-Trans, Foveon or four-colour filters yet.
+    // A 2 x 2 Bayer pattern or X-Trans's 6 x 6, already three colours a
+    // photosite (a linear DNG, Canon's sRAW), or no filter at all (a
+    // monochrome sensor): no Foveon or four-colour filters yet.
     const bool linear = !id.filters && id.colors == 3, grey = !id.filters && id.colors == 1;
-    if (!linear && !grey && (id.filters == 9 || id.filters < 1000 || id.colors != 3))
+    if (!linear && !grey && !raw.developed_pattern())
         return false;
     if (raw.loader() == "canon_sraw_load_raw()")
     {
@@ -1181,8 +1232,8 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
         return decode_linear(raw, out, error, true);
     }
-    // A CR2, a NEF, a DNG or a raw in blocks on the GPU (a CR3 put together
-    // there), or here on every core; the rest by LibRaw. A linear DNG's three
+    // A CR2, a NEF, a DNG or a raw in blocks on the GPU (a CR3 or a Fuji's
+    // compressed RAF put together there), or here on every core; the rest by LibRaw. A linear DNG's three
     // colours a photosite.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
@@ -1244,8 +1295,20 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         if (crx::decode(cr3, *planes, ours_error))
         {
             stream = raw.readout_stream(true);
-            stream->planes = std::move(planes);
+            stream->decoded = std::move(planes);
+            stream->planes = true;
         }
+    }
+    else if (fuji::Prepared raf; decode_options().gpu_decode && raw.fuji(file, size, raf, ours_error) &&
+                                 uint64_t(raf.header.readout_w) * raf.header.readout_h * 2 <= gpu::kMaxBuffer)
+    {
+        // A Fuji's compressed RAF decoded here on every core, a strip a
+        // thread (at most the 128 MB the GPU takes); the GPU takes the
+        // active area out and measures the black.
+        auto rows = std::make_shared<std::vector<uint16_t>>();
+        fuji::decode(raf, *rows);
+        stream = raw.readout_stream(false);
+        stream->decoded = std::move(rows);
     }
     const unsigned n = raw.samples();
     if (stream)
@@ -1308,27 +1371,28 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
     const auto& id = raw.imgdata.idata;
     const auto& sz = raw.imgdata.sizes;
     const auto& col = raw.imgdata.color;
-    // dcraw's FC(row, col): the filter colour, 0 R, 1 G, 2 B, 3 the second G.
-    // Its black level as LibRaw has it: the common one, its colour's, and its
-    // place in a repeating pattern of them (DNG's BlackLevelRepeatDim).
-    for (int row = 0; row < 2; ++row)
-        for (int c = 0; c < 2; ++c)
-        {
-            if (m->channels == 3)
+    // Each site of the filter pattern: dcraw's FC(row, col), the colour (0
+    // R, 1 G, 2 B, 3 the second G), or X-Trans's (LibRaw's xtrans, from the
+    // active area's corner). Its black level as LibRaw has it: the common
+    // one, its colour's, and its place in a repeating pattern of them (DNG's
+    // BlackLevelRepeatDim).
+    if (m->channels == 3)
+        for (int ch = 0; ch < 3; ++ch)  // linear: per channel R, G, B
+            m->black[ch] = float(col.black + col.cblack[ch]);
+    else
+    {
+        m->period = id.filters == 9 ? 6 : 2;
+        for (int row = 0; row < m->period; ++row)
+            for (int c = 0; c < m->period; ++c)
             {
-                // Linear: per channel R, G, B.
-                const int ch = row * 2 + c;
-                m->black[ch] = float(col.black + (ch < 3 ? col.cblack[ch] : 0));
-                continue;
+                const int f = id.filters == 9 ? id.xtrans[row][c] : (id.filters >> ((((row << 1) & 14) | (c & 1)) << 1)) & 3;
+                unsigned b = col.black + col.cblack[f];
+                if (col.cblack[4] && col.cblack[5] && 6 + col.cblack[4] * col.cblack[5] <= LIBRAW_CBLACK_SIZE)
+                    b += col.cblack[6 + (row % col.cblack[4]) * col.cblack[5] + c % col.cblack[5]];
+                m->filter[m->site(c, row)] = f;
+                m->black[m->site(c, row)] = float(b);
             }
-            const int f = (id.filters >> ((((row << 1) & 14) | (c & 1)) << 1)) & 3;
-            m->colour[row * 2 + c] = f == 3 ? 1 : f;
-            m->filter[row * 2 + c] = f;
-            unsigned b = col.black + col.cblack[f];
-            if (col.cblack[4] && col.cblack[5] && 6 + col.cblack[4] * col.cblack[5] <= LIBRAW_CBLACK_SIZE)
-                b += col.cblack[6 + (row % col.cblack[4]) * col.cblack[5] + c % col.cblack[5]];
-            m->black[row * 2 + c] = float(b);
-        }
+    }
     m->white = float(col.maximum);
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "raw: black %u + %u %u %u %u, pattern %ux%u: %u %u %u %u, white %u, mul %g %g %g, filters %08x, active %ux%u at %u,%u, COLOR %d%d%d%d\n", col.black, col.cblack[0],
@@ -1678,7 +1742,7 @@ bool quick(const std::string& path)
         return false;
     const auto& id = raw->imgdata.idata;
     return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
-           (((id.filters >= 1000 && id.colors == 3) || (!id.filters && id.colors == 1)) && raw->packed(bytes, size, packed, error)) ||
+           ((raw->developed_pattern() || (!id.filters && id.colors == 1)) && raw->packed(bytes, size, packed, error)) ||
            (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
 }
 
