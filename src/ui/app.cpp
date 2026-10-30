@@ -97,12 +97,13 @@ App::~App()
     // which go when the process does: let it finish (or give up) first.
     preview_->wait_out();
     listing_->wait_out();
+    saves_->wait_out(true);  // a file half written is worse than a late exit
 }
 
-void App::Background::wait_out()
+void App::Background::wait_out(bool to_the_end)
 {
     ++generation;
-    for (int i = 0; i < 600 && running.load(); ++i)
+    for (int i = 0; (to_the_end || i < 600) && running.load(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
@@ -763,10 +764,11 @@ void App::script_export(const std::string& path)
     // megapixels took the UI thread seconds), from a copy of what's shown.
     auto shown = std::make_shared<const Image>(instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *image_);
     std::thread(
-        [e, shown, path, running = preview_->start()]
+        [e, shown, path, running = saves_->start()]
         {
             std::string error;
-            if (!e->encode(*shown, path, EncodeOptions{}, error))
+            if (!platform::write_replacing(
+                    path, [&](const std::string& temp, std::string& error) { return e->encode(*shown, temp, EncodeOptions{}, error); }, error))
                 std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), error.c_str());
             else
                 std::fprintf(stderr, "script: exported %s\n", path.c_str());

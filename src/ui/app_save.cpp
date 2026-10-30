@@ -323,10 +323,17 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
                         status_message_ = busy_message_ = rap::i18n::format(_("Saving {0}…"), name);
                         update_status();
                         std::thread(
-                            [this, enc, o, source, lossless, path, name]
+                            [this, enc, o, source, lossless, path, name, running = saves_->start()]
                             {
                                 std::string error;
-                                const bool ok = lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), path, error) : enc->encode(*source, path, o, error);
+                                const bool ok = platform::write_replacing(
+                                    path,
+                                    [&](const std::string& temp, std::string& error)
+                                    {
+                                        return lossless ? write_lossless_jpeg(*lossless, o.metadata.get(), temp, error)
+                                                        : enc->encode(*source, temp, o, error);
+                                    },
+                                    error);
                                 platform::post_main(
                                     [this, ok, error, name]
                                     {

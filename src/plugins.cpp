@@ -15,7 +15,6 @@
 #include <ifritview_plugin.h>
 
 #include <glib.h>
-#include <glib/gstdio.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -607,35 +606,28 @@ bool run_encode(const Format& f, const Image& image, const std::string& path, co
     for (const EncodeSetting& s : f.encoder.settings)
         values.push_back(std::clamp(f.encoder.value(options, s.key), s.min, s.max));
 
-    // Into a temporary file beside the target, renamed over it on success.
-    const std::string temp = path + ".ifrit-partial";
-    EncodeCall call;
-    call.file = platform::fopen(temp, "wb");
-    if (!call.file)
-    {
-        error = "cannot create the file";
-        return false;
-    }
-    ifrit_encode_host host{};
-    host.struct_size = sizeof host;
-    host.context = &call;
-    host.write = host_write;
-    host.error = host_encode_error;
-    const ifrit_result r = f.plugin->encode(f.index, &in, values.data(), uint32_t(values.size()), &host);
-    const bool closed = std::fclose(call.file) == 0;
-    if (r == IFRIT_OK && !call.failed && closed)
-    {
-        g_remove(path.c_str());  // Windows' rename won't replace a file
-        if (g_rename(temp.c_str(), path.c_str()) == 0)
+    return platform::write_replacing(
+        path,
+        [&](const std::string& temp, std::string& error)
+        {
+            EncodeCall call;
+            call.file = platform::fopen(temp, "wb");
+            if (!call.file)
+                return error = "cannot create the file", false;
+            ifrit_encode_host host{};
+            host.struct_size = sizeof host;
+            host.context = &call;
+            host.write = host_write;
+            host.error = host_encode_error;
+            const ifrit_result r = f.plugin->encode(f.index, &in, values.data(), uint32_t(values.size()), &host);
+            const bool closed = std::fclose(call.file) == 0;
+            if (call.failed || !closed)
+                return error = "cannot write the file (disk full?)", false;
+            if (r != IFRIT_OK)
+                return error = !call.error.empty() ? call.error : "the plugin failed without saying why", false;
             return true;
-        error = "cannot replace the file";
-    }
-    else if (call.failed || !closed)
-        error = "cannot write the file (disk full?)";
-    else
-        error = !call.error.empty() ? call.error : "the plugin failed without saying why";
-    g_remove(temp.c_str());
-    return false;
+        },
+        error);
 }
 
 // -- loading ------------------------------------------------------------------

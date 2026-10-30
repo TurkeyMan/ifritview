@@ -18,6 +18,13 @@ FILE* fopen(const std::string& path, const char* mode);
 // such thing (Windows); callers then open the file instead.
 FILE* fmemopen(const uint8_t* data, size_t size);
 
+// `path` written whole or not at all: `write` makes it at a temporary path
+// beside it (true once it has, else false and why), which then takes its
+// place in one step; a reader, or a crash meanwhile, finds the old file or
+// the new, never part of one. False, and why, when it couldn't be.
+bool write_replacing(const std::string& path, const std::function<bool(const std::string& temp, std::string& error)>& write,
+                     std::string& error);
+
 // Size of a file in bytes, or -1.
 int64_t file_size(const std::string& path);
 

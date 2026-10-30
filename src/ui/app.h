@@ -335,10 +335,13 @@ private:
             ++running;
             return std::shared_ptr<void>(nullptr, [self = shared_from_this()](void*) { --self->running; });
         }
-        void wait_out();  // on exit: the latest generation moved on, those running waited for (a few seconds at most)
+        // On exit: the latest generation moved on, those running waited
+        // for: a few seconds at most, or (`to_the_end`) as long as they take.
+        void wait_out(bool to_the_end = false);
     };
     std::shared_ptr<Background> preview_ = std::make_shared<Background>();  // previews: a save's, the camera's JPEG, LibRaw's develop, a comparison
     std::shared_ptr<Background> listing_ = std::make_shared<Background>();  // the folder, listed
+    std::shared_ptr<Background> saves_ = std::make_shared<Background>();    // files being written: finished before the app goes
     bool refit_after_layout_ = false;
     bool refit_when_laid_out_ = false;  // a fit guessed the chrome: fit again once laid out
     double fitted_scale_ = 0;           // the device scale the window was last fitted at

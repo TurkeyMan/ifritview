@@ -35,6 +35,28 @@ FILE* fopen(const std::string& path, const char* mode)
 #endif
 }
 
+bool write_replacing(const std::string& path, const std::function<bool(const std::string& temp, std::string& error)>& write,
+                     std::string& error)
+{
+    const std::string temp = path + ".ifrit-partial";
+    if (!write(temp, error))
+    {
+        g_remove(temp.c_str());
+        return false;
+    }
+#ifdef _WIN32
+    // MoveFileEx replaces in one step; rename won't replace a file.
+    const bool placed = MoveFileExW(widen(temp).c_str(), widen(path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    const bool placed = ::rename(temp.c_str(), path.c_str()) == 0;
+#endif
+    if (placed)
+        return true;
+    g_remove(temp.c_str());
+    error = "cannot replace the file";
+    return false;
+}
+
 FILE* fmemopen(const uint8_t* data, size_t size)
 {
 #ifdef _WIN32
