@@ -94,6 +94,13 @@ bool prepare_tiles(const uint8_t* file, size_t size, const std::vector<uint64_t>
 // first two samples `start`, and its curve (indices clamped to it).
 bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, const uint8_t tree[32], const uint16_t start[2][2],
                    const uint16_t* curve, size_t curve_size, Prepared& out, std::string& error);
+// A Pentax PEF's (pentax_load_raw's): as a NEF's, `columns` samples a row,
+// `rows` of them, each row's first two continuing those two rows up (the
+// first two rows' from 0), the differences as a JPEG's, coded by `n` codes:
+// `codes[i]` its bits from the top of 12, `lengths[i]` of them, its symbol
+// i. False for codes that aren't a JPEG table's (canonical).
+bool prepare_pentax(const uint8_t* data, size_t size, int columns, int rows, int precision, const uint16_t* codes, const uint8_t* lengths, int n,
+                    Prepared& out, std::string& error);
 // Whether prepare and decode take this stream (its headers only: quick),
 // and its predictor (the GPU's decode takes 1 only).
 bool takes(const uint8_t* data, size_t size, int* predictor = nullptr);

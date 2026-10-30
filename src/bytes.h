@@ -79,3 +79,49 @@ struct FileReader
         return d;
     }
 };
+
+// A stream's bits, most significant first, `size` bytes of them; past the
+// end, zeros. Up to 64 in hand (`held`), from the top of `peek`, zeros
+// under them.
+class MsbBits
+{
+public:
+    MsbBits(const uint8_t* data, uint64_t size) : data_(data), size_(size) {}
+    // At least 57 in hand.
+    void fill()
+    {
+        if (at_ + 8 <= size_)
+        {
+            cache_ |= be64(data_ + at_) >> count_;
+            at_ += size_t(63 - count_) >> 3;
+            count_ |= 56;
+            cache_ &= ~uint64_t(0) << (64 - count_);  // the next byte's first bits not yet counted
+            return;
+        }
+        for (; count_ <= 56; count_ += 8, ++at_)
+            if (at_ < size_)
+                cache_ |= uint64_t(data_[at_]) << (56 - count_);
+    }
+    int held() const { return count_; }
+    uint64_t peek() const { return cache_; }
+    // `n` (0..32) of those in hand.
+    uint32_t take(int n)
+    {
+        const uint32_t v = n ? uint32_t(cache_ >> (64 - n)) : 0;
+        skip(n);
+        return v;
+    }
+    void skip(int n)
+    {
+        cache_ = n < 64 ? cache_ << n : 0;
+        count_ -= n;
+    }
+    // Whether every byte's been taken into hand.
+    bool drained() const { return at_ >= size_; }
+
+private:
+    const uint8_t* data_;
+    uint64_t size_, at_ = 0;
+    uint64_t cache_ = 0;
+    int count_ = 0;
+};

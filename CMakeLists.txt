@@ -58,6 +58,7 @@ add_library(ifrit_core STATIC
   src/decoders/crx.cpp
   src/decoders/ljpeg.cpp
   src/decoders/dng_opcodes.cpp
+  src/decoders/olympus.cpp
   src/decoders/phase_one.cpp
   src/decoders/rawblocks.cpp
   src/decoders/rawpacked.cpp
