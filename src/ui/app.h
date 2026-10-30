@@ -193,6 +193,7 @@ private:
     rap::slider* exposure_ = nullptr;
     rap::widget* wb_box_ = nullptr;
     rap::slider *wb_kelvin_ = nullptr, *wb_tint_ = nullptr;
+    bool develop_slider_focused() const;  // white balance or a develop knob (Exposure has its own keys)
     bool syncing_wb_ = false;
     void white_balance_changed();  // the sliders moved
     void white_balance_as_shot();  // back to the camera's, every control at rest
@@ -302,6 +303,8 @@ private:
     bool pane_histogram_ = false;
     void toggle_pane();          // the pane in or out, with the window following
     void show_pane_content();    // the info or the histogram in it
+    void show_pane_box();        // which of them shows, before it's filled in
+    void fill_pane();            // the info or the histogram filled in
     void update_histogram();     // where the view draws its histogram
     // The histogram's legend: R, G, B, L chips in its corner, each switching
     // its channel (a hidden one's dim).

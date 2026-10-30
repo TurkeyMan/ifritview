@@ -21,6 +21,16 @@
 #include <random>
 #include <thread>
 
+bool App::develop_slider_focused() const
+{
+    if (wb_kelvin_->has_focus() || wb_tint_->has_focus())
+        return true;
+    for (const auto& k : knobs_)
+        if (k.slider && k.slider->has_focus())
+            return true;
+    return false;
+}
+
 bool App::on_key(const rap::key_event& e)
 {
     if (!e.press)
@@ -52,6 +62,28 @@ bool App::on_key(const rap::key_event& e)
                 break;  // everything else keeps its usual meaning
         }
     }
+    // The develop pane's other sliders keep their own keys while focused
+    // (arrows, Page Up/Down, Home/End step them), rather than the image
+    // changing; Esc or Enter hand the keys back to the image.
+    if (develop_slider_focused())
+        switch (e.key)
+        {
+            case rap::key::left:
+            case rap::key::right:
+            case rap::key::up:
+            case rap::key::down:
+            case rap::key::page_up:
+            case rap::key::page_down:
+            case rap::key::home:
+            case rap::key::end:
+                return false;
+            case rap::key::escape:
+            case rap::key::enter:
+                view_->canvas()->focus();
+                return true;
+            default:
+                break;
+        }
     const bool ctrl = e.modifiers & rap::mod_ctrl;
     const char32_t c = e.key == rap::key::character ? e.codepoint : 0;
     switch (e.key)

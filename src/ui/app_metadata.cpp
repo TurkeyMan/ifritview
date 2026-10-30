@@ -124,8 +124,18 @@ bool App::histogram_legend_click(const rap::pointer_event& e)
 
 void App::show_pane_content()
 {
+    show_pane_box();
+    fill_pane();
+}
+
+void App::show_pane_box()
+{
     info_box_->set_visible(!pane_histogram_);
     histogram_box_->set_visible(pane_histogram_);
+}
+
+void App::fill_pane()
+{
     refresh_metadata();
     update_histogram();
 }
@@ -142,11 +152,12 @@ void App::toggle_pane()
     metadata_pane_->set_visible(metadata_visible_);
     if (metadata_visible_)
         splitter_->set_sizes({std::max(100.f, before.w), float(cfg_.metadata_pane_width)});
+    show_pane_box();
     // The window takes (or gives back) what the pane adds in the same step,
-    // so the first frame is laid out at the final width: laying the pane into
-    // the old width first showed it over the image until the window grew.
-    // Before the pane's content: that asks the histogram canvas its size,
-    // which lays the window out as it is.
+    // so the first frame is laid out at the final width, the pane's controls
+    // in it: laying the pane into the old width first showed it over the
+    // image until the window grew. Before the pane's filled in: that asks
+    // the histogram canvas its size, which lays the window out as it is.
     pane_toggled_from_ = 0;
     if (pane_extra_ <= 0)
         pane_extra_ = float(cfg_.metadata_pane_width) + splitter_->divider();  // until measured: the pane and its divider
@@ -159,7 +170,7 @@ void App::toggle_pane()
         window_->resize({std::max(w, float(cfg_.min_window_width)), before.h});
         pane_toggled_from_ = before.w;
     }
-    show_pane_content();
+    fill_pane();
     // Then the exact fit, measured once the toolkit has laid the pane in or
     // out (it does that later, not here), or shortly if the view's size
     // didn't change.
