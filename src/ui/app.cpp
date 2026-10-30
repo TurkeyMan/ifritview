@@ -1340,6 +1340,7 @@ void App::sync_exposure_slider()
     exposure_range_[0] = bias - down;
     exposure_range_[1] = bias + 3.0;
     exposure_->set_range(exposure_range_[0], exposure_range_[1]);
+    exposure_->set_marks({{bias, ""}});  // as shot
     exposure_->set_value(bias + image_->exposure_edit);
     exposure_->set_enabled(!image_->is_preview());
     sync_white_balance();
@@ -1355,10 +1356,14 @@ void App::sync_white_balance()
     lens_check_->set_visible(image_ && image_->is_raw);
     if (!raw)
         return;
-    double kelvin = image_->wb_kelvin, tint = image_->wb_tint;
-    if (kelvin <= 0)
-        wb_as_shot(*image_->mosaic, kelvin, tint);
+    double shot_kelvin, shot_tint;
+    wb_as_shot(*image_->mosaic, shot_kelvin, shot_tint);
+    const bool chosen = image_->wb_kelvin > 0;
+    const double kelvin = chosen ? image_->wb_kelvin : shot_kelvin, tint = chosen ? image_->wb_tint : shot_tint;
     syncing_wb_ = true;
+    // The as-shot white marked, and the sliders snap to it.
+    wb_kelvin_->set_marks({{shot_kelvin, ""}});
+    wb_tint_->set_marks({{shot_tint, ""}});
     wb_kelvin_->set_value(kelvin);
     wb_tint_->set_value(tint);
     syncing_wb_ = false;

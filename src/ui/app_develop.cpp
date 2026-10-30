@@ -9,6 +9,7 @@
 #include "view.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace
@@ -96,6 +97,7 @@ rap::node App::develop_panel()
                                 .show_value(0)
                                 .stretch()
                                 .mark(rest(crs))
+                                .snap()
                                 .on_changed([this, crs](double v) { knob_changed(crs, v); })
                                 .bind(knobs_[size_t(i)].slider)
                                 .tooltip(_(k.tip))};
@@ -109,6 +111,7 @@ rap::node App::develop_panel()
                                   .show_value(0)
                                   .stretch()
                                   .mark(0.0)
+                                  .snap()
                                   .on_changed([this, crs](double v) { knob_changed(crs, v); })
                                   .bind(knobs_[i].slider)};
     };
@@ -126,9 +129,13 @@ rap::node App::develop_panel()
         // camera's compensation (raw and HDR images), as Lightroom has them.
         vbox{
             L::form{
+                // Even in the light's ratios (log2), as Lightroom's is far
+                // from even in kelvin: daylight's 5500 a third of the way along.
                 {_("Temperature"), L::slider{2000.0, 50000.0, 5500.0}
-                                       .step(50, 500)
+                                       .map([](double k) { return std::log2(k); }, [](double t) { return std::exp2(t); })
+                                       .step(0.005, 0.05)
                                        .show_value(0)
+                                       .snap()  // to the as-shot white, marked per image
                                        .stretch()
                                        .on_changed([this](double) { white_balance_changed(); })
                                        .bind(wb_kelvin_)
@@ -136,8 +143,8 @@ rap::node App::develop_panel()
                 {_("Tint"), L::slider{-150.0, 150.0, 0.0}
                                 .step(1, 10)
                                 .show_value(0)
+                                .snap()
                                 .stretch()
-                                .mark(0.0)
                                 .on_changed([this](double) { white_balance_changed(); })
                                 .bind(wb_tint_)
                                 .tooltip(_("White balance: towards green (-) or magenta (+)"))},
@@ -148,8 +155,8 @@ rap::node App::develop_panel()
             {_("Exposure"), L::slider{-3.0, 3.0, 0.0}
                                 .step(0.1, 1.0)
                                 .show_value(2)
+                                .snap()  // to the camera's compensation, marked per image
                                 .stretch()
-                                .mark(0.0)
                                 .on_changed([this](double) { retone(); })
                                 .bind(exposure_)
                                 .tooltip(_("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
