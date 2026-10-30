@@ -1721,6 +1721,13 @@ void App::apply_xmp(bool fresh)
     image_->exposure_edit = image_->xmp.exposure;
     if (image_->tonable())
         image_->retone(image_->exposure_edit);
+    // Its white balance, where it isn't the camera's (a raw's develop takes
+    // it; the panel's sliders show it).
+    if (image_->xmp.temperature > 0)
+    {
+        image_->wb_kelvin = image_->xmp.temperature;
+        image_->wb_tint = image_->xmp.tint;
+    }
     status_message_ = "XMP edits applied";
 }
 

@@ -184,7 +184,8 @@ struct XmpDevelop
 {
     bool present = false;
     double exposure = 0;     // crs:Exposure2012, EV on top of as-shot
-    double temperature = 0;  // crs:Temperature in Kelvin, 0 = as shot (parsed, not applied yet)
+    double temperature = 0;  // crs:Temperature in Kelvin, 0 = as shot
+    double tint = 0;         // crs:Tint, with it
     int orientation = 1;     // tiff:Orientation
     bool has_crop = false;
     double crop_left = 0, crop_top = 0, crop_right = 1, crop_bottom = 1;  // fractions of the un-rotated image

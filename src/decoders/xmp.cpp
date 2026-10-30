@@ -92,6 +92,7 @@ void collect_develop(XmpPtr xmp, Image& out)
     if (wb != "As Shot" && get_double(xmp, kCrs, "Temperature", v) && v > 0)
     {
         d.temperature = v;
+        d.tint = get_double(xmp, kCrs, "Tint", v) ? v : 0;
         d.present = true;
     }
     if (get_double(xmp, kTiff, "Orientation", v) && v >= 1 && v <= 8)
