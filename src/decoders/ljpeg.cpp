@@ -56,32 +56,37 @@ struct Stream
     bool nikon;  // a difference's bits as Nikon codes them
 };
 
+// The code `v` (the next 16 bits) starts with: its length, 0 for none, and
+// its symbol.
+inline unsigned lookup(const Table& t, uint32_t v, unsigned& symbol)
+{
+    const uint16_t e = t.fast[v >> (16 - Table::kFast)];
+    symbol = e & 0xff;
+    if (e >> 8)
+        return e >> 8;
+    // Longer than the lookup: by its length.
+    for (unsigned l = Table::kFast + 1; l <= 16; ++l)
+        if (const int code = int(v >> (16 - l)); code <= t.maxcode[l])
+        {
+            symbol = t.symbols[code + t.delta[l]];
+            return l;
+        }
+    return 0;
+}
+
 // One sample's difference at `pos` (in bits) with component `c`'s table.
 // False for a code that doesn't exist; a speculative decode takes it as a
 // one-bit symbol and goes on (it's a deterministic path all the same).
 inline bool next(const Stream& s, uint64_t& pos, int c, int& diff)
 {
     uint64_t w = be64(s.bits + (pos >> 3)) << (pos & 7);
-    const Table& t = *s.table[c];
-    const uint16_t e = t.fast[w >> (64 - Table::kFast)];
-    unsigned len = e >> 8, size = e & 0xff;
+    unsigned size;
+    const unsigned len = lookup(*s.table[c], uint32_t(w >> 48), size);
     if (!len)
     {
-        // Longer than the lookup: by its length.
-        const uint32_t v = uint32_t(w >> 48);
-        for (unsigned l = Table::kFast + 1; l <= 16; ++l)
-            if (const int code = int(v >> (16 - l)); code <= t.maxcode[l])
-            {
-                len = l;
-                size = t.symbols[code + t.delta[l]];
-                break;
-            }
-        if (!len)
-        {
-            pos += 1;
-            diff = 0;
-            return false;
-        }
+        pos += 1;
+        diff = 0;
+        return false;
     }
     pos += len;
     if (s.nikon)
@@ -435,6 +440,64 @@ bool prepare_tiles(const uint8_t* file, size_t size, const std::vector<uint64_t>
     return true;
 }
 
+namespace
+{
+
+// A stream of two columns interleaved, `columns` samples a row, every
+// sample coded by `t` (no JPEG framing, nothing stuffed), each row's first
+// two continuing those two rows up: Nikon's and Pentax's.
+void prepare_columns(const uint8_t* data, size_t size, int columns, int rows, int precision, const Table& t, Prepared& p)
+{
+    p = Prepared{};
+    p.width = columns / 2, p.height = rows, p.components = 2, p.precision = precision;
+    p.step = 2;
+    p.bits.assign(data, data + size);
+    p.bits.resize(size + 8, 0);
+    p.parts.assign(1, {});
+    p.parts[0].bits = uint64_t(size) * 8;
+    p.parts[0].rows = rows;
+    p.tables.assign(1, t);
+}
+
+}  // namespace
+
+bool prepare_pentax(const uint8_t* data, size_t size, int columns, int rows, int precision, const uint16_t* codes, const uint8_t* lengths, int n,
+                    Prepared& p, std::string& error)
+{
+    if (columns < 2 || columns % 2 || rows < 1 || !size || n < 1 || n > 16)
+        return error = "not a Pentax stream", false;
+    for (int c = 0; c < n; ++c)
+        if (lengths[c] < 1 || lengths[c] > 12)
+            return error = "a Pentax code of " + std::to_string(lengths[c]) + " bits", false;
+    // The codes as pentax_load_raw looks them up, 12 bits at a time: from
+    // each one's own on, as many as start with it, its length and symbol
+    // (a later code over an earlier one).
+    uint16_t huff[4097] = {};
+    for (int c = 0; c < n; ++c)
+        for (unsigned i = codes[c]; i <= ((codes[c] + (4096u >> lengths[c]) - 1) & 4095);)
+            huff[++i] = uint16_t(lengths[c] << 8 | c);
+    // As a JPEG's table has them, the codes in order, shortest first: taken
+    // only if they're those it makes, every 12 bits looked up alike.
+    uint8_t counts[16] = {}, symbols[16] = {};
+    for (int c = 0; c < n; ++c)
+        symbols[c] = uint8_t(c);
+    std::sort(symbols, symbols + n, [&](uint8_t a, uint8_t b) { return lengths[a] != lengths[b] ? lengths[a] < lengths[b] : codes[a] < codes[b]; });
+    for (int c = 0; c < n; ++c)
+        ++counts[lengths[c] - 1];
+    Table t;
+    if (!build_table(counts, symbols, size_t(n), t))
+        return error = "a Pentax table not a JPEG's", false;
+    for (uint32_t v = 0; v < 4096; ++v)
+    {
+        unsigned symbol = 0;
+        const unsigned len = lookup(t, v << 4, symbol);
+        if (len != unsigned(huff[v + 1] >> 8) || symbol != unsigned(huff[v + 1] & 0xff))
+            return error = "a Pentax table not a JPEG's", false;
+    }
+    prepare_columns(data, size, columns, rows, precision, t, p);
+    return true;
+}
+
 bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, const uint8_t tree[32], const uint16_t start[2][2], const uint16_t* curve,
                    size_t curve_size, Prepared& p, std::string& error)
 {
@@ -446,19 +509,11 @@ bool prepare_nikon(const uint8_t* data, size_t size, int columns, int rows, cons
     Table t;
     if (n > 16 || !build_table(tree, tree + 16, n, t))
         return error = "bad Nikon tree", false;
-    p = Prepared{};
-    p.width = columns / 2, p.height = rows, p.components = 2, p.precision = 14;
+    prepare_columns(data, size, columns, rows, 14, t, p);
     p.nikon = true;
-    p.step = 2;
     for (int r = 0; r < 2; ++r)
         for (int c = 0; c < 2; ++c)
             p.initial[r][c] = start[r][c];
-    p.bits.assign(data, data + size);
-    p.bits.resize(size + 8, 0);
-    p.parts.assign(1, {});
-    p.parts[0].bits = uint64_t(size) * 8;
-    p.parts[0].rows = rows;
-    p.tables.assign(1, t);
     if (curve && curve_size)
     {
         // As nikon_load_raw indexes it: the sample as a signed 16 bits,

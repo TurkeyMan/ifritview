@@ -9,6 +9,7 @@
 #include "dng_opcodes.h"
 #include "dngtiles.h"
 #include "ljpeg.h"
+#include "olympus.h"
 #include "phase_one.h"
 #include "rawblocks.h"
 #include "rawpacked.h"
@@ -392,6 +393,43 @@ public:
         const auto& sz = imgdata.sizes;
         return ljpeg::prepare_nikon(file + u.data_offset, size - size_t(u.data_offset), sz.raw_width, sz.height, trees[tree], start,
                                     imgdata.color.curve, 0x4000, p, error);
+    }
+    // A Pentax PEF's compressed readout as LibRaw's pentax_load_raw reads
+    // it: its codes from the maker notes (how many, each one's bits and
+    // length), the whole readout's rows. False for others.
+    bool pentax(const uint8_t* file, size_t size, ljpeg::Prepared& p, std::string& error, bool check_only = false) const
+    {
+        if (loader() != "pentax_load_raw()")
+            return false;
+        const auto& u = libraw_internal_data.unpacker_data;
+        const FileReader r{file, size, u.order != 0x4949};
+        const size_t at = size_t(u.meta_offset);
+        const int n = (r.u16(at) + 12) & 15;
+        if (u.zero_after_ff || !r.fits(at, 14 + 3 * size_t(n)) || u.data_offset <= 0 || size_t(u.data_offset) >= size)
+            return error = "a Pentax readout laid out another way", false;
+        if (check_only)
+            return true;
+        uint16_t codes[15];
+        uint8_t lengths[15];
+        for (int c = 0; c < n; ++c)
+            codes[c] = r.u16(at + 14 + 2 * c), lengths[c] = file[at + 14 + 2 * n + c];
+        const auto& sz = imgdata.sizes;
+        return ljpeg::prepare_pentax(file + u.data_offset, size - size_t(u.data_offset), sz.raw_width, sz.raw_height, int(u.tiff_bps), codes,
+                                     lengths, n, p, error);
+    }
+    // An Olympus's or OM System's compressed readout, as LibRaw's
+    // olympus_load_raw reads it (olympus.h). False for others.
+    bool olympus(const uint8_t* file, size_t size, olympus::Prepared& p, std::string& error) const
+    {
+        if (loader() != "olympus_load_raw()")
+            return false;
+        const auto& o = imgdata.makernotes.olympus;
+        const unsigned tags[14] = {o.tagX640, o.tagX641, o.tagX642, o.tagX643, o.tagX644, o.tagX645, o.tagX646,
+                                   o.tagX647, o.tagX648, o.tagX649, o.tagX650, o.tagX651, o.tagX652, o.tagX653};
+        const auto& u = libraw_internal_data.unpacker_data;
+        if (u.data_offset < 0)
+            return error = "no Olympus header", false;
+        return olympus::prepare(file, size, uint64_t(u.data_offset), imgdata.sizes.raw_width, imgdata.sizes.raw_height, tags, p, error);
     }
 
     // A readout stored uncompressed, as LibRaw's packed_dng_load_raw (a DNG's
@@ -893,10 +931,10 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
 }
 
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
-// in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), a
-// NEF's, a DNG's or a CR2's lossless JPEG; raw.samples() a photosite. False
-// for others, and (with why) for one of those laid out in a way this
-// doesn't take. `blocks`: a raw in blocks' layout, which says what of the
+// in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), an
+// ORF (olympus.h: its codes on one thread), a NEF's, a PEF's, a DNG's or a
+// CR2's lossless JPEG; raw.samples() a photosite. False for others, and
+// (with why) for one of those laid out in a way this doesn't take. `blocks`: a raw in blocks' layout, which says what of the
 // readout LibRaw writes (the rest it leaves as it is).
 bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<uint16_t>& out, std::string& error,
                  std::shared_ptr<rawblocks::Prepared>* blocks = nullptr)
@@ -922,12 +960,15 @@ bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<u
         crx::readout(cr3, planes, out);
         return true;
     }
+    if (olympus::Prepared orf; error.empty() && raw.olympus(file, size, orf, error))
+        return olympus::decode(orf, out, error);
     if (!error.empty())
         return false;
     uint32_t offset, length;
     unsigned slices[3], tile[3];
-    // A NEF: its rows as they come (raw_width wide, `height` of them), the rest of the readout none.
-    if (ljpeg::Prepared nef; raw.nikon(file, size, nef, error))
+    // A NEF or a PEF: its rows as they come (raw_width wide; a NEF's `height`
+    // of them, the rest of the readout none).
+    if (ljpeg::Prepared nef; raw.nikon(file, size, nef, error) || (error.empty() && raw.pentax(file, size, nef, error)))
     {
         ljpeg::Image j;
         if (!ljpeg::decode(nef, j, error))
@@ -1181,9 +1222,9 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         raw.imgdata.rawparams.specials |= LIBRAW_RAWSPECIAL_SRAW_NO_INTERPOLATE;
         return decode_linear(raw, out, error, true);
     }
-    // A CR2, a NEF, a DNG or a raw in blocks on the GPU (a CR3 put together
-    // there), or here on every core; the rest by LibRaw. A linear DNG's three
-    // colours a photosite.
+    // A CR2, a NEF, a PEF, a DNG or a raw in blocks on the GPU (a CR3 put
+    // together there), or here on every core (an ORF its codes on one); the
+    // rest by LibRaw. A linear DNG's three colours a photosite.
     const int64_t t0 = g_get_monotonic_time();
     std::vector<uint16_t> readout;
     std::string ours_error;
@@ -1205,7 +1246,7 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
             std::copy_n(slices, 3, stream->slices);
         }
     }
-    else if (ljpeg::Prepared nef; decode_options().gpu_decode && raw.nikon(file, size, nef, ours_error))
+    else if (ljpeg::Prepared nef; decode_options().gpu_decode && (raw.nikon(file, size, nef, ours_error) || raw.pentax(file, size, nef, ours_error)))
     {
         stream = raw.readout_stream(false);
         stream->jpeg = std::make_shared<ljpeg::Prepared>(std::move(nef));
@@ -1650,9 +1691,9 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
 
 }  // namespace
 
-// A raw whose readout the GPU decodes (a CR2, a NEF, a DNG predicted from the
-// left, one uncompressed, Sony's and Panasonic's blocks): ready as soon as
-// its preview would be.
+// A raw whose readout the GPU decodes (a CR2, a NEF, a PEF, a DNG predicted
+// from the left, one uncompressed, Sony's and Panasonic's blocks): ready as
+// soon as its preview would be.
 bool quick(const std::string& path)
 {
     if (!decode_options().gpu_decode || decode_options().raw_mode != DecodeOptions::RawMode::Full)
@@ -1666,9 +1707,9 @@ bool quick(const std::string& path)
     int predictor = 0;
     if (locate_cr2(bytes, size, offset, length, slices))
         return ljpeg::takes(bytes + offset, length, &predictor) && predictor == 1;
-    // A NEF or DNG of the kind decoded on the GPU, or a Bayer readout stored
-    // uncompressed (opening it reads only its headers). On the heap: a
-    // LibRaw is hundreds of KB.
+    // A NEF, PEF or DNG of the kind decoded on the GPU, or a Bayer readout
+    // stored uncompressed (opening it reads only its headers). On the heap:
+    // a LibRaw is hundreds of KB.
     auto raw = std::make_unique<RawAccess>();
     ljpeg::Prepared unused;  // a NEF's or DNG's header
     rawpacked::Prepared packed;
@@ -1677,7 +1718,8 @@ bool quick(const std::string& path)
     if (raw->open_buffer(bytes, size) != LIBRAW_SUCCESS)
         return false;
     const auto& id = raw->imgdata.idata;
-    return raw->nikon(bytes, size, unused, error, true) || (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
+    return raw->nikon(bytes, size, unused, error, true) || raw->pentax(bytes, size, unused, error, true) ||
+           (raw->dng(bytes, size, unused, tile, error, true) && unused.predictor == 1) ||
            (((id.filters >= 1000 && id.colors == 3) || (!id.filters && id.colors == 1)) && raw->packed(bytes, size, packed, error)) ||
            (raw->blocks(bytes, size, blocks, error) && rawblocks::fits_gpu(blocks));
 }

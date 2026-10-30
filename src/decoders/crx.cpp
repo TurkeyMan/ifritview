@@ -36,32 +36,27 @@ constexpr int kRunBits[32] = {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4,
 
 // A subband's code, most significant bit first; past its end, zeros (as
 // LibRaw reads no further than its size).
-class Bits
+class Bits : MsbBits
 {
 public:
-    Bits(const uint8_t* data, uint64_t size) : data_(data), size_(size) {}
+    using MsbBits::MsbBits;
     uint32_t bits(int n)  // 1..32
     {
-        if (count_ < n)
+        if (held() < n)
             fill();
-        const uint32_t v = uint32_t(cache_ >> (64 - n));
-        cache_ <<= n;
-        count_ -= n;
-        return v;
+        return take(n);
     }
     // A code (as code() reads it) when its zeros, 1 and k bits are all in
     // hand, and fewer than `limit` zeros; else false, nothing taken.
     bool golomb(int k, uint32_t limit, uint32_t& v)
     {
-        if (count_ < 32)
+        if (held() < 32)
             fill();
-        const int z = std::countl_zero(cache_);
-        if (uint32_t(z) >= limit || z + 1 + k > count_)
+        const int z = std::countl_zero(peek());
+        if (uint32_t(z) >= limit || z + 1 + k > held())
             return false;
-        const uint64_t c = cache_ << z << 1;
-        cache_ = c << k;
-        count_ -= z + 1 + k;
-        v = uint32_t(z) << k | uint32_t(c >> 1 >> (63 - k));
+        skip(z + 1);
+        v = uint32_t(z) << k | take(k);
         return true;
     }
     // The zeros before the next 1 (taken too). LibRaw's for a code running
@@ -69,41 +64,18 @@ public:
     uint32_t zeros()
     {
         uint32_t n = 0;
-        while (!cache_)
+        while (!peek())
         {
-            n += uint32_t(count_);
-            count_ = 0;
-            if (at_ >= size_)
+            n += uint32_t(held());
+            skip(held());
+            if (drained())
                 return n;
             fill();
         }
-        const int z = std::countl_zero(cache_);
-        cache_ <<= z;
-        cache_ <<= 1;
-        count_ -= z + 1;
+        const int z = std::countl_zero(peek());
+        skip(z + 1);
         return n + uint32_t(z);
     }
-
-private:
-    // At least 57 bits in hand.
-    void fill()
-    {
-        if (at_ + 8 <= size_)
-        {
-            cache_ |= be64(data_ + at_) >> count_;
-            at_ += size_t(63 - count_) >> 3;
-            count_ |= 56;
-            cache_ &= ~uint64_t(0) << (64 - count_);  // the next byte's first bits not yet counted
-            return;
-        }
-        for (; count_ <= 56; count_ += 8, ++at_)
-            if (at_ < size_)
-                cache_ |= uint64_t(data_[at_]) << (56 - count_);
-    }
-    const uint8_t* data_;
-    uint64_t size_, at_ = 0;
-    uint64_t cache_ = 0;  // `count_` bits from the top, zeros under them
-    int count_ = 0;
 };
 
 // A Golomb-Rice code with parameter k: its zeros, then k bits under them;
