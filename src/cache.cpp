@@ -20,8 +20,8 @@ size_t ImageCache::image_bytes(const Image& image)
         n += image.linear->rgb.size() * sizeof(uint16_t);
     if (image.mosaic && image.mosaic->data)
         n += image.mosaic->data->size() * sizeof(uint16_t);
-    if (image.mosaic && image.mosaic->stream && image.mosaic->stream->planes)
-        n += image.mosaic->stream->planes->size() * sizeof(uint16_t);
+    if (image.mosaic && image.mosaic->stream && image.mosaic->stream->decoded)
+        n += image.mosaic->stream->decoded->size() * sizeof(uint16_t);
     if (image.mosaic && image.mosaic->stream && image.mosaic->stream->jpeg)
         n += image.mosaic->stream->jpeg->bits.size() + 4 * 65536 * sizeof(uint16_t);
     if (image.mosaic && image.mosaic->stream && image.mosaic->stream->file)  // the file it's read from, kept

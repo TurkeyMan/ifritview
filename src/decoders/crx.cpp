@@ -1,7 +1,7 @@
 #include "crx.h"
 
-#include "../bytes.h"
 #include "../parallel.h"
+#include "bits.h"
 
 #include <algorithm>
 #include <bit>
@@ -33,50 +33,6 @@ constexpr int32_t kSteps[6] = {0x28, 0x2D, 0x33, 0x39, 0x40, 0x48};
 constexpr int32_t kRunStep[32] = {1,    1,    1,    1,    2,    2,    2,    2,    4,     4,     4,     4,     8,      8,      8,      8,
                                   0x10, 0x10, 0x20, 0x20, 0x40, 0x40, 0x80, 0x80, 0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000};
 constexpr int kRunBits[32] = {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-
-// A subband's code, most significant bit first; past its end, zeros (as
-// LibRaw reads no further than its size).
-class Bits : MsbBits
-{
-public:
-    using MsbBits::MsbBits;
-    uint32_t bits(int n)  // 1..32
-    {
-        if (held() < n)
-            fill();
-        return take(n);
-    }
-    // A code (as code() reads it) when its zeros, 1 and k bits are all in
-    // hand, and fewer than `limit` zeros; else false, nothing taken.
-    bool golomb(int k, uint32_t limit, uint32_t& v)
-    {
-        if (held() < 32)
-            fill();
-        const int z = std::countl_zero(peek());
-        if (uint32_t(z) >= limit || z + 1 + k > held())
-            return false;
-        skip(z + 1);
-        v = uint32_t(z) << k | take(k);
-        return true;
-    }
-    // The zeros before the next 1 (taken too). LibRaw's for a code running
-    // past the end isn't defined; this gives up there.
-    uint32_t zeros()
-    {
-        uint32_t n = 0;
-        while (!peek())
-        {
-            n += uint32_t(held());
-            skip(held());
-            if (drained())
-                return n;
-            fill();
-        }
-        const int z = std::countl_zero(peek());
-        skip(z + 1);
-        return n + uint32_t(z);
-    }
-};
 
 // A Golomb-Rice code with parameter k: its zeros, then k bits under them;
 // `escape` bits outright for `limit` zeros or more.

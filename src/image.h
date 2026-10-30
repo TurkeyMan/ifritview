@@ -39,18 +39,19 @@ struct RawMosaic
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
     // Or, with `data` null, the readout as the file has it, for the GPU to
     // decode: its lossless JPEG prepared (ljpeg.h), its blocks (rawblocks.h)
-    // or its samples stored uncompressed (rawpacked.h), or decoded already as
-    // a CR3's planes (crx.h); how that lays out (Canon's slices, a DNG's
-    // tiles), where the active area sits in it, and where the sensor is
-    // masked (the black level, measured as LibRaw does).
+    // or its samples stored uncompressed (rawpacked.h), or decoded already (a
+    // CR3's planes, crx.h; a Fuji's rows, fuji.h); how that lays out (Canon's
+    // slices, a DNG's tiles), where the active area sits in it, and where the
+    // sensor is masked (the black level, measured as LibRaw does).
     struct Stream
     {
         std::shared_ptr<const ljpeg::Prepared> jpeg;
         std::shared_ptr<const rawpacked::Prepared> packed;  // or the readout uncompressed, for the GPU to unpack
         std::shared_ptr<const rawblocks::Prepared> blocks;  // or its blocks, for the GPU to decode
-        // Or its samples decoded already, a plane each place in the 2 x 2 (a
-        // CR3's), for the GPU to put together.
-        std::shared_ptr<const std::vector<uint16_t>> planes;
+        // Or its samples decoded already, for the GPU to put together: row
+        // by row, or (`planes`) a plane each place in the 2 x 2 (a CR3's).
+        std::shared_ptr<const std::vector<uint16_t>> decoded;
+        bool planes = false;
         int readout_w = 0, readout_h = 0;
         unsigned slices[3] = {};  // how many, each one's width, the last one's (none: rows as they come)
         int left = 0, top = 0;    // the active area's corner in the readout
@@ -99,10 +100,15 @@ struct RawMosaic
         int luma_offset = 0;          // taken off the luma (formula 2, cameras before the 5D Mark II)
         float mul[3] = {1, 1, 1};     // LibRaw's sraw_mul, / 1024
     } ycc;
-    int colour[4] = {};          // the filter over (row & 1, col & 1): 0 R, 1 G, 2 B (row-major, 2 x 2)
+    // The filter pattern, `period` x `period` photosites repeated from the
+    // active area's corner (2: Bayer's 2 x 2; 6: X-Trans's 6 x 6); each
+    // site's colour as LibRaw counts them (0 R, 1 G, 2 B, 3 the other G) and
+    // its black level, in data units, row-major (site()).
+    int period = 2;
+    int filter[36] = {};
+    float black[36] = {};        // linear (channels 3): per channel R, G, B in the first three
+    int site(int x, int y) const { return (y % period) * period + x % period; }
     bool grey = false;           // no filter (a monochrome sensor): each photosite grey, no demosaic
-    float black[4] = {};         // per photosite of the 2 x 2 (as colour), in data units
-    int filter[4] = {};          // the colour there as LibRaw counts them: 0 R, 1 G, 2 B, 3 the other G
     float white = 65535;         // saturation, in data units
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
     bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
