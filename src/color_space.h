@@ -68,6 +68,13 @@ Mat3 mul(const Mat3& a, const Mat3& b);
 Vec3 mul(const Mat3& a, const Vec3& v);
 Mat3 inverse(const Mat3& m);
 
+// The XYZ of a chromaticity, Y = 1.
+Vec3 to_xyz(ColorSpace::XY c);
+
+// XYZ seen under the white `from` as seen under `to` (whites as XYZ):
+// Bradford's chromatic adaptation.
+Mat3 bradford(const Vec3& from, const Vec3& to);
+
 // The space's linear RGB to XYZ seen under D65 (its white adapted there,
 // Bradford): what the view's colours are in.
 Mat3 rgb_to_xyz_d65(const ColorSpace& space);

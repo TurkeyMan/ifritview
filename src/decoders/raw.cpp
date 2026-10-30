@@ -4,6 +4,7 @@
 #include "../gpu.h"
 #include "../parallel.h"
 #include "../platform.h"
+#include "../white_balance.h"
 #include "crx.h"
 #include "decoder.h"
 #include "dng_opcodes.h"
@@ -293,6 +294,19 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     return true;
 }
 
+// A DNG's CalibrationIlluminant (an EXIF LightSource) as a temperature, as
+// the DNG SDK has them; 0: unknown. 1 daylight, 2 fluorescent, 3 tungsten,
+// 4 flash, 9 fine weather, 10 cloudy, 11 shade; 12..16 daylight, day white,
+// cool white, white and warm white fluorescent (midway along their ranges);
+// 17..19 standard light A, B, C; 20..23 D55, D65, D75, D50; 24 ISO studio
+// tungsten.
+double illuminant_temperature(int light)
+{
+    static const double kelvin[25] = {0,    5500, 4150, 2850, 5500, 0,    0,    0,    0,    5500, 6500, 7500, 6400,
+                                      5050, 4150, 3525, 2925, 2850, 5500, 6500, 5500, 6500, 7500, 5000, 3200};
+    return light >= 0 && light < 25 ? kelvin[light] : 0;
+}
+
 // LibRaw with the step of its unpack that reads the black level from the
 // sensor's masked border, for a readout unpacked here instead.
 class RawAccess : public LibRaw
@@ -542,13 +556,13 @@ public:
         return (id.filters >= 1000 || id.filters == 9) && id.colors == 3 && !super_ccd();
     }
     // A DNG carrying a colour matrix known to be wrong, given its sensor's
-    // from LibRaw's table instead. Samsung's GX20 firmware (a Pentax K20D)
-    // writes one that drains the colour (as LibRaw's table notes): the light
-    // its own as-shot neutral implies lies far off the blackbody locus
-    // (Duv -0.010 against the K20D's -0.001), and Adobe's profile for it is
-    // the K20D's. Known by the matrix itself, so a file with another one
-    // keeps it. Once opened.
-    void fix_known_bad_matrix()
+    // from LibRaw's table instead (true when it was). Samsung's GX20
+    // firmware (a Pentax K20D) writes one that drains the colour (as
+    // LibRaw's table notes): the light its own as-shot neutral implies lies
+    // far off the blackbody locus (Duv -0.010 against the K20D's -0.001),
+    // and Adobe's profile for it is the K20D's. Known by the matrix itself,
+    // so a file with another one keeps it. Once opened.
+    bool fix_known_bad_matrix()
     {
         const auto& id = imgdata.idata;
         const auto& daylight = imgdata.color.dng_color[1].colormatrix;
@@ -557,6 +571,74 @@ public:
                                   std::fabs(daylight[1][1] - 1.9778f) < 1e-3f;
         if (samsung_gx20)
             adobe_coeff(LIBRAW_CAMERAMAKER_Pentax, "K20D");
+        return samsung_gx20;
+    }
+    // A DNG's colour as its specification has it (DngColour), from its
+    // tags as LibRaw keeps them and the two it doesn't (`file`'s), and
+    // LibRaw's own develop made to agree with it: rgb_cam this model at the
+    // as-shot white, cam_mul that white's. None without matrices for three
+    // colours. Once opened, before unpacking (which keeps LibRaw's colour
+    // for its develop).
+    std::shared_ptr<const DngColour> dng_colour;
+    void use_dng_colour(const uint8_t* file, size_t size)
+    {
+        auto& col = imgdata.color;
+        if (!imgdata.idata.dng_version || imgdata.idata.colors != 3)
+            return;
+        auto d = std::make_shared<DngColour>();
+        const dng::ColourTags tags = dng::colour_tags(file, size);
+        int n = 0;
+        for (const auto& c : col.dng_color)
+        {
+            if (c.colormatrix[0][0] == 0 && c.colormatrix[1][1] == 0)
+                continue;
+            const bool calibrated = tags.calibrated() && c.calibration[0][0] != 0 && c.calibration[1][1] != 0 && c.calibration[2][2] != 0;
+            d->temperature[n] = illuminant_temperature(c.illuminant);
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                {
+                    d->colour[n][i][j] = c.colormatrix[i][j];
+                    d->calibration[n][i][j] = calibrated ? c.calibration[i][j] : double(i == j);
+                    d->forward[n][i][j] = c.forwardmatrix[i][j];
+                }
+            ++n;
+        }
+        if (n == 0)
+            return;
+        if (n == 1)
+            d->temperature[1] = 0;
+        else if (d->forward[1][1] == Vec3{})  // one ForwardMatrix: both calibrations'
+            d->forward[1] = d->forward[0];
+        else if (d->forward[0][1] == Vec3{})
+            d->forward[0] = d->forward[1];
+        for (int c = 0; c < 3; ++c)
+            d->analog[c] = col.dng_levels.analogbalance[c] > 0 ? col.dng_levels.analogbalance[c] : 1;
+        const float* asn = col.dng_levels.asshotneutral;
+        if (asn[0] > 0 && asn[1] > 0 && asn[2] > 0)
+        {
+            const double top = std::max({asn[0], asn[1], asn[2]});
+            d->neutral = {asn[0] / top, asn[1] / top, asn[2] / top};
+        }
+        else if (tags.white_xy[0] > 0 && tags.white_xy[1] > 0)
+            d->neutral = dng_neutral(*d, {tags.white_xy[0], tags.white_xy[1]});
+        else
+            d->neutral = dng_neutral(*d, ColorSpace::srgb().white);  // none: D65
+        d->exposure = (col.dng_levels.baseline_exposure > -999 ? col.dng_levels.baseline_exposure : 0) + tags.exposure_offset;
+        // LibRaw's develop: multipliers 1 / neutral (the least 1), then
+        // rgb_cam, balanced camera RGB to linear BT.709.
+        const Mat3 to_709 = mul(inverse(rgb_to_xyz_d65(ColorSpace::srgb())), dng_camera_to_xyz(*d, d->neutral));
+        for (int c = 0; c < 3; ++c)
+        {
+            col.cam_mul[c] = float(1 / d->neutral[c]);
+            for (int i = 0; i < 3; ++i)
+                col.rgb_cam[i][c] = float(to_709[i][c] * d->neutral[c]);
+        }
+        col.cam_mul[3] = col.cam_mul[1];
+        const ColorSpace::XY white = dng_white(*d, d->neutral);
+        platform::trace("raw: DNG colour, %s, illuminants %.0f K and %.0f K; as shot %.4f %.4f %.4f, white %.4f %.4f; baseline exposure %+.2f EV",
+                        d->forward[0][1] == Vec3{} ? "ColorMatrix" : "ForwardMatrix", d->temperature[0], d->temperature[1], d->neutral[0], d->neutral[1],
+                        d->neutral[2], white.x, white.y, d->exposure);
+        dng_colour = std::move(d);
     }
     // Fuji's SuperCCD: its photosites on a grid turned 45 degrees, which
     // LibRaw's develop turns upright (fuji_rotate); the readout isn't the
@@ -1596,6 +1678,7 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
     for (int c = 0; c < 3; ++c)
         m->as_shot[c] = m->grey ? 1 : mul[c] / least;  // grey: no colours to balance
     m->balanced = (col.as_shot_wb_applied & LIBRAW_ASWB_APPLIED) != 0;
+    m->dng = raw.dng_colour;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
         {
@@ -1746,7 +1829,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         error = libraw_strerror(r);
         return false;
     }
-    raw.fix_known_bad_matrix();
+    if (!raw.fix_known_bad_matrix())
+        raw.use_dng_colour(bytes, size);
 
     bool ok = false;
     std::string mode;

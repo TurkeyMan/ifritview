@@ -30,7 +30,15 @@ struct Ifd
 {
     uint32_t subfile = 0, width = 0, height = 0;
     size_t list[3] = {}, list_size[3] = {};  // OpcodeList1..3: where, how long
+    ColourTags colour;
 };
+
+// The `i`th of the (S)RATIONALs at `at`.
+double rational(const FileReader& r, size_t at, int i, bool is_signed)
+{
+    const uint32_t n = r.u32(at + size_t(i) * 8), d = r.u32(at + size_t(i) * 8 + 4);
+    return d == 0 ? 0 : is_signed ? double(int32_t(n)) / int32_t(d) : double(n) / d;
+}
 
 void walk(const FileReader& r, uint32_t at, std::vector<Ifd>& out, int depth)
 {
@@ -68,6 +76,26 @@ void walk(const FileReader& r, uint32_t at, std::vector<Ifd>& out, int depth)
                         ifd.list[l] = value, ifd.list_size[l] = count;
                     break;
                 }
+                case 0xC629:  // AsShotWhiteXY
+                    if (type == 5 && count == 2)
+                        ifd.colour.white_xy[0] = rational(r, value, 0, false), ifd.colour.white_xy[1] = rational(r, value, 1, false);
+                    break;
+                case 0xC6F3:  // CameraCalibrationSignature
+                case 0xC6F4:  // ProfileCalibrationSignature
+                {
+                    const size_t at = count <= 4 ? e + 8 : value;
+                    if ((type == 1 || type == 2) && count < 256 && r.fits(at, count))
+                    {
+                        std::string text(reinterpret_cast<const char*>(r.p + at), count);
+                        text.resize(std::strlen(text.c_str()));  // to its terminator
+                        (tag == 0xC6F3 ? ifd.colour.camera_signature : ifd.colour.profile_signature) = text;
+                    }
+                    break;
+                }
+                case 0xC7A5:  // BaselineExposureOffset
+                    if (type == 10 && count == 1)
+                        ifd.colour.exposure_offset = rational(r, value, 0, true);
+                    break;
                 default: break;
             }
         }
@@ -282,6 +310,19 @@ Corrections corrections(const uint8_t* file, size_t size, int width, int height,
                 w[20 + q * 6 + j] = bits(float(warp[std::min(q, warp_planes - 1)][j]));
     }
     lay_out(c, maps[0], maps[1]);
+    return c;
+}
+
+ColourTags colour_tags(const uint8_t* file, size_t size)
+{
+    ColourTags c;
+    if (size < 8 || !(file[0] == 'I' || file[0] == 'M'))
+        return c;
+    const FileReader r{file, size, file[0] == 'M'};
+    std::vector<Ifd> ifds;
+    walk(r, r.u32(4), ifds, 0);
+    if (!ifds.empty())
+        c = ifds[0].colour;
     return c;
 }
 

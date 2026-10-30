@@ -706,6 +706,8 @@ rap::node about_page(rap::ui& ui)
     // Downloaded when wanted, not shipped, but theirs all the same.
     text.push_back(L::label{_("Lens corrections from the lensfun project's database (CC BY-SA 3.0)")}.link(
         [] { platform::open_uri("https://lensfun.github.io/"); }));
+    // The notice Adobe's DNG patent licence asks for, a DNG being developed as its specification has it.
+    text.push_back(L::label{_("This product includes DNG technology under license by Adobe.")});
     return L::hbox{mascot(ui), rap::node{rap::spec::box{rap::orientation::vertical, text, false, {}}, {}}};
 }
 

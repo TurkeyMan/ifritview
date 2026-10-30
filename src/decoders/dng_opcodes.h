@@ -119,6 +119,20 @@ void each_opcode(const uint8_t* list, size_t size, F f)
     }
 }
 
+// A DNG's colour tags LibRaw doesn't keep, from IFD 0 (where they're
+// stored): AsShotWhiteXY, BaselineExposureOffset; 0 where there's none.
+// And whether its CameraCalibration matrices are for the profile its
+// ColorMatrix and ForwardMatrix belong to (the two signatures alike, or
+// both missing), as they're applied only then.
+struct ColourTags
+{
+    double white_xy[2] = {};
+    double exposure_offset = 0;
+    std::string camera_signature, profile_signature;  // CameraCalibrationSignature, ProfileCalibrationSignature
+    bool calibrated() const { return camera_signature == profile_signature; }
+};
+ColourTags colour_tags(const uint8_t* file, size_t size);
+
 // The opcode lists of the raw image `width` x `height` (as stored) in the
 // DNG `file`, in the coordinates of its active area (`active_w` x
 // `active_h`); empty when there are none it knows how to apply.
