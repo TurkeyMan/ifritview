@@ -60,5 +60,9 @@ struct CicpSpace
 };
 CicpSpace from_cicp(int primaries, int transfer, double gamma = 0);
 
+// The space's linear RGB to XYZ seen under D65 (its white adapted there,
+// Bradford): what the view's colours are in.
+void rgb_to_xyz_d65(const ColorSpace& space, double out[3][3]);
+
 // A display-class ICC v4 profile (matrix and parametric curves) for `space`.
 std::vector<uint8_t> icc_profile(const ColorSpace& space);

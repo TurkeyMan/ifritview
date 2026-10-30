@@ -1,5 +1,6 @@
 #pragma once
 
+#include "adjust.h"
 #include "color_space.h"
 #include "pixel_buffer.h"
 #include "metadata/file_metadata.h"
@@ -186,6 +187,8 @@ struct XmpDevelop
     double exposure = 0;     // crs:Exposure2012, EV on top of as-shot
     double temperature = 0;  // crs:Temperature in Kelvin, 0 = as shot
     double tint = 0;         // crs:Tint, with it
+    Adjustments adjust;      // the rest of Lightroom's develop settings (adjust.h)
+    std::string process_version;  // crs:ProcessVersion as written ("11.0"); empty: none
     int orientation = 1;     // tiff:Orientation
     bool has_crop = false;
     double crop_left = 0, crop_top = 0, crop_right = 1, crop_bottom = 1;  // fractions of the un-rotated image
@@ -342,6 +345,12 @@ struct Image
     std::vector<PendingEdit> pending_edits;
     double exposure_edit = 0;  // EV chosen by the user or XMP, relative to the camera's bias
     double wb_kelvin = 0, wb_tint = 0;  // white balance chosen for a raw the GPU develops; 0 K: as shot
+    Adjustments adjust;                 // Lightroom's develop controls, by the user or XMP (adjust.h)
+    // Its tables, made again when `adjust` has changed since; null when
+    // it's neutral. The UI thread's.
+    std::shared_ptr<const AdjustTables> adjust_tables() const;
+    mutable Adjustments tables_of_;
+    mutable std::shared_ptr<const AdjustTables> tables_;
     // `pixels` are let go (empty): the GPU draws from the image's own data at
     // its exposure, and they're made again only when something needs them
     // (saving, printing, copying, comparing, turning, cropping, the CPU
@@ -374,10 +383,14 @@ struct Image
     // encoded. Sets has_alpha.
     void set_source(std::shared_ptr<SourceData> src);
     // Same rendering into a fresh buffer, safe to run off the main thread while
-    // `pixels` is being displayed; the caller swaps it in.
-    PixelBuffer retone_buffer(double ev) const;
-    // 8-bit pixels from `source` (linear ones at exposure `ev`).
-    PixelBuffer render_source(double ev) const;
+    // `pixels` is being displayed; the caller swaps it in. With `adjust`,
+    // through the edit stage's tables (adjust.h) after the exposure.
+    PixelBuffer retone_buffer(double ev, const AdjustTables* adjust = nullptr) const;
+    // 8-bit pixels from `source` (linear ones at exposure `ev`), and through `adjust`.
+    PixelBuffer render_source(double ev, const AdjustTables* adjust = nullptr) const;
+    // The 8-bit pixels themselves through `adjust` (an image with nothing
+    // deeper to render from), for what's saved.
+    PixelBuffer adjusted_pixels(const AdjustTables& adjust) const;
 
     // The largest image held: each side, and pixels in all (4 GiB of ARGB).
     // Decoders check a header's size with it before allocating.

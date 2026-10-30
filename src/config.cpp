@@ -172,6 +172,7 @@ void Config::load()
     if (raw_mode != "full" && raw_mode != "half" && raw_mode != "preview")
         raw_mode = "full";
     apply_xmp_edits = get_bool(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
+    auto_save_xmp = get_bool(kf, kFiles, "auto_save_xmp", auto_save_xmp);
     raw_camera_crop = get_bool(kf, kFiles, "raw_camera_crop", raw_camera_crop);
     lens_correction = get_bool(kf, kFiles, "lens_correction", lens_correction);
     lens_downloads = get_bool(kf, kFiles, "lens_downloads", lens_downloads);
@@ -271,6 +272,7 @@ bool Config::save() const
     g_key_file_set_integer(kf, kFiles, "cache_megabytes", cache_megabytes);
     g_key_file_set_string(kf, kFiles, "raw_mode", raw_mode.c_str());
     g_key_file_set_boolean(kf, kFiles, "apply_xmp_edits", apply_xmp_edits);
+    g_key_file_set_boolean(kf, kFiles, "auto_save_xmp", auto_save_xmp);
     g_key_file_set_boolean(kf, kFiles, "raw_camera_crop", raw_camera_crop);
     g_key_file_set_boolean(kf, kFiles, "lens_correction", lens_correction);
     g_key_file_set_boolean(kf, kFiles, "lens_downloads", lens_downloads);

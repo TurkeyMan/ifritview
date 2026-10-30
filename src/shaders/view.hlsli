@@ -1,8 +1,14 @@
 // What the view's passes share: the frame's parameters, the image's
-// textures and measures, and the mapping of a scene colour to the display
-// (in the compose pass, and in the histogram's dispatch so it counts what's
-// shown). Display-only: nothing here reaches what's saved.
+// textures and measures, and a colour of the image as it's shown (in the
+// compose pass, and in the histogram's dispatch so it counts what's shown),
+// in two stages:
+//  - the edit (edit()): the image's data to the edited scene, whatever the
+//    source: its white balance and matrix, exposure, the default look (a
+//    raw's camera-matched curve) and the develop controls (edit.hlsli).
+//    What's saved is this (GpuView::export_pixels, map_display 0);
+//  - the display mapping (display.hlsli): view-only, after it.
 #include "display.hlsli"
+#include "edit.hlsli"
 
 cbuffer Params : register(b0)
 {
@@ -38,7 +44,14 @@ cbuffer Params : register(b0)
     float4 input_z;
     int auto_exposure;  // 1: a raw developed on the GPU, its scale from its own 99th percentile (auto_gain)
     int gain;           // the difference pass: its errors amplified by this (1..255)
-    int2 unused2;
+    int adjusting;      // bit 0: the develop controls' tables apply (edit.hlsli, t4 and t5); bit 1: their channel curves too
+    int map_display;    // 1: the display mapping after the edit (the view); 0: the edit alone (what's saved)
+    float4 to_working_x;  // XYZ to the edit's working space (rows); w of the first: its tone table's top, encoded
+    float4 to_working_y;
+    float4 to_working_z;
+    float4 from_working_x;  // and back
+    float4 from_working_y;
+    float4 from_working_z;
 };
 
 Texture2D<float4> source : register(t0);
@@ -59,7 +72,6 @@ static const uint kStatsMaximum = 1099; // float bits of the greatest
 static const uint kStatsP99 = 1100;     // float: the 99th percentile's luminance (peak.hlsl), for auto exposure
 static const uint kStatsWords = 1101;
 
-// The scene colour as the display shows it (linear, 1 = SDR white).
 // The scene's luminance scale for a raw developed on the GPU: its 99th
 // percentile at SDR white, as LibRaw's auto-brightening does (the roll-off
 // takes the 1% above). 1 for the rest.
@@ -71,19 +83,18 @@ float auto_gain()
     return p99 > 0 ? 1 / p99 : 1;
 }
 
-// A colour of the image's data (its own space: input_x/y/z take it to XYZ)
-// as the display shows it, in the display's linear RGB (BT.709 until
-// there's a display description).
-float3 tone_map(float3 c)
+// The edit: a colour of the image's data (its own space: input_x/y/z take
+// it to XYZ, a raw's white balance in them) as edited, in XYZ (linear,
+// 1 = white), scaled by `scale` (exposure).
+float3 edit(float3 c, float scale)
 {
-    const float scale = exposure * auto_gain();
     float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), c) * scale;
     if (tone == 1)
     {
         // The camera's curve maps luminance; the colour scales with it, so hue
         // holds. It covers the scene from 0 to 1: pushed past that (exposure
-        // above the camera's), the scene is rolled off into it first, as the
-        // display mapping would, not clipped at its end.
+        // above the camera's), the scene is rolled off into it first, not
+        // clipped at its end.
         const float lum = xyz.y;
         const float peak = measured ? asfloat(stats.Load(kStatsMaximum * 4)) * scale : 0;
         const float fitted = peak > 1 ? eetf(lum, peak, 1, white) : lum;
@@ -92,14 +103,33 @@ float3 tone_map(float3 c)
         const float o = lerp(tone_curve.Load(int3(i, 0, 0)), tone_curve.Load(int3(min(i + 1, 4095), 0, 0)), x - i);
         xyz *= lum > 1e-6 ? o / lum : 0;
     }
-    if (measured)
+    if (adjusting & 1)
+    {
+        const float3 w = adjust(mul(float3x3(to_working_x.xyz, to_working_y.xyz, to_working_z.xyz), xyz), from_working_y.xyz,
+                                to_working_x.w, (adjusting & 2) != 0);
+        xyz = mul(float3x3(from_working_x.xyz, from_working_y.xyz, from_working_z.xyz), w);
+    }
+    return xyz;
+}
+
+// A colour of the image's data as the display shows it (the edit, then the
+// display mapping), in the display's linear RGB (BT.709 until there's a
+// display description).
+float3 tone_map(float3 c)
+{
+    const float scale = exposure * auto_gain();
+    float3 xyz = edit(c, scale);
+    if (measured && map_display)
     {
         float y = xyz.y;
         float2 uv = uv_from_xyz(xyz);
         // From the brightest it reaches (on the filtered level the measures
-        // come from, so a lone hot pixel is already smoothed away): nothing is
-        // clipped, and the top keeps some gradation.
-        const float source_peak = asfloat(stats.Load(kStatsMaximum * 4)) * scale;
+        // come from, so a lone hot pixel is already smoothed away), as the
+        // edit's tone curve takes it: nothing is clipped, and the top keeps
+        // some gradation.
+        float source_peak = asfloat(stats.Load(kStatsMaximum * 4)) * scale;
+        if (adjusting & 1)
+            source_peak = tone_lookup(source_peak, 0, to_working_x.w);
         if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
         {
             const float mapped = eetf(y, source_peak, display_peak, white);

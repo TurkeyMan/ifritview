@@ -28,7 +28,7 @@ void App::save_as()
 {
     if (!image_ || save_dialog_)
         return;
-    pixels_for_cpu();
+    save_pixels_ = edited_image();
     // Comparing two files, Save saves where they differ, as it's shown.
     save_source_ = diff_session_ ? view_->difference_shown() : image_;
     if (!save_source_)
@@ -60,7 +60,8 @@ void App::save_as()
             o.metadata = metadata_for_save(*image_, metadata, e.metadata, developed, lossless->width, lossless->height);
         }
         // After the dialog has gone, so the file dialog has the main window as parent.
-        ui_.post([this, e = &e, o, source = save_source_, lossless] { choose_save_path(*e, o, source, lossless); });
+        ui_.post([this, e = &e, o, source = save_source_ == image_ ? save_pixels_ : save_source_, lossless]
+                 { choose_save_path(*e, o, source, lossless); });
     };
     cb.closed = [this]
     {
@@ -68,6 +69,7 @@ void App::save_as()
         preview_image_.reset();
         preview_difference_.reset();
         save_source_.reset();
+        save_pixels_.reset();
         if (!diff_session_)
             end_comparing();
         save_dialog_.reset();
@@ -207,7 +209,7 @@ void App::preview_save(const Encoder& e, const EncodeOptions& o)
     }
     if (save_dialog_)
         save_dialog_->set_info("…");
-    std::shared_ptr<Image> source = save_source_;
+    std::shared_ptr<Image> source = save_source_ == image_ ? save_pixels_ : save_source_;
     const Encoder* encoder = &e;
     std::thread(
         [this, generation, source, encoder, o, lossy, state = preview_, running = preview_->start()]

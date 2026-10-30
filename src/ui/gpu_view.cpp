@@ -8,6 +8,7 @@
 #include "../decoders/rawpacked.h"
 #include "../gpu.h"
 #include "../image.h"
+#include "../white_balance.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
 #include "shaders/develop.h"
@@ -91,9 +92,10 @@ struct ComposeParams
     uint32_t histogram_channels;
     float panel[4];
     float input_x[4], input_y[4], input_z[4];
-    int32_t auto_exposure, gain, unused2[2];
+    int32_t auto_exposure, gain, adjusting, map_display;
+    float to_working[3][4], from_working[3][4];
 };
-static_assert(sizeof(ComposeParams) == 240, "as view.hlsli's cbuffer packs");
+static_assert(sizeof(ComposeParams) == 336, "as view.hlsli's cbuffer packs");
 
 struct DevelopParams
 {
@@ -243,15 +245,25 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                       });
 }
 
-bool GpuView::export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, double exposure, PixelBuffer& out,
-                            std::string& error)
+void GpuView::edit_of(const Image& image, Frame& f)
 {
-    // The view's own frame at 1:1, the whole image, as an SDR display shows it.
+    f.exposure = image.tonable() ? image.exposure_edit : 0.0;
+    std::fill(std::begin(f.white_balance), std::end(f.white_balance), 0.0f);
+    if (image.mosaic && image.wb_kelvin > 0)
+        wb_multipliers(*image.mosaic, image.wb_kelvin, image.wb_tint, f.white_balance);
+    f.adjust = image.adjust_tables();
+}
+
+bool GpuView::export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, PixelBuffer& out, std::string& error)
+{
+    // The view's own frame at 1:1, the whole image, as edited: no display
+    // mapping (sRGB's range, clipped).
     Frame f;
     f.width = image->width;
     f.height = image->height;
     f.zoom = 1;
-    f.exposure = exposure;
+    edit_of(*image, f);
+    f.map_display = false;
     f.background = rap::color{0, 0, 0};
     f.enlarge = f.shrink = ScaleFilter::Nearest;
     f.front = FrontBuffer::Srgb8;
@@ -1266,6 +1278,15 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
     }
     cp.auto_exposure = auto_exposure ? 1 : 0;
     cp.measured = measured ? 1 : 0;
+    cp.map_display = f.map_display ? 1 : 0;
+    if (const AdjustTables* t = f.adjust.get())
+    {
+        cp.adjusting = 1 | (t->channels ? 2 : 0);
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                cp.to_working[i][j] = t->to_working[i][j], cp.from_working[i][j] = t->from_working[i][j];
+        cp.to_working[0][3] = t->tone_top;
+    }
     // The display: sRGB at SDR white until rapport describes the real one.
     std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
     std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
@@ -1280,6 +1301,34 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
     }
 }
 
+std::vector<rap::gpu::texture_ptr> GpuView::view_inputs(const rap::gpu::texture_ptr& image, const Source& s, const Frame* f,
+                                                       const rap::gpu::texture_ptr& extra)
+{
+    std::vector<rap::gpu::texture_ptr> in{image, s.tone ? s.tone : blank_, extra ? extra : blank_, blank_, blank_, blank_};
+    const AdjustTables* t = f ? f->adjust.get() : nullptr;
+    if (!t)
+        return in;
+    DeviceTables* d = nullptr;
+    for (DeviceTables& c : tables_)
+        if (c.serial == t->serial)
+            d = &c;
+    if (!d)
+    {
+        d = &tables_[next_tables_];
+        next_tables_ ^= 1;
+        d->serial = 0;
+        d->tone = device_->create({AdjustTables::kTone, 1, rap::gpu::format::rgba32f});
+        d->colour = device_->create({AdjustTables::kHues, AdjustTables::kSats, rap::gpu::format::rgba32f});
+        if (!d->tone || !d->colour)
+            return in;
+        device_->upload(d->tone, std::as_bytes(std::span(t->tone)), {4, rap::gpu::sample_type::f32});
+        device_->upload(d->colour, std::as_bytes(std::span(t->colour)), {4, rap::gpu::sample_type::f32});
+        d->serial = t->serial;
+    }
+    in[4] = d->tone, in[5] = d->colour;
+    return in;
+}
+
 void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 {
     if (s.measured || !(s.tonable || always))
@@ -1290,7 +1339,7 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     for (int i = 0; i < 2; ++i)
     {
         d[i].program = i ? peak_ : stats_program_;
-        d[i].inputs = {counted, s.tone ? s.tone : blank_};
+        d[i].inputs = view_inputs(counted, s, nullptr);
         d[i].buffers = {histogram_, s.stats};
         d[i].uniforms = params;  // copied at run()
         d[i].groups[0] = i ? 1 : (counted->width() + 15) / 16;
@@ -1309,13 +1358,15 @@ void GpuView::count(Source& s, const Frame& f)
     cp.measured = 1;
     // The histogram of what's shown: again when exposure or the image change.
     const std::shared_ptr<Image> image = s.image.lock();
-    if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure && !fresh)
+    const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
+    if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure &&
+        histogram_adjust_ == adjusted && !fresh)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(histogram_, 0);
     rap::gpu::dispatch d[2];
     d[0].program = histogram_program_;
-    d[0].inputs = {counted, s.tone ? s.tone : blank_};
+    d[0].inputs = view_inputs(counted, s, &f);
     d[0].buffers = {histogram_, s.stats};
     d[0].uniforms = bytes(cp);
     d[0].groups[0] = (counted->width() + 15) / 16;
@@ -1327,6 +1378,7 @@ void GpuView::count(Source& s, const Frame& f)
     histogram_image_ = image;
     histogram_generation_ = s.generation;
     histogram_exposure_ = f.exposure;
+    histogram_adjust_ = adjusted;
     histogram_scale_ = cp.exposure;
     histogram_scene_ = s.tonable;
     histogram_auto_ = s.auto_exposure;
@@ -1364,7 +1416,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         cp.offset = float(-f.pan_y / f.zoom);
         cp.columns = width;
         cp.rows = height;
-        last.inputs = {s.levels[0]};
+        last.inputs = view_inputs(s.levels[0], s, &f);
     }
     else
     {
@@ -1408,9 +1460,8 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         cp.offset = float(-f.pan_y * inv_y - r0);  // into the rows, which start at level row r0
         cp.rows = rows;
         cp.column = c0;
-        last.inputs = {across};
+        last.inputs = view_inputs(across, s, &f);
     }
-    last.inputs.push_back(s.tone ? s.tone : blank_);
     last.buffers = {s.stats, histogram_};
     last.uniforms = bytes(cp);
     passes.push_back(std::move(last));
@@ -1499,8 +1550,9 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
     // Made at A's size when what it's made from changed, then shown as an
     // image (sRGB colours, nothing to tone).
     const bool same_wb = std::equal(std::begin(difference_wb_), std::end(difference_wb_), std::begin(f.white_balance));
+    const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     if (difference_.levels.empty() || difference_.image.lock() != a || difference_.generation != a_generation || difference_gain_ != gain ||
-        (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
+        difference_adjust_ != adjusted || (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
     {
         ComposeParams cp{};
         show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
@@ -1515,7 +1567,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         }
         rap::gpu::pass p;
         p.program = difference_program_;
-        p.inputs = {s.levels[0], s.tone ? s.tone : blank_, errors_};
+        p.inputs = view_inputs(s.levels[0], s, &f, errors_);
         p.buffers = {s.stats, histogram_};
         p.uniforms = bytes(cp);
         p.target = top;
@@ -1528,7 +1580,11 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         std::memcpy(difference_.input_to_xyz, kXyzFrom709, sizeof difference_.input_to_xyz);
         difference_gain_ = gain;
         difference_exposure_ = f.exposure;
+        difference_adjust_ = adjusted;
         std::copy(std::begin(f.white_balance), std::end(f.white_balance), difference_wb_);
     }
-    return draw(difference_, a->width, a->height, false, f, out, 0, f.width, ready, error);
+    // Edited already, as A's colours went into it.
+    Frame plain = f;
+    plain.adjust.reset();
+    return draw(difference_, a->width, a->height, false, plain, out, 0, f.width, ready, error);
 }

@@ -16,7 +16,12 @@ between that and the screen done there in floating point.
    space and HDR range later). Developing inserts its passes at the front:
    demosaic, white balance, colour matrix, lens-distortion correction.
    Edits are parameters of passes, saved to XMP; nothing is baked until
-   export.
+   export. Three stages: the develop (source-specific: decode, demosaic,
+   corrections) gives scene-linear data; the edit (view.hlsli's `edit()`,
+   the same for every source: white balance and matrix, exposure, the
+   default look, Lightroom's controls as adjust.h's tables) is what export
+   saves; the display mapping (tone and gamut to the display, encoding) is
+   the view's alone.
 3. **Present without leaving the GPU.** The result goes to the screen as a
    texture the toolkit composites, with the app's overlays (text, the
    selection, the HUD) drawn over it as today. HDR presentation hands the

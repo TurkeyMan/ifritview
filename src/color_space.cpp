@@ -64,6 +64,22 @@ void colorants(const ColorSpace& s, Mat& rgb_to_d50, Mat& adapt)
     rgb_to_d50 = mul(adapt, m);
 }
 
+}  // namespace
+
+void rgb_to_xyz_d65(const ColorSpace& space, double out[3][3])
+{
+    Mat m, adapt, srgb_m, d65_to_d50;
+    colorants(space, m, adapt);
+    colorants(ColorSpace::srgb(), srgb_m, d65_to_d50);
+    const Mat r = mul(inverse(d65_to_d50), m);
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            out[i][j] = r[i][j];
+}
+
+namespace
+{
+
 // Big-endian ICC encodings.
 struct Writer
 {

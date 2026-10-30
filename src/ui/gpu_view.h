@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+struct AdjustTables;
 struct Image;
 struct ImageDifference;
 struct LjpegParams;  // ljpeg.hlsli's block (gpu_view.cpp)
@@ -47,8 +48,11 @@ public:
     {
         int width = 0, height = 0;              // the canvas's frame target, device pixels
         double zoom = 1, pan_x = 0, pan_y = 0;  // device pixels per image pixel; the image's top left
+        // The edit (view.hlsli's edit()): what's saved.
         double exposure = 0;                    // EV, for images with more than the display shows
         float white_balance[3] = {};            // a raw's R, G, B multipliers (the least 1); 0: as shot
+        std::shared_ptr<const AdjustTables> adjust;  // the develop controls (adjust.h); null: none
+        bool map_display = true;                // then the display mapping (false: the edit alone, as saved)
         rap::color background;
         bool checkerboard = false;  // under transparency
         int checker_size = 8;       // device pixels
@@ -101,11 +105,14 @@ public:
     // `done` runs on a rapport thread once they're in (if a count has run).
     void read_details(std::function<void(const Details&)> done);
 
-    // The image at `exposure` as an 8-bit sRGB rendering, full size, read back
-    // (premultiplied BGRA, as Image keeps pixels): for what reads pixels on
-    // the CPU (saving, printing, comparing) when the GPU developed it. Waits.
-    bool export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, double exposure, PixelBuffer& out,
-                       std::string& error);
+    // The image's edit (its exposure, white balance and develop controls)
+    // into a frame: what the view shows and export_pixels saves.
+    static void edit_of(const Image& image, Frame& f);
+    // The image as edited (edit_of) as an 8-bit sRGB rendering, full size,
+    // read back (premultiplied BGRA, as Image keeps pixels): for what reads
+    // pixels on the CPU (saving, printing, comparing) when the GPU developed
+    // it. No display mapping. Waits.
+    bool export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, PixelBuffer& out, std::string& error);
 
 private:
     // An image on the device: level 0 (its data in linear light), the levels
@@ -127,6 +134,18 @@ private:
     };
 
     bool programs(std::string& error);
+    // What view.hlsli's passes read: `image` (t0), the source's curve (t1),
+    // `extra` (t2), and the frame's develop tables (t4, t5), uploaded once
+    // each (the last two kept: A's and B's); blank where there's none.
+    struct DeviceTables
+    {
+        uint64_t serial = 0;
+        rap::gpu::texture_ptr tone, colour;
+    };
+    DeviceTables tables_[2];
+    int next_tables_ = 0;
+    std::vector<rap::gpu::texture_ptr> view_inputs(const rap::gpu::texture_ptr& image, const Source& s, const Frame* f,
+                                                   const rap::gpu::texture_ptr& extra = nullptr);
     // The image's data on the device, decoded to linear light (level 0).
     bool upload(const Image& image, Source& s, std::string& error);
     // A raw's readout still compressed (RawMosaic::stream) decoded here: its
@@ -200,6 +219,7 @@ private:
     std::weak_ptr<Image> histogram_image_;
     uint64_t histogram_generation_ = 0;
     double histogram_exposure_ = -1e9;
+    uint64_t histogram_adjust_ = 0;  // the develop tables' serial
     float histogram_scale_ = 1;  // the scene's scale it was counted at
     bool histogram_scene_ = false, histogram_auto_ = false;
     rap::gpu::buffer_ptr histogram_stats_;
@@ -211,6 +231,7 @@ private:
     rap::gpu::texture_ptr errors_;  // the errors, a byte a pixel
     int difference_gain_ = 0;
     double difference_exposure_ = 0;
+    uint64_t difference_adjust_ = 0;
     float difference_wb_[3] = {};
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;

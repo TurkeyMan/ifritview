@@ -54,7 +54,8 @@ namespace
 // run with RAPPORT_SNAPSHOT=file.png (and RAPPORT_SNAPSHOT_DELAY) set; what a
 // GPU drew isn't in them, but export:file.png writes the image as saving would
 // (instead:jpeg, instead:libraw, instead:none, lens:on, lens:off first: the
-// G panel's checks).
+// G panel's checks; crs:Contrast2012=40 sets a develop setting by its XMP
+// name, as-shot puts them all back, save-xmp writes the sidecar).
 void run_step(App& app, const std::string& step)
 {
     std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
@@ -156,6 +157,12 @@ void run_step(App& app, const std::string& step)
         app.script_lens(step == "lens:on");
     else if (step.rfind("export:", 0) == 0)
         app.script_export(step.substr(7));
+    else if (step.rfind("crs:", 0) == 0)
+        app.script_crs(step.substr(4));
+    else if (step == "save-xmp")
+        app.script_save_xmp();
+    else if (step == "as-shot")
+        app.script_as_shot();
     else if (step.rfind("compare:", 0) == 0)
         app.script_compare(step.substr(8));
     else if (step == "quit")

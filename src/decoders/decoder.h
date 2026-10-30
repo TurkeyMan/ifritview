@@ -196,6 +196,14 @@ void read_iptc_blob(const uint8_t* data, size_t size, Image& out);
 #ifdef HAVE_XMP
 // Embedded XMP packet plus any .xmp sidecar next to the file.
 void read_xmp(const std::string& path, const uint8_t* data, size_t size, Image& out);
+// The sidecar Lightroom reads beside `path`: photo.xmp for photo.CR3.
+std::string xmp_sidecar_path(const std::string& path);
+// Lightroom's develop settings (`edits`' exposure, white balance and
+// controls, under its process version) into that sidecar: merged into one
+// that's there, everything else in it kept (other schemas, the crs settings
+// not applied here); written whole or not at all. The image file itself is
+// never touched (Lightroom keeps a DNG's or a JPEG's settings inside it).
+bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::string& error);
 #endif
 
 #ifdef HAVE_EXIF
