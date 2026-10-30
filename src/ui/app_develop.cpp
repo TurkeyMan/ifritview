@@ -126,7 +126,7 @@ rap::node App::develop_panel()
         // camera's compensation (raw and HDR images), as Lightroom has them.
         vbox{
             L::form{
-                {_("Temperature"), L::slider{2000.0, 12000.0, 5500.0}
+                {_("Temperature"), L::slider{2000.0, 50000.0, 5500.0}
                                        .step(50, 500)
                                        .show_value(0)
                                        .stretch()

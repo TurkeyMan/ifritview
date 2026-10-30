@@ -3,7 +3,9 @@
 // White balance for a raw the GPU develops (RawMosaic): a colour temperature
 // and tint as the camera's own channel multipliers, through its colour
 // matrix (XYZ to camera RGB), and the as-shot multipliers back as a
-// temperature and tint for the controls to start from. A DNG's by its own
+// temperature and tint for the controls to start from. Temperature and tint
+// are Lightroom's, as the DNG specification has them: the temperature by
+// Robertson's isotherms, the tint a distance along them. A DNG's by its own
 // colour model (DngColour), as its specification has it: the white's
 // temperature picks the matrices, which in turn find the white.
 
@@ -12,12 +14,14 @@
 struct DngColour;
 struct RawMosaic;
 
-// The white of `kelvin` (1667..25000), moved off the Planckian/daylight
-// locus by `tint` (-150..150: + magenta, - green), as the R, G, B
-// multipliers that make it neutral in this camera, the least 1.
+// The white of `kelvin` (Lightroom's 2000..50000), moved off the Planckian
+// locus by `tint` (-150..150: + a greener light, the picture balanced
+// towards magenta; 1 a uv distance of 1/3000), as the R, G, B multipliers
+// that make it neutral in this camera, the least 1.
 void wb_multipliers(const RawMosaic& m, double kelvin, double tint, float out[3]);
 
-// The temperature and tint nearest the camera's as-shot multipliers.
+// The temperature and tint of the white the camera's as-shot multipliers
+// make neutral.
 void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint);
 
 // A DNG's: the camera's RGB of the white `white`, the greatest 1.
