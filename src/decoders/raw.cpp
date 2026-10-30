@@ -529,6 +529,23 @@ public:
         const auto& id = imgdata.idata;
         return (id.filters >= 1000 || id.filters == 9) && id.colors == 3 && !super_ccd();
     }
+    // A DNG carrying a colour matrix known to be wrong, given its sensor's
+    // from LibRaw's table instead. Samsung's GX20 firmware (a Pentax K20D)
+    // writes one that drains the colour (as LibRaw's table notes): the light
+    // its own as-shot neutral implies lies far off the blackbody locus
+    // (Duv -0.010 against the K20D's -0.001), and Adobe's profile for it is
+    // the K20D's. Known by the matrix itself, so a file with another one
+    // keeps it. Once opened.
+    void fix_known_bad_matrix()
+    {
+        const auto& id = imgdata.idata;
+        const auto& daylight = imgdata.color.dng_color[1].colormatrix;
+        const bool samsung_gx20 = id.dng_version && std::strcmp(id.make, "Samsung") == 0 && std::strcmp(id.model, "GX20") == 0 &&
+                                  std::fabs(daylight[0][0] - 2.7717f) < 1e-3f && std::fabs(daylight[0][1] + 1.7403f) < 1e-3f &&
+                                  std::fabs(daylight[1][1] - 1.9778f) < 1e-3f;
+        if (samsung_gx20)
+            adobe_coeff(LIBRAW_CAMERAMAKER_Pentax, "K20D");
+    }
     // Fuji's SuperCCD: its photosites on a grid turned 45 degrees, which
     // LibRaw's develop turns upright (fuji_rotate); the readout isn't the
     // picture's grid.
@@ -1717,6 +1734,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         error = libraw_strerror(r);
         return false;
     }
+    raw.fix_known_bad_matrix();
 
     bool ok = false;
     std::string mode;
