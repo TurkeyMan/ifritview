@@ -1364,11 +1364,13 @@ void GpuView::count(Source& s, const Frame& f)
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     cp.measured = 1;
-    // The histogram of what's shown: again when exposure or the image change.
+    // The histogram of what's shown: again when the image, its exposure,
+    // white balance or develop settings change.
     const std::shared_ptr<Image> image = s.image.lock();
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
+    const bool same_wb = std::equal(std::begin(histogram_wb_), std::end(histogram_wb_), std::begin(f.white_balance));
     if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure &&
-        histogram_adjust_ == adjusted && !fresh)
+        histogram_adjust_ == adjusted && same_wb && !fresh)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(histogram_, 0);
@@ -1387,6 +1389,7 @@ void GpuView::count(Source& s, const Frame& f)
     histogram_generation_ = s.generation;
     histogram_exposure_ = f.exposure;
     histogram_adjust_ = adjusted;
+    std::copy(std::begin(f.white_balance), std::end(f.white_balance), std::begin(histogram_wb_));
     histogram_scale_ = cp.exposure;
     histogram_scene_ = s.tonable;
     histogram_auto_ = s.auto_exposure;

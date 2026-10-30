@@ -360,6 +360,13 @@ void App::script_crs(const std::string& setting)
         return;
     const std::string name = setting.substr(0, eq);
     const double value = std::strtod(setting.c_str() + eq + 1, nullptr);
+    if (name == "Temperature" || name == "Tint")
+    {
+        // As the slider moved by hand.
+        (name == "Temperature" ? wb_kelvin_ : wb_tint_)->set_value(value);
+        white_balance_changed();
+        return;
+    }
     if (name == "ProcessVersion")
         image_->adjust.legacy = value < 6;
     else if (double* v = field(image_->adjust, name))

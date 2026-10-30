@@ -221,6 +221,7 @@ private:
     uint64_t histogram_generation_ = 0;
     double histogram_exposure_ = -1e9;
     uint64_t histogram_adjust_ = 0;  // the develop tables' serial
+    float histogram_wb_[3] = {};     // the white balance counted with
     float histogram_scale_ = 1;  // the scene's scale it was counted at
     bool histogram_scene_ = false, histogram_auto_ = false;
     rap::gpu::buffer_ptr histogram_stats_;
