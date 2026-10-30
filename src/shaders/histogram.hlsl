@@ -9,11 +9,6 @@ RWByteAddressBuffer bins : register(u0);
 
 groupshared uint local_bins[1024];
 
-float encode(float v)
-{
-    v = saturate(v);
-    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
-}
 
 [numthreads(16, 16, 1)]
 void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
@@ -29,7 +24,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         if (c.a > 0)
         {
             const float3 shown = tone_map(max(c.rgb / c.a, 0));
-            const float3 e = float3(encode(shown.r), encode(shown.g), encode(shown.b));
+            const float3 e = float3(srgb_encode(shown.r), srgb_encode(shown.g), srgb_encode(shown.b));
             const uint3 b = uint3(e * 255 + 0.5);
             const uint y = uint(dot(e, float3(0.2126, 0.7152, 0.0722)) * 255 + 0.5);
             InterlockedAdd(local_bins[b.r], 1);

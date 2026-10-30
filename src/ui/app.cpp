@@ -257,6 +257,7 @@ void App::update_toolbar()
             compare_buttons_[i]->set_checked(comparing && size_t(view_->compare_mode()) == i);
     }
     exposure_box_->set_visible(!comparing && exposure_applies());
+    sync_knobs();
     if (gain_)
         gain_->set_enabled(comparing && view_->compare_mode() == View::Compare::Difference);
     if (compare_widgets_[size_t(View::Compare::Difference)])
@@ -279,57 +280,8 @@ void App::build_ui()
     using L::spacer;
     using L::vbox;
 
-    // The develop controls, under the histogram: exposure in stops round the
-    // camera's compensation (raw and HDR images), and a raw's white balance
-    // as a temperature and tint (raws the GPU develops).
-    rap::node develop =
-        vbox{
-            L::form{
-                {_("Exposure"), L::slider{-3.0, 3.0, 0.0}
-                                    .step(0.1, 1.0)
-                                    .show_value(2)
-                                    .mark(0.0)
-                                    .on_changed([this](double) { retone(); })
-                                    .bind(exposure_)
-                                    .tooltip(_("Exposure (EV). Rests at the camera's compensation, i.e. as shot.\n"
-                                               "Greyed while the embedded preview stands in for the raw"))},
-            },
-            vbox{
-                L::form{
-                    {_("Temperature"), L::slider{2000.0, 12000.0, 5500.0}
-                                           .step(50, 500)
-                                           .show_value(0)
-                                           .on_changed([this](double) { white_balance_changed(); })
-                                           .bind(wb_kelvin_)
-                                           .tooltip(_("White balance: the colour temperature of the light (kelvin)"))},
-                    {_("Tint"), L::slider{-150.0, 150.0, 0.0}
-                                    .step(1, 10)
-                                    .show_value(0)
-                                    .mark(0.0)
-                                    .on_changed([this](double) { white_balance_changed(); })
-                                    .bind(wb_tint_)
-                                    .tooltip(_("White balance: towards green (-) or magenta (+)"))},
-                },
-            }
-                .handle(wb_box_),
-            L::form{{"", L::button{_("As shot")}
-                             .on_click([this] { white_balance_as_shot(); })
-                             .tooltip(_("Back to the camera's exposure and white balance"))}},
-            L::form{{"", L::check{_("Camera's JPEG")}
-                             .on_toggled([this](bool on) { show_instead(on ? Instead::CameraJpeg : Instead::Nothing); })
-                             .bind(camera_jpeg_check_)
-                             .tooltip(_("Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"))},
-                     {"", L::check{_("LibRaw's develop")}
-                              .on_toggled([this](bool on) { show_instead(on ? Instead::LibRaw : Instead::Nothing); })
-                              .bind(libraw_check_)
-                              .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))},
-                     {"", L::check{_("Lens correction"), cfg_.lens_correction}
-                              .on_toggled([this](bool on) { set_lens_correction(on, true); })
-                              .bind(lens_check_)
-                              .tooltip(_("Take out the lens's distortion, colour fringes and vignetting, from lensfun's database, "
-                                         "for raws that carry no corrections of their own"))}},
-        }
-            .handle(exposure_box_);
+    // The develop controls, under the histogram (app_develop.cpp).
+    rap::node develop = develop_panel();
 
     platform::trace("ui: creating the window");
     window_ = ui_.create(L::window{
@@ -459,7 +411,6 @@ void App::build_ui()
                         .bind(histogram_canvas_)
                         .height(rap::extent{13, rap::extent::unit::lines}),
 
-                    develop,
                     L::form{
                         {_("Peak"), L::label{""}.bind(hist_peak_)},
                         {_("Brightest"), L::label{""}.bind(hist_max_)},
@@ -467,6 +418,7 @@ void App::build_ui()
                         {_("Average (APL)"), L::label{""}.bind(hist_average_)},
                         {_("Clipped"), L::label{""}.bind(hist_clipped_)},
                     },
+                    develop,
                     L::spacer{},
                 }
                     .margins()
@@ -698,13 +650,33 @@ void App::pixels_for_cpu()
     view_->retoned();
 }
 
+// Made from the image's own data, its pixels have its edits in them; an
+// 8-bit image's are the file's, so a copy is edited: on the GPU, by the
+// edit stage the view draws with, where it can (opaque ones: that renders
+// over black), else on the CPU through the same tables.
+std::shared_ptr<Image> App::edited_image()
+{
+    pixels_for_cpu();
+    if (!image_ || image_->linear || image_->source || image_->mosaic)
+        return image_;
+    const std::shared_ptr<const AdjustTables> tables = image_->adjust_tables();
+    if (!tables)
+        return image_;
+    image_->break_transform(_("the develop settings were changed"));  // no lossless JPEG of it
+    auto edited = std::make_shared<Image>(*image_);
+    edited->mips.clear();
+    if (image_->has_alpha || !view_->drawn_on_gpu() || !view_->edited_pixels(image_, edited->pixels))
+        edited->pixels = image_->adjusted_pixels(*tables);
+    return edited;
+}
+
 void App::copy_to_clipboard()
 {
     if (!image_)
         return;
-    pixels_for_cpu();
+    const std::shared_ptr<Image> edited = edited_image();
     int x, y, w, h;
-    const Image region = view_->selection(x, y, w, h) ? image_->crop(x, y, w, h) : *image_;
+    const Image region = view_->selection(x, y, w, h) ? edited->crop(x, y, w, h) : *edited;
     ui_.set_clipboard_image(region.width, region.height, APixelFormat::bgra8_premultiplied, region.pixels.data(), region.stride);
     view_->clear_selection();
     status_message_ = rap::i18n::format(_("Copied {0} × {1} to clipboard"), region.width, region.height);
@@ -753,7 +725,7 @@ void App::script_export(const std::string& path)
 {
     if (!image_)
         return;
-    pixels_for_cpu();
+    const std::shared_ptr<Image> edited = edited_image();
     const Encoder* e = encoder_for_extension(file_extension(path));
     if (!e)
     {
@@ -762,7 +734,7 @@ void App::script_export(const std::string& path)
     }
     // Encoded on a thread of its own, as a save is (a raw's tens of
     // megapixels took the UI thread seconds), from a copy of what's shown.
-    auto shown = std::make_shared<const Image>(instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *image_);
+    auto shown = std::make_shared<const Image>(instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *edited);
     std::thread(
         [e, shown, path, running = saves_->start()]
         {
@@ -818,6 +790,7 @@ int App::run()
 
 void App::quit()
 {
+    flush_xmp();
     ui_.quit();
 }
 
@@ -1312,11 +1285,15 @@ void App::on_loaded(Loader::Result& r)
     // goes back to as shot (or its sidecar's).
     if (from_cache)
     {
-        const double opened = cfg_.apply_xmp_edits && image_->xmp.present ? image_->xmp.exposure : 0.0;
-        if (image_->exposure_edit != opened)
+        const bool xmp = cfg_.apply_xmp_edits && image_->xmp.present;
+        const double opened = xmp ? image_->xmp.exposure : 0.0;
+        Adjustments adjust = xmp ? image_->xmp.adjust : Adjustments{};
+        adjust.kept = image_->adjust.kept;
+        if (image_->exposure_edit != opened || !(image_->adjust == adjust))
         {
             image_->exposure_edit = opened;
-            if (image_->tonable())
+            image_->adjust = std::move(adjust);
+            if (image_->tonable() || image_->source)
                 image_->retone(opened);
         }
     }
@@ -1352,7 +1329,11 @@ void App::sync_exposure_slider()
     if (!fullscreen_)
         exposure_box_->set_visible(shown);
     if (!shown)
+    {
+        sync_white_balance();
+        sync_knobs();
         return;
+    }
     const double bias = image_->exposure_bias;
     // An HDR image may need taking down further than a raw to see its brightest.
     const double down = image_->hdr() ? std::max(3.0, std::ceil(std::log2(double(image_->source->peak)))) : 3.0;
@@ -1362,6 +1343,7 @@ void App::sync_exposure_slider()
     exposure_->set_value(bias + image_->exposure_edit);
     exposure_->set_enabled(!image_->is_preview());
     sync_white_balance();
+    sync_knobs();
 }
 
 void App::sync_white_balance()
@@ -1388,7 +1370,10 @@ void App::white_balance_changed()
         return;
     image_->wb_kelvin = wb_kelvin_->value();
     image_->wb_tint = wb_tint_->value();
+    image_->pixels_stale = true;  // what's saved is made again with it
+    PixelBuffer().swap(image_->pixels);
     view_->redraw();
+    schedule_xmp();
 }
 
 void App::show_instead(Instead what)
@@ -1463,16 +1448,21 @@ void App::show_instead()
         .detach();
 }
 
-// Back to how the camera took it: its white balance and its exposure.
+// Back to how the camera took it: its white balance and its exposure, and
+// every develop control at rest (Process 2012's: Lightroom's defaults).
 void App::white_balance_as_shot()
 {
     if (!image_)
         return;
     image_->wb_kelvin = image_->wb_tint = 0;
     sync_white_balance();
+    Adjustments rested;
+    rested.kept = image_->adjust.kept;
+    image_->adjust = std::move(rested);
+    sync_knobs();
     if (exposure_applies())
         set_exposure(image_->exposure_bias);  // the slider rests at the camera's compensation
-    view_->redraw();
+    adjustments_changed();
 }
 
 void App::set_exposure(double ev)
@@ -1487,6 +1477,7 @@ void App::set_exposure(double ev)
 // then it's read afresh, as the file is.
 void App::leave_image()
 {
+    flush_xmp();
     if (!image_ || image_path_.empty())
         return;
     if (image_->edited)
@@ -1629,6 +1620,7 @@ void App::retone()
     if (!image_ || !image_->tonable())
         return;
     image_->exposure_edit = exposure_->value() - image_->exposure_bias;
+    schedule_xmp();
     if (view_->drawn_on_gpu())
     {
         // Drawn from the image's own data: the view shows the new exposure,
@@ -1643,11 +1635,12 @@ void App::retone()
     request_retone();
 }
 
-// Render the current exposure on a thread into a fresh buffer; swap it in on
-// the UI thread. If the slider moved meanwhile, go again.
+// Render the current exposure and develop settings on a thread into a
+// fresh buffer; swap it in on the UI thread. If a slider moved meanwhile, go
+// again.
 void App::request_retone()
 {
-    if (retone_busy_ || !image_ || !image_->tonable())
+    if (retone_busy_ || !image_ || !(image_->tonable() || image_->source))
         return;
     if (image_->mosaic)
     {
@@ -1662,12 +1655,13 @@ void App::request_retone()
     auto linear = image_->linear;
     auto source = image_->source;
     const double ev = image_->exposure_edit;
+    const std::shared_ptr<const AdjustTables> tables = image_->adjust_tables();
     std::thread(
-        [this, image, linear, source, ev]
+        [this, image, linear, source, ev, tables]
         {
-            auto result = std::make_shared<PixelBuffer>(image->retone_buffer(ev));
+            auto result = std::make_shared<PixelBuffer>(image->retone_buffer(ev, tables.get()));
             ui_.post(
-                [this, image, linear, source, ev, result]
+                [this, image, linear, source, ev, tables, result]
                 {
                     retone_busy_ = false;
                     const bool current = image->linear == linear && image->source == source &&
@@ -1681,7 +1675,7 @@ void App::request_retone()
                         if (image == image_)
                             view_->retoned();
                     }
-                    if (image == image_ && image_->tonable() && std::fabs(image_->exposure_edit - ev) > 1e-9)
+                    if (image == image_ && (std::fabs(image_->exposure_edit - ev) > 1e-9 || image_->adjust_tables() != tables))
                     {
                         if (view_->drawn_on_gpu())
                         {
@@ -1719,7 +1713,8 @@ void App::apply_xmp(bool fresh)
     if (fresh)
         apply_xmp_geometry(*image_);
     image_->exposure_edit = image_->xmp.exposure;
-    if (image_->tonable())
+    image_->adjust = image_->xmp.adjust;
+    if (image_->tonable() || image_->source)
         image_->retone(image_->exposure_edit);
     // Its white balance, where it isn't the camera's (a raw's develop takes
     // it; the panel's sliders show it).

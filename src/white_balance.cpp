@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace
 {
@@ -107,4 +109,7 @@ void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint)
         for (double n = n0 - 5; n <= n0 + 5; n += 0.5)
             if (const double e = miss(t, n); e < best)
                 best = e, kelvin = t, tint = n;
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "white balance: as shot R %.3f G %.3f B %.3f (R/G %.3f, B/G %.3f) -> %.0f K, tint %.1f\n", m.as_shot[0],
+                     m.as_shot[1], m.as_shot[2], m.as_shot[0] / m.as_shot[1], m.as_shot[2] / m.as_shot[1], kelvin, tint);
 }

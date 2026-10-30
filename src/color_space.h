@@ -5,6 +5,7 @@
 // so a space a file only names (an EXIF flag, a PNG's cHRM, HEIF's nclx)
 // travels with the image like a profile it embeds.
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -59,6 +60,17 @@ struct CicpSpace
     std::string label;
 };
 CicpSpace from_cicp(int primaries, int transfer, double gamma = 0);
+
+// 3 x 3 matrices of linear colour (rows), and what's done with them.
+using Vec3 = std::array<double, 3>;
+using Mat3 = std::array<Vec3, 3>;
+Mat3 mul(const Mat3& a, const Mat3& b);
+Vec3 mul(const Mat3& a, const Vec3& v);
+Mat3 inverse(const Mat3& m);
+
+// The space's linear RGB to XYZ seen under D65 (its white adapted there,
+// Bradford): what the view's colours are in.
+Mat3 rgb_to_xyz_d65(const ColorSpace& space);
 
 // A display-class ICC v4 profile (matrix and parametric curves) for `space`.
 std::vector<uint8_t> icc_profile(const ColorSpace& space);

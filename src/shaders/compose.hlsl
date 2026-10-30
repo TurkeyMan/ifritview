@@ -10,11 +10,6 @@
 
 
 
-float srgb_encode(float v)
-{
-    v = saturate(v);
-    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
-}
 
 float pq_encode(float nits)
 {
@@ -23,10 +18,6 @@ float pq_encode(float nits)
     return pow((c1 + c2 * y) / (1 + c3 * y), m2);
 }
 
-float srgb_decode(float v)
-{
-    return v <= 0.04045 ? v / 12.92 : pow(max(v + 0.055, 0.0) / 1.055, 2.4);
-}
 float3 srgb_decode3(float3 c)
 {
     return float3(srgb_decode(c.r), srgb_decode(c.g), srgb_decode(c.b));

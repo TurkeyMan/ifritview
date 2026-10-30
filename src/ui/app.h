@@ -99,6 +99,9 @@ public:
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
     void script_export(const std::string& path);
+    void script_crs(const std::string& setting);  // "Contrast2012=40": a develop setting, as its slider would
+    void script_save_xmp() { save_xmp(false); }
+    void script_as_shot() { white_balance_as_shot(); }
     void script_instead(const std::string& what);
     void script_lens(bool on);  // the G panel's lens correction, for this run (not saved)
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
@@ -192,7 +195,35 @@ private:
     rap::slider *wb_kelvin_ = nullptr, *wb_tint_ = nullptr;
     bool syncing_wb_ = false;
     void white_balance_changed();  // the sliders moved
-    void white_balance_as_shot();  // back to the camera's
+    void white_balance_as_shot();  // back to the camera's, every control at rest
+    // Lightroom's develop controls (app_develop.cpp): a slider each, by its
+    // crs: name, showing and setting the image's (Image::adjust).
+    rap::node develop_panel();
+    struct Knob
+    {
+        std::string crs;
+        rap::slider* slider = nullptr;
+    };
+    std::vector<Knob> knobs_;
+    rap::widget *develop_box_ = nullptr, *basic2012_ = nullptr, *basic2010_ = nullptr;  // the process's own basic controls
+    rap::drop_down* curve_preset_ = nullptr;
+    bool syncing_knobs_ = false;
+    void sync_knobs();  // the sliders to the image's
+    void knob_changed(const std::string& crs, double value);
+    void curve_chosen(int preset);
+    void adjustments_changed();  // shown, and the sidecar written (auto-saving)
+    // Its XMP sidecar: written now (the button), or once the settings have
+    // rested (auto-saving; flushed on leaving the image and on quitting).
+    void save_xmp(bool quiet);
+    void set_auto_save_xmp(bool on);
+    void schedule_xmp();
+    void flush_xmp();
+    std::weak_ptr<Image> xmp_pending_;
+    std::string xmp_pending_path_;
+    rap::subscription xmp_timer_;
+    // The image's pixels as saved: its edits in them (an 8-bit image's
+    // develop settings, which only the view applies until then).
+    std::shared_ptr<Image> edited_image();
     // The view: the raw as developed here, or instead (the G panel's checks,
     // for comparing) the camera's own rendering, the JPEG embedded in it, or
     // LibRaw's develop on the CPU.
@@ -250,6 +281,7 @@ private:
     bool diff_session_ = false;  // comparing two files, not previewing a save
     std::string diff_name_;      // "a ↔ b"
     std::shared_ptr<Image> save_source_;                        // what Save As saves: the image, or the difference shown
+    std::shared_ptr<Image> save_pixels_;                        // the image's pixels as saved (edited_image())
     std::shared_ptr<const struct LosslessJpeg> lossless_plan_;  // for JPEG's Lossless, once worked out
     uint64_t lossless_generation_ = 0;                          // which working-out of it is the latest
     std::unique_ptr<rap::sys::directory_watch> watch_;

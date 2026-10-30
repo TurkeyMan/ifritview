@@ -51,9 +51,13 @@ public:
     // The GPU's frame for the view as it is now, presented before the next
     // paint (nothing if it's already that, or the CPU draws it).
     void present_on_gpu();
-    // A raw the GPU developed, as 8-bit pixels at its exposure (Image::mosaic):
+    // A raw the GPU developed, as 8-bit pixels as edited (Image::mosaic):
     // false without a GPU to do it.
     bool develop_pixels();
+    // `image` as edited (its exposure, white balance, develop settings) on
+    // the GPU, as the view's edit stage has it, into `out`: false without a
+    // GPU to do it.
+    bool edited_pixels(const std::shared_ptr<Image>& image, PixelBuffer& out);
     // The CPU is about to draw an image whose 8-bit pixels the GPU's drawing
     // left at an older exposure: bring them up to date (App::pixels_for_cpu).
     std::function<void()> on_needs_pixels;
@@ -267,11 +271,13 @@ private:
         bool histogram = false, counting = false;
         int channels = 0;
         double wb_kelvin = 0, wb_tint = 0;
+        uint64_t adjust = 0;  // the develop tables' serial
         // Comparing: how, and B (its own exposure and white balance).
         int compare = -1;
         const Image* b = nullptr;
         uint64_t b_generation = 0;
         double b_exposure = 0, b_wb_kelvin = 0, b_wb_tint = 0;
+        uint64_t b_adjust = 0;
         int split = 0, gain = 0;
         const ImageDifference* difference = nullptr;
         bool operator==(const GpuKey&) const = default;

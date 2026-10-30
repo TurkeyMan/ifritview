@@ -4,15 +4,9 @@
 #include <cmath>
 #include <cstdio>
 
-namespace
+Mat3 mul(const Mat3& a, const Mat3& b)
 {
-
-using Vec = std::array<double, 3>;
-using Mat = std::array<Vec, 3>;  // rows
-
-Mat mul(const Mat& a, const Mat& b)
-{
-    Mat r{};
+    Mat3 r{};
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
             for (int k = 0; k < 3; ++k)
@@ -20,16 +14,16 @@ Mat mul(const Mat& a, const Mat& b)
     return r;
 }
 
-Vec mul(const Mat& a, const Vec& v)
+Vec3 mul(const Mat3& a, const Vec3& v)
 {
-    Vec r{};
+    Vec3 r{};
     for (int i = 0; i < 3; ++i)
         for (int k = 0; k < 3; ++k)
             r[i] += a[i][k] * v[k];
     return r;
 }
 
-Mat inverse(const Mat& m)
+Mat3 inverse(const Mat3& m)
 {
     const double a = m[0][0], b = m[0][1], c = m[0][2], d = m[1][0], e = m[1][1], f = m[1][2], g = m[2][0], h = m[2][1], i = m[2][2];
     const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
@@ -37,6 +31,12 @@ Mat inverse(const Mat& m)
              {(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det},
              {(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det}}};
 }
+
+namespace
+{
+
+using Vec = Vec3;
+using Mat = Mat3;
 
 Vec xyz(ColorSpace::XY c)
 {
@@ -63,6 +63,19 @@ void colorants(const ColorSpace& s, Mat& rgb_to_d50, Mat& adapt)
     adapt = mul(inverse(bradford), mul(cone, bradford));
     rgb_to_d50 = mul(adapt, m);
 }
+
+}  // namespace
+
+Mat3 rgb_to_xyz_d65(const ColorSpace& space)
+{
+    Mat m, adapt, srgb_m, d65_to_d50;
+    colorants(space, m, adapt);
+    colorants(ColorSpace::srgb(), srgb_m, d65_to_d50);
+    return mul(inverse(d65_to_d50), m);
+}
+
+namespace
+{
 
 // Big-endian ICC encodings.
 struct Writer

@@ -2052,3 +2052,287 @@ msgstr ""
 #: src/decoders/raw.cpp:1265
 msgid "DNG corrections"
 msgstr ""
+
+#: src/decoders/xmp.cpp
+msgid "{0} isn't XMP that can be read: left as it is"
+msgstr ""
+
+#: src/decoders/xmp.cpp
+msgid "The XMP couldn't be put together"
+msgstr ""
+
+#: src/image.cpp
+msgid "the develop settings were changed"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Contrast"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Contrast: an S-curve about mid-grey, the darks darker and the lights lighter (or, below 0, closer)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Highlights"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Highlights: the bright tones; below 0 brings back what's near or past white, the darks left as they are"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Shadows"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Shadows: the dark tones; above 0 opens them up, the lights left as they are"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Whites"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Whites: where white clips; above 0 more of the brightest goes to white, below 0 less"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Blacks"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Blacks: where black clips; below 0 more of the darkest goes to black, above 0 less"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Brightness"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Brightness (Process 2010): the middle tones, white and black kept"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Contrast (Process 2010): an S-curve about mid-grey"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Recovery"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Recovery (Process 2010): the brightest brought back from white"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Fill Light"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Fill Light (Process 2010): the shadows lifted"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Blacks (Process 2010): how much of the darkest goes to black"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Vibrance"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Vibrance: saturation, most for the least saturated colours, skin tones spared"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Saturation"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Saturation: every colour alike; -100 is greyscale"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "The tone curve's brightest region"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Lights"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "The tone curve's region from the middle to the highlights"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Darks"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "The tone curve's region from the shadows to the middle"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "The tone curve's darkest region"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Shadow split"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Where the curve's shadows end and its darks begin (percent)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Midtone split"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Where the curve's darks end and its lights begin (percent)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Highlight split"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Where the curve's lights end and its highlights begin (percent)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Red"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Orange"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Yellow"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Green"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Aqua"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Blue"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Purple"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Magenta"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Linear"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Medium Contrast"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Strong Contrast"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Temperature"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "White balance: the colour temperature of the light (kelvin)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Tint"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "White balance: towards green (-) or magenta (+)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Exposure"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Exposure (EV). Rests at the camera's compensation, i.e. as shot.\nGreyed while the embedded preview stands in for the raw"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Basic"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Lightroom 3's controls (Process 2010), as this image's settings have them"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Tone Curve"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Point curve"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "The point curve over the parametric one: a preset, or the image's own (Custom)"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "HSL"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Hue"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Luminance"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "As shot"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Back to how the camera took it: its white balance and exposure, every control at rest"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Save XMP"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Write these settings to the image's XMP sidecar (photo.xmp beside photo.CR3), as Lightroom reads them; what else is in it is kept"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Auto-save XMP"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Write the image's XMP sidecar a moment after each change"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Saved the develop settings to {0}"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "Couldn't save the develop settings: {0}"
+msgstr ""
+
+#: src/ui/app_develop.cpp
+msgid "This build can't write XMP"
+msgstr ""

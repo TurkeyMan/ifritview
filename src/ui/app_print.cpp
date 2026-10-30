@@ -12,11 +12,11 @@ void App::print_image()
 {
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
-    pixels_for_cpu();
+    const std::shared_ptr<Image> edited = edited_image();
     // A selection prints alone, as Ctrl+C copies it.
-    std::shared_ptr<const Image> image = image_;
+    std::shared_ptr<const Image> image = edited;
     if (int x, y, w, h; view_->selection(x, y, w, h))
-        image = std::make_shared<const Image>(image_->crop(x, y, w, h));
+        image = std::make_shared<const Image>(edited->crop(x, y, w, h));
 
     rap::print_job job;
     job.title = std::filesystem::path(image_path_).filename().string();

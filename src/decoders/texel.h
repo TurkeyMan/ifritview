@@ -53,18 +53,27 @@ inline uint32_t unit_to_byte(float v)
 {
     return std::isnan(v) ? 0 : uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
+// sRGB's curve, its power law carried on past 1 (white) for what's
+// brighter: linear light to its encoding, and back.
+template <typename T>
+T srgb_encode(T linear)
+{
+    return linear <= T(0.0031308) ? linear * T(12.92) : T(1.055) * std::pow(linear, T(1) / T(2.4)) - T(0.055);
+}
+template <typename T>
+T srgb_decode(T v)
+{
+    return v <= T(0.04045) ? v / T(12.92) : std::pow((v + T(0.055)) / T(1.055), T(2.4));
+}
 // sRGB's curve to linear light.
 inline float srgb_to_linear(float v)
 {
-    return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+    return srgb_decode(v);
 }
 // Linear light to sRGB's curve, clipped to 0..1; NaN is 0.
 inline float linear_to_srgb(float linear)
 {
-    if (std::isnan(linear))
-        return 0;
-    linear = std::clamp(linear, 0.0f, 1.0f);
-    return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1 / 2.4f) - 0.055f;
+    return std::isnan(linear) ? 0 : srgb_encode(std::clamp(linear, 0.0f, 1.0f));
 }
 
 // -- texture layouts ----------------------------------------------------------

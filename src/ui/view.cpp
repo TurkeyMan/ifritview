@@ -1145,8 +1145,10 @@ bool View::draw_on_gpu(rap::color background)
                        !outgoing_.image;
     std::shared_ptr<rap::gpu::device> device = plain ? canvas_->gpu_device() : nullptr;
     // A GPU in software (lavapipe, WARP) is slower than the CPU's own
-    // drawing: it takes only what needs it, raw and HDR images.
-    if (device && device->software() && !(a_shown && image_->tonable()) && !(b && b->tonable()))
+    // drawing: it takes only what needs it, raw and HDR images, and images
+    // with develop settings (the edit stage is the GPU's).
+    const auto needs = [](const Image* i) { return i->tonable() || i->adjust_tables() != nullptr; };
+    if (device && device->software() && !(a_shown && needs(image_.get())) && !(b && needs(b)))
         device = nullptr;
     gpu_wanted_ = plain;
     if (device)
@@ -1171,6 +1173,9 @@ bool View::draw_on_gpu(rap::color background)
                uint32_t(background.r) << 16 | uint32_t(background.g) << 8 | background.b,
                cfg_.checkerboard, cfg_.enlarge_filter, cfg_.shrink_filter, histogram_overlay_, histogram_panel_ != nullptr,
                cfg_.histogram_channels, image_->wb_kelvin, image_->wb_tint};
+    GpuView::Frame f;
+    GpuView::edit_of(*image_, f);
+    key.adjust = f.adjust ? f.adjust->serial : 0;
     // Comparing, what's transparent in either shows over the checkerboard
     // whatever the setting, as the CPU draws it.
     const bool compared_alpha = compare_ && (image_->has_alpha || compare_->b.image->has_alpha);
@@ -1189,20 +1194,18 @@ bool View::draw_on_gpu(rap::color background)
             key.b_exposure = b->tonable() ? b->exposure_edit : 0.0;
             key.b_wb_kelvin = b->wb_kelvin;
             key.b_wb_tint = b->wb_tint;
+            const std::shared_ptr<const AdjustTables> t = b->adjust_tables();
+            key.b_adjust = t ? t->serial : 0;
         }
     }
     if (gpu_shown_ && key == gpu_drawn_)
         return true;  // the frame shown is this one: only the painting over it changed
 
-    GpuView::Frame f;
     f.width = target.width;
     f.height = target.height;
     f.zoom = zoom_;
     f.pan_x = pan_x_;
     f.pan_y = pan_y_;
-    f.exposure = key.exposure;
-    if (image_->mosaic && image_->wb_kelvin > 0)
-        wb_multipliers(*image_->mosaic, image_->wb_kelvin, image_->wb_tint, f.white_balance);
     f.background = background;
     f.checkerboard = key.checkerboard;
     f.checker_size = int(std::lround(8 * scale_factor()));
@@ -1233,10 +1236,7 @@ bool View::draw_on_gpu(rap::color background)
     if (b)
     {
         fb.zoom = zoom_ * double(image_->width) / b->width;
-        fb.exposure = key.b_exposure;
-        std::fill(std::begin(fb.white_balance), std::end(fb.white_balance), 0.0f);
-        if (b->mosaic && b->wb_kelvin > 0)
-            wb_multipliers(*b->mosaic, b->wb_kelvin, b->wb_tint, fb.white_balance);
+        GpuView::edit_of(*b, fb);
     }
     bool drawn;
     if (b && mode != Compare::Swipe)
@@ -1304,19 +1304,33 @@ void View::present_on_gpu()
 #endif
 }
 
-bool View::develop_pixels()
+bool View::edited_pixels(const std::shared_ptr<Image>& image, PixelBuffer& out)
 {
 #ifdef HAVE_GPU
-    if (!image_ || !image_->mosaic || !canvas_)
+    if (!image || !canvas_)
         return false;
     std::shared_ptr<rap::gpu::device> device = canvas_->gpu_device();
     if (!device)
         return false;
     if (!gpu_ || gpu_->device() != device)
         gpu_ = std::make_unique<GpuView>(device);
-    PixelBuffer px;
     std::string error;
-    if (!gpu_->export_pixels(image_, image_->generation, image_->exposure_edit, px, error))
+    if (!gpu_->export_pixels(image, image->generation, out, error))
+        return false;
+    gpu_drawn_ = {};  // its frames were drawn into: draw the view again
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool View::develop_pixels()
+{
+#ifdef HAVE_GPU
+    if (!image_ || !image_->mosaic)
+        return false;
+    PixelBuffer px;
+    if (!edited_pixels(image_, px))
         return false;
     image_->pixels = std::move(px);
     image_->stride = image_->width * 4;

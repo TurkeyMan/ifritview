@@ -999,7 +999,7 @@ std::shared_ptr<const FileMetadata> metadata_for_save(const Image& image, const 
     SaveTarget target;
     target.width = width ? width : image.width;
     target.height = height ? height : image.height;
-    target.pixels_changed = image.edited || image.exposure_edit != 0;
+    target.pixels_changed = image.edited || image.exposure_edit != 0 || image.wb_kelvin > 0 || !image.adjust.neutral();
     target.drop_develop = develop_applied || image.is_raw;  // a raw's develop settings describe the raw, not this rendering
     return std::make_shared<const FileMetadata>(prepare_metadata(*image.stored, choice, target));
 }

@@ -10,16 +10,7 @@
 
 Texture2D<float> errors : register(t2);
 
-float srgb_encode(float v)
-{
-    v = saturate(v);
-    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
-}
 
-float srgb_decode(float v)
-{
-    return v <= 0.04045 ? v / 12.92 : pow(max(v + 0.055, 0.0) / 1.055, 2.4);
-}
 
 float4 main(float4 position : SV_Position) : SV_Target
 {

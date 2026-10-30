@@ -3,6 +3,8 @@
 // (premultiplied BGRA, sRGB-encoded), for 8-bit images. Mode 1: the image's
 // own samples, uploaded as they are (16-bit, half or float; a raw's linear
 // RGB), straight alpha.
+
+#include "srgb.hlsli"
 cbuffer Params : register(b0)
 {
     int mode;
@@ -13,10 +15,6 @@ cbuffer Params : register(b0)
 
 Texture2D<float4> source : register(t0);
 
-float srgb_decode(float v)
-{
-    return v <= 0.04045 ? v / 12.92 : pow(max(v + 0.055, 0.0) / 1.055, 2.4);
-}
 float3 decode3(float3 c)
 {
     return float3(srgb_decode(c.r), srgb_decode(c.g), srgb_decode(c.b));

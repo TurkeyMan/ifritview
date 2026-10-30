@@ -47,6 +47,7 @@ endif()
 # Everything that isn't UI: decoders, the image model, loader, cache, config,
 # folders, video, geocoding.
 add_library(ifrit_core STATIC
+  src/adjust.cpp
   src/color_space.cpp
   src/config.cpp
   src/i18n.cpp
@@ -197,6 +198,7 @@ add_executable(ifritview
   src/ui/app.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp
+  src/ui/app_develop.cpp
   src/ui/app_lens.cpp
   src/ui/app_metadata.cpp
   src/ui/app_playback.cpp
@@ -382,7 +384,7 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifrit_core NAME render_raw_tone SOURCE src/shaders/render.hlsl DEFINES RAW TONE)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
-  set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/display.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
+  set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
       src/shaders/ljpeg.hlsli)
   foreach(shader decode develop resample compose difference histogram_view mosaic)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})

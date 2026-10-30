@@ -8,6 +8,8 @@
 //   LINEAR (a linear source: half or float);
 //   SIGNED (signed 16-bit, snorm); otherwise unsigned 16-bit or float as encoded.
 
+#include "srgb.hlsli"
+
 cbuffer Params : register(b0)
 {
     int channels;     // of the source: 1 grey, 2 grey + alpha, 3 RGB, 4 RGBA
@@ -21,11 +23,6 @@ Texture2D<float4> source : register(t0);
 Texture2D<float> tone : register(t1);  // 4096 values, 64 × 64
 #endif
 
-float srgb_encode(float v)
-{
-    v = saturate(v);
-    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
-}
 float byte_of(float v) { return floor(v * 255.0 + 0.5); }
 // To the nearest half, as image.cpp looks floats up by their nearest half.
 float as_half(float v) { return f16tof32(f32tof16(v)); }
