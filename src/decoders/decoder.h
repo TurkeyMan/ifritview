@@ -193,7 +193,6 @@ bool decode_jxl_samples(const uint8_t* data, size_t size, std::vector<uint16_t>&
 void read_iptc_jpeg(const uint8_t* data, size_t size, Image& out);
 void read_iptc_blob(const uint8_t* data, size_t size, Image& out);
 #endif
-#ifdef HAVE_XMP
 // Embedded XMP packet plus any .xmp sidecar next to the file.
 void read_xmp(const std::string& path, const uint8_t* data, size_t size, Image& out);
 // The sidecar Lightroom reads beside `path`: photo.xmp for photo.CR3.
@@ -204,7 +203,6 @@ std::string xmp_sidecar_path(const std::string& path);
 // not applied here); written whole or not at all. The image file itself is
 // never touched (Lightroom keeps a DNG's or a JPEG's settings inside it).
 bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::string& error);
-#endif
 
 #ifdef HAVE_EXIF
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF

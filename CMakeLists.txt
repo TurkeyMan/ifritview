@@ -54,7 +54,9 @@ add_library(ifrit_core STATIC
   src/folder.cpp
   src/image.cpp
   src/white_balance.cpp
+  src/xml.cpp
   src/decoders/decoder.cpp
+  src/decoders/xmp.cpp
   src/decoders/icc.cpp
   src/decoders/crx.cpp
   src/decoders/fuji.cpp
@@ -279,7 +281,6 @@ ifrit_backend(heif HAVE_HEIF src/decoders/heif.cpp libheif)
 ifrit_backend(jxl  HAVE_JXL  src/decoders/jxl.cpp  libjxl)
 ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
 ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
-ifrit_backend(xmp  HAVE_XMP  src/decoders/xmp.cpp  exempi-2.0)
 
 # TurboJPEG, libjpeg-turbo's other library: its lossless transform saves a
 # JPEG's turns, flips and crop without re-encoding (optional).

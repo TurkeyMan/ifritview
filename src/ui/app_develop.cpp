@@ -309,7 +309,6 @@ void App::save_xmp(bool quiet)
 {
     if (!image_ || image_path_.empty())
         return;
-#ifdef HAVE_XMP
     const XmpDevelop d = develop_of(*image_);
     std::string error;
     if (write_xmp_sidecar(image_path_, d, error))
@@ -321,9 +320,6 @@ void App::save_xmp(bool quiet)
     }
     else
         status_message_ = rap::i18n::format(_("Couldn't save the develop settings: {0}"), error);
-#else
-    status_message_ = _("This build can't write XMP");
-#endif
     update_status();
 }
 
@@ -336,7 +332,6 @@ void App::flush_xmp()
     xmp_pending_.reset();
     if (!image)
         return;
-#ifdef HAVE_XMP
     const XmpDevelop d = develop_of(*image);
     std::string error;
     if (write_xmp_sidecar(xmp_pending_path_, d, error))
@@ -349,7 +344,6 @@ void App::flush_xmp()
         status_message_ = rap::i18n::format(_("Couldn't save the develop settings: {0}"), error);
         update_status();
     }
-#endif
 }
 
 void App::script_crs(const std::string& setting)
