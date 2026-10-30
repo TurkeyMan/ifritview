@@ -62,6 +62,9 @@ struct RawMosaic
         // one's width and height, how many across; their streams' samples
         // one tile's after another's. None: Canon's slices, or rows as they come.
         unsigned tile[3] = {};
+        // Sony's tiles: each JPEG sample's four components a 2 x 2 of
+        // photosites, its rows two of the tile's.
+        bool quads = false;
         // Where the readout's (x, y) is among the decoded samples (as
         // ljpeg.hlsli's readout_index).
         size_t index(unsigned x, unsigned y) const
@@ -70,8 +73,9 @@ struct RawMosaic
                 return ((size_t(y & 1) * 2 + (x & 1)) * unsigned(readout_h / 2) + y / 2) * unsigned(readout_w / 2) + x / 2;
             if (tile[0])
             {
-                const unsigned tx = x / tile[0], ty = y / tile[1];
-                return (size_t(ty) * tile[2] + tx) * tile[0] * tile[1] + size_t(y - ty * tile[1]) * tile[0] + (x - tx * tile[0]);
+                const unsigned tx = x / tile[0], ty = y / tile[1], lx = x - tx * tile[0], ly = y - ty * tile[1];
+                const size_t first = (size_t(ty) * tile[2] + tx) * tile[0] * tile[1];
+                return quads ? first + size_t(ly >> 1) * tile[0] * 2 + (lx >> 1) * 4 + (ly & 1) * 2 + (lx & 1) : first + size_t(ly) * tile[0] + lx;
             }
             if (!slices[0])
                 return size_t(y) * readout_w + x;

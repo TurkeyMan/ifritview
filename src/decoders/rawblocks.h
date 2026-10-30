@@ -12,8 +12,8 @@
 // Decoded into the readout as LibRaw lays it out, raw_width x raw_height;
 // only `rows` rows from the top are written (the rest LibRaw leaves as it
 // finds them), and Sony's last columns when the width isn't whole blocks.
-// Not taken: Panasonic's encoding 8 (panasonicC8_load_raw: a few long
-// Huffman-coded stripes).
+// Panasonic's encoding 8 (panasonicC8_load_raw: a few long Huffman-coded
+// stripes) is pana8.h's.
 
 #include <cstddef>
 #include <cstdint>

@@ -51,8 +51,9 @@ struct LjpegParams
     uint32_t mosaic_w, mosaic_h, scheme, curved;
     uint32_t initial[4];
     uint32_t tile_w, tile_h, tiles_across, planes;
+    uint32_t quads, unused[3];
 };
-static_assert(sizeof(LjpegParams) == 128, "ljpeg.hlsli's layout");
+static_assert(sizeof(LjpegParams) == 144, "ljpeg.hlsli's layout");
 
 namespace
 {
@@ -407,6 +408,7 @@ LjpegParams readout_params(const RawMosaic& m)
     p.slice_n = st.slices[0], p.slice_w = st.slices[1], p.slice_last = st.slices[2];
     p.tile_w = st.tile[0], p.tile_h = st.tile[1], p.tiles_across = st.tile[2];
     p.planes = st.planes ? 1 : 0;
+    p.quads = st.quads ? 1 : 0;
     p.left = uint32_t(st.left), p.top = uint32_t(st.top);
     p.filters = st.filters;
     p.mosaic_w = uint32_t(m.width), p.mosaic_h = uint32_t(m.height);
