@@ -1899,6 +1899,10 @@ msgstr ""
 msgid "Lens corrections from the lensfun project's database (CC BY-SA 3.0)"
 msgstr ""
 
+#: src/ui/settings.cpp
+msgid "This product includes DNG technology under license by Adobe."
+msgstr ""
+
 #: src/ui/settings.cpp:670
 msgid "Settings"
 msgstr ""

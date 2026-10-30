@@ -32,16 +32,24 @@ Mat3 inverse(const Mat3& m)
              {(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det}}};
 }
 
+Vec3 to_xyz(ColorSpace::XY c)
+{
+    return {c.x / c.y, 1.0, (1.0 - c.x - c.y) / c.y};
+}
+
+Mat3 bradford(const Vec3& from, const Vec3& to)
+{
+    const Mat3 cones = {{{0.8951, 0.2664, -0.1614}, {-0.7502, 1.7135, 0.0367}, {0.0389, -0.0685, 1.0296}}};
+    const Vec3 a = mul(cones, from), b = mul(cones, to);
+    const Mat3 scale = {{{b[0] / a[0], 0, 0}, {0, b[1] / a[1], 0}, {0, 0, b[2] / a[2]}}};
+    return mul(inverse(cones), mul(scale, cones));
+}
+
 namespace
 {
 
 using Vec = Vec3;
 using Mat = Mat3;
-
-Vec xyz(ColorSpace::XY c)
-{
-    return {c.x / c.y, 1.0, (1.0 - c.x - c.y) / c.y};
-}
 
 // ICC's connection space white.
 const Vec kD50 = {0.9642, 1.0, 0.8249};
@@ -50,17 +58,14 @@ const Vec kD50 = {0.9642, 1.0, 0.8249};
 // its colorants; and the adaptation itself, for the chad tag.
 void colorants(const ColorSpace& s, Mat& rgb_to_d50, Mat& adapt)
 {
-    const Vec r = xyz(s.red), g = xyz(s.green), b = xyz(s.blue), w = xyz(s.white);
+    const Vec r = to_xyz(s.red), g = to_xyz(s.green), b = to_xyz(s.blue), w = to_xyz(s.white);
     const Mat p = {{{r[0], g[0], b[0]}, {r[1], g[1], b[1]}, {r[2], g[2], b[2]}}};
     const Vec scale = mul(inverse(p), w);  // each primary's share of white
     Mat m = p;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
             m[i][j] *= scale[j];
-    const Mat bradford = {{{0.8951, 0.2664, -0.1614}, {-0.7502, 1.7135, 0.0367}, {0.0389, -0.0685, 1.0296}}};
-    const Vec from = mul(bradford, w), to = mul(bradford, kD50);
-    const Mat cone = {{{to[0] / from[0], 0, 0}, {0, to[1] / from[1], 0}, {0, 0, to[2] / from[2]}}};
-    adapt = mul(inverse(bradford), mul(cone, bradford));
+    adapt = bradford(w, kD50);
     rgb_to_d50 = mul(adapt, m);
 }
 

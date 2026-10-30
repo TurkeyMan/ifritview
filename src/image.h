@@ -35,6 +35,21 @@ namespace lenses
 struct Shot;
 }
 
+// A DNG's colour, as its specification maps the camera's RGB to XYZ
+// (chapter 6), for any white balance (white_balance.h): its calibrations'
+// matrices, interpolated by the white's temperature between the two
+// illuminants'.
+struct DngColour
+{
+    double temperature[2] = {};  // each calibration illuminant's (CalibrationIlluminant1, 2); the second 0: one calibration
+    Mat3 colour[2] = {};         // ColorMatrix: XYZ to the reference camera's RGB
+    Mat3 calibration[2] = {};    // CameraCalibration: the reference camera's RGB to this one's (identity where none)
+    Mat3 forward[2] = {};        // ForwardMatrix: white-balanced reference camera RGB to XYZ D50; all 0: none
+    Vec3 analog = {1, 1, 1};     // AnalogBalance
+    Vec3 neutral = {};           // as shot: white in the camera's RGB (AsShotNeutral, or AsShotWhiteXY's), the greatest 1
+    double exposure = 0;         // BaselineExposure + BaselineExposureOffset, EV
+};
+
 struct RawMosaic
 {
     std::shared_ptr<const std::vector<uint16_t>> data;  // width x height photosites, the sensor's active area (shared by turned copies)
@@ -115,6 +130,7 @@ struct RawMosaic
     bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
+    std::shared_ptr<const DngColour> dng;  // a DNG's colour, in place of the two above; null for other raws
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height
     int orientation = 1;         // EXIF 1..8: how the camera was held
     // A raw's own corrections (a DNG's lens shading and vignetting, a Phase

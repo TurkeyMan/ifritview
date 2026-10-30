@@ -25,6 +25,7 @@
 #include <vector>
 
 struct AdjustTables;
+struct DngColour;
 struct Image;
 struct ImageDifference;
 struct LjpegParams;  // ljpeg.hlsli's block (gpu_view.cpp)
@@ -126,6 +127,7 @@ private:
         float scene_gain = 1;                       // the scene's scale before exposure (a raw's gain without a curve)
         float input_to_xyz[3][3] = {};              // its data -> XYZ (a raw's: its colour matrix, before white balance)
         float as_shot[3] = {1, 1, 1};               // a raw's: what its level 0 was developed with, the least 1
+        std::shared_ptr<const DngColour> dng;       // a DNG's colour: its data -> XYZ by white balance, in place of input_to_xyz
         bool auto_exposure = false;                 // a raw developed here: scaled by its own 99th percentile
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's

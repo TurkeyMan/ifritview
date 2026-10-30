@@ -867,6 +867,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     s.scene_gain = 1;
     s.tonable = image.tonable();
     s.auto_exposure = false;
+    s.dng.reset();
     std::memcpy(s.input_to_xyz, kXyzFrom709, sizeof s.input_to_xyz);
     if (const RawMosaic* m = image.mosaic.get())
     {
@@ -1036,6 +1037,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
                 s.input_to_xyz[i][j] = v;
             }
         std::memcpy(s.as_shot, m->as_shot, sizeof s.as_shot);
+        s.dng = m->dng;
         s.auto_exposure = true;
         s.measured = false;
         return true;
@@ -1256,7 +1258,7 @@ bool GpuView::begin_frame(const Frame& f, rap::gpu::texture_ptr& out, rap::frame
 // The compose pass's parameters for showing `s` as `f` has it, but for
 // the image's place and the resampling.
 static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure,
-                        const float input_to_xyz[3][3], const float as_shot[3], bool measured, ComposeParams& cp)
+                        const float input_to_xyz[3][3], const float as_shot[3], const DngColour* dng, bool measured, ComposeParams& cp)
 {
     set_linear(cp.background, f.background);
     set_linear(cp.checker_a, rap::color{102, 102, 102});
@@ -1270,12 +1272,19 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
     if (auto_exposure)
         for (int j = 0; j < 3; ++j)
             wb[j] = f.white_balance[0] > 0 ? f.white_balance[j] : as_shot[j];
-    for (int j = 0; j < 3; ++j)
+    if (dng && auto_exposure)  // a DNG's matrices are the white's own
     {
-        cp.input_x[j] = input_to_xyz[0][j] * wb[j];
-        cp.input_y[j] = input_to_xyz[1][j] * wb[j];
-        cp.input_z[j] = input_to_xyz[2][j] * wb[j];
+        const Mat3 m = dng_camera_to_xyz(*dng, {1 / wb[0], 1 / wb[1], 1 / wb[2]});
+        for (int j = 0; j < 3; ++j)
+            cp.input_x[j] = float(m[0][j]), cp.input_y[j] = float(m[1][j]), cp.input_z[j] = float(m[2][j]);
     }
+    else
+        for (int j = 0; j < 3; ++j)
+        {
+            cp.input_x[j] = input_to_xyz[0][j] * wb[j];
+            cp.input_y[j] = input_to_xyz[1][j] * wb[j];
+            cp.input_z[j] = input_to_xyz[2][j] * wb[j];
+        }
     cp.auto_exposure = auto_exposure ? 1 : 0;
     cp.measured = measured ? 1 : 0;
     if (const AdjustTables* t = f.adjust.get())
@@ -1351,7 +1360,7 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 void GpuView::count(Source& s, const Frame& f)
 {
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     cp.measured = 1;
@@ -1391,7 +1400,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     if (x1 <= x0)
         return true;  // `ready` left as it was
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
     cp.measured = s.measured ? 1 : 0;
     const double shown_w = width * f.zoom, shown_h = height * f.zoom;
@@ -1554,7 +1563,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         difference_adjust_ != adjusted || (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
     {
         ComposeParams cp{};
-        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.measured, cp);
+        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
         cp.measured = s.measured ? 1 : 0;
         cp.gain = std::clamp(gain, 1, 255);
