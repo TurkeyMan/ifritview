@@ -233,8 +233,11 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     // After dcraw_process, imgdata.image holds output-space linear 16-bit
     // as ushort[4] per pixel; read it directly rather than via
     // dcraw_make_mem_image, and build the clip histogram in the same pass.
+    // It's width x height, as copy_mem_image reads it: a SuperCCD's turned
+    // upright, or a raw stretched to square pixels, leaves iwidth and
+    // iheight as they were.
     const auto& sz = raw.imgdata.sizes;
-    const int w = sz.iwidth, h = sz.iheight;
+    const int w = sz.width, h = sz.height;
     const ushort(*px)[4] = raw.imgdata.image;
     if (!px || w <= 0 || h <= 0 || raw.imgdata.idata.colors < 3)
     {
@@ -455,7 +458,7 @@ public:
             return false;
         if (samples() != 1)
             return error = "more than a sample a photosite", false;
-        if (libraw_internal_data.internal_output_params.fuji_width || sz.left_margin + sz.width > sz.raw_width ||
+        if (super_ccd() || sz.left_margin + sz.width > sz.raw_width ||
             sz.top_margin + sz.height > sz.raw_height)
             return error = "a readout laid out another way", false;
         p.readout_w = sz.raw_width, p.readout_h = sz.raw_height;
@@ -524,8 +527,12 @@ public:
     bool developed_pattern() const
     {
         const auto& id = imgdata.idata;
-        return (id.filters >= 1000 || id.filters == 9) && id.colors == 3;
+        return (id.filters >= 1000 || id.filters == 9) && id.colors == 3 && !super_ccd();
     }
+    // Fuji's SuperCCD: its photosites on a grid turned 45 degrees, which
+    // LibRaw's develop turns upright (fuji_rotate); the readout isn't the
+    // picture's grid.
+    bool super_ccd() const { return libraw_internal_data.internal_output_params.fuji_width != 0; }
     // Samples a photosite in the readout: one (a mosaic, a monochrome
     // sensor), or a linear DNG's colours.
     unsigned samples() const { return imgdata.idata.filters ? 1 : imgdata.idata.colors; }
