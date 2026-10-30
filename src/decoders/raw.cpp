@@ -298,6 +298,18 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
 class RawAccess : public LibRaw
 {
 public:
+    RawAccess()
+    {
+        // Headerless sensor dumps LibRaw's table of them (identify's, known
+        // by their size) hasn't got, in its own terms (parse_custom_cameras):
+        // size, readout width and height, margins left, top, right and
+        // bottom, load flags, filters, max, flags, make, model. CHDK's on a
+        // G7 X: 12 bits a photosite as its other DIGIC dumps, the margins
+        // and RGGB as CHDK's own DNG of it has them (ActiveArea, CFAPattern).
+        static char g7x[] = "31342080,5632,3710,132,40,28,22,40,148,0,2,Canon,PowerShot G7 X";
+        static char* cameras[] = {g7x, nullptr};
+        imgdata.rawparams.custom_camera_strings = cameras;
+    }
     // LibRaw's loader for this file's readout, as get_decoder_info names it
     // ("nikon_load_raw()"); empty before one's chosen.
     std::string loader() const
