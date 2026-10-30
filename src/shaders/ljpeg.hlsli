@@ -44,6 +44,8 @@ cbuffer Ljpeg : register(b0)
     uint tile_h;
     uint tiles_across;
     uint planes;      // 1: a CR3's, decoded already: each place in the 2 x 2 a plane, one after another
+    uint quads;       // 1: Sony's tiles, each sample's four components a 2 x 2 of photosites
+    uint3 unused;
 };
 
 uint start_of(uint r, uint c)  // initial[], row r (< step), component c
@@ -53,16 +55,18 @@ uint start_of(uint r, uint c)  // initial[], row r (< step), component c
 }
 
 // Where the readout's (x, y) is among the samples: a CR3's planes; a DNG's
-// tiles one after another, each filled a row after another; Canon's stream
-// fills each slice top to bottom, slice after slice (as RawMosaic::Stream::index).
+// tiles one after another, each filled a row after another (Sony's a 2 x 2
+// a sample); Canon's stream fills each slice top to bottom, slice after
+// slice (as RawMosaic::Stream::index).
 uint readout_index(uint x, uint y)
 {
     if (planes != 0)
         return (((y & 1) * 2 + (x & 1)) * (readout_h / 2) + (y >> 1)) * (readout_w / 2) + (x >> 1);
     if (tile_w != 0)
     {
-        const uint tx = x / tile_w, ty = y / tile_h;
-        return (ty * tiles_across + tx) * tile_w * tile_h + (y - ty * tile_h) * tile_w + (x - tx * tile_w);
+        const uint tx = x / tile_w, ty = y / tile_h, lx = x - tx * tile_w, ly = y - ty * tile_h;
+        const uint first = (ty * tiles_across + tx) * tile_w * tile_h;
+        return quads != 0 ? first + (ly >> 1) * tile_w * 2 + (lx >> 1) * 4 + (ly & 1) * 2 + (lx & 1) : first + ly * tile_w + lx;
     }
     if (slice_n == 0)
         return y * readout_w + x;
