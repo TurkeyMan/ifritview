@@ -496,18 +496,15 @@ public:
     {
         // Laid out as its last property attribute, or one space in from it.
         const auto last = std::find_if(description_.attributes.rbegin(), description_.attributes.rend(), is_property);
-        attribute_space_ = std::string(space_before(text, last != description_.attributes.rend() ? last->span.begin : description_.span.begin)) +
-                           (last != description_.attributes.rend() ? "" : " ");
+        attribute_space_ = last != description_.attributes.rend() ? std::string(space_before(text, last->span.begin))
+                                                                  : std::string(space_before(text, description_.span.begin)) + " ";
         // As attributes, unless its settings are elements.
         attributes_ =
             std::none_of(p.properties.begin(), p.properties.end(), [&](const Packet::Property& q) { return q.element != npos && p.uri(q) == kCrs; }) ||
             std::any_of(p.properties.begin(), p.properties.end(), [&](const Packet::Property& q) { return q.element == npos && p.uri(q) == kCrs; });
     }
 
-    bool has(std::string_view name) const
-    {
-        return p_.find(kCrs, name) || std::any_of(added_.begin(), added_.end(), [&](const auto& a) { return a.first == name; });
-    }
+    bool has(std::string_view name) const { return p_.find(kCrs, name) || std::find(added_.begin(), added_.end(), name) != added_.end(); }
 
     void set(std::string_view name, const std::string& value)
     {
@@ -523,9 +520,9 @@ public:
                 edits_.push_back({e.span.begin, e.span.end, element(e.qname, value)});
         }
         else if (attributes_)
-            add(name, attribute_space_ + qualified(crs_, name) + "=\"" + xml::escape(value) + "\"", true);
+            add(name, attribute_space_ + qualified(crs_, name) + "=\"" + xml::escape(value) + "\"", new_attributes_);
         else
-            add(name, space_ + element(qualified(crs_, name), value), false);
+            add(name, space_ + element(qualified(crs_, name), value), new_elements_);
     }
 
     // An array (rdf:Seq) of `items`.
@@ -552,7 +549,7 @@ public:
         for (const std::string& item : items)
             seq += space_ + "  " + element(qualified(rdf_, "li"), item);
         seq += space_ + " </" + qualified(rdf_, "Seq") + ">" + space_ + "</" + qualified(crs_, name) + ">";
-        add(name, std::move(seq), false);
+        add(name, seq, new_elements_);
     }
 
     void remove(std::string_view name)
@@ -567,27 +564,23 @@ public:
     std::string result() const
     {
         std::vector<Edit> edits = edits_;
-        std::string attributes, elements;
-        for (const auto& [name, markup] : added_)
-            (std::find(added_attributes_.begin(), added_attributes_.end(), name) != added_attributes_.end() ? attributes : elements) += markup;
-        if (!attributes.empty())
+        if (!new_attributes_.empty())
         {
             const size_t at = description_.tag.end - (description_.self_closed ? 2 : 1);
-            edits.push_back({at, at, attributes});
+            edits.push_back({at, at, new_attributes_});
         }
-        if (!elements.empty())
-            edits.push_back(append(text_, description_, elements));
+        if (!new_elements_.empty())
+            edits.push_back(append(text_, description_, new_elements_));
         return apply(text_, std::move(edits));
     }
 
 private:
     static std::string element(const std::string& qname, const std::string& value) { return "<" + qname + ">" + xml::escape(value) + "</" + qname + ">"; }
 
-    void add(std::string_view name, std::string markup, bool attribute)
+    void add(std::string_view name, const std::string& markup, std::string& to)
     {
-        added_.emplace_back(name, std::move(markup));
-        if (attribute)
-            added_attributes_.emplace_back(name);
+        added_.emplace_back(name);
+        to += markup;
     }
 
     std::string_view text_;
@@ -597,8 +590,8 @@ private:
     std::string space_, attribute_space_;  // before a new element, a new attribute
     bool attributes_;
     std::vector<Edit> edits_;
-    std::vector<std::pair<std::string, std::string>> added_;  // name, markup
-    std::vector<std::string> added_attributes_;
+    std::vector<std::string> added_;             // the settings added, by name
+    std::string new_attributes_, new_elements_;  // and their markup
 };
 
 // An rdf:Description declaring crs added to rdf:RDF, about what the others are.
