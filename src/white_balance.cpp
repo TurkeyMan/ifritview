@@ -197,34 +197,70 @@ Mat3 dng_camera_to_xyz(const DngColour& d, const Vec3& neutral)
     return m;
 }
 
+namespace
+{
+// The camera's response to a white: its neutral, each channel's multiplier
+// the reciprocal.
+Vec3 neutral_of(const RawMosaic& m, double kelvin, double tint)
+{
+    const ColorSpace::XY white = white_of(kelvin, tint);
+    if (m.dng)
+        return dng_neutral(*m.dng, white);
+    const Vec3 xyz = to_xyz(white);
+    Vec3 neutral;
+    for (int c = 0; c < 3; ++c)
+        neutral[c] = m.cam_xyz[c][0] * xyz[0] + m.cam_xyz[c][1] * xyz[1] + m.cam_xyz[c][2] * xyz[2];
+    return neutral;
+}
+
+// Whether a camera's matrix still describes a white: no channel's response
+// under 1/8 of the strongest (no multiplier over 8; tungsten's correction is
+// about 7). Far from the light a matrix was made for (a warm white with a
+// strong tint) a channel's response falls to 0 and below.
+void as_shot_white(const RawMosaic& m, double& kelvin, double& tint);
+
+bool describable(const Vec3& n)
+{
+    const double strongest = std::max({n[0], n[1], n[2]});
+    return strongest > 0 && std::min({n[0], n[1], n[2]}) >= strongest / 8;
+}
+}  // namespace
+
 void wb_multipliers(const RawMosaic& m, double kelvin, double tint, float out[3])
 {
-    // The camera's response to the white (its neutral), each channel's
-    // multiplier its reciprocal. Far from the light a matrix was made for
-    // (a warm white with a strong tint), a channel's response can reach 0
-    // and below, its multiplier running off to infinity and wrapping. Kept
-    // to at least 1/8 of the strongest: no channel is raised more than 8
-    // times the least, which tungsten's correction stays within (about 7);
-    // past that the picture holds rather than falling apart.
-    const ColorSpace::XY white = white_of(kelvin, tint);
-    Vec3 neutral;
-    if (m.dng)
-        neutral = dng_neutral(*m.dng, white);
-    else
+    Vec3 neutral = neutral_of(m, kelvin, tint);
+    if (!describable(neutral))
     {
-        const Vec3 xyz = to_xyz(white);
-        for (int c = 0; c < 3; ++c)
-            neutral[c] = m.cam_xyz[c][0] * xyz[0] + m.cam_xyz[c][1] * xyz[1] + m.cam_xyz[c][2] * xyz[2];
+        // Past where the matrix holds, the white stops where it last did on
+        // the way from as shot (in mired and tint, as the sliders move): the
+        // picture holds there, rather than its correction running off, or a
+        // channel held back alone swinging its colour.
+        double shot_kelvin, shot_tint;
+        as_shot_white(m, shot_kelvin, shot_tint);
+        const auto along = [&](double t)
+        {
+            const double mired = 1e6 / shot_kelvin + t * (1e6 / kelvin - 1e6 / shot_kelvin);
+            return neutral_of(m, 1e6 / mired, shot_tint + t * (tint - shot_tint));
+        };
+        double lo = 0, hi = 1;
+        for (int i = 0; i < 30; ++i)
+        {
+            const double mid = (lo + hi) / 2;
+            (describable(along(mid)) ? lo : hi) = mid;
+        }
+        neutral = along(lo);
     }
     const double strongest = std::max({neutral[0], neutral[1], neutral[2]});
     for (int c = 0; c < 3; ++c)
-        out[c] = float(strongest > 0 ? strongest / std::max(neutral[c], strongest / 8) : 1);
+        out[c] = float(strongest > 0 && neutral[c] > 0 ? strongest / neutral[c] : 1);
 }
 
-void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint)
+namespace
 {
-    // The white the camera balanced for: its neutral (1 / the multipliers)
-    // back through the colour matrix.
+// The white the camera balanced for: its neutral (1 / the multipliers)
+// back through the colour matrix.
+void as_shot_white(const RawMosaic& m, double& kelvin, double& tint)
+{
     const Vec3 neutral = {1.0 / m.as_shot[0], 1.0 / m.as_shot[1], 1.0 / m.as_shot[2]};
     ColorSpace::XY white = ColorSpace::srgb().white;
     if (m.dng)
@@ -240,6 +276,12 @@ void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint)
             white = {xyz[0] / sum, xyz[1] / sum};
     }
     temperature_tint(white, kelvin, tint);
+}
+}  // namespace
+
+void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint)
+{
+    as_shot_white(m, kelvin, tint);
     if (std::getenv("IFRIT_TRACE"))
     {
         float back[3];
