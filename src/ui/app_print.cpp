@@ -19,7 +19,7 @@ void App::print_image()
         image = std::make_shared<const Image>(edited->crop(x, y, w, h));
 
     rap::print_job job;
-    job.title = std::filesystem::path(image_path_).filename().string();
+    job.title = std::filesystem::path(pasted_ ? shown_name() : image_path_).filename().string();
     // Turned to the image's shape; the dialog can still change it.
     job.orientation = image->width > image->height ? rap::page_orientation::landscape : rap::page_orientation::portrait;
     job.draw_page = [this, image](rap::painter& p, int, rap::size_f area)

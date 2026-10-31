@@ -434,6 +434,9 @@ struct Image
     void from_bgra8(const uint8_t* src, int src_stride, bool premultiplied = false);
     void from_rgb16(const uint16_t* src, int src_stride);
     void from_rgba16(const uint16_t* src, int src_stride);
+    // Every pixel's alpha 255: an alpha channel that's opaque throughout
+    // isn't transparency (has_alpha).
+    bool opaque() const;
 
     // A copy of the given rectangle (image coordinates, clamped), keeping
     // linear data so a cropped raw still takes exposure changes.

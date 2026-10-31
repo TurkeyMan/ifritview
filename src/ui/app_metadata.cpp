@@ -206,8 +206,9 @@ std::vector<MetadataGroup> App::collect_metadata() const
     if (!image_)
         return groups;
     MetadataGroup file{N_("File"), {}};
-    file.items.push_back({N_("Name"), folder_.current_name()});
-    file.items.push_back({N_("Folder"), folder_.directory()});
+    file.items.push_back({N_("Name"), shown_name()});
+    if (!pasted_)
+        file.items.push_back({N_("Folder"), folder_.directory()});
     if (file_size_)
         file.items.push_back({N_("Size"), rap::i18n::format(P_("{0} ({1} byte)", "{0} ({1} bytes)", file_size_), human_size(file_size_), file_size_)});
     if (const std::string t = file_time(image_path_, "%Y-%m-%d %H:%M:%S"); !t.empty())
@@ -215,7 +216,8 @@ std::vector<MetadataGroup> App::collect_metadata() const
     groups.push_back(std::move(file));
     MetadataGroup img{N_("Image"), {}};
     img.items.push_back({N_("Dimensions"), std::to_string(image_->width) + " × " + std::to_string(image_->height)});
-    img.items.push_back({N_("Format"), image_->format});
+    if (!image_->format.empty())  // a pasted image has none
+        img.items.push_back({N_("Format"), image_->format});
     if (!image_->pixel_format.empty())
         img.items.push_back({N_("Pixel format"), image_->pixel_format.describe(image_->width, image_->height)});
     if (!image_->color_space.empty())

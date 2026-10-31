@@ -99,6 +99,18 @@ void Image::from_bgra8(const uint8_t* src, int src_stride, bool premultiplied)
     }
 }
 
+bool Image::opaque() const
+{
+    for (int y = 0; y < height; ++y)
+    {
+        const uint32_t* r = row(y);
+        for (int x = 0; x < width; ++x)
+            if (r[x] >> 24 != 255)
+                return false;
+    }
+    return true;
+}
+
 void Image::from_rgb16(const uint16_t* src, int src_stride)
 {
     auto deep = std::make_shared<SourceData>(SourceData::Sample::U16, 3, width, height, false);

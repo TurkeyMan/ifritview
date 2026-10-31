@@ -90,7 +90,7 @@ void App::save_as()
     // difference image has none.
     const bool own = !diff_session_ && !image_->encoded_as.empty();
     const Encoder* by_name = encoder_for_extension(file_extension(image_path_));
-    const std::string format = diff_session_ ? std::string("png") : own ? image_->encoded_as : by_name ? by_name->extension : "";
+    const std::string format = diff_session_ || pasted_ ? std::string("png") : own ? image_->encoded_as : by_name ? by_name->extension : "";
     save_dialog_ = SaveDialog::open(ui_, window_.get(), format, own ? image_->encoding : std::map<std::string, int>{}, save_options_, metadata,
                                     present, std::move(cb));
     plan_lossless();
@@ -304,7 +304,7 @@ void App::choose_save_path(const Encoder& e, const EncodeOptions& o, std::shared
     rap::file_dialog_spec spec;
     spec.mode = rap::file_dialog_spec::mode::save;
     spec.title = rap::i18n::format(_("Save as {0}"), e.name);
-    std::string stem = std::filesystem::path(diff_session_ ? image_path_ : folder_.current_name()).stem().string();
+    std::string stem = std::filesystem::path(diff_session_ ? image_path_ : shown_name()).stem().string();
     if (diff_session_)
         stem += "-difference";
     const std::string name = (stem.empty() ? std::string("image") : stem) + "." + e.extension;

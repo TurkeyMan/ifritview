@@ -177,6 +177,7 @@ void App::open_diff(const std::string& a_path, const std::string& b_path, const 
                     end_comparing();
                     leave_image();
                     image_ = a;
+                    pasted_ = false;
                     image_path_ = a_path;
                     std::error_code ec;
                     file_size_ = std::filesystem::file_size(a_path, ec);

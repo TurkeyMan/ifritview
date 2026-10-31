@@ -683,6 +683,76 @@ void App::copy_to_clipboard()
     update_status();
 }
 
+// The clipboard's image arrives when the platform hands it over (under
+// Wayland, once the window has the focus); by then the user may have moved
+// on, which wins. Made an image off this thread, as a file's decode is.
+void App::paste_from_clipboard()
+{
+    const uint64_t generation = load_generation_;
+    ui_.clipboard_image(
+        [this, generation](std::optional<rap::sys::decoded_image> pasted)
+        {
+            if (generation != load_generation_)
+                return;
+            if (!pasted || !Image::fits(pasted->width, pasted->height))
+            {
+                status_message_ = _("No image on the clipboard");
+                update_status();
+                return;
+            }
+            std::thread(
+                [this, generation, pasted = std::move(*pasted), running = preview_->start()]
+                {
+                    auto image = std::make_shared<Image>();
+                    image->allocate(pasted.width, pasted.height);
+                    if (pasted.format == rap::pixel_format::rgba8)
+                        image->from_rgba8(pasted.pixels.data(), pasted.width * 4);
+                    else
+                        image->from_bgra8(pasted.pixels.data(), pasted.width * 4, true);
+                    image->has_alpha = !image->opaque();
+                    image->build_mips();
+                    platform::post_main(
+                        [this, generation, image]
+                        {
+                            if (generation == load_generation_)
+                                show_pasted(image);
+                        });
+                })
+                .detach();
+        });
+}
+
+// What was shown is left as browsing leaves it (cached for coming back),
+// and the folder stays on its file.
+void App::show_pasted(std::shared_ptr<Image> image)
+{
+    if (save_dialog_)
+        save_dialog_->close();
+    if (slideshow_)
+        stop_slideshow();
+    if (view_->comparing())
+        end_comparing();
+    stop_video();
+    stop_animation();
+    leave_image();
+    ++load_generation_;  // what was on its way for the file is too late now
+    image_ = std::move(image);
+    pasted_ = true;
+    image_path_.clear();
+    image_key_.clear();
+    part_file_.clear();
+    part_ = {};
+    file_size_ = 0;
+    status_message_.clear();
+    busy_message_.clear();
+    present_image();
+}
+
+std::string App::shown_name() const
+{
+    return pasted_ ? std::string(_("Clipboard")) : folder_.current_name();
+}
+
 void App::transform(int exif_orientation)
 {
     if (!image_)
@@ -927,7 +997,7 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     }
     if (rescan)
         list_folder({});
-    if (reload_shown)
+    if (reload_shown && !pasted_)
     {
         // Rewritten: read it again. Not via the cache, which leaving it would
         // fill with what's shown now, dated as the new file.
@@ -1178,7 +1248,7 @@ void App::on_loaded(Loader::Result& r)
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_key_ && !cache_.contains(r.path))
             cache_.put(r.path, {r.image, ImageCache::file_mtime(key_file(r.path))});
-        if (r.image && r.path == current_key() && (!image_ || image_key_ != r.path))
+        if (r.image && r.path == current_key() && (!image_ || image_key_ != r.path) && !pasted_)
         {  // the user moved onto it while it was decoding: it's here before the stand-in
             r.generation = load_generation_;
             r.prefetch = false;
@@ -1255,6 +1325,7 @@ void App::on_loaded(Loader::Result& r)
     if (!r.image)
     {
         image_.reset();
+        pasted_ = false;
         image_path_ = key_file(r.path);
         image_key_ = r.path;
         part_file_ = image_path_;
@@ -1269,6 +1340,7 @@ void App::on_loaded(Loader::Result& r)
     }
     stop_animation();
     image_ = r.image;
+    pasted_ = false;
     image_path_ = key_file(r.path);
     image_key_ = r.path;
     part_file_ = image_path_;  // however it came (the first image doesn't come through load_current)
@@ -1301,6 +1373,11 @@ void App::on_loaded(Loader::Result& r)
     }
     if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
         ensure_developed();
+    present_image();
+}
+
+void App::present_image()
+{
     correct_lens(false);
     view_->set_image(image_);
     instead_image_.reset();
@@ -1911,6 +1988,8 @@ void App::update_title()
     std::string title = "IfritView";
     if (diff_session_)
         title = diff_name_ + " – IfritView";
+    else if (pasted_)
+        title = shown_name() + " – IfritView";
     else if (!folder_.empty())
         title = folder_.current_name() + " (" + std::to_string(folder_.index() + 1) + "/" + std::to_string(folder_.count()) + ") – IfritView";
     window_->set_title(title);
@@ -1921,7 +2000,9 @@ void App::update_status()
     if (!status_left_)
         return;
     std::string left, center, right;
-    if (!folder_.empty())
+    if (pasted_)
+        left = shown_name();
+    else if (!folder_.empty())
         left = folder_.current_name() + "  (" + std::to_string(folder_.index() + 1) + " / " + std::to_string(folder_.count()) + ")";
     if (!status_message_.empty())
         left = status_message_;

@@ -325,20 +325,8 @@ void finish_pixels(DecodeCall& call)
                 }
             }
         }
-        bool opaque = true;
-        if (li.alpha)
-            for (int y = 0; y < out.height && opaque; ++y)
-            {
-                const uint8_t* row = out.pixels.data() + size_t(y) * out.stride;
-                for (int x = 0; x < out.width; ++x)
-                    if (row[size_t(x) * 4 + 3] != 255)
-                    {
-                        opaque = false;
-                        break;
-                    }
-            }
         out.from_rgba8(out.pixels.data(), out.stride);
-        out.has_alpha = !opaque;
+        out.has_alpha = li.alpha && !out.opaque();
     }
     out.bits_per_sample = li.bytes * 8;
     static const char* const names[] = {"", "L", "LA", "RGB", "RGBA"};

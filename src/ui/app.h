@@ -87,6 +87,10 @@ public:
     void toggle_histogram();
     void toggle_xmp();
     void copy_to_clipboard();
+    // Ctrl+V: the clipboard's image shown in place of the file, with no
+    // file of its own: Save As saves it, and Left and Right step through
+    // the folder from the file it replaced.
+    void paste_from_clipboard();
     void transform(int exif_orientation);
     void toggle_animation();
     void toggle_slideshow();
@@ -131,6 +135,8 @@ private:
     // whatever the folder's listing says while it's still being read).
     void load_current(const std::string& file = {});
     void on_loaded(Loader::Result& r);
+    void present_image();  // image_, just come, into the view and the window around it
+    void show_pasted(std::shared_ptr<Image> image);
     void sync_exposure_slider();
     void request_retone();
     bool retone_busy_ = false;
@@ -341,6 +347,8 @@ private:
     uint64_t load_generation_ = 0;
     std::shared_ptr<Image> image_;
     std::string image_path_;  // the file shown
+    bool pasted_ = false;     // the clipboard's image is shown: no file (image_path_ empty)
+    std::string shown_name() const;  // the file's name in the folder, or the clipboard's
     // Which of its pages and mip levels: the key it's loaded and cached by
     // (part_key), and the part asked for (`part_`, of the file `part_file_`;
     // another file starts at its first).
@@ -374,7 +382,7 @@ private:
         // for: a few seconds at most, or (`to_the_end`) as long as they take.
         void wait_out(bool to_the_end = false);
     };
-    std::shared_ptr<Background> preview_ = std::make_shared<Background>();  // previews: a save's, the camera's JPEG, LibRaw's develop, a comparison
+    std::shared_ptr<Background> preview_ = std::make_shared<Background>();  // previews: a save's, the camera's JPEG, LibRaw's develop, a comparison, a paste
     std::shared_ptr<Background> listing_ = std::make_shared<Background>();  // the folder, listed
     std::shared_ptr<Background> saves_ = std::make_shared<Background>();    // files being written: finished before the app goes
     bool refit_after_layout_ = false;

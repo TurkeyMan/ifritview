@@ -175,8 +175,11 @@ bool App::on_key(const rap::key_event& e)
             transform(2);
             return true;  // mirror horizontally
         case 'v':
-            transform(4);
-            return true;  // mirror vertically
+            if (ctrl)
+                paste_from_clipboard();
+            else
+                transform(4);  // mirror vertically
+            return true;
         case 'o':
             if (ctrl)
             {
