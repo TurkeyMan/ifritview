@@ -199,24 +199,26 @@ Mat3 dng_camera_to_xyz(const DngColour& d, const Vec3& neutral)
 
 void wb_multipliers(const RawMosaic& m, double kelvin, double tint, float out[3])
 {
+    // The camera's response to the white (its neutral), each channel's
+    // multiplier its reciprocal. Far from the light a matrix was made for
+    // (a warm white with a strong tint), a channel's response can reach 0
+    // and below, its multiplier running off to infinity and wrapping. Kept
+    // to at least 1/8 of the strongest: no channel is raised more than 8
+    // times the least, which tungsten's correction stays within (about 7);
+    // past that the picture holds rather than falling apart.
     const ColorSpace::XY white = white_of(kelvin, tint);
+    Vec3 neutral;
     if (m.dng)
+        neutral = dng_neutral(*m.dng, white);
+    else
     {
-        const Vec3 neutral = dng_neutral(*m.dng, white);  // the greatest 1: the least multiplier
+        const Vec3 xyz = to_xyz(white);
         for (int c = 0; c < 3; ++c)
-            out[c] = float(neutral[c] > 0 ? 1 / neutral[c] : 1);
-        return;
+            neutral[c] = m.cam_xyz[c][0] * xyz[0] + m.cam_xyz[c][1] * xyz[1] + m.cam_xyz[c][2] * xyz[2];
     }
-    const Vec3 xyz = to_xyz(white);
-    double cam[3];
+    const double strongest = std::max({neutral[0], neutral[1], neutral[2]});
     for (int c = 0; c < 3; ++c)
-        cam[c] = m.cam_xyz[c][0] * xyz[0] + m.cam_xyz[c][1] * xyz[1] + m.cam_xyz[c][2] * xyz[2];
-    double mul[3];
-    for (int c = 0; c < 3; ++c)
-        mul[c] = cam[c] > 1e-9 ? 1 / cam[c] : 1;
-    const double least = std::min({mul[0], mul[1], mul[2]});
-    for (int c = 0; c < 3; ++c)
-        out[c] = float(mul[c] / least);
+        out[c] = float(strongest > 0 ? strongest / std::max(neutral[c], strongest / 8) : 1);
 }
 
 void wb_as_shot(const RawMosaic& m, double& kelvin, double& tint)
