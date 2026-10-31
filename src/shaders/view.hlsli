@@ -113,6 +113,30 @@ float3 edit(float3 c, float scale)
     return xyz;
 }
 
+// The display's gamut is a volume, not only a triangle: a bright colour
+// whose chromaticity fits can still need more of a primary than the display
+// has (a light blue as bright as a leaf in sun needs more blue than there
+// is; blue alone gives 7% of white). Such a colour goes towards white at its
+// own luminance until every channel fits, and lighter rather than clipped
+// channel by channel, which bent its hue and flattened it (#0000FF). Below
+// zero likewise.
+float3 fit_display(float3 rgb, float y)
+{
+    const float top = max(rgb.r, max(rgb.g, rgb.b)), bottom = min(rgb.r, min(rgb.g, rgb.b));
+    if (top <= display_peak && bottom >= 0)
+        return rgb;
+    if (y >= display_peak)
+        return display_peak;
+    if (y <= 0)
+        return 0;
+    float t = 1;
+    if (top > display_peak)
+        t = min(t, (display_peak - y) / (top - y));
+    if (bottom < 0)
+        t = min(t, y / (y - bottom));
+    return y + t * (rgb - y);
+}
+
 // A colour of the image's data as the display shows it (the edit, then the
 // display mapping), in the display's linear RGB (BT.709 until there's a
 // display description).
@@ -158,5 +182,5 @@ float3 tone_map(float3 c)
         }
         xyz = xyz_from_yuv(y, uv);
     }
-    return mul(kXyzToRgb709, xyz);
+    return fit_display(mul(kXyzToRgb709, xyz), xyz.y);
 }
