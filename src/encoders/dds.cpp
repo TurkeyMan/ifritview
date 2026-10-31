@@ -35,6 +35,7 @@ enum class Layout
     BC7,
     RGBA8,
     BGRA8,
+    RGB8,
     B5G6R5,
     B5G5R5A1,
     B4G4R4A4,
@@ -72,6 +73,10 @@ const Format kFormats[] = {
     {Layout::BC7, N_("BC7: colour and alpha, best"), 98, 99, 0, 8, {}, true, true, true},
     {Layout::RGBA8, N_("RGBA 8-bit, uncompressed"), 28, 29, 0, 32, {0xFF, 0xFF00, 0xFF0000, 0xFF000000u}, false, true, false},
     {Layout::BGRA8, N_("BGRA 8-bit, uncompressed"), 87, 91, 0, 32, {0xFF0000, 0xFF00, 0xFF, 0xFF000000u}, false, true, false},
+    // Three bytes a pixel, a quarter less than with alpha: the old header
+    // only (DXGI has no 24-bit layout). Tools read it; GPUs don't, so
+    // engines convert it as they load it.
+    {Layout::RGB8, N_("RGB 8-bit, uncompressed (no alpha)"), 0, 0, 0, 24, {0xFF0000, 0xFF00, 0xFF, 0}, false, false, false},
     {Layout::B5G6R5, N_("RGB 565 (16-bit)"), 85, 0, 0, 16, {0xF800, 0x07E0, 0x001F, 0}, false, false, true},
     {Layout::B5G5R5A1, N_("ARGB 1555 (16-bit)"), 86, 0, 0, 16, {0x7C00, 0x03E0, 0x001F, 0x8000}, false, true, true},
     {Layout::B4G4R4A4, N_("ARGB 4444 (16-bit)"), 115, 0, 0, 16, {0x0F00, 0x00F0, 0x000F, 0xF000}, false, true, true},
@@ -399,14 +404,22 @@ void store(const Level& l, const Format& f, bool dither, std::vector<uint8_t>& o
     }
 }
 
+Layout automatic(const Image& image)
+{
+    return image.hdr() ? Layout::RGBA16F : image.has_alpha ? Layout::BGRA8 : Layout::RGB8;
+}
+
 const Format& format_for(const Image& image, const EncodeOptions& options)
 {
     const int choice = dds_encoder().value(options, "format");
     if (choice >= 1 && choice <= kFormatCount)
         return kFormats[choice - 1];
-    // Automatic: BC7, or half floats for what only floats hold.
+    // Automatic: as it is, nothing lost: half floats for what only floats
+    // hold (alpha with them, as there's no three-channel half), else 8 bits,
+    // with alpha only where it's needed. Compression is a choice.
+    const Layout want = automatic(image);
     for (const Format& f : kFormats)
-        if (f.layout == (image.hdr() ? Layout::RGBA16F : Layout::BC7))
+        if (f.layout == want)
             return f;
     return kFormats[0];
 }
@@ -416,7 +429,8 @@ bool encode_dds(const Image& image, const std::string& path, const EncodeOptions
     const Encoder& self = dds_encoder();
     const Format& f = format_for(image, options);
     const bool mipmaps = self.value(options, "mipmaps") != 0;
-    const bool legacy = self.value(options, "legacy") != 0 && (f.fourcc || f.masks[0]);
+    // The old header where asked for, or where there's no DXGI format (24-bit RGB).
+    const bool legacy = (self.value(options, "legacy") != 0 || !f.dxgi) && (f.fourcc || f.masks[0]);
     const bool colour = self.value(options, "srgb") != 0;  // off: data, as normal maps are
     const bool srgb = colour && !floating(f.layout);       // the floating layouts are linear
     const bool dither = self.value(options, "dither") != 0;
@@ -506,7 +520,7 @@ bool encode_dds(const Image& image, const std::string& path, const EncodeOptions
     return write_file(path, out.data(), out.size(), error);
 }
 
-// The format chosen, or null for Automatic (BC7, or half floats).
+// The format chosen, or null for Automatic (format_for).
 const Format* chosen(const EncodeOptions& options)
 {
     const int choice = options.get("format", 0);
@@ -515,8 +529,8 @@ const Format* chosen(const EncodeOptions& options)
 
 bool lossy(const EncodeOptions& options)
 {
-    const int choice = dds_encoder().value(options, "format");
-    return choice < 1 || choice > kFormatCount || kFormats[choice - 1].lossy;
+    const Format* f = chosen(options);
+    return f && f->lossy;  // Automatic loses nothing
 }
 
 }  // namespace
@@ -526,13 +540,13 @@ const Encoder& dds_encoder()
     static const Encoder e = []
     {
         using Kind = EncodeSetting::Kind;
-        std::vector<const char*> formats{N_("Automatic (BC7; half float for HDR)")};
+        std::vector<const char*> formats{N_("Automatic: as it is (RGB, RGBA, or half float for HDR)")};
         for (const Format& f : kFormats)
             formats.push_back(f.label);
         Encoder d{"DDS", "dds",
                   {{"format", N_("Format"), Kind::Choice, 0, kFormatCount, 0, formats},
                    {"effort", N_("Effort"), Kind::Choice, 0, 2, 1, {N_("Fast"), N_("Balanced"), N_("Best (slow)")}, N_("block-compressed formats"),
-                    nullptr, [](const EncodeOptions& o) { return chosen(o) == nullptr || chosen(o)->compressed; }},
+                    nullptr, [](const EncodeOptions& o) { return chosen(o) != nullptr && chosen(o)->compressed; }},
                    {"mipmaps", N_("Mipmaps"), Kind::Toggle, 0, 1, 1, {}, N_("each half the size, down to 1 px")},
                    // Not only a tag: the mipmaps are averaged in linear light, and
                    // block colours weighed as the eye does, when it's on.
@@ -541,7 +555,7 @@ const Encoder& dds_encoder()
                    {"dither", N_("Dither"), Kind::Toggle, 0, 1, 1, {}, N_("16-bit formats"), nullptr,
                     [](const EncodeOptions& o) { return chosen(o) != nullptr && chosen(o)->bits == 16 && !chosen(o)->compressed && chosen(o)->layout != Layout::RG8; }},
                    {"legacy", N_("Old-style header"), Kind::Toggle, 0, 1, 0, {}, N_("for tools before DirectX 10"), nullptr,
-                    [](const EncodeOptions& o) { return chosen(o) != nullptr && (chosen(o)->fourcc || chosen(o)->masks[0]); }}},
+                    [](const EncodeOptions& o) { return chosen(o) != nullptr && chosen(o)->dxgi && (chosen(o)->fourcc || chosen(o)->masks[0]); }}},
                   encode_dds};
         d.reduces = lossy;
         d.metadata = false;
