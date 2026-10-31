@@ -660,13 +660,13 @@ std::shared_ptr<Image> App::edited_image()
     if (!image_ || image_->linear || image_->source || image_->mosaic)
         return image_;
     const std::shared_ptr<const AdjustTables> tables = image_->adjust_tables();
-    if (!tables)
+    if (!tables && !image_->adjust.detail.active())
         return image_;
     image_->break_transform(_("the develop settings were changed"));  // no lossless JPEG of it
     auto edited = std::make_shared<Image>(*image_);
     edited->mips.clear();
     if (image_->has_alpha || !view_->drawn_on_gpu() || !view_->edited_pixels(image_, edited->pixels))
-        edited->pixels = image_->adjusted_pixels(*tables);
+        edited->pixels = image_->adjusted_pixels(tables.get(), image_->adjust.detail);
     return edited;
 }
 
@@ -1281,13 +1281,15 @@ void App::on_loaded(Loader::Result& r)
     status_message_ = busy_message_ = image_->is_preview() && image_->is_raw ? _("Developing…") : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
+    else if (!from_cache)
+        image_->adjust = image_->opening_adjust(false);  // a raw's Detail at Lightroom's defaults
     // Come back to, it's as it was opened: an exposure set before leaving
     // goes back to as shot (or its sidecar's).
     if (from_cache)
     {
         const bool xmp = cfg_.apply_xmp_edits && image_->xmp.present;
         const double opened = xmp ? image_->xmp.exposure : 0.0;
-        Adjustments adjust = xmp ? image_->xmp.adjust : Adjustments{};
+        Adjustments adjust = image_->opening_adjust(xmp);
         adjust.kept = image_->adjust.kept;
         if (image_->exposure_edit != opened || !(image_->adjust == adjust))
         {
@@ -1461,7 +1463,7 @@ void App::white_balance_as_shot()
         return;
     image_->wb_kelvin = image_->wb_tint = 0;
     sync_white_balance();
-    Adjustments rested;
+    Adjustments rested = image_->opening_adjust(false);
     rested.kept = image_->adjust.kept;
     image_->adjust = std::move(rested);
     sync_knobs();
@@ -1661,12 +1663,13 @@ void App::request_retone()
     auto source = image_->source;
     const double ev = image_->exposure_edit;
     const std::shared_ptr<const AdjustTables> tables = image_->adjust_tables();
+    const Detail detail = image_->adjust.detail;
     std::thread(
-        [this, image, linear, source, ev, tables]
+        [this, image, linear, source, ev, tables, detail]
         {
-            auto result = std::make_shared<PixelBuffer>(image->retone_buffer(ev, tables.get()));
+            auto result = std::make_shared<PixelBuffer>(image->retone_buffer(ev, tables.get(), &detail));
             ui_.post(
-                [this, image, linear, source, ev, tables, result]
+                [this, image, linear, source, ev, tables, detail, result]
                 {
                     retone_busy_ = false;
                     const bool current = image->linear == linear && image->source == source &&
@@ -1680,7 +1683,8 @@ void App::request_retone()
                         if (image == image_)
                             view_->retoned();
                     }
-                    if (image == image_ && (std::fabs(image_->exposure_edit - ev) > 1e-9 || image_->adjust_tables() != tables))
+                    if (image == image_ &&
+                        (std::fabs(image_->exposure_edit - ev) > 1e-9 || image_->adjust_tables() != tables || !(image_->adjust.detail == detail)))
                     {
                         if (view_->drawn_on_gpu())
                         {
@@ -1718,7 +1722,7 @@ void App::apply_xmp(bool fresh)
     if (fresh)
         apply_xmp_geometry(*image_);
     image_->exposure_edit = image_->xmp.exposure;
-    image_->adjust = image_->xmp.adjust;
+    image_->adjust = image_->opening_adjust(true);
     if (image_->tonable() || image_->source)
         image_->retone(image_->exposure_edit);
     // Its white balance, where it isn't the camera's (a raw's develop takes

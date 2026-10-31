@@ -288,6 +288,7 @@ void collect_develop(const Packet& p, Image& out)
         if (get_double(p, kCrs, f.name, v))
         {
             *f.value = v;
+            d.given.insert(f.name);
             d.present = true;
         }
     for (const CrsCurve& c : crs_curves(a))
@@ -660,7 +661,7 @@ bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::st
     }
     for (const CrsField& f : crs_fields(a))
         if (!f.process || f.process == (a.legacy ? 2010 : 2012))
-            xmp.set(f.name, crs_number(*f.value, f.sign ? "%+.0f" : "%.0f"));
+            xmp.set(f.name, crs_number(*f.value, !f.sign ? "%.0f" : f.decimals ? "%+.1f" : "%+.0f"));
     for (const CrsCurve& c : crs_curves(a))
     {
         Adjustments::Curve points = *c.curve;

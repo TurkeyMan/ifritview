@@ -273,6 +273,11 @@ int process(int argc, char** argv)
         std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
         return 1;
     }
+    // A raw as the viewer opens it: sharpened and its colour noise reduced
+    // as Lightroom's defaults have them (detail.h).
+    img.adjust.detail = img.opening_adjust(false).detail;
+    if (img.adjust.detail.active())
+        img.retone(img.exposure_edit);
     for (const Step& st : steps)
     {
         if (st.name == "rotate")

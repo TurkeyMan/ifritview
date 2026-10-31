@@ -14,6 +14,7 @@
 // to the CPU.
 
 #include "../config.h"
+#include "../detail.h"
 #include "../pixel_buffer.h"
 
 #include <rapport/gpu.h>
@@ -53,6 +54,7 @@ public:
         double exposure = 0;                    // EV, for images with more than the display shows
         float white_balance[3] = {};            // a raw's R, G, B multipliers (the least 1); 0: as shot
         std::shared_ptr<const AdjustTables> adjust;  // the develop controls (adjust.h); null: none
+        Detail detail;                          // noise reduction and sharpening, at the image's own resolution
         rap::color background;
         bool checkerboard = false;  // under transparency
         int checker_size = 8;       // device pixels
@@ -131,6 +133,15 @@ private:
         bool auto_exposure = false;                 // a raw developed here: scaled by its own 99th percentile
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's
+        // Noise reduction and sharpening (detail.h): what the levels below
+        // level 0 were made with (filtered on the way to level 1); level 0's
+        // noise, measured once; and level 0 filtered over the region last
+        // shown at 1:1 or closer (x0, y0, x1, y1), kept while it's panned
+        // inside.
+        Detail detailed;
+        rap::gpu::buffer_ptr noise;
+        rap::gpu::texture_ptr region;
+        int region_at[4] = {};
         size_t bytes() const;
     };
 
@@ -179,6 +190,16 @@ private:
     rap::gpu::texture_ptr level(Source& s, int n);
     // The level the measures and the histogram count: at most 2048 pixels.
     rap::gpu::texture_ptr counted_level(Source& s);
+    // Noise reduction and sharpening (detail.h, shaders/detail.hlsl). The
+    // levels below level 0 made again when the settings change; level 0's
+    // rectangle x0..x1, y0..y1 filtered into `target` at tx, ty, a tile at a
+    // time, with the filter's reach around each; level 0 filtered over at
+    // least x0..x1, y0..y1 (`s.region`, kept for panning; its image position
+    // in ox, oy). False when there's no room for it.
+    void follow_detail(Source& s, const Detail& d);
+    void measure_noise(Source& s);
+    bool filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap::gpu::texture_ptr& target, int tx, int ty);
+    rap::gpu::texture_ptr detail_region(Source& s, int x0, int y0, int x1, int y1, int& ox, int& oy);
 
     // What's shown: [0] the image (comparing, A), [1] comparing, B. hold()
     // puts an image in a slot: there already, in the other one (A and B
@@ -222,6 +243,7 @@ private:
     double histogram_exposure_ = -1e9;
     uint64_t histogram_adjust_ = 0;  // the develop tables' serial
     float histogram_wb_[3] = {};     // the white balance counted with
+    Detail histogram_detail_;        // and the noise reduction and sharpening
     float histogram_scale_ = 1;  // the scene's scale it was counted at
     bool histogram_scene_ = false, histogram_auto_ = false;
     rap::gpu::buffer_ptr histogram_stats_;
@@ -237,6 +259,8 @@ private:
     float difference_wb_[3] = {};
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;
+    rap::gpu::program_ptr detail_, noise_;     // noise reduction and sharpening, and its noise measure
+    rap::gpu::texture_ptr detail_temps_[5];   // its passes' intermediates, a tile and its reach, reused
     rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
     rap::gpu::program_ptr develop_green_;    // X-Trans's green, before the develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;

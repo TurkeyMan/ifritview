@@ -23,6 +23,8 @@ struct KnobSpec
     const char* label;
     double lo, hi;
     const char* tip;
+    double step = 1;  // the arrow keys' (Page: ten)
+    int digits = 0;   // shown
 };
 
 // In the panel's order. The labels and tips are marked (N_) and
@@ -51,8 +53,20 @@ const KnobSpec kKnobs[] = {
     {"ParametricShadowSplit", N_("Shadow split"), 10, 70, N_("Where the curve's shadows end and its darks begin (percent)")},
     {"ParametricMidtoneSplit", N_("Midtone split"), 20, 80, N_("Where the curve's darks end and its lights begin (percent)")},
     {"ParametricHighlightSplit", N_("Highlight split"), 30, 90, N_("Where the curve's lights end and its highlights begin (percent)")},
+    // Detail: sharpening, then noise reduction (detail.h).
+    {"Sharpness", N_("Amount"), 0, 150, N_("Sharpening: how much the edges are brought out")},
+    {"SharpenRadius", N_("Radius"), 0.5, 3, N_("Sharpening: the size of the detail it brings out (pixels)"), 0.1, 1},
+    {"SharpenDetail", N_("Detail"), 0, 100, N_("Sharpening: how much of the strongest edges it lets through, so how much halo; low brings out fine texture alone")},
+    {"SharpenEdgeMasking", N_("Masking"), 0, 100, N_("Sharpening: kept off smooth areas (sky, skin), the more so the higher")},
+    {"LuminanceSmoothing", N_("Luminance"), 0, 100, N_("Noise reduction: the grain in brightness")},
+    {"LuminanceNoiseReductionDetail", N_("Detail"), 0, 100, N_("Luminance noise reduction: how much of the finest detail is spared")},
+    {"LuminanceNoiseReductionContrast", N_("Contrast"), 0, 100, N_("Luminance noise reduction: how much of the larger scale contrast is spared")},
+    {"ColorNoiseReduction", N_("Color"), 0, 100, N_("Noise reduction: the speckles and blotches of colour")},
+    {"ColorNoiseReductionDetail", N_("Detail"), 0, 100, N_("Color noise reduction: how much of fine colour detail is spared")},
+    {"ColorNoiseReductionSmoothness", N_("Smoothness"), 0, 100, N_("Color noise reduction: how far it reaches into larger blotches")},
 };
-constexpr int kBasic2012 = 0, kBasic2010 = 5, kPresence = 10, kParametric = 12, kKnobCount = int(std::size(kKnobs));
+constexpr int kBasic2012 = 0, kBasic2010 = 5, kPresence = 10, kParametric = 12, kSharpening = 19, kNoise = 23,
+              kKnobCount = int(std::size(kKnobs));
 // HSL's: after them, hue then saturation then luminance, a band each.
 const char* const kBands[8] = {N_("Red"), N_("Orange"), N_("Yellow"), N_("Green"), N_("Aqua"), N_("Blue"), N_("Purple"), N_("Magenta")};
 const char* const kBandNames[8] = {"Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"};
@@ -62,18 +76,20 @@ const char* const kHslKinds[3] = {"HueAdjustment", "SaturationAdjustment", "Lumi
 const char* const kCurves[] = {"Linear", "Medium Contrast", "Strong Contrast"};
 const char* const kCurveLabels[] = {N_("Linear"), N_("Medium Contrast"), N_("Strong Contrast"), N_("Custom")};
 
-// The value a setting rests at: 0, the splits at their defaults.
-double rest(const std::string& crs)
-{
-    return crs == "ParametricShadowSplit" ? 25 : crs == "ParametricMidtoneSplit" ? 50 : crs == "ParametricHighlightSplit" ? 75 : 0;
-}
-
 double* field(Adjustments& a, const std::string& crs)
 {
     for (const CrsField& f : crs_fields(a))
         if (f.name == crs)
             return f.value;
     return nullptr;
+}
+
+// The value a setting rests at: its default (0 for most).
+double rest(const std::string& crs)
+{
+    Adjustments none;
+    const double* v = field(none, crs);
+    return v ? *v : 0;
 }
 
 }  // namespace
@@ -93,8 +109,8 @@ rap::node App::develop_panel()
         const KnobSpec& k = kKnobs[i];
         const std::string crs = k.crs;
         return {_(k.label), L::slider{k.lo, k.hi, rest(crs)}
-                                .step(1, 10)
-                                .show_value(0)
+                                .step(k.step, k.step * 10)
+                                .show_value(k.digits)
                                 .stretch()
                                 .mark(rest(crs))
                                 .snap()
@@ -184,6 +200,13 @@ rap::node App::develop_panel()
                                                     .tooltip(_("The point curve over the parametric one: a preset, or the image's own (Custom)"))}},
                  }},
                 {_("HSL"), L::tabs{{_("Hue"), hsl(0)}, {_("Saturation"), hsl(1)}, {_("Luminance"), hsl(2)}}},
+                {_("Detail"),
+                 vbox{
+                     L::label{_("Sharpening")},
+                     L::form{knob(kSharpening), knob(kSharpening + 1), knob(kSharpening + 2), knob(kSharpening + 3)},
+                     L::label{_("Noise Reduction")},
+                     L::form{knob(kNoise), knob(kNoise + 1), knob(kNoise + 2), knob(kNoise + 3), knob(kNoise + 4), knob(kNoise + 5)},
+                 }},
             },
             L::form{{"", L::hbox{L::button{_("As shot")}
                                      .on_click([this] { white_balance_as_shot(); })
@@ -227,6 +250,15 @@ void App::sync_knobs()
     for (Knob& k : knobs_)
         if (const double* v = field(a, k.crs); v && k.slider)
             k.slider->set_value(*v);
+    // The Detail sliders snap to their rest and, where it differs, to what
+    // the image opened with (a raw's sharpening and colour noise reduction).
+    Adjustments opening = image_->opening_adjust(false);
+    for (int i = kSharpening; i < kKnobCount; ++i)
+        if (rap::slider* s = knobs_[size_t(i)].slider)
+        {
+            const double r = rest(kKnobs[i].crs), o = *field(opening, kKnobs[i].crs);
+            s->set_marks(o == r ? std::vector<std::pair<double, std::string>>{{r, ""}} : std::vector<std::pair<double, std::string>>{{r, ""}, {o, ""}});
+        }
     int curve = 3;  // custom: the image's own points
     if (a.curve.empty() || a.curve == Adjustments::Curve{{0, 0}, {255, 255}})
     {

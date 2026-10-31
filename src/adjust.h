@@ -19,9 +19,15 @@
 //    the HSL panel.
 // Both work in linear ProPhoto RGB, Lightroom's working space.
 //
+// Noise reduction and sharpening, the Detail panel, are in `detail`: they
+// work on neighbourhoods, at the image's own resolution, before the rest
+// (detail.h); the tables leave them out.
+//
 // Global versions of what in Lightroom is partly local: its Highlights,
 // Shadows, Whites and Blacks adapt to the image's neighbourhoods (tone
 // mapping that keeps local contrast); here each is one curve for the image.
+
+#include "detail.h"
 
 #include <cstdint>
 #include <map>
@@ -57,12 +63,16 @@ struct Adjustments
     // HSL: red, orange, yellow, green, aqua, blue, purple, magenta; -100..100.
     double hue[8] = {}, sat[8] = {}, lum[8] = {};
 
+    // The Detail panel: noise reduction and sharpening.
+    Detail detail;
+
     // Settings read but not applied yet (Clarity, Texture, Dehaze, colour
     // grading, calibration, detail, effects, the profile...): crs field
     // name to its value as written, kept so writing XMP loses nothing.
     std::map<std::string, std::string> kept;
 
-    // Nothing to apply (the kept settings aside).
+    // Nothing for the tables to apply (the kept settings and the detail
+    // aside).
     bool neutral() const;
     bool operator==(const Adjustments&) const = default;
 };
@@ -75,8 +85,11 @@ struct CrsField
     double* value;
     int process;
     bool sign = true;  // written with a sign ("+15"), as the -100..100 ones are
+    int decimals = 0;  // and with these (SharpenRadius: "+1.0")
 };
 std::vector<CrsField> crs_fields(Adjustments& a);
+// The Detail panel's, among them.
+std::vector<CrsField> detail_fields(Detail& d);
 // The point curves by name: ToneCurvePV2012 (and Red, Green, Blue) for
 // 2012, ToneCurve for 2010; and the name of the curve's preset.
 struct CrsCurve

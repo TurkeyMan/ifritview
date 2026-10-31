@@ -40,7 +40,25 @@ std::vector<CrsField> crs_fields(Adjustments& a)
         f.push_back({std::string("SaturationAdjustment") + kBands[b], &a.sat[b], 0});
         f.push_back({std::string("LuminanceAdjustment") + kBands[b], &a.lum[b], 0});
     }
+    for (CrsField& d : detail_fields(a.detail))
+        f.push_back(std::move(d));
     return f;
+}
+
+std::vector<CrsField> detail_fields(Detail& d)
+{
+    return {
+        {"Sharpness", &d.sharpness, 0, false},
+        {"SharpenRadius", &d.sharpen_radius, 0, true, 1},
+        {"SharpenDetail", &d.sharpen_detail, 0, false},
+        {"SharpenEdgeMasking", &d.sharpen_masking, 0, false},
+        {"LuminanceSmoothing", &d.luminance, 0, false},
+        {"LuminanceNoiseReductionDetail", &d.luminance_detail, 0, false},
+        {"LuminanceNoiseReductionContrast", &d.luminance_contrast, 0, false},
+        {"ColorNoiseReduction", &d.colour, 0, false},
+        {"ColorNoiseReductionDetail", &d.colour_detail, 0, false},
+        {"ColorNoiseReductionSmoothness", &d.colour_smoothness, 0, false},
+    };
 }
 
 std::vector<CrsCurve> crs_curves(Adjustments& a)
@@ -73,12 +91,14 @@ Adjustments::Curve named_curve(const std::string& name)
 bool Adjustments::neutral() const
 {
     // What the process applies, against the defaults: the other process's
-    // settings, the curve's name, and what's kept don't count, and a curve
-    // of the two corners is linear, as no curve is.
+    // settings, the curve's name, what's kept and the detail (not the
+    // tables') don't count, and a curve of the two corners is linear, as no
+    // curve is.
     Adjustments mine = *this, none;
     none.legacy = legacy;
     none.curve_name = curve_name;
     none.kept = kept;
+    none.detail = detail;
     for (const CrsField& f : crs_fields(mine))
         if (f.process && f.process != (legacy ? 2010 : 2012))
             *f.value = 0;

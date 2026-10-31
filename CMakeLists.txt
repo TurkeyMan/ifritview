@@ -50,6 +50,7 @@ add_library(ifrit_core STATIC
   src/adjust.cpp
   src/color_space.cpp
   src/config.cpp
+  src/detail.cpp
   src/i18n.cpp
   src/folder.cpp
   src/image.cpp
@@ -386,8 +387,8 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
-      src/shaders/ljpeg.hlsli)
-  foreach(shader decode develop resample compose difference histogram_view mosaic)
+      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli)
+  foreach(shader decode develop resample compose difference histogram_view mosaic detail)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
   rapport_add_shader(ifritview NAME develop_linear SOURCE src/shaders/develop.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
@@ -397,7 +398,7 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifritview NAME mosaic_linear SOURCE src/shaders/mosaic.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME warp SOURCE src/shaders/warp.hlsl)
   foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
-          ljpeg_black unpack raw_blocks)
+          ljpeg_black unpack raw_blocks noise)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl STAGE compute DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
   message(STATUS "gpu: enabled (shaders with ${RAPPORT_SHADER_COMPILER})")

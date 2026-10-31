@@ -11,6 +11,7 @@
 #include "../white_balance.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
+#include "shaders/detail.h"
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_correct.h"
@@ -29,6 +30,7 @@
 #include "shaders/ljpeg_sync.h"
 #include "shaders/mosaic.h"
 #include "shaders/mosaic_linear.h"
+#include "shaders/noise.h"
 #include "shaders/peak.h"
 #include "shaders/raw_blocks.h"
 #include "shaders/resample.h"
@@ -72,6 +74,20 @@ struct ResampleParams
     float inv, offset;
     int32_t size, other;
     float unused[2];
+};
+
+// detail.hlsl's and noise.hlsl's.
+struct DetailParams
+{
+    int32_t mode, axis, step, sharpening;
+    int32_t origin[2], size[2], out_origin[2], image_size[2];
+    float as_shot[4], luminance[4], colour[4], coarsest[4], sharpen[4], mask[4];
+};
+
+struct NoiseParams
+{
+    int32_t mode, size[2], unused;
+    float as_shot[4];
 };
 
 struct ComposeParams
@@ -252,6 +268,7 @@ void GpuView::edit_of(const Image& image, Frame& f)
     if (image.mosaic && image.wb_kelvin > 0)
         wb_multipliers(*image.mosaic, image.wb_kelvin, image.wb_tint, f.white_balance);
     f.adjust = image.adjust_tables();
+    f.detail = image.adjust.detail;
 }
 
 bool GpuView::export_pixels(const std::shared_ptr<Image>& image, uint64_t generation, PixelBuffer& out, std::string& error)
@@ -322,7 +339,7 @@ bool GpuView::programs(std::string& error)
                                  std::pair{&develop_linear_, shaders::develop_linear},
                                  std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
                                  std::pair{&mosaic_linear_, shaders::mosaic_linear},
-                                 std::pair{&warp_, shaders::warp}})
+                                 std::pair{&warp_, shaders::warp}, std::pair{&detail_, shaders::detail}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -337,7 +354,7 @@ bool GpuView::programs(std::string& error)
           std::pair{&histogram_max_, shaders::histogram_max}, std::pair{&ljpeg_guess_, shaders::ljpeg_guess}, std::pair{&ljpeg_sync_, shaders::ljpeg_sync},
           std::pair{&ljpeg_resolve_, shaders::ljpeg_resolve}, std::pair{&ljpeg_decode_, shaders::ljpeg_decode},
           std::pair{&ljpeg_columns_, shaders::ljpeg_columns}, std::pair{&ljpeg_rows_, shaders::ljpeg_rows}, std::pair{&ljpeg_black_, shaders::ljpeg_black},
-          std::pair{&raw_blocks_, shaders::raw_blocks}, std::pair{&unpack_, shaders::unpack}})
+          std::pair{&raw_blocks_, shaders::raw_blocks}, std::pair{&unpack_, shaders::unpack}, std::pair{&noise_, shaders::noise}})
     {
         auto r = device_->compute_program(make());
         if (!r.program)
@@ -1119,6 +1136,7 @@ size_t GpuView::Source::bytes() const
 void GpuView::retain(Source& s, const std::shared_ptr<Image>& next, uint64_t next_generation)
 {
     std::shared_ptr<Image> image = s.image.lock();
+    s.region.reset();  // made again if it's shown at 1:1 again
     if (image && !s.levels.empty() && !(image == next && next_generation != s.generation))
         retained_.insert(retained_.begin(), std::move(s));
     s = Source{};
@@ -1191,6 +1209,153 @@ bool GpuView::hold(int n, const std::shared_ptr<Image>& image, uint64_t generati
     return true;
 }
 
+void GpuView::follow_detail(Source& s, const Detail& d)
+{
+    if (s.detailed == d)
+        return;
+    s.levels.resize(1);
+    s.detailed = d;
+    s.region.reset();
+}
+
+void GpuView::measure_noise(Source& s)
+{
+    if (s.noise)
+        return;
+    s.noise = device_->create_buffer((2 * 1024 + 2) * 4);  // noise.hlsl's: two histograms, then the two deviations
+    if (!s.noise)
+        return;
+    device_->clear(s.noise, 0);
+    const int w = s.levels[0]->width(), h = s.levels[0]->height();
+    const NoiseParams params[2] = {{0, {w, h}, 0, {s.as_shot[0], s.as_shot[1], s.as_shot[2], 1}},
+                                   {1, {w, h}, 0, {s.as_shot[0], s.as_shot[1], s.as_shot[2], 1}}};
+    rap::gpu::dispatch d[2];
+    for (int i = 0; i < 2; ++i)
+    {
+        d[i].program = noise_;
+        d[i].inputs = {s.levels[0]};
+        d[i].buffers = {s.noise};
+        d[i].uniforms = bytes(params[i]);
+    }
+    const int lattice = 4;  // noise.hlsl's kNoiseStride
+    d[0].groups[0] = ((w + lattice - 1) / lattice + 15) / 16;
+    d[0].groups[1] = ((h + lattice - 1) / lattice + 15) / 16;
+    device_->run(std::span(d));
+}
+
+bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap::gpu::texture_ptr& target, int tx, int ty)
+{
+    const DetailFilter filter(s.detailed);
+    if (filter.denoise)
+        measure_noise(s);
+    if (filter.denoise && !s.noise)
+        return false;
+    const rap::gpu::texture_ptr& image = s.levels[0];
+    const int width = image->width(), height = image->height();
+    constexpr int kTile = 1024, kReach = DetailFilter::kReach;
+    // The intermediates: a tile and its reach, 32-bit (the details are
+    // small next to the values).
+    const int tw = std::min(kTile + 2 * kReach, width), th = std::min(kTile + 2 * kReach, height);
+    for (rap::gpu::texture_ptr& t : detail_temps_)
+        if (!t || t->width() < tw || t->height() < th)
+            if (!(t = device_->create({tw, th, rap::gpu::format::rgba32f, 1, true})))
+                return false;
+    DetailParams base{};
+    base.image_size[0] = width, base.image_size[1] = height;
+    for (int c = 0; c < 3; ++c)
+        base.as_shot[c] = s.as_shot[c];
+    base.as_shot[3] = 1;
+    for (int j = 0; j < 4; ++j)
+        base.luminance[j] = filter.luminance[j], base.colour[j] = filter.colour[j];
+    base.coarsest[0] = filter.luminance[4], base.coarsest[1] = filter.colour[4];
+    base.sharpen[0] = filter.amount, base.sharpen[1] = filter.sigma, base.sharpen[2] = filter.halo;
+    base.mask[0] = filter.mask_low, base.mask[1] = filter.mask_high;
+    base.sharpening = filter.sharpen ? 1 : 0;
+    base.out_origin[0] = x0 - tx, base.out_origin[1] = y0 - ty;
+    const int64_t t0 = g_get_monotonic_time();
+    rap::gpu::ticket done;
+    for (int oy = y0; oy < y1; oy += kTile)
+        for (int ox = x0; ox < x1; ox += kTile)
+        {
+            const int ow = std::min(kTile, x1 - ox), oh = std::min(kTile, y1 - oy);
+            const int ix = std::max(0, ox - kReach), iy = std::max(0, oy - kReach);
+            const int iw = std::min(width, ox + ow + kReach) - ix, ih = std::min(height, oy + oh + kReach) - iy;
+            std::vector<DetailParams> params;
+            params.reserve(4 + 3 * DetailFilter::kLevels + 3);  // their bytes are queued with the passes
+            std::vector<rap::gpu::pass> passes;
+            const auto add = [&](int mode, std::vector<rap::gpu::texture_ptr> inputs, const rap::gpu::texture_ptr& to, int axis = 0,
+                                 int step = 0)
+            {
+                DetailParams& p = params.emplace_back(base);
+                p.mode = mode, p.axis = axis, p.step = step;
+                p.origin[0] = ix, p.origin[1] = iy, p.size[0] = iw, p.size[1] = ih;
+                rap::gpu::pass& pass = passes.emplace_back();
+                pass.program = detail_;
+                pass.inputs = std::move(inputs);
+                if (filter.denoise)
+                    pass.buffers = {s.noise};
+                pass.uniforms = bytes(p);
+                pass.target = to;
+                pass.region = to == target ? rap::gpu::rect{ox - x0 + tx, oy - y0 + ty, ow, oh} : rap::gpu::rect{0, 0, iw, ih};
+            };
+            // detail.hlsl's modes.
+            enum { kEncode, kSmooth, kShrink, kCombine, kBlur, kDecode };
+            const auto& t = detail_temps_;
+            rap::gpu::texture_ptr cur = t[0], next = t[1], sum = t[3], other = t[4];
+            add(kEncode, {image}, cur);
+            if (filter.denoise)
+            {
+                // Each scale: smoothed across then down; its detail, shrunk,
+                // into the sum.
+                for (int j = 0, step = 1; j < DetailFilter::kLevels; ++j, step *= 2)
+                {
+                    add(kSmooth, {cur}, t[2], 0, step);
+                    add(kSmooth, {t[2]}, next, 1, step);
+                    add(kShrink, {cur, next, j ? sum : blank_}, other, 0, j);
+                    std::swap(cur, next);
+                    std::swap(sum, other);
+                }
+                add(kCombine, {cur, sum}, t[2]);
+                cur = t[2];
+            }
+            if (filter.sharpen)
+            {
+                add(kBlur, {cur}, sum, 0);
+                add(kBlur, {sum}, other, 1);
+            }
+            add(kDecode, {cur, filter.sharpen ? other : blank_, image}, target);
+            done = device_->run(passes);
+        }
+    if (std::getenv("IFRIT_TRACE"))
+    {
+        done.wait();
+        std::fprintf(stderr, "gpu: detail filtered %dx%d in %.1f ms\n", x1 - x0, y1 - y0, (g_get_monotonic_time() - t0) / 1000.0);
+    }
+    return true;
+}
+
+rap::gpu::texture_ptr GpuView::detail_region(Source& s, int x0, int y0, int x1, int y1, int& ox, int& oy)
+{
+    const int* r = s.region_at;
+    if (!s.region || x0 < r[0] || y0 < r[1] || x1 > r[2] || y1 > r[3])
+    {
+        // A quarter more each way, to pan into.
+        const int width = s.levels[0]->width(), height = s.levels[0]->height();
+        const int mx = (x1 - x0) / 4, my = (y1 - y0) / 4;
+        const int a[4] = {std::max(0, x0 - mx), std::max(0, y0 - my), std::min(width, x1 + mx), std::min(height, y1 + my)};
+        s.region = device_->create({a[2] - a[0], a[3] - a[1], rap::gpu::format::rgba16f, 1, true});
+        if (!s.region || !filter_detail(s, a[0], a[1], a[2], a[3], s.region, 0, 0))
+        {
+            s.region.reset();
+            ox = oy = 0;
+            return s.levels[0];  // unfiltered, rather than nothing
+        }
+        std::copy(std::begin(a), std::end(a), s.region_at);
+    }
+    ox = r[0], oy = r[1];
+    return s.region;
+}
+
 rap::gpu::texture_ptr GpuView::counted_level(Source& s)
 {
     int n = 0;
@@ -1203,7 +1368,17 @@ rap::gpu::texture_ptr GpuView::level(Source& s, int n)
 {
     while (int(s.levels.size()) <= n)
     {
-        const rap::gpu::texture_ptr& above = s.levels.back();
+        // With noise reduction or sharpening, level 1 is made from level 0
+        // filtered (the whole of it, let go once level 1 is made), and the
+        // rest from level 1.
+        rap::gpu::texture_ptr above = s.levels.back();
+        if (s.levels.size() == 1 && s.detailed.active())
+        {
+            const int w = above->width(), h = above->height();
+            auto filtered = device_->create({w, h, rap::gpu::format::rgba16f, 1, true});
+            if (filtered && filter_detail(s, 0, 0, w, h, filtered, 0, 0))
+                above = std::move(filtered);
+        }
         const int w = above->width(), h = above->height();
         const int nw = std::max(1, w / 2), nh = std::max(1, h / 2);
         if (nw == w && nh == h)
@@ -1359,18 +1534,19 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 
 void GpuView::count(Source& s, const Frame& f)
 {
+    follow_detail(s, f.detail);  // the levels it counts are made with it
     ComposeParams cp{};
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     cp.measured = 1;
     // The histogram of what's shown: again when the image, its exposure,
-    // white balance or develop settings change.
+    // white balance, develop settings or detail change.
     const std::shared_ptr<Image> image = s.image.lock();
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     const bool same_wb = std::equal(std::begin(histogram_wb_), std::end(histogram_wb_), std::begin(f.white_balance));
     if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure &&
-        histogram_adjust_ == adjusted && same_wb && !fresh)
+        histogram_adjust_ == adjusted && same_wb && histogram_detail_ == f.detail && !fresh)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(histogram_, 0);
@@ -1389,6 +1565,7 @@ void GpuView::count(Source& s, const Frame& f)
     histogram_generation_ = s.generation;
     histogram_exposure_ = f.exposure;
     histogram_adjust_ = adjusted;
+    histogram_detail_ = f.detail;
     std::copy(std::begin(f.white_balance), std::end(f.white_balance), std::begin(histogram_wb_));
     histogram_scale_ = cp.exposure;
     histogram_scene_ = s.tonable;
@@ -1402,6 +1579,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     x0 = std::clamp(x0, 0, f.width), x1 = std::clamp(x1, 0, f.width);
     if (x1 <= x0)
         return true;  // `ready` left as it was
+    follow_detail(s, f.detail);
     ComposeParams cp{};
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
@@ -1427,7 +1605,22 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         cp.offset = float(-f.pan_y / f.zoom);
         cp.columns = width;
         cp.rows = height;
-        last.inputs = view_inputs(s.levels[0], s, &f);
+        rap::gpu::texture_ptr src = s.levels[0];
+        if (s.detailed.active())
+        {
+            // Level 0 filtered over what's shown (its image position off the offsets).
+            const int vx0 = std::clamp(int(std::floor((x0 - f.pan_x) / f.zoom)) - 1, 0, width);
+            const int vx1 = std::clamp(int(std::ceil((x1 - f.pan_x) / f.zoom)) + 1, 0, width);
+            const int vy0 = std::clamp(int(std::floor(-f.pan_y / f.zoom)) - 1, 0, height);
+            const int vy1 = std::clamp(int(std::ceil((f.height - f.pan_y) / f.zoom)) + 1, 0, height);
+            int ox = 0, oy = 0;
+            src = detail_region(s, vx0, vy0, std::max(vx1, vx0 + 1), std::max(vy1, vy0 + 1), ox, oy);
+            cp.offset_x -= float(ox);
+            cp.offset -= float(oy);
+            cp.columns = src->width();
+            cp.rows = src->height();
+        }
+        last.inputs = view_inputs(src, s, &f);
     }
     else
     {
@@ -1435,9 +1628,11 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         int n = 0;
         while (f.zoom * double(1 << (n + 1)) <= 1.0 + 1e-9 && n < 30)
             ++n;
-        const rap::gpu::texture_ptr src = level(s, n);
+        rap::gpu::texture_ptr src = level(s, n);
         const int lw = src->width(), lh = src->height();
         const double inv_x = lw / shown_w, inv_y = lh / shown_h;  // level texels per frame pixel
+        if (n > 0)
+            s.region.reset();  // zoomed out of level 0: let it go
 
         // The frame columns the image covers (of those drawn), and the level
         // rows the second pass reads for the frame rows it covers.
@@ -1458,7 +1653,19 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
             error = "no room for the first pass";
             return false;
         }
-        const ResampleParams first_params{0, int32_t(filter), float(inv_x), float((c0 - f.pan_x) * inv_x), lw, r0, {}};
+        ResampleParams first_params{0, int32_t(filter), float(inv_x), float((c0 - f.pan_x) * inv_x), lw, r0, {}};
+        if (n == 0 && s.detailed.active())
+        {
+            // Level 0 filtered over the columns and rows the passes read.
+            const double rx = reach(filter, inv_x) + 1;
+            const int qx0 = std::clamp(int(std::floor((c0 - f.pan_x) * inv_x - rx)), 0, lw);
+            const int qx1 = std::clamp(int(std::ceil((c1 - f.pan_x) * inv_x + rx)), 0, lw);
+            int ox = 0, oy = 0;
+            src = detail_region(s, qx0, r0, std::max(qx1, qx0 + 1), std::max(r1, r0 + 1), ox, oy);
+            first_params.offset -= float(ox);
+            first_params.size = src->width();
+            first_params.other = r0 - oy;
+        }
         rap::gpu::pass first;
         first.program = resample_;
         first.inputs = {src};

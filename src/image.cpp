@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "half.h"
+#include "parallel.h"
 
 #include <glib.h>
 #include <algorithm>
@@ -220,6 +221,41 @@ const Encoder& encoder()
 
 }  // namespace
 
+Adjustments Image::opening_adjust(bool with_xmp) const
+{
+    Adjustments a = with_xmp && xmp.present ? xmp.adjust : Adjustments{};
+    if (is_raw)
+    {
+        Detail rest = Detail::raw_defaults();
+        const std::vector<CrsField> mine = detail_fields(a.detail), defaults = detail_fields(rest);
+        for (size_t i = 0; i < mine.size(); ++i)
+            if (!with_xmp || !xmp.given.count(mine[i].name))
+                *mine[i].value = *defaults[i].value;
+    }
+    return a;
+}
+
+namespace
+{
+
+// An image's linear RGB (white 1; `value(i)` of each of its pixels' three,
+// row by row) through noise reduction and sharpening (detail.h): what the
+// CPU's edits then read instead.
+template <class F>
+std::vector<float> detailed_rgb(const Detail& d, int width, int height, F value)
+{
+    std::vector<float> in(size_t(width) * height * 3), out(in.size());
+    parallel(size_t(height), [&](size_t y)
+    {
+        for (size_t i = y * width * 3, end = i + size_t(width) * 3; i < end; ++i)
+            in[i] = value(i);
+    });
+    apply_detail(DetailFilter(d), in.data(), width, height, out.data());
+    return out;
+}
+
+}  // namespace
+
 std::shared_ptr<const AdjustTables> Image::adjust_tables() const
 {
     if (adjust.neutral())
@@ -239,13 +275,13 @@ void Image::retone(double ev)
     if (ev != 0)
         break_transform(_("the exposure was changed"));
     const std::shared_ptr<const AdjustTables> tables = adjust_tables();
-    if (tables)
+    if (tables || adjust.detail.active())
         break_transform(_("the develop settings were changed"));
-    pixels = retone_buffer(ev, tables.get());
+    pixels = retone_buffer(ev, tables.get(), &adjust.detail);
     mips.clear();
 }
 
-PixelBuffer Image::adjusted_pixels(const AdjustTables& adjust) const
+PixelBuffer Image::adjusted_pixels(const AdjustTables* adjust, const Detail& detail) const
 {
     PixelBuffer out(pixels.size());
     if (pixels.size() < size_t(width) * height * 4)
@@ -253,23 +289,34 @@ PixelBuffer Image::adjusted_pixels(const AdjustTables& adjust) const
     std::vector<float> linear(256);
     for (int i = 0; i < 256; ++i)
         linear[i] = srgb_decode(i / 255.0f);
+    // Unpremultiplied, to linear light.
+    const auto channel = [&](uint32_t p, int c)
+    {
+        const uint32_t a = p >> 24, shift = 16 - 8 * uint32_t(c);
+        return a ? linear[std::min(255u, (((p >> shift) & 255) * 255 + a / 2) / a)] : 0.0f;
+    };
+    const auto pixel = [&](int x, int y) { return reinterpret_cast<const uint32_t*>(pixels.data() + size_t(y) * stride)[x]; };
+    const std::vector<float> detailed =
+        detail.active() ? detailed_rgb(detail, width, height, [&](size_t i) { return channel(pixel(int(i / 3 % width), int(i / 3 / width)), int(i % 3)); })
+                        : std::vector<float>{};
     const Encoder& enc = encoder();
     for (int y = 0; y < height; ++y)
     {
-        const uint32_t* s = reinterpret_cast<const uint32_t*>(pixels.data() + size_t(y) * stride);
         uint32_t* d = reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride);
         for (int x = 0; x < width; ++x)
         {
-            const uint32_t p = s[x], a = p >> 24;
+            const uint32_t p = pixel(x, y), a = p >> 24;
             if (a == 0)
             {
                 d[x] = 0;
                 continue;
             }
-            // Unpremultiplied, to linear light, edited, and back.
-            const auto channel = [&](int shift) { return linear[std::min(255u, (((p >> shift) & 255) * 255 + a / 2) / a)]; };
-            float c[3] = {channel(16), channel(8), channel(0)};
-            apply_adjustments(adjust, c);
+            // Edited, and back.
+            float c[3];
+            for (int k = 0; k < 3; ++k)
+                c[k] = detailed.empty() ? channel(p, k) : detailed[(size_t(y) * width + x) * 3 + k];
+            if (adjust)
+                apply_adjustments(*adjust, c);
             d[x] = pack(enc(c[0]), enc(c[1]), enc(c[2]), a);
         }
     }
@@ -311,7 +358,7 @@ void Image::build_mips()
 // half float (the output has 8 bits; a float is looked up by its nearest
 // half once exposed, so values past a half's range still come down); the
 // rest are as they're encoded, signed ones with 0 at mid-grey.
-PixelBuffer Image::render_source(double ev, const AdjustTables* adjust) const
+PixelBuffer Image::render_source(double ev, const AdjustTables* adjust, const Detail* detail) const
 {
     PixelBuffer out(size_t(width) * height * 4);
     const SourceData& s = *source;
@@ -350,19 +397,31 @@ PixelBuffer Image::render_source(double ev, const AdjustTables* adjust) const
             v = (v + 1) / 2;
         return uint32_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
     };
-    // Edited: each colour in linear light (exposed, or decoded from its
-    // encoding) through the tables, then encoded.
-    const auto edited = [&](const uint8_t* px, uint32_t& r, uint32_t& g, uint32_t& b)
+    // Edited: each colour in linear light (decoded from its encoding),
+    // through the noise reduction and sharpening, exposed, through the
+    // tables, then encoded.
+    const auto unexposed = [&](const uint8_t* px, int i)
+    {
+        float v = s.value(px, s.channels >= 3 ? i : 0);
+        if (is_signed)
+            v = (v + 1) / 2;
+        return s.linear ? (v == v ? v : 0.0f) : srgb_decode(std::clamp(v, 0.0f, 1.0f));
+    };
+    const std::vector<float> detailed =
+        detail && detail->active()
+            ? detailed_rgb(*detail, width, height, [&](size_t i) { return unexposed(s.pixel(int(i / 3 % width), int(i / 3 / width)), int(i % 3)); })
+            : std::vector<float>{};
+    const auto edited = [&](const uint8_t* px, int x, int y, uint32_t& r, uint32_t& g, uint32_t& b)
     {
         float c[3];
         for (int i = 0; i < 3; ++i)
         {
-            float v = s.value(px, s.channels >= 3 ? i : 0);
-            if (is_signed)
-                v = (v + 1) / 2;
-            c[i] = s.linear ? (v == v ? v * exposure : 0.0f) : srgb_decode(std::clamp(v, 0.0f, 1.0f));
+            c[i] = detailed.empty() ? unexposed(px, i) : detailed[(size_t(y) * width + x) * 3 + i];
+            if (s.linear)
+                c[i] *= exposure;
         }
-        apply_adjustments(*adjust, c);
+        if (adjust)
+            apply_adjustments(*adjust, c);
         const Encoder& enc = encoder();
         r = enc(c[0]), g = enc(c[1]), b = enc(c[2]);
     };
@@ -373,8 +432,8 @@ PixelBuffer Image::render_source(double ev, const AdjustTables* adjust) const
         {
             const uint8_t* px = s.pixel(x, y);
             uint32_t r, g, b, a = 255;
-            if (adjust)
-                edited(px, r, g, b);
+            if (adjust || !detailed.empty())
+                edited(px, x, y, r, g, b);
             else if (s.channels >= 3)
             {
                 r = encoded(px, 0, false);
@@ -391,7 +450,7 @@ PixelBuffer Image::render_source(double ev, const AdjustTables* adjust) const
     return out;
 }
 
-PixelBuffer Image::retone_buffer(double ev, const AdjustTables* adjust) const
+PixelBuffer Image::retone_buffer(double ev, const AdjustTables* adjust, const Detail* detail) const
 {
     PixelBuffer out(size_t(width) * height * 4);  // the pixels themselves may have been let go (pixels_stale)
     const bool from_source = !linear && source;
@@ -400,19 +459,26 @@ PixelBuffer Image::retone_buffer(double ev, const AdjustTables* adjust) const
     auto row_of = [&](int y) { return reinterpret_cast<uint32_t*>(out.data() + size_t(y) * stride); };
     const double exposure = std::pow(2.0, ev);
     if (from_source)
-        return render_source(ev, adjust);
+        return render_source(ev, adjust, detail);
     const Encoder& enc = encoder();
-    if (linear->tone.empty() && adjust)
+    // The data (white 1, before the gain) through the noise reduction and
+    // sharpening first, when they're on.
+    const std::vector<float> detailed = detail && detail->active()
+                                            ? detailed_rgb(*detail, width, height, [&](size_t i) { return linear->rgb[i] / 65535.0f; })
+                                            : std::vector<float>{};
+    const auto at = [&](size_t i) { return detailed.empty() ? linear->rgb[i] / 65535.0f : detailed[i]; };
+    if (linear->tone.empty() && (adjust || !detailed.empty()))
     {
-        const float gain = float(linear->auto_gain * exposure / 65535.0);
-        const uint16_t* s = linear->rgb.data();
+        const float gain = float(linear->auto_gain * exposure);
         for (int y = 0; y < height; ++y)
         {
             uint32_t* d = row_of(y);
-            for (int x = 0; x < width; ++x, s += 3)
+            for (int x = 0; x < width; ++x)
             {
-                float c[3] = {s[0] * gain, s[1] * gain, s[2] * gain};
-                apply_adjustments(*adjust, c);
+                const size_t i = (size_t(y) * width + x) * 3;
+                float c[3] = {at(i) * gain, at(i + 1) * gain, at(i + 2) * gain};
+                if (adjust)
+                    apply_adjustments(*adjust, c);
                 d[x] = pack_premultiplied(enc(c[0]), enc(c[1]), enc(c[2]), 255);
             }
         }
@@ -438,14 +504,14 @@ PixelBuffer Image::retone_buffer(double ev, const AdjustTables* adjust) const
     // the pixel's colour is scaled by the same ratio so hue is kept. It's
     // the default look: the edits come after it.
     const std::vector<float>& tone = linear->tone;
-    const uint16_t* s = linear->rgb.data();
-    const float scale = float(exposure / 65535.0);
+    const float scale = float(exposure);
     for (int y = 0; y < height; ++y)
     {
         uint32_t* d = row_of(y);
-        for (int x = 0; x < width; ++x, s += 3)
+        for (int x = 0; x < width; ++x)
         {
-            const float r = s[0] * scale, g = s[1] * scale, b = s[2] * scale;
+            const size_t i = (size_t(y) * width + x) * 3;
+            const float r = at(i) * scale, g = at(i + 1) * scale, b = at(i + 2) * scale;
             const float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
             const float o = tone[std::min(4095, int(lum * 4095.0f + 0.5f))];
             const float ratio = lum > 1e-6f ? o / lum : 0.0f;
@@ -716,7 +782,7 @@ void Image::adopt(Image&& f)
     has_audio = has_audio || f.has_audio;
     final_width = final_height = 0;
     stage = Stage::Final;
-    if (tonable() && (exposure_edit != 0 || !adjust.neutral()))
+    if (tonable() && (exposure_edit != 0 || !adjust.neutral() || adjust.detail.active()))
         retone(exposure_edit);
 }
 
