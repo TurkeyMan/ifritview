@@ -96,7 +96,7 @@ std::shared_ptr<SaveDialog> SaveDialog::open(rap::ui& ui, rap::window* parent, c
                                          L::spacer{},  // what a format with fewer settings leaves, above the buttons
                                          L::buttons{L::ok(_("_Save…")), L::cancel},
                                      }}}
-                               .size(rap::extent{62, rap::extent::unit::chars}, rap::extent{float(13 + 2.5 * double(most)), rap::extent::unit::lines})
+                               .size(rap::extent{70, rap::extent::unit::chars}, rap::extent{float(13 + 2.5 * double(most)), rap::extent::unit::lines})
                                .modeless()
                                .resizable(false),
                            parent);

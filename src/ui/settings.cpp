@@ -743,7 +743,7 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
                                              .stretch(),
                                          L::buttons{L::cancel, L::ok},
                                      }}}
-                               .size(chars(116), rap::extent{40, rap::extent::unit::lines}),
+                               .size(chars(132), rap::extent{46, rap::extent::unit::lines}),
                            parent);
     lap("create");
     st->tabs->set_current(page);
