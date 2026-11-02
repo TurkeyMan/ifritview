@@ -371,7 +371,11 @@ public:
             return false;
         phase_one_allocate_tempbuffer();
         int rc = phase_one_subtract_black(static_cast<ushort*>(imgdata.rawdata.raw_alloc), imgdata.rawdata.raw_image);
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
         if (rc == 0 && imgdata.params.use_p1_correction)
+#else
+        if (rc == 0)  // before 0.22 there was no switch: always corrected
+#endif
             rc = phase_one_correct();
         const auto& sz = imgdata.sizes;
         if (rc == 0)
@@ -452,6 +456,11 @@ public:
     // olympus_load_raw reads it (olympus.h). False for others.
     bool olympus(const uint8_t* file, size_t size, olympus::Prepared& p, std::string& error) const
     {
+#if !LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
+        // Before 0.22 LibRaw keeps none of the tags: its own decoding, then.
+        (void)file, (void)size, (void)p, (void)error;
+        return false;
+#else
         if (loader() != "olympus_load_raw()")
             return false;
         const auto& o = imgdata.makernotes.olympus;
@@ -461,6 +470,7 @@ public:
         if (u.data_offset < 0)
             return error = "no Olympus header", false;
         return olympus::prepare(file, size, uint64_t(u.data_offset), imgdata.sizes.raw_width, imgdata.sizes.raw_height, tags, p, error);
+#endif
     }
 
     // A readout stored uncompressed, as LibRaw's packed_dng_load_raw (a DNG's
@@ -1005,6 +1015,11 @@ public:
     // others; and, with why, for what pana8 doesn't take.
     bool pana8(const uint8_t* file, size_t size, pana8::Prepared& p, std::string& error) const
     {
+#if !LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
+        // Encoding 8 came with LibRaw 0.22: older ones can't open it at all.
+        (void)file, (void)size, (void)p, (void)error;
+        return false;
+#else
         if (loader() != "panasonicC8_load_raw()")
             return false;
         const pana8_tags_t& t = libraw_internal_data.unpacker_data.pana8;
@@ -1023,6 +1038,7 @@ public:
             h.width[i] = t.stripe_width[i], h.height[i] = t.stripe_height[i];
         }
         return pana8::prepare(file, size, h, imgdata.sizes.raw_width, imgdata.sizes.raw_height, p, error);
+#endif
     }
 
     // A CR3's raw track (crx.h), the one LibRaw chose. False for others; and,
