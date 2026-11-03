@@ -37,7 +37,10 @@ std::shared_ptr<void> http_get(const std::string& url, const HttpHeaders& header
     std::thread(
         [job]
         {
-            const rap::sys::http_response r = rap::sys::http_get(job->url, {.headers = job->headers, .cancelled = &job->cancelled});
+            rap::sys::http_options options;
+            options.headers = job->headers;
+            options.cancelled = &job->cancelled;
+            const rap::sys::http_response r = rap::sys::http_get(job->url, options);
             job->response = {r.status, r.body, r.error};
             platform::post_main(
                 [job]
