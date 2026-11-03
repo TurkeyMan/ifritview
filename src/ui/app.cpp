@@ -1852,11 +1852,13 @@ void App::fit_window_to_image()
     // can differ by a fraction of a pixel (a fractional scale; a splitter
     // sharing a resize with its pane).
     const std::array<double, 7> inputs{iw, ih, double(images), double(pane_w), scale, work.w, work.h};
-    if (!refit_when_laid_out_ && inputs == fitted_for_ && std::fabs(cur.w - fitted_size_.w) < 2 &&
-        std::fabs(cur.h - fitted_size_.h) < 2)
+    if (!refit_when_laid_out_ && inputs == fitted_for_ && std::fabs(cur.w - fitted_size_.w) < 0.5f &&
+        std::fabs(cur.h - fitted_size_.h) < 0.5f)
         return;
-    const float w = std::clamp(cw + chrome_w + pane_w, float(cfg_.min_window_width), max_w);
-    const float h = std::clamp(ch + chrome_h, float(cfg_.min_window_height), max_h);
+    // Whole logical pixels, up: a toolkit rounding a fraction down would cut
+    // the image's last column (1282 px at 1.5 is 854.67).
+    const float w = std::ceil(std::clamp(cw + chrome_w + pane_w, float(cfg_.min_window_width), max_w));
+    const float h = std::ceil(std::clamp(ch + chrome_h, float(cfg_.min_window_height), max_h));
     fitted_for_ = inputs;
     if (std::fabs(cur.w - w) < 1 && std::fabs(cur.h - h) < 1)
     {
