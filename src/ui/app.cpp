@@ -528,8 +528,10 @@ void App::build_ui()
     exposure_box_->set_visible(false);
     crop_button_->set_enabled(false);
     update_toolbar();
-    status_location_->set_visible(false);
-    status_location_->set_tooltip(_("Open in maps"));
+    // Never hidden, only emptied: the footer keeps its height (a flat
+    // button's is a label's and more) from one image to the next, so the
+    // view isn't resized as well as the window when the next is fitted.
+    status_location_->set_enabled(false);
 
     view_->on_action = [this](Action a)
     {
@@ -782,6 +784,24 @@ void App::transform(int exif_orientation)
     refit_timer_ = ui_.timer(120, false, [this] { fit_window_to_image(); });
     update_status();
     refresh_metadata();
+}
+
+// Twelve steps 25 ms apart, as a pointer dragging the divider gives them: a
+// run of sizes for the view and the pane, without touching the mouse.
+void App::script_drag_pane(float by)
+{
+    const std::vector<float> start = splitter_->sizes();
+    if (start.size() != 2)
+        return;
+    auto step = std::make_shared<int>(0);
+    script_drag_ = ui_.timer(25, true,
+                             [this, start, by, step]
+                             {
+                                 if (*step == 12)
+                                     return;  // done: the next drag replaces the timer
+                                 const float moved = by * float(++*step) / 12;
+                                 splitter_->set_sizes({start[0] + moved, start[1] - moved});
+                             });
 }
 
 void App::script_toggle_xmp()
@@ -2100,11 +2120,14 @@ void App::update_status()
         const std::string place = image_->place == " " ? "" : image_->place;
         location_url_ = cfg_.map_link(image_->latitude, image_->longitude);
         status_location_->set_text(image_->location_text() + (place.empty() ? "" : "  ·  " + place));
-        status_location_->set_visible(true);
+        status_location_->set_tooltip(_("Open in maps"));
+        status_location_->set_enabled(true);
     }
     else
     {
-        status_location_->set_visible(false);
+        status_location_->set_text("");
+        status_location_->set_tooltip("");
+        status_location_->set_enabled(false);
     }
     const bool busy = !busy_message_.empty() && status_message_ == busy_message_;
     view_->set_busy(busy);

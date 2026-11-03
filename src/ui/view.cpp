@@ -83,9 +83,10 @@ rap::node View::node()
 {
     return rap::layout::canvas{}
         .on_paint([this](rap::painter& p, rap::size_f s) { paint(p, s); })
-        // Not stretched while resizing (stretch_while_resizing): the window
-        // fitted to a new image is a resize too, and would show the last
-        // image scaled for the settle time before the new one.
+        // A run of sizes (a splitter or the window dragged) shows the last
+        // frame scaled until it settles (stretch_while_resizing, from
+        // attach): nothing drawn at each. A lone one, the window fitted to
+        // the next image, is painted at once.
         .on_resize(
             [this](rap::size_f)
             {
@@ -93,9 +94,6 @@ rap::node View::node()
                 layout();
                 if (on_resized)
                     on_resized();
-                // The frame at the new size before the paint at it: never the
-                // last image stretched by the window, then the new one.
-                present_on_gpu();
             })
         .on_resize_settled(
             [this](rap::size_f)
@@ -115,6 +113,7 @@ rap::node View::node()
 void View::attach(rap::canvas* canvas)
 {
     canvas_ = canvas;
+    stretch_on_background();
 #ifdef HAVE_GPU
     // The GPU device arriving (or going) changes the frame target: draw again,
     // on it if it's there.
@@ -125,6 +124,14 @@ void View::attach(rap::canvas* canvas)
 rap::color View::background() const
 {
     return parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
+}
+
+// While a run of sizes lasts, the last frame scaled whole onto the view's
+// background.
+void View::stretch_on_background()
+{
+    if (canvas_)
+        canvas_->stretch_while_resizing(rap::resize_stretch::uniform, background());
 }
 
 void View::invalidate()
@@ -360,6 +367,7 @@ void View::set_image(std::shared_ptr<Image> image)
 void View::set_fullscreen(bool on)
 {
     fullscreen_ = on;
+    stretch_on_background();
     // The transition moves the window under the pointer; a press still held
     // from the double-click would otherwise turn into a drag.
     pressed_button_ = 0;
@@ -707,6 +715,7 @@ void View::set_overlay(OverlaySections sections)
 
 void View::config_changed()
 {
+    stretch_on_background();
     drop_caches();
     layout();
     invalidate();  // drawn the new way now (the filters, the checkerboard, the backgrounds), not at the next move

@@ -99,6 +99,7 @@ public:
     void script_poke_controls() { view_->poke_controls(); }
     void script_show_volume() { view_->script_show_volume(); }
     void script_toggle_xmp();
+    void script_drag_pane(float by);  // the info pane's divider moved by `by` px, as a drag moves it
     void remember_pane_width();
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
@@ -228,6 +229,7 @@ private:
     std::weak_ptr<Image> xmp_pending_;
     std::string xmp_pending_path_;
     rap::subscription xmp_timer_;
+    rap::subscription script_drag_;  // script_drag_pane's steps
     // The image's pixels as saved: its edits in them (an 8-bit image's
     // develop settings, which only the view applies until then).
     std::shared_ptr<Image> edited_image();

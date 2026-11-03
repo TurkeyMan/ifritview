@@ -229,6 +229,7 @@ private:
     std::unique_ptr<Comparison> compare_;
     void drop_caches();
     rap::color background() const;  // around the image: the window's, or full screen's
+    void stretch_on_background();
     // image_changed() for another image put in the view's (comparing): its
     // data is as it was, so the GPU keeps what it has of it.
     void image_replaced();
