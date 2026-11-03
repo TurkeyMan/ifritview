@@ -22,7 +22,7 @@ float3 encoded(int2 p)
 
 void count(uint bin_base, float v)
 {
-    noise.InterlockedAdd((bin_base + min(uint(v / kNoiseRange * kNoiseBins), kNoiseBins - 1)) * 4, 1);
+    noise.InterlockedAdd((bin_base + min(uint(v / kNoiseRange * kNoiseBins), kNoiseBins - 1)) * 4, 1u);
 }
 
 float median(uint bin_base)

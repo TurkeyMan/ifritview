@@ -27,9 +27,9 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         const uint i = readout_index(x, y);
         const uint v = SAMPLE(values, i);
         InterlockedAdd(group_sum[c], v);
-        InterlockedAdd(group_count[c], 1);
+        InterlockedAdd(group_count[c], 1u);
         if (v == 0)
-            InterlockedAdd(group_zero, 1);
+            InterlockedAdd(group_zero, 1u);
     }
     GroupMemoryBarrierWithGroupSync();
     if (index < 4)

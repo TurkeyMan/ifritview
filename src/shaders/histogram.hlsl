@@ -27,10 +27,10 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
             const float3 e = float3(srgb_encode(shown.r), srgb_encode(shown.g), srgb_encode(shown.b));
             const uint3 b = uint3(e * 255 + 0.5);
             const uint y = uint(dot(e, float3(0.2126, 0.7152, 0.0722)) * 255 + 0.5);
-            InterlockedAdd(local_bins[b.r], 1);
-            InterlockedAdd(local_bins[256 + b.g], 1);
-            InterlockedAdd(local_bins[512 + b.b], 1);
-            InterlockedAdd(local_bins[768 + min(y, 255u)], 1);
+            InterlockedAdd(local_bins[b.r], 1u);
+            InterlockedAdd(local_bins[256 + b.g], 1u);
+            InterlockedAdd(local_bins[512 + b.b], 1u);
+            InterlockedAdd(local_bins[768 + min(y, 255u)], 1u);
         }
     }
     GroupMemoryBarrierWithGroupSync();

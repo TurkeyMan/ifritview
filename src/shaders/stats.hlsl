@@ -34,8 +34,8 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
             if (xyz.y > 0)
             {
                 const uint bin = uint(clamp((log2(xyz.y) + 20) * 1024 / 32, 0.0, 1023.0));
-                InterlockedAdd(local_luminance[bin], 1);
-                InterlockedAdd(local_count, 1);
+                InterlockedAdd(local_luminance[bin], 1u);
+                InterlockedAdd(local_count, 1u);
                 InterlockedMax(local_least, ~asuint(xyz.y));  // positive floats order as their bits
                 InterlockedMax(local_most, asuint(xyz.y));
                 const float2 v = uv_from_xyz(xyz) - kWhiteUv;
