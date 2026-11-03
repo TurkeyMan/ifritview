@@ -1622,6 +1622,8 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     const bool one_to_one = std::fabs(f.zoom - 1) < 1e-9 && f.pan_x == std::floor(f.pan_x) && f.pan_y == std::floor(f.pan_y);
     const ScaleFilter filter = f.zoom > 1 ? f.enlarge : f.shrink;
     std::vector<rap::gpu::pass> passes;
+    // A pass's uniforms are read at run(), below: they live as long.
+    ResampleParams first_params{};
     rap::gpu::pass last;
     last.program = compose_;
     last.target = frame;
@@ -1682,7 +1684,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
             error = "no room for the first pass";
             return false;
         }
-        ResampleParams first_params{0, int32_t(filter), float(inv_x), float((c0 - f.pan_x) * inv_x), lw, r0, {}};
+        first_params = {0, int32_t(filter), float(inv_x), float((c0 - f.pan_x) * inv_x), lw, r0, {}};
         if (n == 0 && s.detailed.active())
         {
             // Level 0 filtered over the columns and rows the passes read.
