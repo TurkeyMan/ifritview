@@ -83,24 +83,27 @@ rap::node View::node()
 {
     return rap::layout::canvas{}
         .on_paint([this](rap::painter& p, rap::size_f s) { paint(p, s); })
+        // Not stretched while resizing (stretch_while_resizing): the window
+        // fitted to a new image is a resize too, and would show the last
+        // image scaled for the settle time before the new one.
         .on_resize(
             [this](rap::size_f)
             {
                 resizing_ = true;
-                resize_settled_ = ui_.timer(150, false,
-                                            [this]
-                                            {
-                                                resizing_ = false;
-                                                if (std::exchange(zoom_change_held_, false))
-                                                    zoom_changed();
-                                                gpu_drawn_ = {};  // drawn again, with the histogram
-                                                present_on_gpu();
-                                            });
                 layout();
                 if (on_resized)
                     on_resized();
                 // The frame at the new size before the paint at it: never the
                 // last image stretched by the window, then the new one.
+                present_on_gpu();
+            })
+        .on_resize_settled(
+            [this](rap::size_f)
+            {
+                resizing_ = false;
+                if (std::exchange(zoom_change_held_, false))
+                    zoom_changed();
+                gpu_drawn_ = {};  // drawn again, with the histogram
                 present_on_gpu();
             })
         .on_pointer([this](const rap::pointer_event& e) { return pointer(e); })
@@ -117,6 +120,11 @@ void View::attach(rap::canvas* canvas)
     // on it if it's there.
     canvas_->on_frame_target([this](const rap::frame_target&) { invalidate(); });
 #endif
+}
+
+rap::color View::background() const
+{
+    return parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
 }
 
 void View::invalidate()
@@ -1016,7 +1024,7 @@ void View::paint(rap::painter& p, rap::size_f)
     int vw, vh;
     view_size(vw, vh);
 
-    const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
+    const rap::color bg = background();
 #ifdef HAVE_GPU
     const bool on_gpu = draw_on_gpu(bg);
     // A raw or an HDR image is the GPU's to draw (its own data, in linear
@@ -1321,7 +1329,7 @@ void View::present_on_gpu()
 {
 #ifdef HAVE_GPU
     if (canvas_ && image_)
-        draw_on_gpu(parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38}));
+        draw_on_gpu(background());
 #endif
 }
 

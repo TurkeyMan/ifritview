@@ -408,6 +408,16 @@ void App::build_ui()
                                 paint_histogram_legend(p, size);
                             })
                         .on_pointer([this](const rap::pointer_event& e) { return histogram_legend_click(e); })
+                        // Resized, the last one stretched (it has no proportions
+                        // to keep), and drawn again once the sizes settle.
+                        .stretch_while_resizing(rap::resize_stretch::fill)
+                        .on_resize([this](rap::size_f) { histogram_resizing_ = true; })
+                        .on_resize_settled(
+                            [this](rap::size_f)
+                            {
+                                histogram_resizing_ = false;
+                                view_->histogram_panel_changed();
+                            })
                         .bind(histogram_canvas_)
                         .height(rap::extent{13, rap::extent::unit::lines}),
 
@@ -446,7 +456,12 @@ void App::build_ui()
     histogram_box_->set_visible(false);
     // The docked histogram: drawn again when its canvas changes size, and
     // its numbers when the view has counted.
-    histogram_canvas_->on_frame_target([this](const rap::frame_target&) { view_->histogram_panel_changed(); });
+    histogram_canvas_->on_frame_target(
+        [this](const rap::frame_target&)
+        {
+            if (!histogram_resizing_)
+                view_->histogram_panel_changed();
+        });
 #ifdef HAVE_GPU
     view_->on_histogram_details = [this](const GpuView::Details& d)
     {

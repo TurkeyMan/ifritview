@@ -228,6 +228,7 @@ private:
     double divider_x() const;  // device px
     std::unique_ptr<Comparison> compare_;
     void drop_caches();
+    rap::color background() const;  // around the image: the window's, or full screen's
     // image_changed() for another image put in the view's (comparing): its
     // data is as it was, so the GPU keeps what it has of it.
     void image_replaced();
@@ -290,12 +291,12 @@ private:
     } gpu_drawn_;
     bool gpu_shown_ = false;
     // While the view is being resized (a splitter dragged, the window
-    // sized), frames skip what a resize doesn't change and is slow to redo:
-    // the histogram counted, drawn into its panel and read back, and the
-    // status told of the zoom. Done once, a moment after the last resize.
+    // sized), until the canvas says the sizes have settled
+    // (on_resize_settled): the status isn't told of the zoom, and the
+    // histogram isn't counted, drawn into its panel or read back. Done once
+    // it settles.
     bool resizing_ = false;
     bool zoom_change_held_ = false;
-    rap::subscription resize_settled_;
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)
