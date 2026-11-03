@@ -22,7 +22,17 @@ if ! grep -q -- '^-- rapport plugins: gtk3;gtk4;qt6$' build-ci.log; then
   echo "a toolkit plugin is missing; install its -dev package in .github/ci/deps-*.sh" >&2
   exit 1
 fi
+# And the GPU's path, its shaders compiled by glslang.
+if ! grep -q -- '^-- gpu: enabled' build-ci.log; then
+  echo "no shader compiler; install glslang in .github/ci/deps-*.sh" >&2
+  exit 1
+fi
 cmake --build build-ci --parallel "$(nproc)"
+
+# Every shader valid for Vulkan: an invalid compute pipeline can hang a GPU.
+for spv in build-ci/shaders/*.spv; do
+  spirv-val --target-env vulkan1.3 "$spv"
+done
 
 # Decode without a display.
 mkdir -p build-ci/smoke

@@ -18,7 +18,7 @@ options=('!lto')
 depends=('bzip2' 'cairo' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk3' 'json-glib' 'lcms2' 'libexif'
          'libgcc' 'libgomp' 'libheif' 'libiptcdata' 'libjpeg-turbo' 'libjxl' 'libpng' 'libraw'
          'libstdc++' 'libtiff' 'libwebp' 'zlib' 'zstd')
-makedepends=('cmake' 'git' 'wayland-protocols' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs')
+makedepends=('cmake' 'git' 'wayland-protocols' 'gtk4' 'qt6-base' 'poppler-glib' 'gstreamer' 'gst-plugins-base-libs' 'glslang' 'spirv-tools')
 # Loaded at runtime when present.
 optdepends=('gtk4: the GTK 4 interface, preferred on GNOME'
             'qt6-base: the Qt 6 interface, preferred on KDE Plasma'
@@ -52,6 +52,11 @@ build() {
 }
 
 check() {
+  # The GPU's shaders, as glslang made them, valid for Vulkan (an invalid
+  # compute pipeline can hang a GPU).
+  for spv in build/shaders/*.spv; do
+    spirv-val --target-env vulkan1.3 "$spv"
+  done
   # Decode without a display, then the version and the example format plugin.
   mkdir -p smoke
   printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > smoke/rgb.ppm
