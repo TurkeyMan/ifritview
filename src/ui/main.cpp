@@ -1,6 +1,8 @@
 #include "app.h"
 #include "platform.h"
 #include "first_image.h"
+#include "gpu_view.h"
+#include "decoders/decoder.h"
 #include "i18n.h"
 #include "lens_store.h"
 #include "pipeline.h"
@@ -178,6 +180,74 @@ void run_step(App& app, const std::string& step)
 int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first,
             std::shared_future<Config> settings);
 
+// --gpu-render IN OUT.ppm ZOOM [nearest|area|mitchell|catmullrom|lanczos3]:
+// IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
+// (lavapipe will do), into OUT; with how much of it isn't the background.
+// The view's GPU path checked without a window.
+static int gpu_render(int argc, char** argv)
+{
+    if (argc < 3)
+    {
+        std::fprintf(stderr, "--gpu-render IN OUT.ppm ZOOM [FILTER]\n");
+        return 2;
+    }
+    auto image = std::make_shared<Image>();
+    std::string error;
+    if (!decode_image(argv[0], *image, error))
+    {
+        std::fprintf(stderr, "%s: %s\n", argv[0], error.c_str());
+        return 1;
+    }
+    auto device = rap::gpu::device::headless();
+    if (!device)
+    {
+        std::fprintf(stderr, "no GPU device\n");
+        return 1;
+    }
+    GpuView view(device);
+    GpuView::Frame f;
+    f.zoom = std::atof(argv[2]);
+    f.width = std::max(1, int(std::ceil(image->width * f.zoom)));
+    f.height = std::max(1, int(std::ceil(image->height * f.zoom)));
+    f.background = rap::color{38, 38, 38};
+    if (argc > 3)
+    {
+        static const char* const names[] = {"nearest", "area", "mitchell", "catmullrom", "lanczos3"};
+        for (int i = 0; i < 5; ++i)
+            if (!std::strcmp(argv[3], names[i]))
+                f.shrink = f.enlarge = ScaleFilter(i);
+    }
+    rap::gpu::texture_ptr out;
+    rap::gpu::ticket ready;
+    rap::frame_color colour;
+    if (!view.render(image, 1, f, out, ready, colour, error))
+    {
+        std::fprintf(stderr, "render: %s\n", error.c_str());
+        return 1;
+    }
+    const int tw = out->width(), th = out->height();
+    std::vector<std::byte> px(size_t(tw) * th * 4);
+    device->readback(out, px, size_t(tw) * 4).wait();
+    size_t drawn = 0;
+    std::FILE* file = std::fopen(argv[1], "wb");
+    if (file)
+        std::fprintf(file, "P6\n%d %d\n255\n", f.width, f.height);
+    for (int y = 0; y < f.height; ++y)
+        for (int x = 0; x < f.width; ++x)
+        {
+            const std::byte* p = &px[(size_t(y) * tw + x) * 4];
+            const int r = std::to_integer<int>(p[0]), g = std::to_integer<int>(p[1]), b = std::to_integer<int>(p[2]);
+            drawn += std::abs(r - 38) + std::abs(g - 38) + std::abs(b - 38) > 6;
+            if (file)
+                std::fputc(r, file), std::fputc(g, file), std::fputc(b, file);
+        }
+    if (file)
+        std::fclose(file);
+    std::printf("%s on %s%s: %dx%d at zoom %g, %zu of %zu pixels not the background\n", argv[0], std::string(device->api()).c_str(),
+                device->software() ? " (software)" : "", f.width, f.height, f.zoom, drawn, size_t(f.width) * f.height);
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     const auto t_start = std::chrono::steady_clock::now();
@@ -223,6 +293,8 @@ int main(int argc, char** argv)
         return process(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--formats") == 0)
         return formats_report();
+    if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
+        return gpu_render(argc - 2, argv + 2);
 
     // The language first: the toolkit takes it as it starts.
     start_translations(saved_language());

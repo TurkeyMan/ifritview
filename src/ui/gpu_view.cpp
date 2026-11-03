@@ -1712,6 +1712,16 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     last.buffers = {s.stats, histogram_};
     last.uniforms = bytes(cp);
     passes.push_back(std::move(last));
+    // IFRIT_GPU_SEPARATE_RUNS: each pass a run of its own, to tell a fault in
+    // the passes from one between them (a barrier within a run).
+    static const bool separate = std::getenv("IFRIT_GPU_SEPARATE_RUNS");
+    if (separate && passes.size() > 1)
+    {
+        for (size_t i = 0; i + 1 < passes.size(); ++i)
+            device_->run(std::span(&passes[i], 1));
+        ready = device_->run(std::span(&passes.back(), 1));
+        return true;
+    }
     ready = device_->run(passes);
     return true;
 }
