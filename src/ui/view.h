@@ -285,6 +285,13 @@ private:
         bool operator==(const GpuKey&) const = default;
     } gpu_drawn_;
     bool gpu_shown_ = false;
+    // While the view is being resized (a splitter dragged, the window
+    // sized), frames skip what a resize doesn't change and is slow to redo:
+    // the histogram counted, drawn into its panel and read back, and the
+    // status told of the zoom. Done once, a moment after the last resize.
+    bool resizing_ = false;
+    bool zoom_change_held_ = false;
+    rap::subscription resize_settled_;
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)

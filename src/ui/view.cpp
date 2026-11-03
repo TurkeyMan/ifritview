@@ -17,6 +17,7 @@
 #include <cstring>
 #include <numbers>
 #include <thread>
+#include <utility>
 
 using APixelFormat = rap::pixel_format;
 
@@ -85,6 +86,16 @@ rap::node View::node()
         .on_resize(
             [this](rap::size_f)
             {
+                resizing_ = true;
+                resize_settled_ = ui_.timer(150, false,
+                                            [this]
+                                            {
+                                                resizing_ = false;
+                                                if (std::exchange(zoom_change_held_, false))
+                                                    zoom_changed();
+                                                gpu_drawn_ = {};  // drawn again, with the histogram
+                                                present_on_gpu();
+                                            });
                 layout();
                 if (on_resized)
                     on_resized();
@@ -700,6 +711,11 @@ void View::drop_caches()
 
 void View::zoom_changed()
 {
+    if (resizing_)
+    {
+        zoom_change_held_ = true;
+        return;
+    }
     if (on_zoom_changed)
         on_zoom_changed();
 }
@@ -1213,7 +1229,7 @@ bool View::draw_on_gpu(rap::color background)
     f.checker_size = int(std::lround(8 * scale_factor()));
     f.enlarge = cfg_.enlarge_filter;
     f.shrink = cfg_.shrink_filter;
-    f.count_histogram = histogram_overlay_ || histogram_panel_;
+    f.count_histogram = (histogram_overlay_ || histogram_panel_) && !resizing_;
     f.histogram_channels = cfg_.histogram_channels;
     f.histogram = histogram_overlay_;
     if (f.histogram)
@@ -1278,7 +1294,7 @@ bool View::draw_on_gpu(rap::color background)
         platform::trace("gpu view: %dx%d at zoom %.4f%s", f.width, f.height, f.zoom, how.c_str());
     }
     gpu_shown_ = true;
-    if (histogram_panel_)
+    if (histogram_panel_ && !resizing_)
     {
         draw_histogram_panel();
         if (on_histogram_details)
