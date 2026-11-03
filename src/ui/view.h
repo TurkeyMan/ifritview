@@ -120,7 +120,11 @@ public:
     };
     ZoomMode zoom_mode() const { return mode_; }
     double zoom() const { return zoom_; }
-    void zoom_fit();
+    // The whole image in the view: at most 1:1 (an image's pixels aren't
+    // enlarged unasked); `fill` (fit asked for: the toolbar's, a key's, a
+    // mouse action's) enlarges a smaller one to fill the view too, until the
+    // next image.
+    void zoom_fit(bool fill = false);
     void zoom_original();
     // The zoom that is 1:1: one image pixel to a device pixel, or for an
     // image that renders at any size (a PDF page), its actual size.
@@ -377,6 +381,7 @@ private:
     double zoom_ = 1.0;
     double pan_x_ = 0, pan_y_ = 0;  // image origin in device pixels
     bool fullscreen_ = false;
+    bool fit_fills_ = false;  // zoom_fit(true): a fit past 1:1, for this image
     int pressed_button_ = 0;
     bool drag_active_ = false;
     bool suppress_click_ = false;

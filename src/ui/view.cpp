@@ -342,6 +342,7 @@ void View::set_image(std::shared_ptr<Image> image)
     drag_active_ = false;
     pressed_button_ = 0;
     mode_ = ZoomMode::Fit;
+    fit_fills_ = false;
     layout();
     zoom_changed();
     if (on_selection_changed)
@@ -731,8 +732,9 @@ double View::fit_zoom() const
     const double w = stand_in ? image_->final_width : image_->width;
     const double h = stand_in ? image_->final_height : image_->height;
     double z = std::min(vw / w, vh / h);
-    // Pixels stop at 1:1; an image that renders at any size fills the view.
-    if (!(fullscreen_ && cfg_.fullscreen_upscale) && !image_->vector)
+    // Pixels stop at 1:1, unless a fit to fill was asked for; an image that
+    // renders at any size fills the view.
+    if (!(fullscreen_ && cfg_.fullscreen_upscale) && !image_->vector && !fit_fills_)
         z = std::min(z, 1.0);
     if (std::fabs(z - 1.0) < 0.01)
         z = 1.0;
@@ -882,10 +884,11 @@ void View::zoom_original()
     set_zoom(natural_zoom(), vw / 2.0, vh / 2.0);
 }
 
-void View::zoom_fit()
+void View::zoom_fit(bool fill)
 {
     end_motion();
     mode_ = ZoomMode::Fit;
+    fit_fills_ = fill;
     layout();
     zoom_changed();
 }
@@ -1801,7 +1804,7 @@ void View::run_click(Action a, double x, double y)
             return;
         }
         case Action::ZoomFit:
-            zoom_fit();
+            zoom_fit(true);
             return;
         case Action::ZoomOriginal:
             zoom_original();

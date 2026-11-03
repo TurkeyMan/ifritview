@@ -1929,7 +1929,7 @@ void App::zoom_original()
 }
 void App::zoom_fit()
 {
-    view_->zoom_fit();
+    view_->zoom_fit(true);  // asked for: a small image enlarged to fill the view
 }
 
 void App::open_dialog()
