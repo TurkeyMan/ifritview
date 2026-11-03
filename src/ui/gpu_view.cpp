@@ -1542,7 +1542,8 @@ std::vector<rap::gpu::texture_ptr> GpuView::view_inputs(const rap::gpu::texture_
 
 void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 {
-    if (s.measured || !(s.tonable || always))
+    static const bool unmeasured = std::getenv("IFRIT_NO_MEASURE");  // to tell the measures' part in a fault
+    if (s.measured || !(s.tonable || always) || unmeasured)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(s.stats, 0);
