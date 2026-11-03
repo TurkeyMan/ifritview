@@ -21,8 +21,9 @@ void unpack(const Prepared& p, std::vector<uint16_t>& out)
     const uint64_t mask = (1u << p.bits) - 1;
     const unsigned flip = p.swap ? 1 : 0;
     parallel(size_t(p.readout_h),
-             [&](unsigned y)
+             [&](size_t row)
              {
+                 const unsigned y = unsigned(row);
                  uint16_t* o = out.data() + size_t(y) * p.readout_w;
                  size_t q = size_t(uint64_t(y) * p.row_bits / 8);
                  if (p.bits == 16 && g <= 2 && q % 2 == 0)  // whole 16-bit samples, either order

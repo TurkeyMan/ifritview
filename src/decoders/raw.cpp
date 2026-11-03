@@ -807,8 +807,9 @@ public:
         const auto held = [](float q) { return uint16_t(uint32_t(q < 0.f ? 0.f : q > 65535.f ? 65535.f : q)); };
         out.resize(size_t(rw) * rh * 3);
         parallel(rh,
-                 [&](unsigned y)
+                 [&](size_t row)
                  {
+                     const unsigned y = unsigned(row);
                      uint16_t* o = out.data() + size_t(y) * rw * 3;
                      for (unsigned x = 0; x < rw; ++x, o += 3)
                      {
@@ -1288,8 +1289,9 @@ bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<u
         const unsigned rw = raw.imgdata.sizes.raw_width, rh = raw.imgdata.sizes.raw_height, n = raw.samples(), wrap = st.tile[0];
         out.resize(size_t(rw) * rh * n);
         parallel(rh,
-                 [&](unsigned y)
+                 [&](size_t row)
                  {
+                     const unsigned y = unsigned(row);
                      for (unsigned x = 0; x < rw; x += wrap)  // a tile's row at a time
                      {
                          uint16_t* o = out.data() + (size_t(y) * rw + x) * n;
@@ -1334,7 +1336,7 @@ bool unpack_here(RawAccess& raw, const uint8_t* file, size_t size, std::vector<u
     // bottom, slice after slice.
     const uint16_t* from = j.samples.data();
     parallel(rh,
-             [&](unsigned row)
+             [&](size_t row)
              {
                  if (!slices[0])
                  {
@@ -1475,8 +1477,9 @@ bool decode_linear(RawAccess& raw, Image& out, std::string& error, bool ycc)
     m->channels = 3;
     auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height * 3);
     parallel(unsigned(m->height),
-             [&](unsigned y)
+             [&](size_t row)
              {
+                 const unsigned y = unsigned(row);
                  uint16_t* o = data->data() + size_t(y) * m->width * 3;
                  const ushort(*i)[4] = image + size_t(y) * m->width;
                  for (int x = 0; x < m->width; ++x, o += 3)
@@ -1649,8 +1652,9 @@ bool decode_mosaic(RawAccess& raw, const uint8_t* file, size_t size, Image& out,
         auto data = std::make_shared<std::vector<uint16_t>>(size_t(m->width) * m->height * n);
         // The active area, out of the readout with its margins.
         parallel(unsigned(m->height),
-                 [&](unsigned y)
+                 [&](size_t row)
                  {
+                     const unsigned y = unsigned(row);
                      std::memcpy(data->data() + size_t(y) * m->width * n, src + size_t(y + sz.top_margin) * pitch + size_t(sz.left_margin) * n,
                                  size_t(m->width) * n * 2);
                  });
