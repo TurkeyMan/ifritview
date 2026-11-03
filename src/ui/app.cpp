@@ -1848,10 +1848,21 @@ void App::fit_window_to_image()
     const double cap = image_->vector ? HUGE_VAL : 1.0;
     const double s = std::min({cap, (max_w - chrome_w - pane_w) / (images * iw), (max_h - chrome_h) / ih});
     const float cw = images * float(std::ceil(iw * s)), ch = float(std::ceil(ih * s));
+    // What decides the size; not the chrome, which is measured each time and
+    // can differ by a fraction of a pixel (a fractional scale; a splitter
+    // sharing a resize with its pane).
+    const std::array<double, 7> inputs{iw, ih, double(images), double(pane_w), scale, work.w, work.h};
+    if (!refit_when_laid_out_ && inputs == fitted_for_ && std::fabs(cur.w - fitted_size_.w) < 2 &&
+        std::fabs(cur.h - fitted_size_.h) < 2)
+        return;
     const float w = std::clamp(cw + chrome_w + pane_w, float(cfg_.min_window_width), max_w);
     const float h = std::clamp(ch + chrome_h, float(cfg_.min_window_height), max_h);
+    fitted_for_ = inputs;
     if (std::fabs(cur.w - w) < 1 && std::fabs(cur.h - h) < 1)
+    {
+        fitted_size_ = cur;
         return;
+    }
     if (auto pos = window_->position())
     {
         // Growth keeps the top-left corner; an edge past the work area pushes back.
@@ -1866,6 +1877,7 @@ void App::fit_window_to_image()
             window_->move({x, y});
     }
     window_->resize({w, h});
+    fitted_size_ = {w, h};  // as asked: a toolkit may resize later
 }
 
 void App::toggle_fullscreen()

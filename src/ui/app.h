@@ -388,6 +388,11 @@ private:
     bool refit_after_layout_ = false;
     bool refit_when_laid_out_ = false;  // a fit guessed the chrome: fit again once laid out
     double fitted_scale_ = 0;           // the device scale the window was last fitted at
+    // The last fit's inputs and the size it gave: a fit for the same (the
+    // next of a folder of same-size images) leaves the window be, rather
+    // than measuring its chrome again and moving it a pixel each time.
+    std::array<double, 7> fitted_for_{};
+    rap::size_f fitted_size_{};
     bool first_presented_ = false;
     std::string deferred_scan_;  // the folder of the first image, listed once it's painted
     void take_first_image(class FirstImage& first, const std::string& file, uint64_t generation);
