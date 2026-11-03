@@ -15,6 +15,7 @@
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_correct.h"
+#include "shaders/develop_impulse.h"
 #include "shaders/develop_green.h"
 #include "shaders/develop_ycc.h"
 #include "shaders/difference.h"
@@ -331,15 +332,19 @@ bool GpuView::programs(std::string& error)
 {
     if (compose_)
         return true;
-    for (auto [program, make] : {std::pair{&decode_, shaders::decode}, std::pair{&resample_, shaders::resample},
-                                 std::pair{&compose_, shaders::compose}, std::pair{&difference_program_, shaders::difference},
-                                 std::pair{&histogram_view_, shaders::histogram_view},
-                                 std::pair{&develop_, shaders::develop}, std::pair{&develop_correct_, shaders::develop_correct},
-                                 std::pair{&develop_green_, shaders::develop_green},
-                                 std::pair{&develop_linear_, shaders::develop_linear},
-                                 std::pair{&develop_ycc_, shaders::develop_ycc}, std::pair{&mosaic_, shaders::mosaic},
-                                 std::pair{&mosaic_linear_, shaders::mosaic_linear},
-                                 std::pair{&warp_, shaders::warp}, std::pair{&detail_, shaders::detail}})
+    // A program and the shader it's made from (a function pointer, spelt out:
+    // GCC 14 deduces std::pair's from a function's type, not its pointer).
+    using entry = std::pair<rap::gpu::program_ptr*, decltype(&shaders::decode)>;
+    for (auto [program, make] : {entry{&decode_, shaders::decode}, entry{&resample_, shaders::resample},
+                                 entry{&compose_, shaders::compose}, entry{&difference_program_, shaders::difference},
+                                 entry{&histogram_view_, shaders::histogram_view},
+                                 entry{&develop_, shaders::develop}, entry{&develop_correct_, shaders::develop_correct},
+                                 entry{&develop_impulse_, shaders::develop_impulse},
+                                 entry{&develop_green_, shaders::develop_green},
+                                 entry{&develop_linear_, shaders::develop_linear},
+                                 entry{&develop_ycc_, shaders::develop_ycc}, entry{&mosaic_, shaders::mosaic},
+                                 entry{&mosaic_linear_, shaders::mosaic_linear},
+                                 entry{&warp_, shaders::warp}, entry{&detail_, shaders::detail}})
     {
         auto r = device_->program(make());
         if (!r.program)
@@ -350,11 +355,11 @@ bool GpuView::programs(std::string& error)
         *program = r.program;
     }
     for (auto [program, make] :
-         {std::pair{&stats_program_, shaders::stats}, std::pair{&peak_, shaders::peak}, std::pair{&histogram_program_, shaders::histogram},
-          std::pair{&histogram_max_, shaders::histogram_max}, std::pair{&ljpeg_guess_, shaders::ljpeg_guess}, std::pair{&ljpeg_sync_, shaders::ljpeg_sync},
-          std::pair{&ljpeg_resolve_, shaders::ljpeg_resolve}, std::pair{&ljpeg_decode_, shaders::ljpeg_decode},
-          std::pair{&ljpeg_columns_, shaders::ljpeg_columns}, std::pair{&ljpeg_rows_, shaders::ljpeg_rows}, std::pair{&ljpeg_black_, shaders::ljpeg_black},
-          std::pair{&raw_blocks_, shaders::raw_blocks}, std::pair{&unpack_, shaders::unpack}, std::pair{&noise_, shaders::noise}})
+         {entry{&stats_program_, shaders::stats}, entry{&peak_, shaders::peak}, entry{&histogram_program_, shaders::histogram},
+          entry{&histogram_max_, shaders::histogram_max}, entry{&ljpeg_guess_, shaders::ljpeg_guess}, entry{&ljpeg_sync_, shaders::ljpeg_sync},
+          entry{&ljpeg_resolve_, shaders::ljpeg_resolve}, entry{&ljpeg_decode_, shaders::ljpeg_decode},
+          entry{&ljpeg_columns_, shaders::ljpeg_columns}, entry{&ljpeg_rows_, shaders::ljpeg_rows}, entry{&ljpeg_black_, shaders::ljpeg_black},
+          entry{&raw_blocks_, shaders::raw_blocks}, entry{&unpack_, shaders::unpack}, entry{&noise_, shaders::noise}})
     {
         auto r = device_->compute_program(make());
         if (!r.program)
@@ -937,9 +942,11 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         // the develop reads as it would the raw's: whole data units, as
         // LibRaw makes a Phase One's; the gain maps' fractions kept (their
         // gains lift the shadows of a phone's 10 bits) as halves.
+        bool halves = false;  // the mosaic now in half floats (gains' fractions kept)
         if (corrections && ((*m->corrections)[0] || (*m->corrections)[3]))
         {
             const bool whole = (*m->corrections)[3];
+            halves = !whole;
             rap::gpu::pass c;
             c.program = develop_correct_;
             c.inputs = {sites};
@@ -955,6 +962,27 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             sites = c.target;
             if (m->corrected)
                 check_corrections(*m, sites);
+        }
+        // Hot and cold photosites out, before the demosaic spreads them into
+        // coloured specks (Bayer's and a monochrome sensor's; X-Trans's
+        // neighbours of a colour aren't on a lattice). In the format it came
+        // in: unorm 16 keeps 16-bit data exact, which halves wouldn't.
+        static const bool impulses = !std::getenv("IFRIT_NO_IMPULSE");
+        if (impulses && m->channels == 1 && !m->ycc.block_h && (m->period == 2 || m->grey))
+        {
+            rap::gpu::pass c;
+            c.program = develop_impulse_;
+            c.inputs = {sites};
+            c.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};
+            c.uniforms = bytes(p);
+            c.target = device_->create({m->width, m->height, halves ? rap::gpu::format::r16f : rap::gpu::format::r16, 1, true});
+            if (!c.target)
+            {
+                error = "too big for the GPU";
+                return false;
+            }
+            device_->run(std::span(&c, 1));
+            sites = c.target;
         }
         // Output (x, y), as shown, to the photosite: through the turn, then
         // into the framing (EXIF orientation: what the stored image needs).

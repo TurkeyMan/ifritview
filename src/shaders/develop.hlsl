@@ -392,6 +392,80 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int x = int(position.x), y = int(position.y);
     return (corrected(x, y) + black_at(x, y)) / 65535;
 }
+#elif defined(IMPULSE)
+// Hot and cold photosites taken out before the demosaic spreads them, as
+// impulse.h has it for the CPU: far above (or below) all eight of its colour
+// around it, by more than they differ among themselves and a floor, and the
+// only such peak where it is: a glint lighting a photosite of each colour
+// makes its nearest of the other colours peaks of theirs too, and is kept. It
+// becomes the median of its colour's eight.
+static const float kSpread = 1;      // impulse.h's kImpulseSpread
+static const float kFloor = 0.005;   // impulse.h's kImpulseFloor: of the range from black to white
+static const int kShared = 2;        // impulse.h's kImpulseShared
+
+// Past an edge, mirrored: the same colour, as the parity is kept.
+float level_at(int x, int y)
+{
+    x = x < 0 ? -x : x >= size.x ? 2 * (size.x - 1) - x : x;
+    y = y < 0 ? -y : y >= size.y ? 2 * (size.y - 1) - y : y;
+    return mosaic.Load(int3(x, y, 0)) * 65535 - black_at(x, y);
+}
+
+// The eight of (x, y)'s colour around it, `s` away.
+void neighbours(int x, int y, int s, out float n[8])
+{
+    n[0] = level_at(x - s, y - s), n[1] = level_at(x, y - s), n[2] = level_at(x + s, y - s), n[3] = level_at(x - s, y);
+    n[4] = level_at(x + s, y), n[5] = level_at(x - s, y + s), n[6] = level_at(x, y + s), n[7] = level_at(x + s, y + s);
+}
+
+// How far (x, y) stands above (`up`) or below all eight of its colour around it.
+float beyond(int x, int y, int s, bool up)
+{
+    float n[8];
+    neighbours(x, y, s, n);
+    float lo = n[0], hi = n[0];
+    for (int i = 1; i < 8; ++i)
+        lo = min(lo, n[i]), hi = max(hi, n[i]);
+    const float v = level_at(x, y);
+    return up ? v - hi : lo - v;
+}
+
+float main(float4 position : SV_Position) : SV_Target
+{
+    read_levels();
+    const int x = int(position.x), y = int(position.y);
+    const float raw = mosaic.Load(int3(x, y, 0));
+    const float v = raw * 65535 - black_at(x, y);
+    const int s = flags.y ? 1 : 2;
+    float n[8];
+    neighbours(x, y, s, n);
+    float lo = n[0], hi = n[0];
+    for (int i = 1; i < 8; ++i)
+        lo = min(lo, n[i]), hi = max(hi, n[i]);
+    const float t = max(kSpread * (hi - lo), kFloor * (as_shot.w - black_at(x, y)));
+    const bool hot = v - hi > t, cold = lo - v > t;
+    if (!hot && !cold)
+        return raw;
+    if (!flags.y)
+    {
+        // Its nearest of the other colours: peaks of theirs too, a glint.
+        int peaks = 0;
+        for (int j = -1; j <= 1; ++j)
+            for (int i = -1; i <= 1; ++i)
+                if ((i || j) && beyond(x + i, y + j, 2, hot) > 0)
+                    ++peaks;
+        if (peaks >= kShared)
+            return raw;
+    }
+    // The median of eight: the mean of the middle two, sorted in place.
+    for (int a = 1; a < 8; ++a)
+        for (int b = a; b > 0 && n[b - 1] > n[b]; --b)
+        {
+            const float k = n[b];
+            n[b] = n[b - 1], n[b - 1] = k;
+        }
+    return ((n[3] + n[4]) / 2 + black_at(x, y)) / 65535;
+}
 #else
 // OpcodeList3's, on R, G, B at (x, y): its gain maps and radial vignette;
 // or lensfun's vignetting (pa), the same polynomial as the fall-off to

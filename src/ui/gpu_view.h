@@ -262,6 +262,7 @@ private:
     rap::gpu::program_ptr detail_, noise_;     // noise reduction and sharpening, and its noise measure
     rap::gpu::texture_ptr detail_temps_[5];   // its passes' intermediates, a tile and its reach, reused
     rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
+    rap::gpu::program_ptr develop_impulse_;  // its hot and cold photosites taken out, before the demosaic
     rap::gpu::program_ptr develop_green_;    // X-Trans's green, before the develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::program_ptr mosaic_linear_;  // a linear DNG's readout: three colours a photosite

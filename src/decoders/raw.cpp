@@ -1,5 +1,6 @@
 #include "../bytes.h"
 #include "../i18n.h"
+#include "../impulse.h"
 #include "../lens_database.h"
 #include "../gpu.h"
 #include "../parallel.h"
@@ -224,6 +225,19 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     {
         error = libraw_strerror(r);
         return false;
+    }
+    // Hot and cold photosites out first, as the GPU's develop has them.
+    {
+        static const bool impulses = !std::getenv("IFRIT_NO_IMPULSE");
+        const auto& id = raw.imgdata.idata;
+        auto& rd = raw.imgdata.rawdata;
+        const bool bayer = id.filters >= 1000 && id.colors == 3, mono = id.filters == 0 && id.colors == 1;
+        if (impulses && rd.raw_image && (bayer || mono))
+        {
+            const auto& c = raw.imgdata.color;
+            remove_impulses(rd.raw_image, rd.sizes.raw_width, rd.sizes.raw_height, rd.sizes.raw_pitch / 2,
+                            float(c.maximum) - float(c.black), mono);
+        }
     }
     r = raw.dcraw_process();
     if (r != LIBRAW_SUCCESS)
