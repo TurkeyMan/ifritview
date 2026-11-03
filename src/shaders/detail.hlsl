@@ -28,6 +28,7 @@ cbuffer Params : register(b0)
     float4 coarsest;    // scale 4's: luminance, colour; z: colour's guide (DetailFilter::guide)
     float4 sharpen;     // amount, the Gaussian's sigma, halo
     float4 mask;        // low, high (0: none)
+    float4 support;     // shrink: scales 0..3's support from the next, multiples of the noise (DetailFilter::support)
 };
 
 Texture2D<float4> a : register(t0);
@@ -82,7 +83,18 @@ float4 main(float4 position : SV_Position) : SV_Target
         const int j = step;
         const float3 d = at(a, p).xyz - at(b, p).xyz;
         const float noise_l = asfloat(noise.Load(kNoiseSigma * 4)), noise_c = asfloat(noise.Load((kNoiseSigma + 1) * 4));
-        const float tl = (j < 4 ? luminance[j] : coarsest.x) * noise_l, tc = (j < 4 ? colour[j] : coarsest.y) * noise_c;
+        float tl = (j < 4 ? luminance[j] : coarsest.x) * noise_l;
+        const float tc = (j < 4 ? colour[j] : coarsest.y) * noise_c;
+        if (j < 4 && support[j] > 0)
+        {
+            // The next scale's luminance gradient here, against its noise:
+            // a fine detail on an edge of the coarser is shrunk less.
+            const int gap = 1 << j;
+            const float2 g = float2(at(b, p + int2(gap, 0)).x - at(b, p - int2(gap, 0)).x,
+                                    at(b, p + int2(0, gap)).x - at(b, p - int2(0, gap)).x);
+            const float r = length(g) / 2 / (support[j] * noise_l);
+            tl /= 1 + r * r;
+        }
         const float3 kept = float3(shrink(d.x, tl), shrink(d.yz, tc));
         return float4((j > 0 ? at(c, p).xyz : 0) + kept, 0);
     }

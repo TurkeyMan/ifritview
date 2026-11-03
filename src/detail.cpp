@@ -45,6 +45,9 @@ DetailFilter::DetailFilter(const Detail& d)
         luminance[j] = l * weight_l[j] * kNoiseAt[j] / kNoiseAt[0];
         colour[j] = c * weight_c[j] * kNoiseAt[j] / kNoiseAt[0];
     }
+    static const bool unsupported = std::getenv("IFRIT_DETAIL_UNSUPPORTED");  // to compare
+    for (int j = 0; j + 1 < kLevels && !unsupported; ++j)
+        support[j] = 3 * kNoiseAt[j + 1] / kNoiseAt[0];
     static const bool unguided = std::getenv("IFRIT_DETAIL_UNGUIDED");  // to compare
     guide = denoise && !unguided ? 2.5f : 0;
     amount = float(std::clamp(d.sharpness, 0.0, 150.0) / 100 * 1.5);
@@ -209,10 +212,21 @@ void apply_detail(const DetailFilter& f, const float* rgb, int width, int height
             {
                 smooth(cur, smoothed, step, 1, 0);
                 smooth(smoothed, next, step, 0, 1);
+                const int gap = 1 << j;
                 for (size_t i = 0; i < size_t(iw) * ih; ++i)
                 {
                     float l = cur.c[0][i] - next.c[0][i], a = cur.c[1][i] - next.c[1][i], b = cur.c[2][i] - next.c[2][i];
-                    l = shrink(l, f.luminance[j] * noise_l);
+                    float t = f.luminance[j] * noise_l;
+                    if (f.support[j] > 0)
+                    {
+                        // The next scale's luminance gradient here, against its noise.
+                        const int x = int(i % size_t(iw)), y = int(i / size_t(iw));
+                        const float gx = next.at(0, x + gap, y) - next.at(0, x - gap, y);
+                        const float gy = next.at(0, x, y + gap) - next.at(0, x, y - gap);
+                        const float r = std::sqrt(gx * gx + gy * gy) / 2 / (f.support[j] * noise_l);
+                        t /= 1 + r * r;
+                    }
+                    l = shrink(l, t);
                     shrink(a, b, f.colour[j] * noise_c);
                     sum.c[0][i] += l, sum.c[1][i] += a, sum.c[2][i] += b;
                 }

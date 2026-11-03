@@ -25,6 +25,11 @@
 // edges (an "edge-avoiding" a trous, Dammertz et al. 2010), rather than
 // bleeding across them.
 //
+// Luminance's shrinking also asks the next coarser scale whether there's
+// something there: where its luminance has an edge, a fine detail is part of
+// it and is shrunk less (by 1 + (gradient / 3 sigma)^2, sigma that scale's
+// noise); a lone speck barely shows a scale up, and is shrunk in full.
+//
 // Sharpening is an unsharp mask of the luminance (after the noise is
 // taken out, so it isn't sharpened): the detail a Gaussian of `radius`
 // leaves, its large swings tempered (Detail: how much of an edge's swing
@@ -66,6 +71,9 @@ struct DetailFilter
     // Each scale's shrinkage threshold, a multiple of the finest scale's
     // noise (measured per image): luminance, colour.
     float luminance[kLevels] = {}, colour[kLevels] = {};
+    // Each scale's support from the next coarser: its luminance gradient is
+    // weighed against this multiple of the finest scale's noise (0: none).
+    float support[kLevels] = {};
     float amount = 0;     // of the luminance detail added back
     float sigma = 1;      // the sharpening Gaussian's, in pixels
     float halo = 0;       // a detail swing of this much gets through half

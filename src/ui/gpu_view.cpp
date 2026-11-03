@@ -82,7 +82,7 @@ struct DetailParams
 {
     int32_t mode, axis, step, sharpening;
     int32_t origin[2], size[2], out_origin[2], image_size[2];
-    float as_shot[4], luminance[4], colour[4], coarsest[4], sharpen[4], mask[4];
+    float as_shot[4], luminance[4], colour[4], coarsest[4], sharpen[4], mask[4], support[4];
 };
 
 struct NoiseParams
@@ -1294,7 +1294,7 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
         base.as_shot[c] = s.as_shot[c];
     base.as_shot[3] = 1;
     for (int j = 0; j < 4; ++j)
-        base.luminance[j] = filter.luminance[j], base.colour[j] = filter.colour[j];
+        base.luminance[j] = filter.luminance[j], base.colour[j] = filter.colour[j], base.support[j] = filter.support[j];
     base.coarsest[0] = filter.luminance[4], base.coarsest[1] = filter.colour[4], base.coarsest[2] = filter.guide;
     base.sharpen[0] = filter.amount, base.sharpen[1] = filter.sigma, base.sharpen[2] = filter.halo;
     base.mask[0] = filter.mask_low, base.mask[1] = filter.mask_high;
