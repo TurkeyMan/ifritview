@@ -92,6 +92,11 @@ rap::node View::node()
             {
                 resizing_ = true;
                 layout();
+                // The stretched frame put where the image lands at this size
+                // (fitted and capped, centred, panned), as the frame drawn
+                // once the sizes settle will have it.
+                if (canvas_ && image_ && drawn_rect_)
+                    canvas_->stretch_to(*drawn_rect_, image_on_canvas());
                 if (on_resized)
                     on_resized();
             })
@@ -99,10 +104,15 @@ rap::node View::node()
             [this](rap::size_f)
             {
                 resizing_ = false;
-                if (std::exchange(zoom_change_held_, false))
-                    zoom_changed();
+                // The new frame first: telling the status of the zoom changes
+                // its text, its row is laid out again and the window painted
+                // there and then, this canvas with it, which would show the
+                // last frame it was given (the one from before the sizes
+                // changed, at its size) until this one came.
                 gpu_drawn_ = {};  // drawn again, with the histogram
                 present_on_gpu();
+                if (std::exchange(zoom_change_held_, false))
+                    zoom_changed();
             })
         .on_pointer([this](const rap::pointer_event& e) { return pointer(e); })
         .on_scroll([this](const rap::scroll_event& e) { return scroll(e); })
@@ -119,6 +129,13 @@ void View::attach(rap::canvas* canvas)
     // on it if it's there.
     canvas_->on_frame_target([this](const rap::frame_target&) { invalidate(); });
 #endif
+}
+
+rap::rect_f View::image_on_canvas() const
+{
+    const double scale = scale_factor();
+    return {float(pan_x_ / scale), float(pan_y_ / scale), float(image_->width * zoom_ / scale),
+            float(image_->height * zoom_ / scale)};
 }
 
 rap::color View::background() const
@@ -138,8 +155,12 @@ void View::invalidate()
 {
     if (canvas_)
         canvas_->invalidate();
-    // Drawn now, not in the paint: the paint then shows this frame, not the last.
-    present_on_gpu();
+    // Drawn now, not in the paint: the paint then shows this frame, not the
+    // last. Not while sizes come in a run: the canvas shows the last frame
+    // stretched until they settle, and a frame drawn at each would be work
+    // never shown (a lone size change is painted at once, through paint()).
+    if (!resizing_)
+        present_on_gpu();
     if (on_framing_changed && !applying_framing_)
     {
         const Framing f = framing();
@@ -1034,6 +1055,8 @@ void View::paint(rap::painter& p, rap::size_f)
     view_size(vw, vh);
 
     const rap::color bg = background();
+    if (image_)
+        drawn_rect_ = image_on_canvas();
 #ifdef HAVE_GPU
     const bool on_gpu = draw_on_gpu(bg);
     // A raw or an HDR image is the GPU's to draw (its own data, in linear
@@ -1330,6 +1353,7 @@ bool View::draw_on_gpu(rap::color background)
                 });
     }
     gpu_drawn_ = key;
+    drawn_rect_ = image_on_canvas();
     return true;
 }
 #endif

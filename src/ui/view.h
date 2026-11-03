@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "compare.h"
 #include "controls.h"
 #include "image.h"
@@ -229,6 +231,10 @@ private:
     std::unique_ptr<Comparison> compare_;
     void drop_caches();
     rap::color background() const;  // around the image: the window's, or full screen's
+    rap::rect_f image_on_canvas() const;  // where the image lies, logical px
+    // Where the image lay in the last frame drawn: what a run of sizes
+    // stretches (rap::canvas::stretch_to), from there to where it lies now.
+    std::optional<rap::rect_f> drawn_rect_;
     void stretch_on_background();
     // image_changed() for another image put in the view's (comparing): its
     // data is as it was, so the GPU keeps what it has of it.
