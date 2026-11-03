@@ -467,29 +467,26 @@ rap::node viewing_page(const Config& cfg, State& st)
 rap::node controls_page(const Config& cfg, State& st)
 {
     // One row per control: windowed and fullscreen actions side by side.
-    rap::nodes rows;
-    std::vector<std::string> form_labels;
-    // A blank label, not an empty one (which would span both columns), so
-    // the headings sit over the fields.
-    form_labels.push_back(" ");
+    std::vector<L::form_row> rows;
     // Wide enough for the longest action: GTK widens a drop-down to fit its
     // choices, so a narrower one would push the second column out of line.
     constexpr float column = 36;
-    rows.push_back(L::hbox{L::label{_("Windowed")}.width(chars(column)), L::label{_("Fullscreen")}});
+    // A blank label, not an empty one (which would span both columns), so
+    // the headings sit over the fields.
+    rows.emplace_back(" ", L::hbox{L::label{_("Windowed")}.width(chars(column)), L::label{_("Fullscreen")}});
     for (const ControlInfo& c : kControls)
     {
         const std::vector<Action> acts = actions_for(c.kind);
         const std::vector<std::string> items = labels(acts);
-        form_labels.push_back(tr_ifrit(c.label));
-        rows.push_back(L::hbox{
-            L::drop_down{items, index_of(acts, cfg.control(c.id, false))}.bind(st.controls[size_t(c.id)]).width(chars(column)),
-            L::drop_down{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(column)),
-        });
+        rows.emplace_back(tr_ifrit(c.label),
+                          L::hbox{
+                              L::drop_down{items, index_of(acts, cfg.control(c.id, false))}.bind(st.controls[size_t(c.id)]).width(chars(column)),
+                              L::drop_down{items, index_of(acts, cfg.control(c.id, true))}.bind(st.fullscreen_controls[size_t(c.id)]).width(chars(column)),
+                          });
     }
-    rap::spec::form form{form_labels, rows};
     State* s = &st;
     return L::scroll{L::vbox{
-        rap::node{form, {}},
+        L::form{rows},
         L::label{_("While selecting a region, hold Shift for a square or Ctrl for the image's own shape.")},
         L::hbox{
             L::spacer{},
