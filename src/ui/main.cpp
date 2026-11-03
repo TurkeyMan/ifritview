@@ -243,6 +243,31 @@ static int gpu_render(int argc, char** argv)
         }
     if (file)
         std::fclose(file);
+    // The first pass's rows, where the filtered path drew them: their range.
+    if (const rap::gpu::texture_ptr& rows = view.first_pass())
+    {
+        const int rw = rows->width(), rh = rows->height();
+        std::vector<uint16_t> half(size_t(rw) * rh * 4);
+        device->readback(rows, std::as_writable_bytes(std::span(half)), size_t(rw) * 8).wait();
+        const auto to_float = [](uint16_t h)
+        {
+            const int e = h >> 10 & 31, m = h & 1023;
+            const float v = e == 0 ? std::ldexp(float(m), -24) : e == 31 ? INFINITY : std::ldexp(float(m | 1024), e - 25);
+            return h >> 15 ? -v : v;
+        };
+        float lo[4] = {INFINITY, INFINITY, INFINITY, INFINITY}, hi[4] = {-INFINITY, -INFINITY, -INFINITY, -INFINITY};
+        size_t nan = 0;
+        for (size_t i = 0; i < half.size(); ++i)
+        {
+            const float v = to_float(half[i]);
+            if (v != v)
+                ++nan;
+            else
+                lo[i % 4] = std::min(lo[i % 4], v), hi[i % 4] = std::max(hi[i % 4], v);
+        }
+        std::printf("first pass rows %dx%d: r %g..%g g %g..%g b %g..%g a %g..%g, %zu NaN\n", rw, rh, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2],
+                    lo[3], hi[3], nan);
+    }
     std::printf("%s on %s%s: %dx%d at zoom %g, %zu of %zu pixels not the background\n", argv[0], std::string(device->api()).c_str(),
                 device->software() ? " (software)" : "", f.width, f.height, f.zoom, drawn, size_t(f.width) * f.height);
     return 0;

@@ -88,6 +88,8 @@ public:
                            std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
+    // The filtered path's first pass's target (--gpu-render reads it back).
+    const rap::gpu::texture_ptr& first_pass() const { return rows_[0]; }
 
     // The histogram counted by the last render() (count_histogram), drawn
     // into a `width` x `height` texture for the docked panel's canvas. False
