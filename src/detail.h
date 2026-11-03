@@ -18,7 +18,12 @@
 // absolute detail. Luminance is shrunk gently (its Detail spares the finest
 // scales, its Contrast the middle ones); colour harder and across coarser
 // scales (its Detail spares the finest, its Smoothness reaches the coarsest),
-// as a colour difference vector, so hues aren't bent.
+// as a colour difference vector, so hues aren't bent. Colour is smoothed
+// guided by luminance: a tap of the spline counts towards the colour less
+// the more its luminance differs from the centre's (in multiples of the
+// luminance noise), so colour averages over what's evenly lit and stops at
+// edges (an "edge-avoiding" a trous, Dammertz et al. 2010), rather than
+// bleeding across them.
 //
 // Sharpening is an unsharp mask of the luminance (after the noise is
 // taken out, so it isn't sharpened): the detail a Gaussian of `radius`
@@ -65,6 +70,9 @@ struct DetailFilter
     float sigma = 1;      // the sharpening Gaussian's, in pixels
     float halo = 0;       // a detail swing of this much gets through half
     float mask_low = 0, mask_high = 0;  // the luminance gradient the mask opens over; 0: no mask
+    // Colour's smoothing fades over luminance differences of this many
+    // times the luminance noise (a Gaussian's sigma); 0: not guided.
+    float guide = 0;
 };
 
 // The CPU's: linear RGB (3 floats a pixel, rows of `width`, white 1) through

@@ -6,7 +6,7 @@
 #include "detail.hlsli"
 
 #define DETAIL_ENCODE 0   // level 0 (t0) to the encoding
-#define DETAIL_SMOOTH 1   // t0 smoothed by the B3 spline along `axis`, `step` apart
+#define DETAIL_SMOOTH 1   // t0 smoothed by the B3 spline along `axis`, `step` apart: colour guided by luminance
 #define DETAIL_SHRINK 2   // the sum so far (t2), plus scale `step`'s detail (t0 less t1) shrunk
 #define DETAIL_COMBINE 3  // the coarsest (t0) and the details kept (t1) together
 #define DETAIL_BLUR 4     // t0's luminance by the sharpening Gaussian along `axis`
@@ -25,7 +25,7 @@ cbuffer Params : register(b0)
     float4 as_shot;     // what level 0 is white balanced with (its data / these)
     float4 luminance;   // shrink: scales 0..3's thresholds, multiples of the noise
     float4 colour;
-    float4 coarsest;    // scale 4's: luminance, colour
+    float4 coarsest;    // scale 4's: luminance, colour; z: colour's guide (DetailFilter::guide)
     float4 sharpen;     // amount, the Gaussian's sigma, halo
     float4 mask;        // low, high (0: none)
 };
@@ -60,10 +60,22 @@ float4 main(float4 position : SV_Position) : SV_Target
         return float4(detail_encode(a.Load(int3(clamp(p + origin, 0, image_size - 1), 0)).rgb * as_shot.rgb), 0);
     if (mode == DETAIL_SMOOTH)
     {
-        float4 sum = 0;
+        // Luminance plainly; colour weighted down by how far each tap's
+        // luminance is from the centre's (detail.cpp's smooth()).
+        const float noise_l = asfloat(noise.Load(kNoiseSigma * 4));
+        const float sigma_l = coarsest.z * noise_l, inv = sigma_l > 0 ? 1 / (2 * sigma_l * sigma_l) : 0;
+        const float centre = at(a, p).x;
+        float l = 0, w = 0;
+        float2 c = 0;
         for (int k = -2; k <= 2; ++k)
-            sum += kB3[k + 2] * at(a, p + k * step * dir);
-        return sum;
+        {
+            const float3 v = at(a, p + k * step * dir).xyz;
+            const float d = v.x - centre, g = kB3[k + 2] * (inv > 0 ? exp(-d * d * inv) : 1);
+            l += kB3[k + 2] * v.x;
+            c += g * v.yz;
+            w += g;
+        }
+        return float4(l, c / w, 0);
     }
     if (mode == DETAIL_SHRINK)
     {

@@ -1295,7 +1295,7 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
     base.as_shot[3] = 1;
     for (int j = 0; j < 4; ++j)
         base.luminance[j] = filter.luminance[j], base.colour[j] = filter.colour[j];
-    base.coarsest[0] = filter.luminance[4], base.coarsest[1] = filter.colour[4];
+    base.coarsest[0] = filter.luminance[4], base.coarsest[1] = filter.colour[4], base.coarsest[2] = filter.guide;
     base.sharpen[0] = filter.amount, base.sharpen[1] = filter.sigma, base.sharpen[2] = filter.halo;
     base.mask[0] = filter.mask_low, base.mask[1] = filter.mask_high;
     base.sharpening = filter.sharpen ? 1 : 0;

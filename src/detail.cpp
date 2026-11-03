@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
 
 Detail Detail::raw_defaults()
@@ -44,6 +45,8 @@ DetailFilter::DetailFilter(const Detail& d)
         luminance[j] = l * weight_l[j] * kNoiseAt[j] / kNoiseAt[0];
         colour[j] = c * weight_c[j] * kNoiseAt[j] / kNoiseAt[0];
     }
+    static const bool unguided = std::getenv("IFRIT_DETAIL_UNGUIDED");  // to compare
+    guide = denoise && !unguided ? 2.5f : 0;
     amount = float(std::clamp(d.sharpness, 0.0, 150.0) / 100 * 1.5);
     sigma = float(std::clamp(d.sharpen_radius, 0.5, 3.0));
     const float through = unit(d.sharpen_detail);
@@ -168,6 +171,28 @@ void apply_detail(const DetailFilter& f, const float* rgb, int width, int height
         const int ix = std::max(0, ox - DetailFilter::kReach), iy = std::max(0, oy - DetailFilter::kReach);
         const int iw = std::min(width, ox + ow + DetailFilter::kReach) - ix, ih = std::min(height, oy + oh + DetailFilter::kReach) - iy;
         Planes cur, next, smoothed, sum;
+        // The B3 spline along (dx, dy), `step` apart: luminance plainly,
+        // colour guided by it (shaders/detail.hlsl's DETAIL_SMOOTH).
+        const float sigma_l = f.guide * noise_l, inv = sigma_l > 0 ? 1 / (2 * sigma_l * sigma_l) : 0;
+        const auto smooth = [&](const Planes& in, Planes& out, int step, int dx, int dy)
+        {
+            for (int y = 0; y < in.height; ++y)
+                for (int x = 0; x < in.width; ++x)
+                {
+                    const float centre = in.at(0, x, y);
+                    float l = 0, a = 0, b = 0, w = 0;
+                    for (int k = -2; k <= 2; ++k)
+                    {
+                        const int px = x + k * step * dx, py = y + k * step * dy;
+                        const float lum = in.at(0, px, py), d = lum - centre;
+                        const float g = kB3[k + 2] * (inv > 0 ? std::exp(-d * d * inv) : 1);
+                        l += kB3[k + 2] * lum;
+                        a += g * in.at(1, px, py), b += g * in.at(2, px, py), w += g;
+                    }
+                    const size_t i = size_t(y) * in.width + x;
+                    out.c[0][i] = l, out.c[1][i] = a / w, out.c[2][i] = b / w;
+                }
+        };
         cur.resize(iw, ih);
         for (int y = 0; y < ih; ++y)
             for (int x = 0; x < iw; ++x)
@@ -182,24 +207,8 @@ void apply_detail(const DetailFilter& f, const float* rgb, int width, int height
             next.resize(iw, ih), smoothed.resize(iw, ih), sum.resize(iw, ih);
             for (int j = 0, step = 1; j < DetailFilter::kLevels; ++j, step *= 2)
             {
-                for (int k = 0; k < 3; ++k)
-                    for (int y = 0; y < ih; ++y)
-                        for (int x = 0; x < iw; ++x)
-                        {
-                            float s = 0;
-                            for (int u = -2; u <= 2; ++u)
-                                s += kB3[u + 2] * cur.at(k, x + u * step, y);
-                            smoothed.c[k][size_t(y) * iw + x] = s;
-                        }
-                for (int k = 0; k < 3; ++k)
-                    for (int y = 0; y < ih; ++y)
-                        for (int x = 0; x < iw; ++x)
-                        {
-                            float s = 0;
-                            for (int v = -2; v <= 2; ++v)
-                                s += kB3[v + 2] * smoothed.at(k, x, y + v * step);
-                            next.c[k][size_t(y) * iw + x] = s;
-                        }
+                smooth(cur, smoothed, step, 1, 0);
+                smooth(smoothed, next, step, 0, 1);
                 for (size_t i = 0; i < size_t(iw) * ih; ++i)
                 {
                     float l = cur.c[0][i] - next.c[0][i], a = cur.c[1][i] - next.c[1][i], b = cur.c[2][i] - next.c[2][i];
