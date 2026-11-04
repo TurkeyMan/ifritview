@@ -392,8 +392,10 @@ void App::build_ui()
                             }}
                     .stretch()  // the list's own stretch is inside the builder: the slot needs it too
                     .handle(info_box_),
-                // The histogram of what's shown (drawn on the GPU), and what's measured.
-                vbox{
+                // The histogram of what's shown (drawn on the GPU), and what's
+                // measured, with the develop controls: scrolled when the window's
+                // shorter than they are, rather than holding the window that tall.
+                vbox{L::scroll{vbox{
                     L::canvas{}
                         .on_paint(
                             [this](rap::painter& p, rap::size_f size)
@@ -421,7 +423,8 @@ void App::build_ui()
                     develop,
                     L::spacer{},
                 }
-                    .margins()
+                    .margins()}
+                    .stretch()}
                     .stretch()
                     .handle(histogram_box_),
                 }
