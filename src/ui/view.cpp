@@ -86,6 +86,10 @@ rap::node View::node()
         .on_resize(
             [this](rap::size_f)
             {
+                // The size the held frame's for (the window fitted to a new
+                // image, told to the canvas before the window takes it):
+                // drawn now, below, at it.
+                present_held_ = false;
                 resizing_ = true;
                 resize_settled_ = ui_.timer(150, false,
                                             [this]
@@ -1155,6 +1159,11 @@ void View::paint(rap::painter& p, rap::size_f)
 #ifdef HAVE_GPU
 bool View::draw_on_gpu(rap::color background)
 {
+    // Held (hold_present): nothing drawn, whoever asks (the paint as the
+    // window's laid out for the fit too), the canvas keeping the frame it
+    // has, until the window's taken the size the frame is to be drawn at.
+    if (present_held_ && gpu_shown_)
+        return true;
     // The plain case: one still image shown as it is, or a comparison of
     // two (A, B, a swipe between them, where they differ). Zoom animations,
     // cross-fades, videos and vector images are the CPU's still.
