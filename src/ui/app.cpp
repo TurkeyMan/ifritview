@@ -408,16 +408,6 @@ void App::build_ui()
                                 paint_histogram_legend(p, size);
                             })
                         .on_pointer([this](const rap::pointer_event& e) { return histogram_legend_click(e); })
-                        // Resized, the last one stretched (it has no proportions
-                        // to keep), and drawn again once the sizes settle.
-                        .stretch_while_resizing(rap::resize_stretch::fill)
-                        .on_resize([this](rap::size_f) { histogram_resizing_ = true; })
-                        .on_resize_settled(
-                            [this](rap::size_f)
-                            {
-                                histogram_resizing_ = false;
-                                view_->histogram_panel_changed();
-                            })
                         .bind(histogram_canvas_)
                         .height(rap::extent{13, rap::extent::unit::lines}),
 
@@ -443,7 +433,7 @@ void App::build_ui()
                 // Long names and details give way, so they never hold the window wide.
                 L::label{""}.ellipsize().bind(status_left_).stretch(),
                 L::label{""}.ellipsize().bind(status_center_),
-                L::button{""}.flat().on_click([this] { open_url(location_url_); }).bind(status_location_),
+                L::label{""}.link([this] { open_url(location_url_); }).bind(status_location_),
                 L::label{""}.bind(status_right_),
             }
                 .margins()
@@ -456,12 +446,7 @@ void App::build_ui()
     histogram_box_->set_visible(false);
     // The docked histogram: drawn again when its canvas changes size, and
     // its numbers when the view has counted.
-    histogram_canvas_->on_frame_target(
-        [this](const rap::frame_target&)
-        {
-            if (!histogram_resizing_)
-                view_->histogram_panel_changed();
-        });
+    histogram_canvas_->on_frame_target([this](const rap::frame_target&) { view_->histogram_panel_changed(); });
 #ifdef HAVE_GPU
     view_->on_histogram_details = [this](const GpuView::Details& d)
     {
@@ -528,9 +513,9 @@ void App::build_ui()
     exposure_box_->set_visible(false);
     crop_button_->set_enabled(false);
     update_toolbar();
-    // Never hidden, only emptied: the footer keeps its height (a flat
-    // button's is a label's and more) from one image to the next, so the
-    // view isn't resized as well as the window when the next is fitted.
+    // Never hidden, only emptied: the footer keeps its height from one image
+    // to the next, so the view isn't resized as well as the window when the
+    // next is fitted.
     status_location_->set_enabled(false);
 
     view_->on_action = [this](Action a)
@@ -1414,9 +1399,6 @@ void App::on_loaded(Loader::Result& r)
 void App::present_image()
 {
     correct_lens(false);
-    // Drawn once the window's fitted to it, at that size: not first at the
-    // last image's size, then again as the window takes the new one.
-    view_->hold_present(true);
     view_->set_image(image_);
     instead_image_.reset();
     show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
@@ -1424,7 +1406,6 @@ void App::present_image()
         view_->stamp_present(nav_stamp_us_, image_.get());
     nav_stamp_us_ = 0;
     fit_window_to_image();
-    view_->hold_present(false);
     update_title();
     sync_exposure_slider();
     update_status();

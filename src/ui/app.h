@@ -300,14 +300,13 @@ private:
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;
-    rap::button* status_location_ = nullptr;
+    rap::label* status_location_ = nullptr;  // a link to the map
     rap::splitter* splitter_ = nullptr;
     rap::widget* metadata_pane_ = nullptr;
     rap::list* metadata_list_ = nullptr;
     // The pane holds the info or the histogram (and what's measured), not both.
     rap::widget *info_box_ = nullptr, *histogram_box_ = nullptr;
     rap::canvas* histogram_canvas_ = nullptr;
-    bool histogram_resizing_ = false;  // its canvas showing the last one stretched, until the sizes settle
     rap::label *hist_peak_ = nullptr, *hist_max_ = nullptr, *hist_min_ = nullptr, *hist_average_ = nullptr, *hist_clipped_ = nullptr;
     bool pane_histogram_ = false;
     void toggle_pane();          // the pane in or out, with the window following

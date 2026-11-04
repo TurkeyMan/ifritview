@@ -83,44 +83,25 @@ rap::node View::node()
 {
     return rap::layout::canvas{}
         .on_paint([this](rap::painter& p, rap::size_f s) { paint(p, s); })
-        // A run of sizes (a splitter or the window dragged) shows the last
-        // frame scaled until it settles (stretch_while_resizing, from
-        // attach): nothing drawn at each. A lone one, the window fitted to
-        // the next image, is painted at once.
         .on_resize(
             [this](rap::size_f)
             {
-                // A second size before the last settled: a run of them (a
-                // drag), shown stretched until it settles. A lone one (the
-                // window fitted to the next image, told to the canvas before
-                // the window takes it) is drawn now, at the new size, so the
-                // window shows it as it changes.
-                const bool run = resizing_;
                 resizing_ = true;
+                resize_settled_ = ui_.timer(150, false,
+                                            [this]
+                                            {
+                                                resizing_ = false;
+                                                if (std::exchange(zoom_change_held_, false))
+                                                    zoom_changed();
+                                                gpu_drawn_ = {};  // drawn again, with the histogram
+                                                present_on_gpu();
+                                            });
                 layout();
-                // The stretched frame put where the image lands at this size
-                // (fitted and capped, centred, panned), as the frame drawn
-                // once the sizes settle will have it.
-                if (canvas_ && image_ && drawn_rect_)
-                    canvas_->stretch_to(*drawn_rect_, image_on_canvas());
-                if (!run)
-                    present_on_gpu();
                 if (on_resized)
                     on_resized();
-            })
-        .on_resize_settled(
-            [this](rap::size_f)
-            {
-                resizing_ = false;
-                // The new frame first: telling the status of the zoom changes
-                // its text, its row is laid out again and the window painted
-                // there and then, this canvas with it, which would show the
-                // last frame it was given (the one from before the sizes
-                // changed, at its size) until this one came.
-                gpu_drawn_ = {};  // drawn again, with the histogram
+                // The frame at the new size before the paint at it: never the
+                // last image stretched by the window, then the new one.
                 present_on_gpu();
-                if (std::exchange(zoom_change_held_, false))
-                    zoom_changed();
             })
         .on_pointer([this](const rap::pointer_event& e) { return pointer(e); })
         .on_scroll([this](const rap::scroll_event& e) { return scroll(e); })
@@ -131,7 +112,6 @@ rap::node View::node()
 void View::attach(rap::canvas* canvas)
 {
     canvas_ = canvas;
-    stretch_on_background();
 #ifdef HAVE_GPU
     // The GPU device arriving (or going) changes the frame target: draw again,
     // on it if it's there.
@@ -139,43 +119,12 @@ void View::attach(rap::canvas* canvas)
 #endif
 }
 
-rap::rect_f View::image_on_canvas() const
-{
-    const double scale = scale_factor();
-    return {float(pan_x_ / scale), float(pan_y_ / scale), float(image_->width * zoom_ / scale),
-            float(image_->height * zoom_ / scale)};
-}
-
-rap::color View::background() const
-{
-    return parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
-}
-
-// While a run of sizes lasts, the last frame scaled whole onto the view's
-// background.
-void View::stretch_on_background()
-{
-    if (canvas_)
-        canvas_->stretch_while_resizing(rap::resize_stretch::uniform, background());
-}
-
-void View::hold_present(bool held)
-{
-    present_held_ = held;
-    if (!held)
-        present_on_gpu();
-}
-
 void View::invalidate()
 {
     if (canvas_)
         canvas_->invalidate();
-    // Drawn now, not in the paint: the paint then shows this frame, not the
-    // last. Not while sizes come in a run: the canvas shows the last frame
-    // stretched until they settle, and a frame drawn at each would be work
-    // never shown (a lone size change is painted at once, through paint()).
-    if (!resizing_ && !present_held_)
-        present_on_gpu();
+    // Drawn now, not in the paint: the paint then shows this frame, not the last.
+    present_on_gpu();
     if (on_framing_changed && !applying_framing_)
     {
         const Framing f = framing();
@@ -403,7 +352,6 @@ void View::set_image(std::shared_ptr<Image> image)
 void View::set_fullscreen(bool on)
 {
     fullscreen_ = on;
-    stretch_on_background();
     // The transition moves the window under the pointer; a press still held
     // from the double-click would otherwise turn into a drag.
     pressed_button_ = 0;
@@ -751,7 +699,6 @@ void View::set_overlay(OverlaySections sections)
 
 void View::config_changed()
 {
-    stretch_on_background();
     drop_caches();
     layout();
     invalidate();  // drawn the new way now (the filters, the checkerboard, the backgrounds), not at the next move
@@ -1069,9 +1016,7 @@ void View::paint(rap::painter& p, rap::size_f)
     int vw, vh;
     view_size(vw, vh);
 
-    const rap::color bg = background();
-    if (image_)
-        drawn_rect_ = image_on_canvas();
+    const rap::color bg = parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38});
 #ifdef HAVE_GPU
     const bool on_gpu = draw_on_gpu(bg);
     // A raw or an HDR image is the GPU's to draw (its own data, in linear
@@ -1368,7 +1313,6 @@ bool View::draw_on_gpu(rap::color background)
                 });
     }
     gpu_drawn_ = key;
-    drawn_rect_ = image_on_canvas();
     return true;
 }
 #endif
@@ -1377,7 +1321,7 @@ void View::present_on_gpu()
 {
 #ifdef HAVE_GPU
     if (canvas_ && image_)
-        draw_on_gpu(background());
+        draw_on_gpu(parse_colour(fullscreen_ ? cfg_.fullscreen_background : cfg_.background, rap::color{38, 38, 38}));
 #endif
 }
 

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <optional>
-
 #include "compare.h"
 #include "controls.h"
 #include "image.h"
@@ -40,10 +38,6 @@ public:
     const Image* image() const { return image_.get(); }
     void set_fullscreen(bool on);
     void config_changed();
-    // Held, a change draws nothing until it's let go (then at once): the app
-    // about to fit its window to a new image, so the image isn't drawn at the
-    // old size first. A resize meanwhile draws it, at its new size.
-    void hold_present(bool held);
     void image_changed();  // the image's pixels (and maybe its size) changed in place
     void retoned();        // only its 8-bit pixels did, for a new exposure: its own data is the same
     // The histogram of what's shown: over the image (fullscreen) and/or on
@@ -234,12 +228,6 @@ private:
     double divider_x() const;  // device px
     std::unique_ptr<Comparison> compare_;
     void drop_caches();
-    rap::color background() const;  // around the image: the window's, or full screen's
-    rap::rect_f image_on_canvas() const;  // where the image lies, logical px
-    // Where the image lay in the last frame drawn: what a run of sizes
-    // stretches (rap::canvas::stretch_to), from there to where it lies now.
-    std::optional<rap::rect_f> drawn_rect_;
-    void stretch_on_background();
     // image_changed() for another image put in the view's (comparing): its
     // data is as it was, so the GPU keeps what it has of it.
     void image_replaced();
@@ -302,13 +290,12 @@ private:
     } gpu_drawn_;
     bool gpu_shown_ = false;
     // While the view is being resized (a splitter dragged, the window
-    // sized), until the canvas says the sizes have settled
-    // (on_resize_settled): the status isn't told of the zoom, and the
-    // histogram isn't counted, drawn into its panel or read back. Done once
-    // it settles.
+    // sized), frames skip what a resize doesn't change and is slow to redo:
+    // the histogram counted, drawn into its panel and read back, and the
+    // status told of the zoom. Done once, a moment after the last resize.
     bool resizing_ = false;
     bool zoom_change_held_ = false;
-    bool present_held_ = false;  // hold_present
+    rap::subscription resize_settled_;
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since
     rap::subscription gpu_wait_tick_;  // a repaint while it waits (for the patience to run out)
