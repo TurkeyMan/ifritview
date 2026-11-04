@@ -90,6 +90,12 @@ rap::node View::node()
         .on_resize(
             [this](rap::size_f)
             {
+                // A second size before the last settled: a run of them (a
+                // drag), shown stretched until it settles. A lone one (the
+                // window fitted to the next image, told to the canvas before
+                // the window takes it) is drawn now, at the new size, so the
+                // window shows it as it changes.
+                const bool run = resizing_;
                 resizing_ = true;
                 layout();
                 // The stretched frame put where the image lands at this size
@@ -97,6 +103,8 @@ rap::node View::node()
                 // once the sizes settle will have it.
                 if (canvas_ && image_ && drawn_rect_)
                     canvas_->stretch_to(*drawn_rect_, image_on_canvas());
+                if (!run)
+                    present_on_gpu();
                 if (on_resized)
                     on_resized();
             })
@@ -151,6 +159,13 @@ void View::stretch_on_background()
         canvas_->stretch_while_resizing(rap::resize_stretch::uniform, background());
 }
 
+void View::hold_present(bool held)
+{
+    present_held_ = held;
+    if (!held)
+        present_on_gpu();
+}
+
 void View::invalidate()
 {
     if (canvas_)
@@ -159,7 +174,7 @@ void View::invalidate()
     // last. Not while sizes come in a run: the canvas shows the last frame
     // stretched until they settle, and a frame drawn at each would be work
     // never shown (a lone size change is painted at once, through paint()).
-    if (!resizing_)
+    if (!resizing_ && !present_held_)
         present_on_gpu();
     if (on_framing_changed && !applying_framing_)
     {
