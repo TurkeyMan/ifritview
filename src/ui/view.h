@@ -38,6 +38,11 @@ public:
     const Image* image() const { return image_.get(); }
     void set_fullscreen(bool on);
     void config_changed();
+    // Held, a change draws nothing until it's let go (then at once): the app
+    // about to fit its window to a new image, so the image isn't drawn at the
+    // old size first, centred for a window it's about to leave. A resize
+    // meanwhile draws it, at its new size.
+    void hold_present(bool held);
     void image_changed();  // the image's pixels (and maybe its size) changed in place
     void retoned();        // only its 8-bit pixels did, for a new exposure: its own data is the same
     // The histogram of what's shown: over the image (fullscreen) and/or on
@@ -295,6 +300,7 @@ private:
     // status told of the zoom. Done once, a moment after the last resize.
     bool resizing_ = false;
     bool zoom_change_held_ = false;
+    bool present_held_ = false;  // hold_present
     rap::subscription resize_settled_;
     bool gpu_wanted_ = false;          // the last paint was one the GPU would draw
     int64_t gpu_waiting_since_ = 0;    // a raw or HDR image waiting for the GPU's device, since

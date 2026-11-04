@@ -1399,6 +1399,10 @@ void App::on_loaded(Loader::Result& r)
 void App::present_image()
 {
     correct_lens(false);
+    // Drawn once the window's fitted to it, at that size: not first at the
+    // last image's size (centred for that window, so off centre in the new
+    // one), then again as the window takes the new one.
+    view_->hold_present(true);
     view_->set_image(image_);
     instead_image_.reset();
     show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
@@ -1406,6 +1410,7 @@ void App::present_image()
         view_->stamp_present(nav_stamp_us_, image_.get());
     nav_stamp_us_ = 0;
     fit_window_to_image();
+    view_->hold_present(false);
     update_title();
     sync_exposure_slider();
     update_status();

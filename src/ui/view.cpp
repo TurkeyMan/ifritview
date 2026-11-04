@@ -119,12 +119,21 @@ void View::attach(rap::canvas* canvas)
 #endif
 }
 
+void View::hold_present(bool held)
+{
+    present_held_ = held;
+    if (!held)
+        present_on_gpu();
+}
+
 void View::invalidate()
 {
     if (canvas_)
         canvas_->invalidate();
-    // Drawn now, not in the paint: the paint then shows this frame, not the last.
-    present_on_gpu();
+    // Drawn now, not in the paint: the paint then shows this frame, not the
+    // last. Not while held (hold_present).
+    if (!present_held_)
+        present_on_gpu();
     if (on_framing_changed && !applying_framing_)
     {
         const Framing f = framing();
