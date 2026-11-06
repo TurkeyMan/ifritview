@@ -321,20 +321,8 @@ bool decode_masks(const Masks& m, const uint8_t* d, size_t size, int w, int h, s
                 if (m.a)
                     a = mask_channel(v, m.a);
             }
-            if (premultiplied)
-            {
-                r = std::min(r, a);  // a stored colour can't outshine its alpha
-                g = std::min(g, a);
-                b = std::min(b, a);
-            }
-            else if (a < 255)
-            {
-                r = (r * a + 127) / 255;
-                g = (g * a + 127) / 255;
-                b = (b * a + 127) / 255;
-            }
             opaque = opaque && a == 255;
-            px[x] = a << 24 | r << 16 | g << 8 | b;
+            px[x] = argb(r, g, b, a, premultiplied);
         }
     }
     out.has_alpha = !opaque;
