@@ -218,8 +218,15 @@ void GpuView::read_details(std::function<void(const Details&)> done)
     const bool automatic = histogram_auto_;
     device_->readback(histogram_stats_, read->stats);
     device_->readback(histogram_, read->histogram,
-                      [read, scene, exposure, automatic, done = std::move(done)]
+                      [read, device = device_, scene, exposure, automatic, done = std::move(done)]
                       {
+                          if (device->lost())  // a failed readback leaves them as they were: nothing measured
+                          {
+                              Details unknown;
+                              unknown.known = false;
+                              done(unknown);
+                              return;
+                          }
                           const auto word = [](const std::vector<std::byte>& v, size_t i)
                           {
                               uint32_t w;
@@ -293,6 +300,11 @@ bool GpuView::export_pixels(const std::shared_ptr<Image>& image, uint64_t genera
         return false;
     std::vector<std::byte> rgba(size_t(f.width) * f.height * 4);
     device_->readback(frame, rgba, size_t(f.width) * 4).wait();
+    if (device_->lost())
+    {
+        error = "the GPU was lost reading the image back";
+        return false;
+    }
     out.resize(rgba.size());
     for (size_t i = 0; i < rgba.size(); i += 4)  // RGBA to BGRA, opaque
     {
@@ -540,6 +552,11 @@ void GpuView::check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& valu
     std::vector<std::byte> gpu(values->size()), sums(levels->size());
     device_->readback(values, gpu).wait();
     device_->readback(levels, sums).wait();
+    if (device_->lost())
+    {
+        std::fprintf(stderr, "gpu raw check: the GPU was lost reading the samples back\n");
+        return;
+    }
     const gint64 t1 = g_get_monotonic_time();
     std::vector<uint16_t> samples;
     std::string why;
@@ -565,6 +582,11 @@ void GpuView::check_readout(const RawMosaic& m, const rap::gpu::buffer_ptr& valu
     const unsigned n = unsigned(m.channels), texel = n == 1 ? 1 : 4;  // as readout_buffers made it
     std::vector<uint16_t> area(size_t(m.width) * m.height * texel);
     device_->readback(sites, std::as_writable_bytes(std::span(area)), size_t(m.width) * 2 * texel).wait();
+    if (device_->lost())
+    {
+        std::fprintf(stderr, "gpu raw check: the GPU was lost reading the active area back\n");
+        return;
+    }
     size_t off = 0;
     for (int y = 0; y < m.height; ++y)
         for (int x = 0; x < m.width; ++x)
@@ -582,6 +604,11 @@ void GpuView::check_corrections(const RawMosaic& m, const rap::gpu::texture_ptr&
     const gint64 t0 = g_get_monotonic_time();
     std::vector<uint16_t> read(size_t(m.width) * m.height);
     device_->readback(corrected, std::as_writable_bytes(std::span(read)), size_t(m.width) * 2).wait();
+    if (device_->lost())
+    {
+        std::fprintf(stderr, "gpu raw check: the GPU was lost reading the corrections back\n");
+        return;
+    }
     const gint64 t1 = g_get_monotonic_time();
     std::vector<float> ours(read.size());  // black off, as LibRaw's
     for (int y = 0; y < m.height; ++y)
@@ -726,8 +753,13 @@ bool GpuView::decode_stream(const RawMosaic& m, rap::gpu::texture_ptr& sites, ra
         // (Read back once the passes are done: how long they took, from the uploads on.)
         auto head = std::make_shared<std::vector<std::byte>>(plan->size());
         const size_t streams = j.parts.size();
-        device_->readback(plan, *head, [head, t_start, streams, chunks]
+        device_->readback(plan, *head, [head, device = device_, t_start, streams, chunks]
                           {
+                              if (device->lost())
+                              {
+                                  std::fprintf(stderr, "gpu: the GPU was lost decoding a raw's stream\n");
+                                  return;
+                              }
                               uint32_t failed;
                               std::memcpy(&failed, head->data(), 4);
                               if (failed)

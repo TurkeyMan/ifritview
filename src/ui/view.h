@@ -65,7 +65,7 @@ public:
     bool edited_pixels(const std::shared_ptr<Image>& image, PixelBuffer& out);
     // The CPU is about to draw an image whose 8-bit pixels the GPU's drawing
     // left at an older exposure: bring them up to date (App::pixels_for_cpu).
-    std::function<void()> on_needs_pixels;
+    std::function<bool()> on_needs_pixels;
 #ifdef HAVE_GPU
     // The panel's numbers, on the UI thread, after each count.
     std::function<void(const GpuView::Details&)> on_histogram_details;
