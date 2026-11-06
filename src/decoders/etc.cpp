@@ -2,6 +2,7 @@
 // premultiplied 0xAARRGGBB. Unsigned EAC goes through etcdec's 16-bit path;
 // signed EAC is decoded here, etcdec reading its blocks as unsigned ones.
 #include "etc.h"
+#include "texel.h"
 
 #define ETCDEC_IMPLEMENTATION
 #define ETCDEC_STATIC
@@ -172,22 +173,10 @@ bool decode_etc(Etc format, const uint8_t* data, size_t size, int w, int h, Imag
                             g = rgba[i * 4 + 1];
                             b = rgba[i * 4 + 2];
                             a = format == Etc::ETC1 || format == Etc::ETC2_RGB ? 255 : rgba[i * 4 + 3];
-                            if (premultiplied)
-                            {
-                                r = std::min(r, a);  // a stored colour can't outshine its alpha
-                                g = std::min(g, a);
-                                b = std::min(b, a);
-                            }
-                            else if (a < 255)
-                            {
-                                r = (r * a + 127) / 255;
-                                g = (g * a + 127) / 255;
-                                b = (b * a + 127) / 255;
-                            }
                             break;
                     }
                     opaque = opaque && a == 255;
-                    px[x] = a << 24 | r << 16 | g << 8 | b;
+                    px[x] = argb(r, g, b, a, premultiplied);
                 }
             }
         }

@@ -127,22 +127,10 @@ bool decode_bcn(Bcn format, const uint8_t* data, size_t size, int w, int h, Imag
                             g = rgba[i * 4 + 1];
                             b = rgba[i * 4 + 2];
                             a = rgba[i * 4 + 3];
-                            if (premultiplied)
-                            {
-                                r = std::min(r, a);  // a stored colour can't outshine its alpha
-                                g = std::min(g, a);
-                                b = std::min(b, a);
-                            }
-                            else if (a < 255)
-                            {
-                                r = (r * a + 127) / 255;
-                                g = (g * a + 127) / 255;
-                                b = (b * a + 127) / 255;
-                            }
                             break;
                     }
                     opaque = opaque && a == 255;
-                    px[x] = a << 24 | r << 16 | g << 8 | b;
+                    px[x] = argb(r, g, b, a, premultiplied);
                 }
             }
         }
