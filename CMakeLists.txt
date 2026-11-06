@@ -218,7 +218,7 @@ target_link_libraries(ifritview PRIVATE ifrit_core rapport::rapport)
 if(WIN32)
   # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
   enable_language(RC)
-  target_sources(ifritview PRIVATE data/windows/ifritview.rc)
+  target_sources(ifritview PRIVATE data/windows/ifritview.rc src/ui/script_drag_win32.cpp)
   # The resource compiler's own inputs, which CMake doesn't see in the .rc.
   set_source_files_properties(data/windows/ifritview.rc PROPERTIES OBJECT_DEPENDS
     "${CMAKE_SOURCE_DIR}/data/windows/ifritview.ico;${CMAKE_SOURCE_DIR}/data/windows/ifritview.manifest")

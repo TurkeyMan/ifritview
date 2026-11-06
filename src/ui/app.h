@@ -100,6 +100,9 @@ public:
     void script_show_volume() { view_->script_show_volume(); }
     void script_toggle_xmp();
     void script_drag_pane(float by);  // the info pane's divider moved by `by` px, as a drag moves it
+    // The same through the splitter's own mouse handling (Windows: its bar
+    // posted a press, moves and a release), as a drag with the mouse runs.
+    void script_drag_pane_native(float by);
     void remember_pane_width();
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);
