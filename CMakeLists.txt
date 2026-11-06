@@ -387,7 +387,7 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
-      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli)
+      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli)
   foreach(shader decode develop resample compose difference histogram_view mosaic detail)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
