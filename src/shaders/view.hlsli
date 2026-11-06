@@ -64,14 +64,7 @@ RWByteAddressBuffer stats : register(u1);
 #else
 ByteAddressBuffer stats : register(t8);
 #endif
-static const uint kStatsLuminance = 0;  // 1024 counts: log2 luminance, 2^-20 .. 2^12
-static const uint kStatsExtents = 1024; // 72 floats (as uints): how far from white per 5 degrees of hue, 1 = the display's edge
-static const uint kStatsCount = 1096;   // pixels counted
-static const uint kStatsPeak = 1097;    // float: the 99.9th percentile's luminance (peak.hlsl)
-static const uint kStatsMinimum = 1098; // ~float bits of the least luminance above 0 (max of the complement: a min)
-static const uint kStatsMaximum = 1099; // float bits of the greatest
-static const uint kStatsP99 = 1100;     // float: the 99th percentile's luminance (peak.hlsl), for auto exposure
-static const uint kStatsWords = 1101;
+#include "stats_layout.hlsli"
 
 // The scene's luminance scale for a raw developed on the GPU: its 99th
 // percentile at SDR white, as LibRaw's auto-brightening does (the roll-off

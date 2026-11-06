@@ -8,6 +8,7 @@
 #include "../decoders/rawpacked.h"
 #include "../gpu.h"
 #include "../image.h"
+#include "../shaders/stats_layout.hlsli"
 #include "../white_balance.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
@@ -209,7 +210,7 @@ void GpuView::read_details(std::function<void(const Details&)> done)
         return;
     struct Read
     {
-        std::vector<std::byte> stats = std::vector<std::byte>(1101 * 4), histogram = std::vector<std::byte>(1032 * 4);
+        std::vector<std::byte> stats = std::vector<std::byte>(kStatsWords * 4), histogram = std::vector<std::byte>(1032 * 4);
     };
     auto read = std::make_shared<Read>();
     const bool scene = histogram_scene_;
@@ -233,19 +234,19 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                           };
                           Details d;
                           d.scene = scene;
-                          const uint32_t count = word(read->stats, 1096);
+                          const uint32_t count = word(read->stats, kStatsCount);
                           if (count)
                           {
                               float scale = exposure;
-                              if (automatic && as_float(word(read->stats, 1100)) > 0)
-                                  scale /= as_float(word(read->stats, 1100));  // as auto_gain() has it
-                              d.minimum = as_float(~word(read->stats, 1098)) * scale;
-                              d.maximum = as_float(word(read->stats, 1099)) * scale;
-                              d.peak = as_float(word(read->stats, 1097)) * scale;
+                              if (automatic && as_float(word(read->stats, kStatsP99)) > 0)
+                                  scale /= as_float(word(read->stats, kStatsP99));  // as auto_gain() has it
+                              d.minimum = as_float(~word(read->stats, kStatsMinimum)) * scale;
+                              d.maximum = as_float(word(read->stats, kStatsMaximum)) * scale;
+                              d.peak = as_float(word(read->stats, kStatsPeak)) * scale;
                               // The mean from the log2 histogram's bin centres (to a couple of percent).
                               double sum = 0;
                               for (int bin = 0; bin < 1024; ++bin)
-                                  sum += double(word(read->stats, size_t(bin))) * std::exp2((bin + 0.5) * 32 / 1024 - 20);
+                                  sum += double(word(read->stats, kStatsLuminance + bin)) * std::exp2((bin + 0.5) * 32 / 1024 - 20);
                               d.average = float(sum / count) * scale;
                           }
                           // Clipped as shown: R, G or B at an end (each channel's share, the largest).
@@ -1220,7 +1221,7 @@ bool GpuView::hold(int n, const std::shared_ptr<Image>& image, uint64_t generati
     if (!kept)
     {
         const int64_t t0 = g_get_monotonic_time();
-        s.stats = device_->create_buffer(1101 * 4);  // this image's measures
+        s.stats = device_->create_buffer(kStatsWords * 4);  // this image's measures
         if (!s.stats || !upload(*image, s, error))
         {
             if (error.empty())
