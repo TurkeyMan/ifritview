@@ -18,26 +18,17 @@ bool sniff(const uint8_t* h, size_t n)
     return n >= 12 && std::memcmp(h, "RIFF", 4) == 0 && std::memcmp(h + 8, "WEBP", 4) == 0;
 }
 
-bool read_file(const std::string& path, std::vector<uint8_t>& data)
-{
-    const uint8_t* bytes = nullptr;
-    size_t size = 0;
-    if (!file_bytes(path, bytes, size))
-        return false;
-    data.assign(bytes, bytes + size);
-    return true;
-}
-
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    std::vector<uint8_t> file;
-    if (!read_file(path, file))
+    const uint8_t* bytes = nullptr;
+    size_t byte_count = 0;
+    if (!file_bytes(path, bytes, byte_count))
     {
         error = "cannot read file";
         return false;
     }
     WebPBitstreamFeatures features;
-    if (WebPGetFeatures(file.data(), file.size(), &features) != VP8_STATUS_OK)
+    if (WebPGetFeatures(bytes, byte_count, &features) != VP8_STATUS_OK)
     {
         error = "not a valid WebP stream";
         return false;
@@ -49,7 +40,7 @@ bool decode(const std::string& path, Image& out, std::string& error)
     WebPAnimDecoderOptionsInit(&options);
     options.color_mode = MODE_bgrA;
     options.use_threads = 1;
-    WebPData data{file.data(), file.size()};
+    WebPData data{bytes, byte_count};
     WebPAnimDecoder* dec = WebPAnimDecoderNew(&data, &options);
     if (!dec)
     {

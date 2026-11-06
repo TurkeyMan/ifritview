@@ -19,16 +19,6 @@ bool sniff(const uint8_t* h, size_t n)
     return (n >= 2 && h[0] == 0xFF && h[1] == 0x0A) || (n >= 12 && std::memcmp(h, container, 12) == 0);
 }
 
-bool read_file(const std::string& path, std::vector<uint8_t>& data)
-{
-    const uint8_t* bytes = nullptr;
-    size_t size = 0;
-    if (!file_bytes(path, bytes, size))
-        return false;
-    data.assign(bytes, bytes + size);
-    return true;
-}
-
 // A decoder on `size` bytes at `data` (all there is of it), the events
 // subscribed; on threads of its own unless `threaded` is false, as many as
 // the image's size suggests once its basic info is in (threads_for).
@@ -68,15 +58,16 @@ struct Decoding
 
 bool decode(const std::string& path, Image& out, std::string& error)
 {
-    std::vector<uint8_t> file;
-    if (!read_file(path, file))
+    const uint8_t* bytes = nullptr;
+    size_t byte_count = 0;
+    if (!file_bytes(path, bytes, byte_count))
     {
         error = "cannot read file";
         return false;
     }
     Decoding decoding;
     const auto& dec = decoding.dec;
-    if (!decoding.start(file.data(), file.size(), JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE))
+    if (!decoding.start(bytes, byte_count, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE))
     {
         error = "JXL decoder setup failed";
         return false;
