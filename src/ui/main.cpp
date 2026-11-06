@@ -21,6 +21,7 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -104,6 +105,14 @@ void run_step(App& app, const std::string& step)
         app.on_dropped({step.substr(5)});
     else if (step == "recursive:on" || step == "recursive:off")
         app.set_recursive(step == "recursive:on");
+    else if (step.rfind("drag-pane-native-fast:", 0) == 0)
+    {
+        // "drag-pane-native-fast:-150,300,8": 150 px left over 300 ms, the pointer moving every 8 ms
+        float by = 0;
+        int ms = 300, period = 8;
+        std::sscanf(step.c_str() + 22, "%f,%d,%d", &by, &ms, &period);
+        app.script_drag_pane_native_fast(by, ms, std::max(1, period));
+    }
     else if (step.rfind("drag-pane-native:", 0) == 0)
         app.script_drag_pane_native(std::stof(step.substr(17)));  // as drag-pane, through the splitter's mouse handling
     else if (step.rfind("drag-pane:", 0) == 0)
