@@ -263,7 +263,9 @@ private:
     // The image's 8-bit pixels at its exposure, made again if the GPU's drawing
     // left them behind (Image::pixels_stale): before saving, printing,
     // copying, comparing, or the CPU drawing it.
-    void pixels_for_cpu();
+    // False when they can't be had (a raw the GPU couldn't develop): the
+    // status says why, and the pixels stay stale for another try.
+    bool pixels_for_cpu();
     ScaleFilter smooth_enlarge_ = ScaleFilter::Lanczos3;  // what the toolbar toggle turns enlarging back on with
     rap::tool_button* xmp_toggle_ = nullptr;
     rap::tool_button* recursive_toggle_ = nullptr;

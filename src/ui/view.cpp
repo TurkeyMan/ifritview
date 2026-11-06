@@ -1056,13 +1056,14 @@ void View::paint(rap::painter& p, rap::size_f)
 #else
     const bool on_gpu = false;
 #endif
+    bool have_pixels = true;  // false: they couldn't be had, nothing to draw from
     if (!on_gpu && image_ && image_->pixels_stale && on_needs_pixels)
-        on_needs_pixels();
+        have_pixels = on_needs_pixels();
     if (!on_gpu)
         p.rect({0, 0, L(vw), L(vh)}, 0, bg, std::nullopt);
     if (divided_)
         p.rect({0, 0, L(scale), L(vh)}, 0, rap::theme_color::mid, std::nullopt);  // again over the image, below
-    if (!image_ || image_->width <= 0 || image_->height <= 0)
+    if (!image_ || image_->width <= 0 || image_->height <= 0 || !have_pixels)
         return;
     if (on_gpu)
     {

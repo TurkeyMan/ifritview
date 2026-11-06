@@ -445,7 +445,7 @@ void App::build_ui()
                              .margins(false));
     platform::trace("ui: window created");
     view_->attach(view_->canvas());
-    view_->on_needs_pixels = [this] { pixels_for_cpu(); };
+    view_->on_needs_pixels = [this] { return pixels_for_cpu(); };
     histogram_box_->set_visible(false);
     // The docked histogram: drawn again when its canvas changes size, and
     // its numbers when the view has counted.
@@ -637,22 +637,25 @@ void App::open_url(const std::string& url)
 
 // Ctrl+C: the selection if there is one, otherwise the whole image. The
 // selection is dropped afterwards as the visible sign that it was copied.
-void App::pixels_for_cpu()
+bool App::pixels_for_cpu()
 {
     if (!image_ || !image_->pixels_stale)
-        return;
+        return true;
     if (image_->mosaic)
     {
         // Developed on the GPU: rendered there and read back.
-        if (view_->develop_pixels())
-            image_->pixels_stale = false;
-        else
+        if (!view_->develop_pixels())
+        {
             status_message_ = _("This raw needs the GPU to develop it");
-        return;
+            return false;
+        }
+        image_->pixels_stale = false;
+        return true;
     }
     image_->pixels_stale = false;
     image_->retone(image_->exposure_edit);
     view_->retoned();
+    return true;
 }
 
 // Made from the image's own data, its pixels have its edits in them; an
@@ -661,7 +664,8 @@ void App::pixels_for_cpu()
 // over black), else on the CPU through the same tables.
 std::shared_ptr<Image> App::edited_image()
 {
-    pixels_for_cpu();
+    if (!pixels_for_cpu())
+        return nullptr;  // no pixels to edit: a raw the GPU couldn't develop
     if (!image_ || image_->linear || image_->source || image_->mosaic)
         return image_;
     const std::shared_ptr<const AdjustTables> tables = image_->adjust_tables();
@@ -680,6 +684,11 @@ void App::copy_to_clipboard()
     if (!image_)
         return;
     const std::shared_ptr<Image> edited = edited_image();
+    if (!edited)
+    {
+        update_status();  // why (pixels_for_cpu), the clipboard left as it was
+        return;
+    }
     int x, y, w, h;
     const Image region = view_->selection(x, y, w, h) ? edited->crop(x, y, w, h) : *edited;
     ui_.set_clipboard_image(region.width, region.height, APixelFormat::bgra8_premultiplied, region.pixels.data(), region.stride);
@@ -819,6 +828,11 @@ void App::script_export(const std::string& path)
     if (!image_)
         return;
     const std::shared_ptr<Image> edited = edited_image();
+    if (!edited)
+    {
+        std::fprintf(stderr, "script: not exported to %s: %s\n", path.c_str(), status_message_.c_str());
+        return;
+    }
     const Encoder* e = encoder_for_extension(file_extension(path));
     if (!e)
     {
@@ -1603,7 +1617,11 @@ void App::crop_to_selection()
     int x, y, w, h;
     if (!image_ || !view_->selection(x, y, w, h))
         return;
-    pixels_for_cpu();
+    if (!pixels_for_cpu())
+    {
+        update_status();
+        return;
+    }
     *image_ = image_->crop(x, y, w, h);  // same object: the view and pane keep their pointer
     if (image_->tonable())
         image_->retone(image_->exposure_edit);

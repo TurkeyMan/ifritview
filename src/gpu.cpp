@@ -191,6 +191,11 @@ bool render(const Image& image, double ev, PixelBuffer& out, std::string& error)
     dev.run(std::span(&pass, 1));
     std::vector<std::byte> rgba(size_t(w) * h * 4);
     dev.readback(target, rgba, size_t(w) * 4).wait();
+    if (dev.lost())
+    {
+        error = "the GPU was lost reading the image back";
+        return false;
+    }
 
     // Unpremultiplied RGBA bytes to image.cpp's premultiplied ARGB, as its pack() does.
     out.assign(size_t(w) * h * 4, 0);

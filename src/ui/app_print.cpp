@@ -13,6 +13,11 @@ void App::print_image()
     if (!image_ || image_->width <= 0 || image_->height <= 0)
         return;
     const std::shared_ptr<Image> edited = edited_image();
+    if (!edited)
+    {
+        update_status();
+        return;
+    }
     // A selection prints alone, as Ctrl+C copies it.
     std::shared_ptr<const Image> image = edited;
     if (int x, y, w, h; view_->selection(x, y, w, h))

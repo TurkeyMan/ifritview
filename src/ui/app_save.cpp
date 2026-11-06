@@ -37,6 +37,12 @@ void App::save_as()
         update_status();
         return;
     }
+    if (save_source_ == image_ && !save_pixels_)
+    {
+        update_status();  // why (pixels_for_cpu): nothing to save
+        save_source_.reset();
+        return;
+    }
     SaveDialog::Callbacks cb;
     cb.changed = [this](const Encoder& e, const EncodeOptions& o) { preview_save(e, o); };
     cb.preview_shown = [this](bool on) { show_save_preview(on); };

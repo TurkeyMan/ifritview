@@ -230,6 +230,11 @@ static int gpu_render(int argc, char** argv)
     const int tw = out->width(), th = out->height();
     std::vector<std::byte> px(size_t(tw) * th * 4);
     device->readback(out, px, size_t(tw) * 4).wait();
+    if (device->lost())  // before the output's opened: a failed readback leaves px empty
+    {
+        std::fprintf(stderr, "readback: the GPU was lost\n");
+        return 1;
+    }
     size_t drawn = 0;
     std::FILE* file = std::fopen(argv[1], "wb");
     if (file)
@@ -251,6 +256,11 @@ static int gpu_render(int argc, char** argv)
         const int rw = rows->width(), rh = rows->height();
         std::vector<uint16_t> half(size_t(rw) * rh * 4);
         device->readback(rows, std::as_writable_bytes(std::span(half)), size_t(rw) * 8).wait();
+        if (device->lost())
+        {
+            std::fprintf(stderr, "first pass rows: the GPU was lost reading them back\n");
+            return 1;
+        }
         const auto to_float = [](uint16_t h)
         {
             const int e = h >> 10 & 31, m = h & 1023;
