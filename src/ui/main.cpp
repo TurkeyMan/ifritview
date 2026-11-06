@@ -104,6 +104,8 @@ void run_step(App& app, const std::string& step)
         app.on_dropped({step.substr(5)});
     else if (step == "recursive:on" || step == "recursive:off")
         app.set_recursive(step == "recursive:on");
+    else if (step.rfind("drag-pane-native:", 0) == 0)
+        app.script_drag_pane_native(std::stof(step.substr(17)));  // as drag-pane, through the splitter's mouse handling
     else if (step.rfind("drag-pane:", 0) == 0)
         app.script_drag_pane(std::stof(step.substr(10)));  // "drag-pane:-200": the divider 200 px left
     else if (step == "xmp")

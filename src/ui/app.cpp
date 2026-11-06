@@ -15,6 +15,9 @@
 #include "jpeg_lossless.h"
 #include "lens_store.h"
 #include "encoders/encoder.h"
+#ifdef _WIN32
+#include "script_drag_win32.h"
+#endif
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -799,6 +802,30 @@ void App::script_drag_pane(float by)
                                  const float moved = by * float(++*step) / 12;
                                  splitter_->set_sizes({start[0] + moved, start[1] - moved});
                              });
+}
+
+void App::script_drag_pane_native(float by)
+{
+#ifdef _WIN32
+    const std::vector<float> start = splitter_->sizes();
+    if (start.size() != 2)
+        return;
+    constexpr int kSteps = 12;  // as script_drag_pane
+    std::function<bool(int)> drag = native_pane_drag(*splitter_, by, kSteps);
+    if (!drag)
+        return;
+    auto step = std::make_shared<int>(0);
+    script_drag_ = ui_.timer(25, true,
+                             [this, drag, step]
+                             {
+                                 if (*step > kSteps + 1)
+                                     return;  // released: the next drag replaces the timer
+                                 if (!drag((*step)++))
+                                     *step = kSteps + 2;  // interrupted (said), or the bar's gone
+                             });
+#else
+    script_drag_pane(by);  // GTK and Qt: the set_sizes path stands in
+#endif
 }
 
 void App::script_toggle_xmp()
