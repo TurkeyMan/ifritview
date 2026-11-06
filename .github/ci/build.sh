@@ -29,26 +29,7 @@ if ! grep -q -- '^-- gpu: enabled' build-ci.log; then
 fi
 cmake --build build-ci --parallel "$(nproc)"
 
-# Every shader valid for Vulkan: an invalid compute pipeline can hang a GPU.
-for spv in build-ci/shaders/*.spv; do
-  spirv-val --target-env vulkan1.3 "$spv"
-done
-
-# Decode without a display.
-mkdir -p build-ci/smoke
-printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > build-ci/smoke/rgb.ppm
-build-ci/ifritview --probe build-ci/smoke/rgb.ppm
-build-ci/ifritview --version
-# The viewer's downscaler, which draws every zoomed-out image (GCC 16.2's
-# LTO once miscompiled it): a 64x48 image to 23x17.
-printf 'P6\n64 48\n255\n' > build-ci/smoke/big.ppm
-head -c $((64 * 48 * 3)) /dev/urandom >> build-ci/smoke/big.ppm
-build-ci/ifritview --process build-ci/smoke/big.ppm shrink:23,17 info
-# A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
-# packaged), reading a 1x1 image.
-printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > build-ci/smoke/red.ff
-build-ci/ifritview --plugins
-build-ci/ifritview --probe build-ci/smoke/red.ff
+sh .github/ci/smoke.sh build-ci build-ci/smoke
 
 if [ "$generator" = DEB ]; then
   # The .deb depends on what the exe and the core need, not the plugins: a

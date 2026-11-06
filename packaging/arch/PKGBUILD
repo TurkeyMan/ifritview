@@ -52,22 +52,7 @@ build() {
 }
 
 check() {
-  # The GPU's shaders, as glslang made them, valid for Vulkan (an invalid
-  # compute pipeline can hang a GPU).
-  for spv in build/shaders/*.spv; do
-    spirv-val --target-env vulkan1.3 "$spv"
-  done
-  # Decode without a display, then the version and the example format plugin.
-  mkdir -p smoke
-  printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > smoke/rgb.ppm
-  build/ifritview --probe smoke/rgb.ppm
-  build/ifritview --version
-  # The downscaler every zoomed-out image is drawn with.
-  printf 'P6\n64 48\n255\n' > smoke/big.ppm
-  head -c $((64 * 48 * 3)) /dev/urandom >> smoke/big.ppm
-  build/ifritview --process smoke/big.ppm shrink:23,17 info
-  printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > smoke/red.ff
-  build/ifritview --probe smoke/red.ff
+  sh "$_root/.github/ci/smoke.sh" build smoke
 }
 
 package() {
