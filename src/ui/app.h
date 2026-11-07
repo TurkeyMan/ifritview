@@ -103,6 +103,9 @@ public:
     // The same through the splitter's own mouse handling (Windows: its bar
     // posted a press, moves and a release), as a drag with the mouse runs.
     void script_drag_pane_native(float by);
+    // That with the pointer moving every `period_ms` over `duration_ms`, at a
+    // mouse's pace rather than a step per turn of the loop.
+    void script_drag_pane_native_fast(float by, int duration_ms, int period_ms);
     void remember_pane_width();
     void script_end_dialog(bool accept);
     void script_compare(const std::string& how);

@@ -828,6 +828,22 @@ void App::script_drag_pane_native(float by)
 #endif
 }
 
+void App::script_drag_pane_native_fast(float by, int duration_ms, int period_ms)
+{
+#ifdef _WIN32
+    script_drag_ = {};  // the last drag ended (cancelled if it's still going) before this one starts
+    std::function<bool()> drag = native_pane_drag_fast(*splitter_, by, duration_ms, period_ms);
+    if (!drag)
+        return;
+    // The timer holds the run: replacing it (the next drag) or the app closing
+    // cancels it, its thread joined and its hook taken off.
+    script_drag_ = ui_.timer(25, true, [drag] { drag(); });
+#else
+    (void)duration_ms, (void)period_ms;
+    script_drag_pane(by);
+#endif
+}
+
 void App::script_toggle_xmp()
 {
     xmp_toggle_->set_checked(!xmp_toggle_->checked());  // set from code: no callback
