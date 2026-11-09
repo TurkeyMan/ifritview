@@ -133,7 +133,10 @@ void App::show_pane_box()
     info_box_->set_visible(!pane_histogram_);
     histogram_box_->set_visible(pane_histogram_);
     if (pane_histogram_ || !metadata_visible_)
+    {
         map_view_->stop_fetching();
+        scan_pins(false);  // which stops, being hidden
+    }
 }
 
 void App::fill_pane()
@@ -370,8 +373,9 @@ void App::refresh_map()
     map_view_->attach(map_canvas_);
     const bool show = !fullscreen_ && image_ && image_->has_location && map_view_->enabled();
     if (show)
-        map_view_->set_location(image_->latitude, image_->longitude);
+        map_view_->set_location(image_->latitude, image_->longitude, folder_.current());
     else
         map_view_->stop_fetching();
     map_canvas_->set_visible(show);
+    scan_pins(false);
 }

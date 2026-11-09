@@ -42,14 +42,24 @@ public:
     void config_changed();  // the settings were applied: other tiles, maybe
     void stop_fetching();   // it's been hidden: what's on the way isn't wanted
 
-    // Where the pin goes: a new position is centred, the zoom kept.
-    void set_location(double latitude, double longitude);
+    // Where the red pin goes, and the file it's for: a new position is
+    // centred, the zoom kept, unless a click on a gray pin brought it here.
+    void set_location(double latitude, double longitude, const std::string& path);
+
+    // The gray pins: the folder's other geotagged files.
+    struct Pin
+    {
+        std::string path;
+        double latitude = 0, longitude = 0;
+    };
+    void set_pins(const std::vector<Pin>& pins);
 
     void paint(rap::painter& p, rap::size_f size);
     bool pointer(const rap::pointer_event& e);
     bool scroll(const rap::scroll_event& e);
 
     std::function<void(double latitude, double longitude)> on_open;  // double-clicked
+    std::function<void(const std::string& path)> on_pick;            // a gray pin clicked
 
 private:
     struct Tile
@@ -73,6 +83,28 @@ private:
     void store(const Tile& t, const std::string& bytes);
     void evict();
     void refresh();
+    void build_clusters();
+    void pick(size_t cluster);
+
+    // Pins close enough at this zoom to be one, with how many there are.
+    struct Placed
+    {
+        std::string path;
+        double x = 0, y = 0;  // on the world, 0..1
+    };
+    struct Cluster
+    {
+        double x = 0, y = 0;
+        int count = 0;
+        size_t first = 0;  // in pins_
+        int64_t cell = 0;
+    };
+    struct Drawn
+    {
+        float x = 0, y = 0, radius = 0;  // the pin's head, on the canvas
+        size_t cluster = 0;
+    };
+    int64_t cell_of(const Placed& p) const;
 
     rap::ui& ui_;
     Config& cfg_;
@@ -80,6 +112,14 @@ private:
 
     bool has_ = false;
     double lat_ = 0, lon_ = 0;
+    std::string path_;
+    bool keep_view_ = false;
+    std::vector<Placed> pins_;
+    std::vector<Cluster> clusters_;
+    std::vector<Drawn> drawn_;
+    int clusters_zoom_ = -1;
+    bool moved_ = false;
+    rap::point_f pressed_{};
     double pin_x_ = 0, pin_y_ = 0;        // on the world, 0..1
     double centre_x_ = 0, centre_y_ = 0;  // likewise
     double zoom_ = 15;  // between tile levels too: their tiles scaled to fit

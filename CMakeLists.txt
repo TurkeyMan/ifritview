@@ -76,6 +76,8 @@ add_library(ifrit_core STATIC
   src/encoders/reduce.cpp
   src/cache.cpp
   src/geocode.cpp
+  src/folder_block.cpp
+  src/folder_index.cpp
   src/video.cpp
   src/loader.cpp
   src/scale.cpp
@@ -126,6 +128,9 @@ add_library(ifrit_bc7enc STATIC third_party/bc7enc/bc7enc.c src/encoders/rgbcx.c
 set_source_files_properties(third_party/bc7enc/bc7enc.c PROPERTIES LANGUAGE CXX)
 target_compile_options(ifrit_bc7enc PRIVATE "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
 target_link_libraries(ifrit_core PRIVATE ifrit_bc7enc)
+# SQLite: the folder index's store.
+pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
+target_link_libraries(ifrit_core PRIVATE PkgConfig::SQLITE)
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
   target_link_libraries(ifrit_core PUBLIC shell32 advapi32)

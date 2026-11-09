@@ -23,6 +23,7 @@
 #include <fstream>
 #include <iterator>
 #include <numbers>
+#include <map>
 #include <span>
 #include <system_error>
 
@@ -33,6 +34,7 @@ namespace
 
 constexpr int kTile = 256, kMinZoom = 2, kMaxZoom = 19;
 constexpr double kZoomStep = 0.25;  // of a level (a doubling) per wheel notch
+constexpr int kPinCell = 34;      // pins in one square this wide are drawn as one
 constexpr int kMaxFetches = 2;     // at once: the tile servers ask for few
 constexpr size_t kMaxTiles = 128;  // in memory
 constexpr auto kTileLife = std::chrono::hours(24 * 30);
@@ -211,16 +213,113 @@ void MapView::refresh()
         canvas_->invalidate();
 }
 
-void MapView::set_location(double latitude, double longitude)
+void MapView::set_location(double latitude, double longitude, const std::string& path)
 {
+    if (path != path_)
+    {
+        path_ = path;
+        clusters_zoom_ = -1;  // that one's the red pin now, not gray
+        refresh();
+    }
     if (has_ && latitude == lat_ && longitude == lon_)
+    {
+        keep_view_ = false;
         return;
+    }
     has_ = true;
     lat_ = latitude;
     lon_ = longitude;
-    pin_x_ = centre_x_ = world_x(longitude);
-    pin_y_ = centre_y_ = world_y(latitude);
+    pin_x_ = world_x(longitude);
+    pin_y_ = world_y(latitude);
+    if (!keep_view_)
+    {
+        centre_x_ = pin_x_;
+        centre_y_ = pin_y_;
+    }
+    keep_view_ = false;
     refresh();
+}
+
+void MapView::set_pins(const std::vector<Pin>& pins)
+{
+    pins_.clear();
+    pins_.reserve(pins.size());
+    for (const Pin& p : pins)
+    {
+        // -180 and +180 are one place.
+        const double x = world_x(p.longitude);
+        pins_.push_back({p.path, x - std::floor(x), world_y(p.latitude)});
+    }
+    clusters_zoom_ = -1;
+    refresh();
+}
+
+int64_t MapView::cell_of(const Placed& p) const
+{
+    const double scale = double(int64_t(1) << tile_zoom()) * kTile / kPinCell;
+    return int64_t(p.x * scale) << 32 | int64_t(p.y * scale);
+}
+
+void MapView::build_clusters()
+{
+    clusters_zoom_ = tile_zoom();
+    clusters_.clear();
+    drawn_.clear();
+    std::map<int64_t, size_t> at;
+    for (size_t i = 0; i < pins_.size(); ++i)
+    {
+        const Placed& p = pins_[i];
+        if (p.path == path_)
+            continue;
+        const int64_t cell = cell_of(p);
+        const auto [it, added] = at.try_emplace(cell, clusters_.size());
+        if (added)
+        {
+            Cluster c;
+            c.first = i;
+            c.cell = cell;
+            clusters_.push_back(c);
+        }
+        Cluster& c = clusters_[it->second];
+        c.x += (p.x - c.x) / double(++c.count);
+        c.y += (p.y - c.y) / double(c.count);
+    }
+}
+
+void MapView::pick(size_t cluster)
+{
+    const Cluster c = clusters_[cluster];
+    if (c.count == 1 && on_pick)
+    {
+        keep_view_ = true;
+        on_pick(pins_[c.first].path);
+        return;
+    }
+    if (zoom_ < kMaxZoom)
+    {
+        // Closer, till they come apart.
+        centre_x_ = c.x;
+        centre_y_ = c.y;
+        zoom_ = std::min(zoom_ + 2, double(kMaxZoom));
+        refresh();
+        return;
+    }
+    // As close as it goes: all in one spot, so each click the next after the
+    // photo shown, in the folder's order, going through every one.
+    std::vector<size_t> members;
+    size_t after = 0;
+    for (size_t i = 0; i < pins_.size(); ++i)
+        if (cell_of(pins_[i]) == c.cell)
+        {
+            members.push_back(i);
+            if (pins_[i].path == path_)
+                after = members.size();
+        }
+    if (members.size() > 1 && on_pick)
+    {
+        keep_view_ = true;
+        on_pick(pins_[members[after % members.size()]].path);
+    }
 }
 
 std::string MapView::file_of(const Tile& t) const
@@ -293,6 +392,39 @@ void MapView::paint(rap::painter& p, rap::size_f size)
     wanted_.clear();
     for (const Need& n : need)
         wanted_.push_back(n.key);
+
+    // The folder's other photos, under the red pin.
+    if (clusters_zoom_ != tile_zoom())
+        build_clusters();
+    drawn_.clear();
+    {
+        const rap::color edge{255, 255, 255}, gray{112, 118, 130};
+        rap::text_style count_style;
+        count_style.fg = rap::color{255, 255, 255};
+        count_style.size = 7;
+        count_style.bold = true;
+        for (size_t i = 0; i < clusters_.size(); ++i)
+        {
+            const Cluster& c = clusters_[i];
+            double dx = c.x - centre_x_;
+            dx -= std::round(dx);  // the nearer way round the world
+            const float x = float(dx * world_) + size.w / 2, y = float((c.y - centre_y_) * world_) + size.h / 2;
+            if (x < -30 || x > size.w + 30 || y < -8 || y > size.h + 44)
+                continue;
+            const float r = c.count > 1 ? 10.f : 7.f, head = y - r - 7;
+            p.polygon({{x - r + 1.f, head + 2}, {x + r - 1.f, head + 2}, {x, y + 1.5f}}, edge, std::nullopt);
+            p.circle({x, head}, r + 1.25f, edge, std::nullopt);
+            p.polygon({{x - r + 2.5f, head + 2}, {x + r - 2.5f, head + 2}, {x, y - 1}}, gray, std::nullopt);
+            p.circle({x, head}, r, gray, std::nullopt);
+            if (c.count > 1)
+            {
+                const std::string n = c.count > 99 ? "99+" : std::to_string(c.count);
+                const rap::size_f t = p.measure(n, count_style);
+                p.text({x - t.w / 2, head - t.h / 2}, n, count_style);
+            }
+            drawn_.push_back({x, head, r + 3, i});
+        }
+    }
 
     // The pin: its point on the position.
     double pin_dx = pin_x_ - centre_x_;
@@ -493,16 +625,30 @@ bool MapView::pointer(const rap::pointer_event& e)
             return true;
         }
         dragging_ = true;
-        last_ = e.pos;
+        moved_ = false;
+        pressed_ = last_ = e.pos;
         return true;
     }
     if (e.type == T::release && e.button == 1)
     {
+        const bool click = dragging_ && !moved_;
         dragging_ = false;
+        if (click)
+            for (auto it = drawn_.rbegin(); it != drawn_.rend(); ++it)
+            {
+                const float dx = e.pos.x - it->x, dy = e.pos.y - it->y;
+                if (dx * dx + dy * dy <= it->radius * it->radius)
+                {
+                    pick(it->cluster);
+                    break;
+                }
+            }
         return true;
     }
     if (e.type == T::move && dragging_ && world_ > 0)
     {
+        if (std::abs(e.pos.x - pressed_.x) > 3 || std::abs(e.pos.y - pressed_.y) > 3)
+            moved_ = true;
         centre_x_ -= (e.pos.x - last_.x) / world_;
         centre_y_ = std::clamp(centre_y_ - (e.pos.y - last_.y) / world_, 0.0, 1.0);
         centre_x_ -= std::floor(centre_x_);

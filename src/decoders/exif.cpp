@@ -5,6 +5,7 @@
 #include <libexif/exif-loader.h>
 #include <libexif/exif-mnote-data.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace
@@ -64,6 +65,20 @@ ExifSummary read(ExifData* ed, Image& out)
     // the file embeds its own.
     if (summary.color_space == "Adobe RGB (1998)")
         out.declared_space = ColorSpace::adobe_rgb();
+    if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_EXIF], EXIF_TAG_DATE_TIME_ORIGINAL))
+    {
+        int Y = 0, M = 0, D = 0, h = 0, m = 0, s = 0;
+        const std::string text(reinterpret_cast<const char*>(e->data), e->size);
+        if (std::sscanf(text.c_str(), "%4d:%2d:%2d %2d:%2d:%2d", &Y, &M, &D, &h, &m, &s) == 6 && Y > 0 && M >= 1 && M <= 12 && D >= 1 && D <= 31 && h >= 0 &&
+            h < 24 && m >= 0 && m < 60 && s >= 0 && s <= 60)
+        {
+            // Days from 1970 by the civil calendar.
+            const int y = M <= 2 ? Y - 1 : Y;
+            const int era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
+            const int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+            summary.taken = (int64_t(era) * 146097 + doe - 719468) * 86400 + h * 3600 + m * 60 + s;
+        }
+    }
     if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_MODEL))
     {
         char buf[128];
