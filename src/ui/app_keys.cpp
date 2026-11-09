@@ -164,6 +164,8 @@ bool App::on_key(const rap::key_event& e)
         case 'm':
             if (image_ && image_->is_video && image_->has_audio)
                 toggle_mute();
+            else
+                toggle_map();
             return true;
         case 'l':
             transform(8);

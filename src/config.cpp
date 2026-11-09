@@ -223,7 +223,12 @@ void Config::load()
     map_url = get_string(kf, kMaps, "url", map_url);
     map_tile_url = get_string(kf, kMaps, "tile_url", map_tile_url);
     map_satellite_url = get_string(kf, kMaps, "satellite_url", map_satellite_url);
+    if (map_satellite_url == "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")
+        map_satellite_url += "?blankTile=false";  // answers "none here" rather than a grey "not yet available" picture
     map_satellite = get_bool(kf, kMaps, "satellite", map_satellite);
+    map_overlay = get_bool(kf, kMaps, "overlay", map_overlay);
+    map_live_toggle = get_bool(kf, kMaps, "live_toggle", map_live_toggle);
+    map_height = std::clamp(get_int(kf, kMaps, "height", map_height), 100, 4000);
     language = get_string(kf, kInterfaceGroup, "language", language);
     geocoder_url = get_string(kf, kMaps, "geocoder_url", geocoder_url);
     if (!geocoder_url.empty() && (geocoder_url.find("{lat}") == std::string::npos || geocoder_url.find("{lon}") == std::string::npos))
@@ -324,6 +329,9 @@ bool Config::save() const
     g_key_file_set_string(kf, kMaps, "tile_url", map_tile_url.c_str());
     g_key_file_set_string(kf, kMaps, "satellite_url", map_satellite_url.c_str());
     g_key_file_set_boolean(kf, kMaps, "satellite", map_satellite);
+    g_key_file_set_integer(kf, kMaps, "height", map_height);
+    g_key_file_set_boolean(kf, kMaps, "overlay", map_overlay);
+    g_key_file_set_boolean(kf, kMaps, "live_toggle", map_live_toggle);
     g_key_file_set_string(kf, kInterfaceGroup, "language", language.c_str());
     g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
     g_key_file_set_boolean(kf, kOverlay, "enabled", overlay_enabled);

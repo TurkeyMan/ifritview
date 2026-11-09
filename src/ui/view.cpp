@@ -1464,6 +1464,9 @@ void View::paint_over(rap::painter& p, rap::color)
     if (cfg_.overlay_enabled && !overlay_.empty() && (fullscreen_ || cfg_.overlay_windowed))
         draw_overlay(p);
 
+    if (on_paint_over)
+        on_paint_over(p, {L(vw), L(vh)});
+
     if (controls_visible())
         draw_video_controls(p);
 
@@ -1928,6 +1931,8 @@ void View::update_volume_hover(double dx, double dy)
 
 bool View::pointer(const rap::pointer_event& e)
 {
+    if (on_pointer_over && on_pointer_over(e))
+        return true;
     using T = rap::pointer_event_type;
     const double s = scale_factor();
     const double ex = e.pos.x, ey = e.pos.y;
@@ -2111,6 +2116,8 @@ bool View::pointer(const rap::pointer_event& e)
 
 bool View::scroll(const rap::scroll_event& e)
 {
+    if (on_scroll_over && on_scroll_over(e))
+        return true;
     // Over the speaker or the volume line, the wheel is the volume.
     if (video_ && video_audio_ && controls_visible())
     {
