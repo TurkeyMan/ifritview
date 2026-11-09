@@ -221,10 +221,20 @@ void Config::load()
     overlay_font_pt = std::clamp(get_int(kf, kOverlay, "font_pt", overlay_font_pt), 6, 40);
     save_metadata = get_string(kf, kSave, "metadata", save_metadata);
     map_url = get_string(kf, kMaps, "url", map_url);
+    map_tile_url = get_string(kf, kMaps, "tile_url", map_tile_url);
+    map_satellite_url = get_string(kf, kMaps, "satellite_url", map_satellite_url);
+    map_satellite = get_bool(kf, kMaps, "satellite", map_satellite);
     language = get_string(kf, kInterfaceGroup, "language", language);
     geocoder_url = get_string(kf, kMaps, "geocoder_url", geocoder_url);
     if (!geocoder_url.empty() && (geocoder_url.find("{lat}") == std::string::npos || geocoder_url.find("{lon}") == std::string::npos))
         geocoder_url.clear();
+    // Settings from before the map, with place names turned off: nor should
+    // the map start telling a tile server where the photos were taken.
+    if (geocoder_url.empty() && !g_key_file_has_key(kf, kMaps, "tile_url", nullptr))
+    {
+        map_tile_url.clear();
+        map_satellite_url.clear();
+    }
     if (map_url.find("{lat}") == std::string::npos || map_url.find("{lon}") == std::string::npos)
         map_url = "https://www.google.com/maps?q={lat},{lon}";
     // Version 2: Shift + wheel moved from scrolling (dragging pans better)
@@ -311,6 +321,9 @@ bool Config::save() const
     g_key_file_set_integer(kf, kControlsGroup, "version", 2);
     g_key_file_set_string(kf, kSave, "metadata", save_metadata.c_str());
     g_key_file_set_string(kf, kMaps, "url", map_url.c_str());
+    g_key_file_set_string(kf, kMaps, "tile_url", map_tile_url.c_str());
+    g_key_file_set_string(kf, kMaps, "satellite_url", map_satellite_url.c_str());
+    g_key_file_set_boolean(kf, kMaps, "satellite", map_satellite);
     g_key_file_set_string(kf, kInterfaceGroup, "language", language.c_str());
     g_key_file_set_string(kf, kMaps, "geocoder_url", geocoder_url.c_str());
     g_key_file_set_boolean(kf, kOverlay, "enabled", overlay_enabled);

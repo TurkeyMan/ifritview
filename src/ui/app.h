@@ -6,6 +6,7 @@
 #include "geocode.h"
 #include "image.h"
 #include "loader.h"
+#include "map_view.h"
 #include "metadata_model.h"
 #include "save.h"
 #include "video.h"
@@ -312,6 +313,9 @@ private:
     rap::splitter* splitter_ = nullptr;
     rap::widget* metadata_pane_ = nullptr;
     rap::list* metadata_list_ = nullptr;
+    rap::canvas* map_canvas_ = nullptr;
+    std::unique_ptr<MapView> map_view_;
+    void refresh_map();
     // The pane holds the info or the histogram (and what's measured), not both.
     rap::widget *info_box_ = nullptr, *histogram_box_ = nullptr;
     rap::canvas* histogram_canvas_ = nullptr;
