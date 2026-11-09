@@ -24,7 +24,9 @@
 #include <iterator>
 #include <numbers>
 #include <map>
+#include <set>
 #include <span>
+#include <unordered_map>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -33,8 +35,12 @@ namespace
 {
 
 constexpr int kTile = 256, kMinZoom = 2, kMaxZoom = 19;
+constexpr double kNeighbourhood = 14;  // the farthest out a photo opened from a pin is shown
 constexpr double kZoomStep = 0.25;  // of a level (a doubling) per wheel notch
-constexpr int kPinCell = 34;      // pins in one square this wide are drawn as one
+constexpr int kPinCell = 56;      // pins in one square this wide are drawn as one
+constexpr size_t kMaxThumbs = 512;   // kept
+constexpr size_t kThumbsAsked = 64;  // being made at a time, nearest first
+constexpr size_t kThumbsNear = 256;  // the nearest, safe from being dropped: fewer than are kept
 constexpr int kMaxFetches = 2;     // at once: the tile servers ask for few
 constexpr size_t kMaxTiles = 128;  // in memory
 constexpr auto kTileLife = std::chrono::hours(24 * 30);
@@ -144,6 +150,7 @@ MapView::MapView(rap::ui& ui, Config& cfg) : ui_(ui), cfg_(cfg) {}
 
 MapView::~MapView()
 {
+    loader_.reset();
     if (trim_.joinable())
         trim_.join();
 }
@@ -205,6 +212,9 @@ void MapView::stop_fetching()
         t.fetch.reset();
     fetching_ = 0;
     wanted_.clear();
+    if (loader_)
+        loader_->want({});
+    asked_.clear();
 }
 
 void MapView::refresh()
@@ -242,84 +252,295 @@ void MapView::set_location(double latitude, double longitude, const std::string&
 
 void MapView::set_pins(const std::vector<Pin>& pins)
 {
+    // What points into the old list goes with it, till the next paint.
+    current_ = nullptr;
+    clusters_.clear();
+    drawn_.clear();
     pins_.clear();
     pins_.reserve(pins.size());
     for (const Pin& p : pins)
     {
         // -180 and +180 are one place.
         const double x = world_x(p.longitude);
-        pins_.push_back({p.path, x - std::floor(x), world_y(p.latitude)});
+        pins_.push_back({p.path, x - std::floor(x), world_y(p.latitude), p.path + "|" + std::to_string(p.modified), p.orientation});
     }
     clusters_zoom_ = -1;
     refresh();
 }
 
-int64_t MapView::cell_of(const Placed& p) const
+// Pins closer than a pin's width at `level` make one: each joins the first
+// group whose first pin it's near, so the groups don't change as the map's
+// panned, and a stack isn't split by where some grid happens to fall.
+std::vector<MapView::Cluster> MapView::group(const std::vector<size_t>& pins, int level) const
 {
-    const double scale = double(int64_t(1) << tile_zoom()) * kTile / kPinCell;
-    return int64_t(p.x * scale) << 32 | int64_t(p.y * scale);
+    const double world = double(int64_t(1) << level) * kTile;
+    // Whole cells round the world, each at least a pin wide, so a neighbour's
+    // always in the next cell, across the seam too.
+    const int64_t across = std::max<int64_t>(1, int64_t(world / kPinCell));
+    const double cell_size = world / double(across);
+    std::vector<Cluster> out;
+    std::unordered_map<int64_t, std::vector<size_t>> grid;  // groups by the cell of their first pin
+    const auto cell = [&](int64_t cx, int64_t cy) { return ((cx % across + across) % across) << 32 | ((cy + 1) & 0xFFFFFFFF); };
+    for (const size_t i : pins)
+    {
+        const Placed& p = pins_[i];
+        const int64_t cx = int64_t(p.x * world / cell_size), cy = int64_t(p.y * world / cell_size);
+        size_t joined = out.size();
+        for (int64_t dy = -1; dy <= 1 && joined == out.size(); ++dy)
+            for (int64_t dx = -1; dx <= 1 && joined == out.size(); ++dx)
+            {
+                const auto it = grid.find(cell(cx + dx, cy + dy));
+                if (it == grid.end())
+                    continue;
+                for (const size_t g : it->second)
+                {
+                    const Placed& first = pins_[out[g].first];
+                    double ax = p.x - first.x;
+                    ax -= std::round(ax);  // the nearer way round the world
+                    const double px = ax * world, py = (p.y - first.y) * world;
+                    if (px * px + py * py < double(kPinCell) * kPinCell)
+                    {
+                        joined = g;
+                        break;
+                    }
+                }
+            }
+        if (joined == out.size())
+        {
+            Cluster c;
+            c.first = i;
+            c.x = p.x;
+            c.y = p.y;
+            out.push_back(std::move(c));
+            grid[cell(cx, cy)].push_back(joined);
+        }
+        Cluster& c = out[joined];
+        c.members.push_back(i);
+        ++c.count;
+        double ax = p.x - c.x;
+        ax -= std::round(ax);
+        c.x += ax / double(c.count);
+        c.y += (p.y - c.y) / double(c.count);
+    }
+    return out;
 }
 
 void MapView::build_clusters()
 {
     clusters_zoom_ = tile_zoom();
-    clusters_.clear();
     drawn_.clear();
-    std::map<int64_t, size_t> at;
+    current_ = nullptr;
+    std::vector<size_t> others;
+    others.reserve(pins_.size());
     for (size_t i = 0; i < pins_.size(); ++i)
     {
-        const Placed& p = pins_[i];
-        if (p.path == path_)
-            continue;
-        const int64_t cell = cell_of(p);
-        const auto [it, added] = at.try_emplace(cell, clusters_.size());
-        if (added)
-        {
-            Cluster c;
-            c.first = i;
-            c.cell = cell;
-            clusters_.push_back(c);
-        }
-        Cluster& c = clusters_[it->second];
-        c.x += (p.x - c.x) / double(++c.count);
-        c.y += (p.y - c.y) / double(c.count);
+        if (pins_[i].path == path_)
+            current_ = &pins_[i];
+        else
+            others.push_back(i);
     }
+    clusters_ = group(others, clusters_zoom_);
 }
 
 void MapView::pick(size_t cluster)
 {
+    if (cluster >= clusters_.size())
+        return;
     const Cluster c = clusters_[cluster];
-    if (c.count == 1 && on_pick)
+    // A photo opened from far out comes close enough to see where it was
+    // taken; from nearer, the map stays where it is.
+    const auto open = [this](const Placed& pin)
     {
-        keep_view_ = true;
-        on_pick(pins_[c.first].path);
-        return;
-    }
-    if (zoom_ < kMaxZoom)
-    {
-        // Closer, till they come apart.
-        centre_x_ = c.x;
-        centre_y_ = c.y;
-        zoom_ = std::min(zoom_ + 2, double(kMaxZoom));
-        refresh();
-        return;
-    }
-    // As close as it goes: all in one spot, so each click the next after the
-    // photo shown, in the folder's order, going through every one.
-    std::vector<size_t> members;
-    size_t after = 0;
-    for (size_t i = 0; i < pins_.size(); ++i)
-        if (cell_of(pins_[i]) == c.cell)
+        if (!on_pick)
+            return;
+        if (zoom_ < kNeighbourhood)
         {
-            members.push_back(i);
-            if (pins_[i].path == path_)
-                after = members.size();
+            zoom_ = kNeighbourhood;
+            centre_x_ = pin.x;
+            centre_y_ = pin.y;
+            refresh();
         }
-    if (members.size() > 1 && on_pick)
-    {
         keep_view_ = true;
-        on_pick(pins_[members[after % members.size()]].path);
+        on_pick(pin.path);
+    };
+    if (c.count == 1)
+    {
+        open(pins_[c.first]);
+        return;
     }
+
+    // The different places in it, and where they lie, measured from the
+    // first of them the short way round the world.
+    const Placed& origin = pins_[c.first];
+    std::set<std::pair<double, double>> places;
+    double x0 = 0, x1 = 0, y0 = origin.y, y1 = origin.y;
+    for (const size_t i : c.members)
+    {
+        places.emplace(pins_[i].x, pins_[i].y);
+        double rx = pins_[i].x - origin.x;
+        rx -= std::round(rx);
+        x0 = std::min(x0, rx);
+        x1 = std::max(x1, rx);
+        y0 = std::min(y0, pins_[i].y);
+        y1 = std::max(y1, pins_[i].y);
+    }
+
+    if (places.size() < 2 || group(c.members, kMaxZoom).size() == 1)
+    {
+        // No zoom will part them, so each click the next after the photo
+        // shown (if it's one of them too), going through every one.
+        std::vector<size_t> cycle = c.members;
+        if (current_)
+        {
+            std::vector<size_t> with = c.members;
+            with.push_back(size_t(current_ - pins_.data()));
+            if (group(with, kMaxZoom).size() == 1)
+                cycle = std::move(with);
+        }
+        std::sort(cycle.begin(), cycle.end());
+        size_t after = 0;
+        for (size_t i = 0; i < cycle.size(); ++i)
+            if (pins_[cycle[i]].path == path_)
+                after = i + 1;
+        open(pins_[cycle[after % cycle.size()]]);
+        return;
+    }
+
+    // The first level where each place has a pin of its own, but no closer
+    // than shows them all.
+    int level = std::min(tile_zoom() + 1, kMaxZoom);
+    for (; level < kMaxZoom; ++level)
+        if (group(c.members, level).size() == places.size())
+            break;
+    double target = level;
+    if (canvas_)
+    {
+        const rap::size_f size = canvas_->size();
+        const double extent = std::max(x1 - x0, y1 - y0);
+        if (extent > 0 && size.w > 0 && size.h > 0)
+            target = std::min(target, std::log2(0.7 * std::min(size.w, size.h) / (extent * kTile)));
+    }
+    zoom_ = std::clamp(std::max(target, zoom_ + 0.5), double(kMinZoom), double(kMaxZoom));
+    centre_x_ = origin.x + (x0 + x1) / 2;
+    centre_x_ -= std::floor(centre_x_);
+    // A little lower down the world than their middle, for the pins stand above their points.
+    centre_y_ = (y0 + y1) / 2 - 26 / (kTile * std::pow(2.0, zoom_));
+    refresh();
+}
+
+void MapView::draw_pin(rap::painter& p, float x, float y, const Placed* placed, int count, bool selected, Drawn* hit)
+{
+    const float inner = selected ? 46.f : 36.f, border = selected ? 4.f : 3.f, outer = inner + 2 * border, tip = selected ? 11.f : 9.f;
+    const float left = x - outer / 2, top = y - tip - outer, mid = top + outer / 2;
+    const rap::color frame = selected ? rap::color{214, 52, 42} : rap::color{255, 255, 255};
+
+    // The cards behind, a stack's.
+    if (count > 1)
+    {
+        const rap::color card{240, 241, 244}, line{170, 175, 185};
+        for (const float degrees : {14.f, -10.f})
+        {
+            const float r = degrees * float(std::numbers::pi) / 180, c = std::cos(r), s = std::sin(r), h = outer / 2 - 1;
+            std::vector<rap::point_f> corners;
+            for (const auto& [a, b] : {std::pair{-h, -h}, std::pair{h, -h}, std::pair{h, h}, std::pair{-h, h}})
+                corners.push_back({x + a * c - b * s, mid + a * s + b * c});
+            p.polygon(corners, card, line, 1);
+        }
+    }
+
+    p.rect({left, top + 2, outer, outer}, 7, rap::color{0, 0, 0, 60}, std::nullopt);
+    p.polygon({{x - tip, top + outer - 2}, {x + tip, top + outer - 2}, {x, y}}, frame, std::nullopt);
+    p.rect({left, top, outer, outer}, 7, frame, std::nullopt);
+
+    const auto it = placed ? thumbs_.find(placed->thumb) : thumbs_.end();
+    const rap::rect_f picture{left + border, top + border, inner, inner};
+    if (it != thumbs_.end() && it->second.image)
+    {
+        it->second.used = clock_;
+        const float side = float(it->second.image->width());
+        p.image(*it->second.image, {0, 0, side, side}, picture);
+    }
+    else
+        p.rect(picture, 3, rap::color{203, 208, 216}, std::nullopt);
+
+    if (count > 1)
+    {
+        const std::string n = count > 99 ? "99+" : std::to_string(count);
+        rap::text_style style;
+        style.fg = rap::color{255, 255, 255};
+        style.size = 7;
+        style.bold = true;
+        const rap::size_f t = p.measure(n, style);
+        const float bx = left + outer - 3, by = top + 3, r = std::max(8.5f, t.w / 2 + 4);
+        p.circle({bx, by}, r, rap::color{35, 38, 46}, std::nullopt);
+        p.text({bx - t.w / 2, by - t.h / 2}, n, style);
+    }
+    if (hit)
+    {
+        hit->x = x;
+        hit->y = mid;
+        hit->radius = outer / 2 + 3;
+    }
+}
+
+// What's wanted and isn't here yet, the most wanted first.
+void MapView::ask_thumbs(const std::vector<const Placed*>& wanted)
+{
+    std::vector<ThumbLoader::Request> requests;
+    std::vector<std::string> keys;
+    for (size_t i = 0; i < wanted.size() && i < kThumbsNear; ++i)
+    {
+        if (requests.size() >= kThumbsAsked)
+            break;
+        const Placed* placed = wanted[i];
+        Thumb& t = thumbs_[placed->thumb];
+        t.used = clock_;
+        if (t.image || t.failed)
+            continue;
+        keys.push_back(placed->thumb);
+        requests.push_back({placed->thumb, placed->path, placed->orientation});
+    }
+    trim_thumbs();
+    if (keys == asked_)
+        return;
+    asked_ = std::move(keys);
+    if (!loader_)
+        loader_ = std::make_unique<ThumbLoader>(
+            [this, alive = std::weak_ptr<char>(alive_)](const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture)
+            {
+                platform::post_main(
+                    [this, alive, key, picture = std::move(picture)]() mutable
+                    {
+                        if (alive.lock())
+                            thumb_ready(key, std::move(picture));
+                    });
+            });
+    loader_->want(std::move(requests));
+}
+
+void MapView::trim_thumbs()
+{
+    while (thumbs_.size() > kMaxThumbs)
+    {
+        auto oldest = thumbs_.end();
+        for (auto it = thumbs_.begin(); it != thumbs_.end(); ++it)
+            if (it->second.used != clock_ && (oldest == thumbs_.end() || it->second.used < oldest->second.used))
+                oldest = it;
+        if (oldest == thumbs_.end())
+            break;
+        thumbs_.erase(oldest);
+    }
+}
+
+void MapView::thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture)
+{
+    Thumb& t = thumbs_[key];
+    t.used = clock_;
+    if (picture)
+        t.image = ui_.create_image(picture->side, picture->side, picture->format, picture->pixels.data(), size_t(picture->side) * 4);
+    t.failed = !t.image;
+    trim_thumbs();
+    refresh();
 }
 
 std::string MapView::file_of(const Tile& t) const
@@ -393,49 +614,59 @@ void MapView::paint(rap::painter& p, rap::size_f size)
     for (const Need& n : need)
         wanted_.push_back(n.key);
 
-    // The folder's other photos, under the red pin.
+    // The folder's other photos, the ones nearest the bottom in front and the
+    // red pin over them all. Thumbnails are made for those a good way past
+    // the edges too, so zooming out or panning finds them ready.
     if (clusters_zoom_ != tile_zoom())
         build_clusters();
     drawn_.clear();
     {
-        const rap::color edge{255, 255, 255}, gray{112, 118, 130};
-        rap::text_style count_style;
-        count_style.fg = rap::color{255, 255, 255};
-        count_style.size = 7;
-        count_style.bold = true;
+        struct Seen
+        {
+            float x, y;
+            size_t cluster;
+        };
+        std::vector<Seen> seen;
+        struct Near
+        {
+            float distance;
+            const Placed* placed;
+        };
+        std::vector<Near> near_pins;
+        const float margin = std::max(size.w, size.h);
         for (size_t i = 0; i < clusters_.size(); ++i)
         {
             const Cluster& c = clusters_[i];
             double dx = c.x - centre_x_;
             dx -= std::round(dx);  // the nearer way round the world
             const float x = float(dx * world_) + size.w / 2, y = float((c.y - centre_y_) * world_) + size.h / 2;
-            if (x < -30 || x > size.w + 30 || y < -8 || y > size.h + 44)
+            if (x < -margin || x > size.w + margin || y < -margin || y > size.h + margin)
                 continue;
-            const float r = c.count > 1 ? 10.f : 7.f, head = y - r - 7;
-            p.polygon({{x - r + 1.f, head + 2}, {x + r - 1.f, head + 2}, {x, y + 1.5f}}, edge, std::nullopt);
-            p.circle({x, head}, r + 1.25f, edge, std::nullopt);
-            p.polygon({{x - r + 2.5f, head + 2}, {x + r - 2.5f, head + 2}, {x, y - 1}}, gray, std::nullopt);
-            p.circle({x, head}, r, gray, std::nullopt);
-            if (c.count > 1)
-            {
-                const std::string n = c.count > 99 ? "99+" : std::to_string(c.count);
-                const rap::size_f t = p.measure(n, count_style);
-                p.text({x - t.w / 2, head - t.h / 2}, n, count_style);
-            }
-            drawn_.push_back({x, head, r + 3, i});
+            near_pins.push_back({std::hypot(x - size.w / 2, y - size.h / 2), &pins_[c.first]});
+            if (x > -50 && x < size.w + 50 && y > -8 && y < size.h + 70)
+                seen.push_back({x, y, i});
         }
-    }
+        std::sort(seen.begin(), seen.end(), [](const Seen& a, const Seen& b) { return a.y < b.y; });
+        for (const Seen& s : seen)
+        {
+            Drawn d;
+            d.cluster = s.cluster;
+            const Cluster& c = clusters_[s.cluster];
+            draw_pin(p, s.x, s.y, &pins_[c.first], c.count, false, &d);
+            drawn_.push_back(d);
+        }
+        double pin_dx = pin_x_ - centre_x_;
+        pin_dx -= std::round(pin_dx);  // the nearer way round the world
+        draw_pin(p, float(pin_dx * world_) + size.w / 2, float((pin_y_ - centre_y_) * world_) + size.h / 2, current_, 1, true, nullptr);
 
-    // The pin: its point on the position.
-    double pin_dx = pin_x_ - centre_x_;
-    pin_dx -= std::round(pin_dx);  // the nearer way round the world
-    const float px = float(pin_dx * world_) + size.w / 2, py = float((pin_y_ - centre_y_) * world_) + size.h / 2;
-    const rap::color white{255, 255, 255}, red{220, 40, 40};
-    p.polygon({{px - 9.5f, py - 15}, {px + 9.5f, py - 15}, {px, py + 1.5f}}, white, std::nullopt);
-    p.circle({px, py - 20}, 11, white, std::nullopt);
-    p.polygon({{px - 8, py - 15}, {px + 8, py - 15}, {px, py - 1}}, red, std::nullopt);
-    p.circle({px, py - 20}, 9.5f, red, std::nullopt);
-    p.circle({px, py - 20}, 3.5f, white, std::nullopt);
+        std::sort(near_pins.begin(), near_pins.end(), [](const Near& a, const Near& b) { return a.distance < b.distance; });
+        std::vector<const Placed*> wanted;
+        if (current_)
+            wanted.push_back(current_);
+        for (const Near& n : near_pins)
+            wanted.push_back(n.placed);
+        ask_thumbs(wanted);
+    }
 
     // Street / satellite, named for what a click switches to, if both are on.
     chip_ = {};
@@ -443,7 +674,7 @@ void MapView::paint(rap::painter& p, rap::size_f size)
     {
         const std::string other = layer() ? _("Street") : _("Satellite");
         rap::text_style chip_style;
-        chip_style.fg = white;
+        chip_style.fg = rap::color{255, 255, 255};
         const rap::size_f t = p.measure(other, chip_style);
         chip_ = {size.w - t.w - 24, 8, t.w + 16, t.h + 6};
         p.rect(chip_, 4, rap::color{0, 0, 0, 170}, std::nullopt);
