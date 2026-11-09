@@ -315,6 +315,15 @@ private:
     rap::widget* metadata_pane_ = nullptr;
     rap::list* metadata_list_ = nullptr;
     rap::canvas* map_canvas_ = nullptr;
+    rap::splitter* map_split_ = nullptr;  // the details above, the map below
+    bool map_shown_ = false, map_split_bound_ = false;
+    bool map_overlay_on_ = false;  // showing over the image in fullscreen
+    void toggle_map();
+    rap::rect_f map_overlay_area(rap::size_f view) const;
+    rap::rect_f map_overlay_rect_{};  // where it was last painted
+    void restore_map_height();
+    void map_resized();
+    float map_split_total_ = 0;  // the pane's height, last seen
     std::unique_ptr<MapView> map_view_;
     void refresh_map();
     void scan_pins(bool again);                  // the folder's geotags, for the map
