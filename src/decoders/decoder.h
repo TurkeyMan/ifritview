@@ -213,8 +213,16 @@ struct ExifSummary
     int orientation = 1;
     std::string camera;
     std::string color_space;  // "sRGB" / "Adobe RGB (1998)" when declared
+    int64_t taken = 0;        // DateTimeOriginal in seconds, the camera's local time; 0 when absent
 };
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
+#endif
+
+#ifdef HAVE_HEIF
+// The primary image's EXIF (as a TIFF structure) and size, nothing decoded.
+// False only if the file couldn't be read; one that isn't really a HEIF, or
+// has no EXIF, is read fine and leaves `exif` empty.
+bool heif_stored_exif(const std::string& path, std::vector<uint8_t>& exif, int& width, int& height);
 #endif
 
 const Decoder& exr_decoder();

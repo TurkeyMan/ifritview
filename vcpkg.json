@@ -18,6 +18,7 @@
     "libjxl",
     "libexif",
     "zstd",
+    "sqlite3",
     "bzip2",
     { "name": "pkgconf", "host": true }
   ]
