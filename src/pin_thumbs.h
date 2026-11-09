@@ -1,0 +1,55 @@
+#pragma once
+// Small square pictures of a folder's photos, for the map's pins, made on a
+// thread of their own: from the preview stored in the file's metadata if it
+// has one, else, for an image the platform can decode and not too big, from
+// the file.
+
+#include <rapport/rapport.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+class ThumbLoader
+{
+public:
+    struct Request
+    {
+        std::string key, path;
+        int orientation = 1;  // EXIF 1..8
+    };
+    struct Picture
+    {
+        int side = 0;  // pixels: it's square
+        rap::pixel_format format{};
+        std::vector<uint8_t> pixels;  // side * 4 bytes a row
+    };
+    // On the loader's thread, for each request; `picture` null if none could be made.
+    using Done = std::function<void(const std::string& key, std::shared_ptr<Picture> picture)>;
+
+    explicit ThumbLoader(Done done);
+    ~ThumbLoader();  // waits for its thread
+    ThumbLoader(const ThumbLoader&) = delete;
+    ThumbLoader& operator=(const ThumbLoader&) = delete;
+
+    // What's wanted now, most wanted first, in place of what was.
+    void want(std::vector<Request> requests);
+
+private:
+    void run();
+
+    Done done_;
+    std::mutex mutex_;
+    std::condition_variable wake_;
+    std::deque<Request> queue_;
+    std::string working_;  // the key being made
+    bool stop_ = false;
+    std::thread thread_;
+};

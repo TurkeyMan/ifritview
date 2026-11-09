@@ -1262,7 +1262,7 @@ void App::pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, b
     if (serial != pins_serial_)
         return;  // an earlier scan's
     for (FolderIndex::Located& f : found)
-        pins_building_.push_back({std::move(f.path), f.latitude, f.longitude});
+        pins_building_.push_back({std::move(f.path), f.latitude, f.longitude, f.orientation, f.mtime});
     if (done || pins_live_)
         map_view_->set_pins(pins_building_);
     platform::trace("folder index: %zu geotags%s", pins_building_.size(), done ? ", all" : "");

@@ -78,6 +78,7 @@ add_library(ifrit_core STATIC
   src/geocode.cpp
   src/folder_block.cpp
   src/folder_index.cpp
+  src/pin_thumbs.cpp
   src/video.cpp
   src/loader.cpp
   src/scale.cpp
