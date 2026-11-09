@@ -86,6 +86,10 @@ struct Config
     // Maps: where a GPS location link goes; {lat} and {lon} are substituted.
     std::string map_url = "https://www.google.com/maps?q={lat},{lon}";
     std::string map_link(double latitude, double longitude) const;
+    // The info pane's map: tile URL templates ({z}, {x}, {y}), empty = no map.
+    std::string map_tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+    std::string map_satellite_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+    bool map_satellite = false;
     // Reverse geocoding provider, {lat}/{lon} template; empty = off.
     // The interface's language, a tag such as "de"; empty for the system's.
     // Takes effect when IfritView next starts.

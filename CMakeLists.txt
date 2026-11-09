@@ -208,6 +208,7 @@ add_executable(ifritview
   src/ui/app_save.cpp
   src/ui/app_print.cpp
   src/ui/view.cpp
+  src/ui/map_view.cpp
   src/ui/settings.cpp
   src/ui/save.cpp
 )

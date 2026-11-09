@@ -132,6 +132,8 @@ void App::show_pane_box()
 {
     info_box_->set_visible(!pane_histogram_);
     histogram_box_->set_visible(pane_histogram_);
+    if (pane_histogram_ || !metadata_visible_)
+        map_view_->stop_fetching();
 }
 
 void App::fill_pane()
@@ -358,4 +360,18 @@ void App::refresh_metadata()
         return;
     const std::string url = image_ && image_->has_location ? cfg_.map_link(image_->latitude, image_->longitude) : "";
     metadata_model_.set(collect_metadata(), image_.get(), url);
+    refresh_map();
+}
+
+void App::refresh_map()
+{
+    if (!map_canvas_)
+        return;  // made with the list, when the pane first shows
+    map_view_->attach(map_canvas_);
+    const bool show = !fullscreen_ && image_ && image_->has_location && map_view_->enabled();
+    if (show)
+        map_view_->set_location(image_->latitude, image_->longitude);
+    else
+        map_view_->stop_fetching();
+    map_canvas_->set_visible(show);
 }

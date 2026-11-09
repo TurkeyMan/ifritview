@@ -64,6 +64,8 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     cfg_ = settings.get();
     cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
     geocoder_.set_provider(cfg_.geocoder_url);
+    map_view_ = std::make_unique<MapView>(ui_, cfg_);
+    map_view_->on_open = [this](double latitude, double longitude) { open_url(cfg_.map_link(latitude, longitude)); };
     lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
     // Format plugins load on a thread of their own, the first image never
@@ -380,7 +382,7 @@ void App::build_ui()
                 // Hidden at first, so made once the window is up and idle.
                 L::deferred{[this]
                             {
-                                return L::list{{{_("Tag"), rap::extent{14, rap::extent::unit::chars}}, {_("Value"), {}, true}},
+                                return vbox{L::list{{{_("Tag"), rap::extent{14, rap::extent::unit::chars}}, {_("Value"), {}, true}},
                                                &metadata_model_}
                                     .selection(rap::selection_mode::single)
                                     .on_activate(
@@ -391,6 +393,15 @@ void App::build_ui()
                                                 open_url(url);
                                         })
                                     .bind(metadata_list_)
+                                    .stretch(),
+                                    L::canvas{}
+                                        .focusable(false)
+                                        .on_paint([this](rap::painter& p, rap::size_f size) { map_view_->paint(p, size); })
+                                        .on_pointer([this](const rap::pointer_event& e) { return map_view_->pointer(e); })
+                                        .on_scroll([this](const rap::scroll_event& e) { return map_view_->scroll(e); })
+                                        .on_resize([this](rap::size_f) { if (!map_view_->attached()) refresh_map(); })
+                                        .bind(map_canvas_)
+                                        .height(rap::extent{280, rap::extent::unit::px})}
                                     .stretch();
                             }}
                     .stretch()  // the list's own stretch is inside the builder: the slot needs it too
@@ -1998,6 +2009,7 @@ void App::on_fullscreen_changed(bool fs)
         update_title();
         exposure_box_->set_visible(exposure_applies());
     }
+    refresh_map();
     update_histogram();
     view_->set_fullscreen(fs);
     if (fs && slideshow_)
@@ -2066,6 +2078,7 @@ void App::open_settings_page(int page)
             xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
             window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
             view_->config_changed();
+            map_view_->config_changed();
             refresh_metadata();
             const bool reload =
                 ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->is_raw) ||
