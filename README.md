@@ -24,8 +24,9 @@ an old game ever produced.
 - **Nothing is required that isn't needed.** Every format library is
   optional. Build without one and its formats are simply left out.
 - **Your photos stay yours.** The only thing IfritView sends anywhere is a
-  photo's GPS position, to turn it into a place name, and you choose the
-  service or switch it off in Settings.
+  photo's GPS position: to turn it into a place name, and, as map tile
+  requests while the Info pane is open, to draw the map. You choose the
+  services or switch them off in Settings.
 
 ## What it does
 

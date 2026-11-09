@@ -107,7 +107,8 @@ ExifSummary read(ExifData* ed, Image& out)
     };
     double lat = 0, lon = 0;
     if (coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE_REF), lat) &&
-        coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE_REF), lon))
+        coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE_REF), lon) && lat >= -90 && lat <= 90 &&
+        lon >= -180 && lon <= 180)
     {
         out.has_location = true;
         out.latitude = lat;

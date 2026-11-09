@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "decoders/decoder.h"
 #include "geocode.h"
+#include "map_view.h"
 #include "embedded.h"
 #include "i18n.h"
 #include "integration.h"
@@ -169,6 +170,7 @@ struct State
                *apply_xmp = nullptr, *lens_downloads = nullptr;
     rap::spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
     rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
+    rap::drop_down *street_map = nullptr, *satellite_map = nullptr;
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
@@ -194,6 +196,7 @@ struct State
     rap::tabs* tabs = nullptr;
 
     std::vector<std::string> geo_urls;  // per geo_provider item: "off", provider urls, "" = custom
+    std::vector<std::string> street_urls, satellite_urls;  // likewise, per map drop-down item
 
     // Pages are built when first shown: only those can have changed.
     void apply()
@@ -235,6 +238,14 @@ struct State
             cfg.geocoder_url.clear();
         else if (geo_text.find("{lat}") != std::string::npos && geo_text.find("{lon}") != std::string::npos)
             cfg.geocoder_url = geo_text;
+        const auto take_map = [](rap::drop_down* d, const std::vector<std::string>& urls, std::string& url)
+        {
+            const int i = d->current();
+            if (i >= 0 && !urls[size_t(i)].empty())  // "" = the URL from the settings file: left
+                url = urls[size_t(i)] == "off" ? std::string() : urls[size_t(i)];
+        };
+        take_map(street_map, street_urls, cfg.map_tile_url);
+        take_map(satellite_map, satellite_urls, cfg.map_satellite_url);
     }
 
     void apply_viewing()
@@ -310,6 +321,33 @@ rap::node general_page(const Config& cfg, State& st)
     st.geo_urls.push_back("");
     if (geo_index < 0)
         geo_index = int(geos.size() - 1);
+
+    // Off, the presets, and a URL of the user's own if the settings file has one.
+    const auto map_choices = [](bool satellite, const std::string& current, std::vector<std::string>& urls, int& index)
+    {
+        std::vector<std::string> names{_("Off")};
+        urls = {"off"};
+        index = current.empty() ? 0 : -1;
+        size_t count = 0;
+        const MapView::Provider* list = MapView::providers(satellite, count);
+        for (size_t i = 0; i < count; ++i)
+        {
+            names.push_back(list[i].name);
+            urls.push_back(list[i].url);
+            if (current == list[i].url)
+                index = int(i + 1);
+        }
+        if (index < 0)
+        {
+            names.push_back(_("Custom"));
+            urls.push_back("");
+            index = int(names.size() - 1);
+        }
+        return names;
+    };
+    int street_index = 0, satellite_index = 0;
+    const std::vector<std::string> streets = map_choices(false, cfg.map_tile_url, st.street_urls, street_index);
+    const std::vector<std::string> satellites = map_choices(true, cfg.map_satellite_url, st.satellite_urls, satellite_index);
 
     int raw_index = 0;
     for (int i = 0; i < 3; ++i)
@@ -403,6 +441,12 @@ rap::node general_page(const Config& cfg, State& st)
                                                  .enabled(st.geo_urls[size_t(geo_index)].empty())
                                                  .bind(st.geo_url)
                                                  .width(chars(44))},
+                     {_("Street map"), L::drop_down{streets, street_index}
+                                               .tooltip(_("While the Info pane is open, this service is asked for the map around a photo's GPS position"))
+                                               .bind(st.street_map)},
+                     {_("Satellite map"), L::drop_down{satellites, satellite_index}
+                                                  .tooltip(_("While the Info pane is open, this service is asked for imagery around a photo's GPS position"))
+                                                  .bind(st.satellite_map)},
                  }},
     }};
 }
