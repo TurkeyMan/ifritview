@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -18,6 +19,8 @@ struct FileRecord;
 
 // From the file's first bytes (for HEIF, the file): false if it can't be read.
 bool read_file_record(const std::string& path, FileRecord& record);
+// The preview stored in the file's metadata; empty if it has none.
+std::vector<uint8_t> embedded_thumbnail(const std::string& path);
 
 class FolderIndex
 {
@@ -26,6 +29,8 @@ public:
     {
         std::string path;
         double latitude = 0, longitude = 0;
+        int orientation = 1;
+        int64_t mtime = 0;
     };
     // On the index's thread: more of what's been found, and whether that's all.
     using Report = std::function<void(std::vector<Located> found, bool done)>;

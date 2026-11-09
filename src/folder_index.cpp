@@ -164,6 +164,31 @@ bool read_file_record(const std::string& path, FileRecord& record)
 #endif
 }
 
+std::vector<uint8_t> embedded_thumbnail(const std::string& path)
+{
+#ifdef HAVE_EXIF
+    const std::string bytes = read_bytes(rap::sys::path_from_utf8(path), kHead);
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(bytes.data());
+    const size_t n = bytes.size();
+    std::vector<uint8_t> exif;
+    if (is_tiff(d, n))
+        exif.assign(d, d + n);
+#ifdef HAVE_HEIF
+    else if (is_heif(d, n))
+    {
+        int w = 0, h = 0;
+        heif_stored_exif(path, exif, w, h);
+    }
+#endif
+    else if (n)
+        exif = extract_metadata(d, n).exif;
+    return exif.empty() ? std::vector<uint8_t>{} : exif_thumbnail(exif.data(), exif.size());
+#else
+    (void)path;
+    return {};
+#endif
+}
+
 // The database: a block per directory, opened on the index's thread. Any
 // trouble with it just means working without it.
 struct FolderIndex::Store
@@ -416,7 +441,7 @@ void FolderIndex::work(Store& store, const Job& job)
                 dirty = true;
             }
             if (record.has_location)
-                found.push_back({*path, record.latitude, record.longitude});
+                found.push_back({*path, record.latitude, record.longitude, record.orientation, record.mtime});
             now.push_back(std::move(record));
 
             const auto t = std::chrono::steady_clock::now();

@@ -172,3 +172,26 @@ ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out)
     std::memcpy(buf.data() + 6, data, size);
     return read(load(buf.data(), buf.size()), out);
 }
+
+std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size)
+{
+    if (!data || size < 8 || size > (size_t(1) << 28))
+        return {};
+    std::vector<uint8_t> prefixed;
+    if (std::memcmp(data, "Exif\0\0", 6) != 0 && !(data[0] == 0xFF && data[1] == 0xD8))
+    {
+        prefixed.resize(6 + size);
+        std::memcpy(prefixed.data(), "Exif\0\0", 6);
+        std::memcpy(prefixed.data() + 6, data, size);
+        data = prefixed.data();
+        size = prefixed.size();
+    }
+    std::vector<uint8_t> thumbnail;
+    if (ExifData* ed = load(data, size))
+    {
+        if (ed->data && ed->size)
+            thumbnail.assign(ed->data, ed->data + ed->size);
+        exif_data_unref(ed);
+    }
+    return thumbnail;
+}
