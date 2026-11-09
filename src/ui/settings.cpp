@@ -171,6 +171,7 @@ struct State
     rap::spin *min_width = nullptr, *min_height = nullptr, *prefetch_ahead = nullptr, *prefetch_behind = nullptr, *cache_mb = nullptr;
     rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
     rap::drop_down *street_map = nullptr, *satellite_map = nullptr;
+    rap::check* map_live_toggle = nullptr;
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
@@ -246,6 +247,7 @@ struct State
         };
         take_map(street_map, street_urls, cfg.map_tile_url);
         take_map(satellite_map, satellite_urls, cfg.map_satellite_url);
+        cfg.map_live_toggle = map_live_toggle->checked();
     }
 
     void apply_viewing()
@@ -447,6 +449,9 @@ rap::node general_page(const Config& cfg, State& st)
                      {_("Satellite map"), L::drop_down{satellites, satellite_index}
                                                   .tooltip(_("While the Info pane is open, this service is asked for imagery around a photo's GPS position"))
                                                   .bind(st.satellite_map)},
+                     {"", L::check{_("Show the other map in the street/satellite button"), cfg.map_live_toggle}
+                              .tooltip(_("Fetches the other map's tiles too, as you move around the map; turn it off on a slow connection"))
+                              .bind(st.map_live_toggle)},
                  }},
     }};
 }

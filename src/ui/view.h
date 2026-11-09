@@ -53,6 +53,10 @@ public:
     // redraw, and its 8-bit pixels can wait.
     bool drawn_on_gpu() const;
     void redraw() { invalidate(); }
+    // Something of the app's drawn over the image, and what's first offered its input.
+    std::function<void(rap::painter&, rap::size_f)> on_paint_over;
+    std::function<bool(const rap::pointer_event&)> on_pointer_over;
+    std::function<bool(const rap::scroll_event&)> on_scroll_over;
     // The GPU's frame for the view as it is now, presented before the next
     // paint (nothing if it's already that, or the CPU draws it).
     void present_on_gpu();

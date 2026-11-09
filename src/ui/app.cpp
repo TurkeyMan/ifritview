@@ -69,6 +69,15 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     map_view_->on_pick = [this](const std::string& path) { open_pin(path); };
     lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
+    view_->on_paint_over = [this](rap::painter& p, rap::size_f size)
+    {
+        if (!map_overlay_on_)
+            return;
+        map_overlay_rect_ = map_overlay_area(size);
+        map_view_->paint_in(p, map_overlay_rect_);
+    };
+    view_->on_pointer_over = [this](const rap::pointer_event& e) { return map_overlay_on_ && map_view_->pointer_in(e, map_overlay_rect_); };
+    view_->on_scroll_over = [this](const rap::scroll_event& e) { return map_overlay_on_ && map_view_->scroll_in(e, map_overlay_rect_); };
     // Format plugins load on a thread of their own, the first image never
     // waiting for them; once they're in, their formats join the folder.
     s_app = this;
@@ -383,7 +392,7 @@ void App::build_ui()
                 // Hidden at first, so made once the window is up and idle.
                 L::deferred{[this]
                             {
-                                return vbox{L::list{{{_("Tag"), rap::extent{14, rap::extent::unit::chars}}, {_("Value"), {}, true}},
+                                return L::splitter{L::vertical, L::list{{{_("Tag"), rap::extent{14, rap::extent::unit::chars}}, {_("Value"), {}, true}},
                                                &metadata_model_}
                                     .selection(rap::selection_mode::single)
                                     .on_activate(
@@ -394,15 +403,17 @@ void App::build_ui()
                                                 open_url(url);
                                         })
                                     .bind(metadata_list_)
+                                    .height(rap::extent{80, rap::extent::unit::px})  // the least it shrinks to, not what it wants
                                     .stretch(),
                                     L::canvas{}
                                         .focusable(false)
                                         .on_paint([this](rap::painter& p, rap::size_f size) { map_view_->paint(p, size); })
                                         .on_pointer([this](const rap::pointer_event& e) { return map_view_->pointer(e); })
                                         .on_scroll([this](const rap::scroll_event& e) { return map_view_->scroll(e); })
-                                        .on_resize([this](rap::size_f) { if (!map_view_->attached()) refresh_map(); })
+                                        .on_resize([this](rap::size_f) { map_resized(); })
                                         .bind(map_canvas_)
-                                        .height(rap::extent{280, rap::extent::unit::px})}
+                                        .height(rap::extent{100, rap::extent::unit::px})}
+                                    .bind(map_split_)
                                     .stretch();
                             }}
                     .stretch()  // the list's own stretch is inside the builder: the slot needs it too
@@ -574,6 +585,8 @@ void App::build_ui()
     view_->on_presented = [this] { image_presented(); };
     view_->on_resized = [this]
     {
+        if (map_canvas_)
+            map_resized();  // the window changed: the map keeps the height it was given
         if (refit_after_layout_)
             refit_after_pane_toggle();
         else if (refit_when_laid_out_)
@@ -1221,7 +1234,7 @@ void App::image_presented()
 
 void App::scan_pins(bool again)
 {
-    const bool shown = map_canvas_ && !fullscreen_ && metadata_visible_ && !pane_histogram_ && image_ && image_->has_location && map_view_->enabled();
+    const bool shown = map_overlay_on_ || (map_canvas_ && !fullscreen_ && metadata_visible_ && !pane_histogram_ && image_ && image_->has_location && map_view_->enabled());
     if (!shown)
     {
         pins_key_.clear();  // looked at afresh when it next shows

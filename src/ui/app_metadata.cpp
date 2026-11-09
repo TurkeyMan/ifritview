@@ -360,22 +360,105 @@ View::OverlaySections App::overlay_sections() const
 void App::refresh_metadata()
 {
     if (!metadata_visible_ || pane_histogram_)
+    {
+        refresh_map();
         return;
+    }
     const std::string url = image_ && image_->has_location ? cfg_.map_link(image_->latitude, image_->longitude) : "";
     metadata_model_.set(collect_metadata(), image_.get(), url);
     refresh_map();
 }
 
+// The height the map was last dragged to, as far as the pane allows.
+void App::restore_map_height()
+{
+    const std::vector<float> sizes = map_split_->sizes();
+    if (sizes.size() != 2)
+        return;
+    const float total = sizes[0] + sizes[1];
+    if (total <= 0)
+        return;
+    const float height = std::min(float(cfg_.map_height), std::max(100.f, total - 80));
+    map_split_->set_sizes({total - height, height});
+}
+
+// The window changing the pane's height leaves the map the height it was
+// dragged to, the details taking the difference. (A drag leaves the total as
+// it was: that's not this.)
+void App::map_resized()
+{
+    if (!map_split_bound_)
+        refresh_map();
+    const std::vector<float> sizes = map_split_->sizes();
+    if (sizes.size() != 2 || !map_shown_)
+        return;
+    const float total = sizes[0] + sizes[1];
+    if (std::abs(total - map_split_total_) < 1)
+        return;
+    map_split_total_ = total;
+    ui_.post([this] { restore_map_height(); });
+}
+
 void App::refresh_map()
 {
-    if (!map_canvas_)
-        return;  // made with the list, when the pane first shows
-    map_view_->attach(map_canvas_);
-    const bool show = !fullscreen_ && image_ && image_->has_location && map_view_->enabled();
-    if (show)
+    const bool located = image_ && image_->has_location && map_view_->enabled();
+    const bool was_overlay = map_overlay_on_;
+    map_overlay_on_ = fullscreen_ && cfg_.map_overlay && located;
+    const bool pane = map_canvas_ && !fullscreen_ && located;
+
+    if (map_canvas_ && !map_split_bound_)
+    {
+        map_split_bound_ = true;
+        map_split_->on_moved(
+            [this]
+            {
+                const std::vector<float> sizes = map_split_->sizes();
+                if (sizes.size() == 2 && map_shown_ && sizes[1] >= 100)
+                {
+                    cfg_.map_height = int(sizes[1]);
+                    cfg_.save();
+                }
+            });
+    }
+    if (map_overlay_on_)
+        map_view_->attach([this] { view_->redraw(); });
+    else if (map_canvas_)
+        map_view_->attach([canvas = map_canvas_] { canvas->invalidate(); });
+
+    if (map_overlay_on_ || pane)
         map_view_->set_location(image_->latitude, image_->longitude, folder_.current());
     else
         map_view_->stop_fetching();
-    map_canvas_->set_visible(show);
+    if (map_canvas_)
+    {
+        map_canvas_->set_visible(pane);
+        if (pane && !map_shown_)
+            restore_map_height();
+        map_shown_ = pane;
+    }
+    if (was_overlay != map_overlay_on_)
+    {
+        map_view_->cancel_gesture();
+        view_->redraw();
+    }
     scan_pins(false);
+}
+
+rap::rect_f App::map_overlay_area(rap::size_f view) const
+{
+    const float w = std::min(480.f, std::max(200.f, view.w * 0.3f)), h = w * 0.68f;
+    return {view.w - w - 24, view.h - h - 24, w, h};
+}
+
+// M: in fullscreen the map over the image; otherwise the pane it's in.
+void App::toggle_map()
+{
+    if (!fullscreen_)
+    {
+        toggle_metadata();
+        return;
+    }
+    cfg_.map_overlay = !cfg_.map_overlay;
+    cfg_.save();
+    refresh_map();
 }

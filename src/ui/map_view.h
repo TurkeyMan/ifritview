@@ -9,6 +9,7 @@
 #include <rapport/rapport.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -38,11 +39,12 @@ public:
     MapView(const MapView&) = delete;
     MapView& operator=(const MapView&) = delete;
 
-    void attach(rap::canvas* canvas) { canvas_ = canvas; }
-    bool attached() const { return canvas_ != nullptr; }
+    // What to ask to be painted again: the pane's canvas, or the fullscreen view.
+    void attach(std::function<void()> repaint) { repaint_ = std::move(repaint); }
     bool enabled() const;
     void config_changed();  // the settings were applied: other tiles, maybe
     void stop_fetching();   // it's been hidden: what's on the way isn't wanted
+    void cancel_gesture();  // what it's drawn on has changed: a drag there is over
 
     // Where the red pin goes, and the file it's for: a new position is
     // centred, the zoom kept, unless a click on a gray pin brought it here.
@@ -62,13 +64,22 @@ public:
     bool pointer(const rap::pointer_event& e);
     bool scroll(const rap::scroll_event& e);
 
+    // The same, in part of a bigger canvas: `area`, framed.
+    void paint_in(rap::painter& p, rap::rect_f area);
+    bool pointer_in(const rap::pointer_event& e, rap::rect_f area);
+    bool scroll_in(const rap::scroll_event& e, rap::rect_f area);
+
     std::function<void(double latitude, double longitude)> on_open;  // double-clicked
     std::function<void(const std::string& path)> on_pick;            // a gray pin clicked
 
 private:
     struct Tile
     {
-        std::unique_ptr<rap::image> image;
+        std::vector<uint8_t> pixels;  // width * 4 bytes a row
+        int width = 0, height = 0;
+        rap::pixel_format format{};
+        uint64_t generation = 0;  // different each time pixels arrive
+        std::chrono::steady_clock::time_point asked{};  // when its fetch began
         std::shared_ptr<void> fetch;  // while it's being fetched
         bool failed = false, tried_disk = false;
         uint64_t used = 0;
@@ -78,9 +89,26 @@ private:
     int layer() const;
     int tile_zoom() const;  // the level whose tiles are drawn
     const std::string& url_of(int layer) const;
-    const char* attribution() const;
+    const char* attribution(int layer) const;
     std::string file_of(const Tile& t) const;
-    void draw_tile(rap::painter& p, int z, int x, int y, rap::rect_f to);
+    // The tiles under a view put together at their own size, in one image:
+    // scaled as one, there are no joins to show.
+    struct Mosaic
+    {
+        std::unique_ptr<rap::image> image;
+        std::vector<uint8_t> pixels;
+        rap::pixel_format format{};
+        int width = 0, height = 0;
+        int layer = -1, level = -1, x0 = 0, x1 = -1, y0 = 0, y1 = -1;
+        std::vector<uint64_t> sources;  // a cell's source_of, row by row
+        uint64_t version = 0;
+    };
+    void draw_mosaic(rap::painter& p, Mosaic& m, int layer, int level, int x0, int x1, int y0, int y1, double left, double top, double tile);
+    uint64_t source_of(int layer, int z, int x, int y) const;
+    void blit_tile(Mosaic& m, int ox, int oy, int layer, int z, int x, int y);
+    void want_parents(int layer, int z, int x, int y, std::vector<uint64_t>& out);
+    void want_prime(int which, int level, double left, double top, rap::size_f size);
+    void want_ahead(int which, size_t limit, int level, int x0, int x1, int y0, int y1, double left, double top, double tile, rap::size_f size);
     void pump();
     void got(uint64_t key, const HttpResponse& response);
     bool decode(Tile& t, const std::string& bytes);
@@ -88,6 +116,9 @@ private:
     void evict();
     void refresh();
     void build_clusters();
+    struct Drawn;
+    const Drawn* pin_at(rap::point_f q) const;
+    bool over_selected(rap::point_f q) const;
     void pick(size_t cluster);
 
     struct Drawn
@@ -124,7 +155,8 @@ private:
 
     rap::ui& ui_;
     Config& cfg_;
-    rap::canvas* canvas_ = nullptr;
+    std::function<void()> repaint_;
+    rap::size_f size_{};  // what it was last painted at
 
     bool has_ = false;
     double lat_ = 0, lon_ = 0;
@@ -133,13 +165,25 @@ private:
     std::vector<Placed> pins_;
     std::vector<Cluster> clusters_;
     std::vector<Drawn> drawn_;
+    Drawn selected_;  // the red pin, where it was last drawn
     int clusters_zoom_ = -1;
     const Placed* current_ = nullptr;  // the red pin's, once the folder's been read
     std::unordered_map<std::string, Thumb> thumbs_;
     std::vector<std::string> asked_;
     std::shared_ptr<char> alive_ = std::make_shared<char>();
     std::unique_ptr<ThumbLoader> loader_;  // made when first wanted
+    enum class Gesture
+    {
+        none,
+        map,
+        view
+    };
+    Gesture gesture_ = Gesture::none;  // in a bigger canvas: whose press this is
+    int gesture_button_ = 0;
     bool moved_ = false;
+    std::chrono::steady_clock::time_point last_move_{};
+    double view_vx_ = 0, view_vy_ = 0;  // canvas px a second, while being dragged
+    bool plain_click_ = false;  // the last click was on bare map, not a pin or a drag
     rap::point_f pressed_{};
     double pin_x_ = 0, pin_y_ = 0;        // on the world, 0..1
     double centre_x_ = 0, centre_y_ = 0;  // likewise
@@ -151,9 +195,18 @@ private:
     double world_ = 0;  // the world's width on the canvas at this zoom
 
     std::unordered_map<uint64_t, Tile> tiles_;
+    struct Prefetch
+    {
+        double covers, distance;  // the share of its view it'd fill; how far off it is
+        uint64_t key;
+    };
+    std::vector<Prefetch> ahead_;  // this paint's, from the map and the button
     std::vector<uint64_t> wanted_;  // what the last paint needed, nearest the middle first
     uint64_t clock_ = 0;
     int fetching_ = 0;
+    double fetch_seconds_ = 0.25;  // how long a fetch usually takes here, learned as they land
+    Mosaic map_mosaic_, preview_mosaic_;
+    uint64_t tiles_version_ = 1;  // goes up when a tile's pixels arrive or go
     std::string urls_[2];  // what tiles_ was fetched from
     int stores_ = 0;
     std::atomic<bool> trimming_{false};
