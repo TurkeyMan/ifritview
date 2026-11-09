@@ -3,9 +3,13 @@
 #include "icc.h"
 
 #include <libheif/heif.h>
+#include <rapport/sys.h>
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 #include <vector>
 
 namespace
@@ -188,4 +192,78 @@ const Decoder& heif_decoder()
     static const Decoder d{"HEIF", {"heic", "heif", "hif", "avif"}, sniff, [](const std::string& path, Image& out, std::string& error)
                            { return decode_part(path, {}, out, error); }, nullptr, false, decode_part};
     return d;
+}
+
+namespace
+{
+
+// The file read as libheif asks: only its boxes and the block wanted, not the
+// pictures, whatever the file claims to be.
+struct FileReader
+{
+    std::ifstream in;
+    int64_t size = 0;
+    bool failed = false;
+};
+
+const heif_reader kFileReader = {
+    1,
+    [](void* user) -> int64_t { return int64_t(static_cast<FileReader*>(user)->in.tellg()); },
+    [](void* data, size_t n, void* user) -> int
+    {
+        FileReader& r = *static_cast<FileReader*>(user);
+        r.in.read(static_cast<char*>(data), std::streamsize(n));
+        r.failed |= !r.in.good();
+        return r.in.good() ? 0 : 1;
+    },
+    [](int64_t position, void* user) -> int
+    {
+        FileReader& r = *static_cast<FileReader*>(user);
+        r.in.clear();
+        r.in.seekg(position);
+        r.failed |= !r.in.good();
+        return r.in.good() ? 0 : 1;
+    },
+    [](int64_t target, void* user) -> heif_reader_grow_status
+    { return target <= static_cast<FileReader*>(user)->size ? heif_reader_grow_status_size_reached : heif_reader_grow_status_size_beyond_eof; },
+};
+
+constexpr size_t kMaxExif = size_t(16) << 20;
+
+}  // namespace
+
+bool heif_stored_exif(const std::string& path, std::vector<uint8_t>& exif, int& width, int& height)
+{
+    FileReader file;
+    const std::filesystem::path p = rap::sys::path_from_utf8(path);
+    std::error_code ec;
+    file.size = int64_t(std::filesystem::file_size(p, ec));
+    file.in.open(p, std::ios::binary);
+    if (ec || !file.in)
+        return false;
+    heif_context* ctx = heif_context_alloc();
+    heif_image_handle* handle = nullptr;
+    bool ok = heif_context_read_from_reader(ctx, &kFileReader, &file, nullptr).code == heif_error_Ok &&
+              heif_context_get_primary_image_handle(ctx, &handle).code == heif_error_Ok;
+    if (ok)
+    {
+        width = heif_image_handle_get_width(handle);
+        height = heif_image_handle_get_height(handle);
+        heif_item_id id = 0;
+        if (heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", &id, 1) == 1)
+        {
+            const size_t n = heif_image_handle_get_metadata_size(handle, id);
+            std::vector<uint8_t> block(n <= kMaxExif ? n : 0);
+            if (n >= 8 && n <= kMaxExif && heif_image_handle_get_metadata(handle, id, block.data()).code == heif_error_Ok)
+            {
+                // Its payload starts with a big-endian offset to the TIFF header.
+                const size_t off = 4 + ((size_t(block[0]) << 24) | (size_t(block[1]) << 16) | (size_t(block[2]) << 8) | block[3]);
+                if (off < n)
+                    exif.assign(block.begin() + long(off), block.end());
+            }
+        }
+        heif_image_handle_release(handle);
+    }
+    heif_context_free(ctx);
+    return !file.failed;
 }

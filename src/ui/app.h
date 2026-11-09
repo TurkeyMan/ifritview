@@ -3,6 +3,7 @@
 #include "cache.h"
 #include "config.h"
 #include "folder.h"
+#include "folder_index.h"
 #include "geocode.h"
 #include "image.h"
 #include "loader.h"
@@ -316,6 +317,14 @@ private:
     rap::canvas* map_canvas_ = nullptr;
     std::unique_ptr<MapView> map_view_;
     void refresh_map();
+    void scan_pins(bool again);                  // the folder's geotags, for the map
+    void pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, bool done);
+    void open_pin(const std::string& path);
+    std::unique_ptr<FolderIndex> folder_index_;  // made when a map first wants it
+    std::string pins_key_, pins_dir_;            // what was scanned
+    uint64_t pins_serial_ = 0, pins_listing_ = 0;
+    bool pins_live_ = false;                     // shown as they come, not when they're all in
+    std::vector<MapView::Pin> pins_building_;
     // The pane holds the info or the histogram (and what's measured), not both.
     rap::widget *info_box_ = nullptr, *histogram_box_ = nullptr;
     rap::canvas* histogram_canvas_ = nullptr;

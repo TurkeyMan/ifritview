@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(IfritView VERSION 0.1 LANGUAGES CXX)
+project(IfritView VERSION 0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,6 +76,8 @@ add_library(ifrit_core STATIC
   src/encoders/reduce.cpp
   src/cache.cpp
   src/geocode.cpp
+  src/folder_block.cpp
+  src/folder_index.cpp
   src/video.cpp
   src/loader.cpp
   src/scale.cpp
@@ -126,6 +128,14 @@ add_library(ifrit_bc7enc STATIC third_party/bc7enc/bc7enc.c src/encoders/rgbcx.c
 set_source_files_properties(third_party/bc7enc/bc7enc.c PROPERTIES LANGUAGE CXX)
 target_compile_options(ifrit_bc7enc PRIVATE "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
 target_link_libraries(ifrit_core PRIVATE ifrit_bc7enc)
+# SQLite (third_party/sqlite): the folder index's store. Built as it comes.
+add_library(ifrit_sqlite STATIC third_party/sqlite/sqlite3.c)
+target_compile_definitions(ifrit_sqlite PRIVATE SQLITE_THREADSAFE=2 SQLITE_OMIT_LOAD_EXTENSION SQLITE_DEFAULT_WAL_SYNCHRONOUS=1)
+target_compile_options(ifrit_sqlite PRIVATE "$<IF:$<C_COMPILER_ID:MSVC>,/w,-w>")
+target_include_directories(ifrit_sqlite PUBLIC third_party/sqlite)
+find_package(Threads REQUIRED)
+target_link_libraries(ifrit_sqlite PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(ifrit_core PRIVATE ifrit_sqlite)
 if(WIN32)
   target_sources(ifrit_core PRIVATE src/integration_win.cpp)
   target_link_libraries(ifrit_core PUBLIC shell32 advapi32)
