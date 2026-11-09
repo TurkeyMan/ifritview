@@ -216,6 +216,8 @@ struct ExifSummary
     int64_t taken = 0;        // DateTimeOriginal in seconds, the camera's local time; 0 when absent
 };
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
+// The preview stored in an EXIF payload (usually a JPEG); empty if none.
+std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size);
 #endif
 
 #ifdef HAVE_HEIF

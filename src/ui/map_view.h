@@ -4,6 +4,8 @@
 // for the full map; a chip in the corner switches between street and
 // satellite. Tiles are kept in memory and in the system's temporary folder.
 
+#include "pin_thumbs.h"
+
 #include <rapport/rapport.h>
 
 #include <atomic>
@@ -51,6 +53,8 @@ public:
     {
         std::string path;
         double latitude = 0, longitude = 0;
+        int orientation = 1;
+        int64_t modified = 0;  // the thumbnail's made anew when it changes
     };
     void set_pins(const std::vector<Pin>& pins);
 
@@ -86,25 +90,37 @@ private:
     void build_clusters();
     void pick(size_t cluster);
 
-    // Pins close enough at this zoom to be one, with how many there are.
-    struct Placed
-    {
-        std::string path;
-        double x = 0, y = 0;  // on the world, 0..1
-    };
-    struct Cluster
-    {
-        double x = 0, y = 0;
-        int count = 0;
-        size_t first = 0;  // in pins_
-        int64_t cell = 0;
-    };
     struct Drawn
     {
         float x = 0, y = 0, radius = 0;  // the pin's head, on the canvas
         size_t cluster = 0;
     };
-    int64_t cell_of(const Placed& p) const;
+    // Pins close enough at this zoom to be one, with how many there are.
+    struct Placed
+    {
+        std::string path;
+        double x = 0, y = 0;  // on the world, 0..1
+        std::string thumb;    // its key
+        int orientation = 1;
+    };
+    struct Thumb
+    {
+        std::unique_ptr<rap::image> image;
+        bool failed = false;
+        uint64_t used = 0;
+    };
+    void draw_pin(rap::painter& p, float x, float y, const Placed* placed, int count, bool selected, Drawn* hit);
+    void ask_thumbs(const std::vector<const Placed*>& wanted);
+    void trim_thumbs();
+    void thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture);
+    struct Cluster
+    {
+        double x = 0, y = 0;
+        int count = 0;
+        size_t first = 0;  // in pins_
+        std::vector<size_t> members;
+    };
+    std::vector<Cluster> group(const std::vector<size_t>& pins, int level) const;
 
     rap::ui& ui_;
     Config& cfg_;
@@ -118,6 +134,11 @@ private:
     std::vector<Cluster> clusters_;
     std::vector<Drawn> drawn_;
     int clusters_zoom_ = -1;
+    const Placed* current_ = nullptr;  // the red pin's, once the folder's been read
+    std::unordered_map<std::string, Thumb> thumbs_;
+    std::vector<std::string> asked_;
+    std::shared_ptr<char> alive_ = std::make_shared<char>();
+    std::unique_ptr<ThumbLoader> loader_;  // made when first wanted
     bool moved_ = false;
     rap::point_f pressed_{};
     double pin_x_ = 0, pin_y_ = 0;        // on the world, 0..1
