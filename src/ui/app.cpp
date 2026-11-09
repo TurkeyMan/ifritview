@@ -66,6 +66,7 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     geocoder_.set_provider(cfg_.geocoder_url);
     map_view_ = std::make_unique<MapView>(ui_, cfg_);
     map_view_->on_open = [this](double latitude, double longitude) { open_url(cfg_.map_link(latitude, longitude)); };
+    map_view_->on_pick = [this](const std::string& path) { open_pin(path); };
     lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
     // Format plugins load on a thread of their own, the first image never
@@ -1095,6 +1096,8 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         image_path_.clear();
         load_current();
     }
+    if (!batch.events.empty() || batch.overflow)
+        scan_pins(true);
     platform::trace("folder changed: %zu events%s, %d files", batch.events.size(), batch.overflow ? " (overflow)" : "", folder_.count());
     if (listed || reload_shown)
     {
@@ -1216,6 +1219,68 @@ void App::image_presented()
     navigate(d);
 }
 
+void App::scan_pins(bool again)
+{
+    const bool shown = map_canvas_ && !fullscreen_ && metadata_visible_ && !pane_histogram_ && image_ && image_->has_location && map_view_->enabled();
+    if (!shown)
+    {
+        pins_key_.clear();  // looked at afresh when it next shows
+        ++pins_serial_;     // and what's on its way isn't wanted
+        if (folder_index_)
+            folder_index_->cancel();
+        return;
+    }
+    const std::string key = folder_.directory() + "|" + std::to_string(folder_.count()) + "|" + std::to_string(pins_listing_) + (cfg_.recursive ? "|r" : "");
+    if (!again && key == pins_key_)
+        return;
+    pins_key_ = key;
+    pins_live_ = pins_dir_ != folder_.directory();  // the same folder again: no flicker, the old pins till the new are in
+    pins_dir_ = folder_.directory();
+    if (pins_live_)
+        map_view_->set_pins({});
+    pins_building_.clear();
+    if (!folder_index_)
+        folder_index_ = std::make_unique<FolderIndex>();
+    std::vector<std::string> paths;
+    paths.reserve(size_t(folder_.count()));
+    for (int i = 0; i < folder_.count(); ++i)
+        paths.push_back(folder_.path_at(i));
+    folder_index_->scan(std::move(paths),
+                        [serial = ++pins_serial_](std::vector<FolderIndex::Located> found, bool done)
+                        {
+                            platform::post_main(
+                                [serial, found = std::move(found), done]() mutable
+                                {
+                                    if (s_app)
+                                        s_app->pins_found(serial, std::move(found), done);
+                                });
+                        });
+}
+
+void App::pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, bool done)
+{
+    if (serial != pins_serial_)
+        return;  // an earlier scan's
+    for (FolderIndex::Located& f : found)
+        pins_building_.push_back({std::move(f.path), f.latitude, f.longitude});
+    if (done || pins_live_)
+        map_view_->set_pins(pins_building_);
+    platform::trace("folder index: %zu geotags%s", pins_building_.size(), done ? ", all" : "");
+}
+
+void App::open_pin(const std::string& path)
+{
+    if (navigation_locked())
+        return;
+    for (int i = 0; i < folder_.count(); ++i)
+        if (folder_.path_at(i) == path)
+        {
+            if (folder_.go(i))
+                load_current();
+            return;
+        }
+}
+
 void App::go_first()
 {
     if (navigation_locked())
@@ -1311,11 +1376,13 @@ void App::folder_listed(Folder::Listing listing, bool again, double ms)
     if (again)
         listing.want = folder_.current_name();  // where the cursor is now, not when it was asked for
     folder_.adopt(std::move(listing));
+    ++pins_listing_;  // the same number of files needn't be the same files
     platform::trace("folder read: %d files%s in %.0f ms", folder_.count(), cfg_.recursive ? ", with subfolders," : "", ms);
     watch_folder();
     update_title();
     update_status();
     schedule_prefetch();
+    refresh_map();
 }
 
 void App::on_loaded(Loader::Result& r)

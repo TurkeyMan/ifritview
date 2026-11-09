@@ -7,6 +7,7 @@ IfritView itself is GPL-3.0-or-later (see LICENSE).
   - bcdec, by Sergii Kudlai
   - etcdec, by Sergii Kudlai
   - bc7enc and rgbcx, by Richard Geldreich, Jr. (DDS saving)
+  - SQLite (public domain; the folder index)
   - Octicons, by GitHub (the GitHub mark in About)
   - lensfun's lens database (downloaded when needed, not included; CC BY-SA 3.0)
 
