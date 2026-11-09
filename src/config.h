@@ -88,8 +88,11 @@ struct Config
     std::string map_link(double latitude, double longitude) const;
     // The info pane's map: tile URL templates ({z}, {x}, {y}), empty = no map.
     std::string map_tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-    std::string map_satellite_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+    std::string map_satellite_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?blankTile=false";
     bool map_satellite = false;
+    int map_height = 280;  // the map's share of the info pane
+    bool map_overlay = false;  // over the image in fullscreen
+    bool map_live_toggle = true;  // the street/satellite button shows the other map
     // Reverse geocoding provider, {lat}/{lon} template; empty = off.
     // The interface's language, a tag such as "de"; empty for the system's.
     // Takes effect when IfritView next starts.
