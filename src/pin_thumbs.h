@@ -2,7 +2,8 @@
 // Small square pictures of a folder's photos, for the map's pins, made on a
 // thread of their own: from the preview stored in the file's metadata if it
 // has one, else, for an image the platform can decode and not too big, from
-// the file.
+// the file. Kept in the cache folder once made, up to 256 MB, so they're there
+// at once the next time.
 
 #include <rapport/rapport.h>
 
