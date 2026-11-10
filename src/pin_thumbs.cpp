@@ -408,8 +408,9 @@ int check_thumbs_forget(const std::string& dir)
             });
         // One made and kept, so there's something to forget.
         loader.want({{"before", photo, 1}});
-        for (int i = 0; i < 200 && none_kept(); ++i)
-            std::this_thread::sleep_for(50ms);
+        // A minute: a deadline for a slow machine (a big picture's decoded).
+        for (const auto deadline = std::chrono::steady_clock::now() + 60s; none_kept() && std::chrono::steady_clock::now() < deadline;)
+            std::this_thread::sleep_for(20ms);
         if (none_kept())
         {
             std::printf("check-thumbs-forget: skipped (this platform can't decode a BMP)\n");
@@ -454,7 +455,7 @@ int check_thumbs_forget(const std::string& dir)
             now = loader.forget();
         }
         loader.want({{"again", photo, 1}});
-        if (current.get_future().wait_for(10s) != std::future_status::ready)
+        if (current.get_future().wait_for(120s) != std::future_status::ready)  // two big pictures decoded, on a slow machine
             return fail("a picture asked for again after forgetting, while it was being made, never came");
     }
     std::printf("check-thumbs-forget: ok\n");
