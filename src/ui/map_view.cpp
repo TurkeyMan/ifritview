@@ -299,6 +299,21 @@ void MapView::set_pins(const std::vector<Pin>& pins)
     refresh();
 }
 
+void MapView::forget_pins(std::function<void(bool)> done)
+{
+    set_pins({});
+    asked_.clear();
+    thumbs_.clear();
+    if (loader_)
+        thumbs_generation_ = loader_->forget(std::move(done));  // what's on its way is from before
+    else
+    {
+        const bool deleted = ThumbLoader::forget_kept();
+        if (done)
+            done(deleted);
+    }
+}
+
 // Pins closer than a pin's width at `level` make one: each joins the first
 // group whose first pin it's near, so the groups don't change as the map's
 // panned, and a stack isn't split by where some grid happens to fall.
@@ -533,13 +548,13 @@ void MapView::ask_thumbs(const std::vector<const Placed*>& wanted)
     asked_ = std::move(keys);
     if (!loader_)
         loader_ = std::make_unique<ThumbLoader>(
-            [this, alive = std::weak_ptr<char>(alive_)](const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture)
+            [this, alive = std::weak_ptr<char>(alive_)](const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture, uint64_t generation)
             {
                 platform::post_main(
-                    [this, alive, key, picture = std::move(picture)]() mutable
+                    [this, alive, key, picture = std::move(picture), generation]() mutable
                     {
                         if (alive.lock())
-                            thumb_ready(key, std::move(picture));
+                            thumb_ready(key, std::move(picture), generation);
                     });
             });
     loader_->want(std::move(requests));
@@ -559,8 +574,10 @@ void MapView::trim_thumbs()
     }
 }
 
-void MapView::thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture)
+void MapView::thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture, uint64_t generation)
 {
+    if (generation != thumbs_generation_)
+        return;  // asked for before the pictures were forgotten
     Thumb& t = thumbs_[key];
     t.used = clock_;
     if (picture)

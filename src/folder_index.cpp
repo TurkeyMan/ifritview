@@ -18,7 +18,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <map>
+#include <utility>
 #include <unordered_map>
 
 namespace fs = std::filesystem;
@@ -559,11 +561,17 @@ struct FolderIndex::Store
                sqlite3_db_config(db, SQLITE_DBCONFIG_RESET_DATABASE, 0, 0) == SQLITE_OK;
     }
 
-    void open()
+    // The journal written into the database and emptied; not while another
+    // connection still reads what was there before.
+    bool flush()
     {
-        const std::string dir = platform::cache_dir();
-        g_mkdir_with_parents(dir.c_str(), 0700);
-        const std::string path = platform::join_path(dir, "folder-index.db");
+        int log = 0, copied = 0;
+        return db && sqlite3_wal_checkpoint_v2(db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, &log, &copied) == SQLITE_OK && log <= 0;
+    }
+
+    void open(const std::string& path)
+    {
+        g_mkdir_with_parents(rap::sys::path_to_utf8(rap::sys::path_from_utf8(path).parent_path()).c_str(), 0700);
         if (open_file(path))
             return;
         // Busy or locked is another window at work: this session goes without.
@@ -630,7 +638,12 @@ struct FolderIndex::Store
     }
 };
 
-FolderIndex::FolderIndex()
+std::string FolderIndex::database_path()
+{
+    return platform::join_path(platform::cache_dir(), "folder-index.db");
+}
+
+FolderIndex::FolderIndex(std::string database) : database_(std::move(database))
 {
     thread_ = std::thread([this] { run(); });
 }
@@ -667,41 +680,120 @@ void FolderIndex::cancel()
     ++serial_;
 }
 
+void FolderIndex::forget(std::function<void(bool)> done)
+{
+    {
+        std::lock_guard lock(mutex_);
+        have_job_ = false;
+        job_ = {};
+        updates_.clear();
+        ++serial_;
+        forget_ = true;
+        if (done)
+            forgotten_.push_back(std::move(done));
+    }
+    wake_.notify_all();
+}
+
 void FolderIndex::run()
 {
     platform::lower_thread_priority();
     Store store;
     bool opened = false;
+    // Forgetting: every folder's records deleted, the space they took given
+    // back, so nothing of where the photos were is left in the file, and the
+    // journal written in and emptied, so nothing's left there either. Another
+    // window writing is waited for, as any write is; one still reading what
+    // was there, or busy with the database, stops it part way. Then it's
+    // taken up where it stopped (each step done stays done, and records
+    // stored after the delete are kept) whenever there's nothing else to do,
+    // and on closing; and, this mark left beside the database till it has
+    // finished, by whichever window opens the database next.
+    enum class Step
+    {
+        none,  // nothing to forget
+        erase,
+        compact,
+        flush,
+    };
+    const fs::path mark = rap::sys::path_from_utf8(database_ + ".forget");
+    Step pending = Step::none;
+    const auto forget = [&](bool asked, const std::vector<std::function<void(bool)>>& done)
+    {
+        if (asked)
+            pending = Step::erase;  // from the start: what's there now goes, whatever's gone before
+        std::error_code e;
+        if (!fs::exists(mark, e))
+            std::ofstream(mark, std::ios::binary).put('\n');
+        // A database that couldn't be opened before (another window busy
+        // bringing it up to date, say) is tried again.
+        if (!store.db)
+            store.open(database_);
+        if (pending == Step::erase && store.db && store.exec("DELETE FROM dirs"))
+            pending = Step::compact;
+        if (pending == Step::compact && store.db && store.exec("VACUUM"))
+            pending = Step::flush;
+        if (pending == Step::flush && store.flush())
+            pending = Step::none;
+        const bool emptied = pending == Step::none;
+        if (emptied)
+            fs::remove(mark, e);
+        platform::trace("folder index: %s", emptied ? "forgotten" : "not forgotten yet: another connection has it");
+        for (const auto& d : done)
+            d(emptied);
+    };
+    const auto open = [&]
+    {
+        if (opened)
+            return;
+        store.open(database_);
+        opened = true;
+        std::error_code e;
+        if (fs::exists(mark, e))
+            forget(true, {});
+    };
     while (true)
     {
         Job job;
         Update update;
-        bool scanning = false;
+        bool scanning = false, updating = false, asked = false, stopping = false;
+        std::vector<std::function<void(bool)>> forgotten;
         {
             std::unique_lock lock(mutex_);
-            wake_.wait(lock, [this] { return stop_ || have_job_ || !updates_.empty(); });
-            if (stop_)
-                return;
-            if (have_job_)
+            const auto ready = [this] { return stop_ || have_job_ || !updates_.empty() || forget_; };
+            if (pending != Step::none)
+                wake_.wait_for(lock, std::chrono::seconds(5), ready);
+            else
+                wake_.wait(lock, ready);
+            stopping = stop_;
+            asked = std::exchange(forget_, false);
+            forgotten = std::move(forgotten_);
+            forgotten_.clear();
+            // Closing, what's asked for goes with it; a forget doesn't.
+            if (!stopping && have_job_)
             {
                 job = std::move(job_);
                 have_job_ = false;
                 scanning = true;
             }
-            else
+            else if (!stopping && !updates_.empty())
             {
                 update = std::move(updates_.front());
                 updates_.pop_front();
+                updating = true;
             }
         }
-        if (!opened)
-        {
-            store.open();
-            opened = true;
-        }
+        const bool unfinished = pending != Step::none;
+        if (stopping && !asked && !unfinished)
+            return;
+        open();
+        if (asked || (pending != Step::none && !scanning && !updating))
+            forget(asked, forgotten);
+        if (stopping)
+            return;
         if (scanning)
             work(store, job);
-        else
+        else if (updating)
             work(store, update);
     }
 }
@@ -875,4 +967,211 @@ void FolderIndex::work(Store& store, const Job& job)
     }
     if (!stale(job))
         job.report(std::move(found), true);
+}
+
+int check_index_forget(const std::string& dir)
+{
+    using namespace std::chrono_literals;
+    g_mkdir_with_parents(dir.c_str(), 0700);
+    const std::string path = platform::join_path(dir, "check-index.db");
+    for (const char* suffix : {"", "-wal", "-shm"})
+        g_remove((path + suffix).c_str());
+    const std::string photo = platform::join_path(dir, "check-photo.jpg");
+    std::ofstream(rap::sys::path_from_utf8(photo), std::ios::binary) << "not much of a photo";
+
+    FolderIndex index(path);
+    const auto forget = [&]
+    {
+        std::promise<bool> result;
+        index.forget([&](bool emptied) { result.set_value(emptied); });
+        return result.get_future().get();
+    };
+    sqlite3* writer = nullptr;
+    sqlite3* reader = nullptr;
+    sqlite3_stmt* read = nullptr;
+    const auto rows = [&]
+    {
+        sqlite3_stmt* count = nullptr;
+        int n = -1;
+        if (sqlite3_prepare_v2(writer, "SELECT COUNT(*) FROM dirs", -1, &count, nullptr) == SQLITE_OK && sqlite3_step(count) == SQLITE_ROW)
+            n = sqlite3_column_int(count, 0);
+        sqlite3_finalize(count);
+        return n;
+    };
+    const auto journal = [&]
+    {
+        std::error_code e;
+        const auto size = fs::file_size(rap::sys::path_from_utf8(path + "-wal"), e);
+        return e ? 0 : size;
+    };
+    // Another window part way through reading what's there.
+    const auto hold = [&]
+    {
+        return sqlite3_exec(reader, "BEGIN", nullptr, nullptr, nullptr) == SQLITE_OK &&
+               sqlite3_prepare_v2(reader, "SELECT path FROM dirs", -1, &read, nullptr) == SQLITE_OK && sqlite3_step(read) == SQLITE_ROW;
+    };
+    const auto let_go = [&]
+    {
+        sqlite3_finalize(read);
+        read = nullptr;
+        sqlite3_exec(reader, "COMMIT", nullptr, nullptr, nullptr);
+    };
+    const auto add = [&] { return sqlite3_exec(writer, "INSERT OR REPLACE INTO dirs(path, used, block) VALUES('/photos', 0, x'00')", nullptr, nullptr, nullptr) == SQLITE_OK; };
+    const auto fail = [&](const char* what)
+    {
+        std::fprintf(stderr, "check-index-forget: %s\n", what);
+        let_go();
+        sqlite3_close(reader);
+        sqlite3_close(writer);
+        return 1;
+    };
+
+    if (!forget())  // made, empty
+        return fail("an empty index wasn't forgotten");
+    if (sqlite3_open(path.c_str(), &writer) != SQLITE_OK || sqlite3_open(path.c_str(), &reader) != SQLITE_OK || !add())
+        return fail("couldn't add a folder");
+
+    // Refused while the old records are being read, and done, without being
+    // asked again, once they aren't.
+    if (!hold())
+        return fail("couldn't read the folder back");
+    if (forget())
+        return fail("forgotten while another connection still reads the old records");
+    let_go();
+    for (int i = 0; i < 100 && (rows() != 0 || journal() != 0); ++i)
+        std::this_thread::sleep_for(100ms);
+    if (rows() != 0 || journal() != 0)
+        return fail("not forgotten once the reader had finished");
+
+    // An update queued before a forget doesn't write its file back after it.
+    // The index is kept busy (a forget waiting on a reader) while they're queued.
+    if (!add() || !hold())
+        return fail("couldn't add a folder again");
+    std::atomic<bool> reported{false};
+    std::promise<bool> first;
+    index.forget([&](bool) { first.set_value(true); });
+    std::this_thread::sleep_for(200ms);
+    index.update({photo}, {}, [&](std::vector<std::string>, std::vector<FolderIndex::Located>) { reported = true; });
+    std::promise<bool> second;
+    index.forget([&](bool emptied) { second.set_value(emptied); });
+    let_go();
+    first.get_future().get();
+    if (!second.get_future().get())
+        return fail("not forgotten after the update");
+    std::this_thread::sleep_for(500ms);  // time for an update that wasn't dropped
+    if (reported || rows() != 0)
+        return fail("an update queued before forgetting wrote its records back");
+
+    // A forget asked for as the index closes is done before it goes.
+    if (!add())
+        return fail("couldn't add a folder for closing");
+    {
+        FolderIndex closing(path);
+        closing.forget();
+    }
+    if (rows() != 0)
+        return fail("a forget asked for as the index closed was dropped");
+
+    // One that can't finish as it closes is left marked, and finished by the
+    // next index to open the database.
+    const fs::path mark = rap::sys::path_from_utf8(path + ".forget");
+    if (!add() || !hold())
+        return fail("couldn't add a folder to be left marked");
+    {
+        FolderIndex closing(path);
+        closing.forget();
+    }
+    std::error_code e;
+    if (!fs::exists(mark, e))
+        return fail("an unfinished forget wasn't marked");
+    let_go();
+    {
+        FolderIndex next(path);
+        std::promise<void> scanned;
+        next.scan({}, [&](std::vector<FolderIndex::Located>, bool done) { if (done) scanned.set_value(); });
+        scanned.get_future().get();
+    }
+    if (rows() != 0 || journal() != 0 || fs::exists(mark, e))
+        return fail("a marked forget wasn't finished by the next to open the database");
+
+    // A mark on a database from before (version 2, due to be brought up to
+    // date) that another window has locked as this one opens it: finished
+    // once it lets go, the update made too.
+    sqlite3_close(writer);
+    sqlite3_close(reader);
+    writer = reader = nullptr;
+    const std::string old = platform::join_path(dir, "check-index-v2.db");
+    const fs::path old_mark = rap::sys::path_from_utf8(old + ".forget");
+    for (const char* suffix : {"", "-wal", "-shm", ".forget"})
+        g_remove((old + suffix).c_str());
+    const auto version = [&]
+    {
+        sqlite3_stmt* st = nullptr;
+        int v = -1;
+        if (sqlite3_prepare_v2(writer, "PRAGMA user_version", -1, &st, nullptr) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+            v = sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
+        return v;
+    };
+    if (sqlite3_open(old.c_str(), &writer) != SQLITE_OK ||
+        sqlite3_exec(writer,
+                     "PRAGMA journal_mode=WAL; PRAGMA user_version=2;"
+                     "CREATE TABLE dirs(path TEXT PRIMARY KEY, used INTEGER NOT NULL, block BLOB NOT NULL) WITHOUT ROWID;"
+                     "INSERT INTO dirs(path, used, block) VALUES('/photos', 0, x'00');",
+                     nullptr, nullptr, nullptr) != SQLITE_OK)
+        return fail("couldn't make a version 2 database");
+    std::ofstream(old_mark, std::ios::binary).put('\n');
+    if (sqlite3_exec(writer, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) != SQLITE_OK)
+        return fail("couldn't lock the version 2 database");
+    {
+        FolderIndex next(old);
+        std::promise<bool> result;
+        next.forget([&](bool emptied) { result.set_value(emptied); });
+        if (result.get_future().get())
+            return fail("forgotten while another window had the database locked");
+        sqlite3_exec(writer, "COMMIT", nullptr, nullptr, nullptr);
+        for (int i = 0; i < 100 && (rows() != 0 || fs::exists(old_mark, e)); ++i)
+            std::this_thread::sleep_for(100ms);
+    }
+    if (rows() != 0 || fs::exists(old_mark, e))
+        return fail("a marked forget wasn't finished once the database could be opened");
+    if (version() < 3)
+        return fail("the database wasn't brought up to date");
+
+    // The same, with a scan asked for while it's locked: one that stores
+    // nothing (it has no database) doesn't excuse the delete when it's next tried.
+    sqlite3_close(writer);
+    writer = nullptr;
+    const std::string scanned = platform::join_path(dir, "check-index-v2-scan.db");
+    const fs::path scanned_mark = rap::sys::path_from_utf8(scanned + ".forget");
+    for (const char* suffix : {"", "-wal", "-shm", ".forget"})
+        g_remove((scanned + suffix).c_str());
+    if (sqlite3_open(scanned.c_str(), &writer) != SQLITE_OK ||
+        sqlite3_exec(writer,
+                     "PRAGMA journal_mode=WAL; PRAGMA user_version=2;"
+                     "CREATE TABLE dirs(path TEXT PRIMARY KEY, used INTEGER NOT NULL, block BLOB NOT NULL) WITHOUT ROWID;"
+                     "INSERT INTO dirs(path, used, block) VALUES('/photos', 0, x'00');",
+                     nullptr, nullptr, nullptr) != SQLITE_OK)
+        return fail("couldn't make another version 2 database");
+    std::ofstream(scanned_mark, std::ios::binary).put('\n');
+    if (sqlite3_exec(writer, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) != SQLITE_OK)
+        return fail("couldn't lock the other version 2 database");
+    {
+        FolderIndex next(scanned);
+        std::promise<void> done;
+        next.scan({}, [&](std::vector<FolderIndex::Located>, bool all) { if (all) done.set_value(); });
+        done.get_future().get();
+        sqlite3_exec(writer, "COMMIT", nullptr, nullptr, nullptr);
+        for (int i = 0; i < 100 && (rows() != 0 || fs::exists(scanned_mark, e)); ++i)
+            std::this_thread::sleep_for(100ms);
+    }
+    if (rows() != 0)
+        return fail("a scan while the database was locked let a marked forget skip its delete");
+    if (fs::exists(scanned_mark, e))
+        return fail("a marked forget wasn't finished after a scan while the database was locked");
+
+    std::printf("check-index-forget: ok\n");
+    sqlite3_close(reader);
+    sqlite3_close(writer);
+    return 0;
 }

@@ -117,6 +117,13 @@ public:
     void script_as_shot() { white_balance_as_shot(); }
     void script_instead(const std::string& what);
     void script_lens(bool on);  // the G panel's lens correction, for this run (not saved)
+    void script_forget_locations() { forget_locations(); }  // as the Maps settings' button does
+    void script_maps_off()  // both maps turned off in Settings, and OK
+    {
+        cfg_.map_tile_url.clear();
+        cfg_.map_satellite_url.clear();
+        apply_settings(cfg_.raw_mode, cfg_.apply_xmp_edits, cfg_.raw_camera_crop);
+    }
     void script_pointer(const rap::pointer_event& e) { view_->feed_pointer(e); }
     void script_toggle_lossless() { if (save_dialog_) save_dialog_->toggle_lossless(); }  // a, b, swipe, diff, swap, side or gain:N
 
@@ -326,7 +333,11 @@ private:
     float map_split_total_ = 0;  // the pane's height, last seen
     std::unique_ptr<MapView> map_view_;
     void refresh_map();
+    // Settings' OK: the new settings put to use (and saved).
+    void apply_settings(const std::string& old_raw_mode, bool old_apply_xmp, bool old_raw_crop);
     void scan_pins(bool again);                  // the folder's geotags, for the map
+    // What's kept of where photos were taken, deleted; `done` on this thread.
+    void forget_locations(std::function<void(bool forgotten)> done = {});
     void pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, bool done);
     std::string pins_key() const;
     void update_pins(std::vector<std::string> changed, std::vector<std::string> gone);
