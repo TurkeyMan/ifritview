@@ -216,8 +216,19 @@ void MapView::config_changed()
     refresh();
 }
 
+void MapView::set_hover(const std::string& text, bool always)
+{
+    if (text == hovering_ && !always)
+        return;
+    hovering_ = text;
+    if (on_hover)
+        on_hover(text);
+}
+
 void MapView::cancel_gesture()
 {
+    set_hover({}, true);  // whatever's showing it now hasn't been told yet
+    pointer_here_ = false;  // till it moves again, over whichever it's on now
     dragging_ = false;
     moved_ = false;
     plain_click_ = false;
@@ -272,6 +283,7 @@ void MapView::set_location(double latitude, double longitude, const std::string&
 void MapView::set_pins(const std::vector<Pin>& pins)
 {
     // What points into the old list goes with it, till the next paint.
+    set_hover({});
     current_ = nullptr;
     clusters_.clear();
     drawn_.clear();
@@ -816,7 +828,17 @@ bool MapView::pointer_in(const rap::pointer_event& e, rap::rect_f area)
     // begun before the map came up: the view needs to see it.
     if (e.type == T::release)
         return false;
-    return over && (pointer(moved) || true);  // the view under it doesn't get what's over the map
+    if (!over)
+    {
+        // Off the map, as good as gone from it.
+        if (pointer_here_)
+        {
+            pointer_here_ = false;
+            set_hover({});
+        }
+        return false;
+    }
+    return pointer(moved) || true;  // the view under it doesn't get what's over the map
 }
 
 bool MapView::scroll_in(const rap::scroll_event& e, rap::rect_f area)
@@ -835,7 +857,10 @@ void MapView::paint(rap::painter& p, rap::size_f size)
     size_ = size;
     p.rect({0, 0, size.w, size.h}, 0, rap::paint{rap::theme_color::base}, std::nullopt);
     if (!has_)
+    {
+        set_hover({});
         return;
+    }
 
     const int level = tile_zoom();
     const int count = 1 << level;
@@ -919,6 +944,11 @@ void MapView::paint(rap::painter& p, rap::size_f size)
         double pin_dx = pin_x_ - centre_x_;
         pin_dx -= std::round(pin_dx);  // the nearer way round the world
         draw_pin(p, float(pin_dx * world_) + size.w / 2, float((pin_y_ - centre_y_) * world_) + size.h / 2, current_, 1, true, &selected_);
+        // The pins have just been put where they're seen: a zoom, a pan, a
+        // new stack or a pin moved can change what's under a pointer that
+        // hasn't moved.
+        if (pointer_here_)
+            set_hover(hover_text(pointer_at_));
 
         std::sort(near_pins.begin(), near_pins.end(), [](const Near& a, const Near& b) { return a.distance < b.distance; });
         std::vector<const Placed*> wanted;
@@ -1287,6 +1317,26 @@ void MapView::evict()
     }
 }
 
+// The file a pin's for, or for a stack how many and the first few.
+std::string MapView::hover_text(rap::point_f q) const
+{
+    const auto name = [](const std::string& path) { return rap::sys::path_to_utf8(rap::sys::path_from_utf8(path).filename()); };
+    if (over_selected(q))
+        return name(path_);
+    const Drawn* pin = pin_at(q);
+    if (!pin || pin->cluster >= clusters_.size())
+        return {};
+    const Cluster& c = clusters_[pin->cluster];
+    if (c.count == 1)
+        return name(pins_[c.first].path);
+    std::string text = rap::i18n::format(_("{0} photos"), c.count) + ": ";
+    for (size_t i = 0; i < c.members.size() && i < 3; ++i)
+        text += (i ? ", " : "") + name(pins_[c.members[i]].path);
+    if (c.members.size() > 3)
+        text += ", …";
+    return text;
+}
+
 bool MapView::over_selected(rap::point_f q) const
 {
     const float dx = q.x - selected_.x, dy = q.y - selected_.y;
@@ -1308,6 +1358,12 @@ const MapView::Drawn* MapView::pin_at(rap::point_f q) const
 bool MapView::pointer(const rap::pointer_event& e)
 {
     using T = rap::pointer_event_type;
+    pointer_here_ = e.type != T::leave;
+    pointer_at_ = e.pos;
+    if (e.type == T::leave)
+        set_hover({});
+    else if (e.type == T::move && !dragging_)
+        set_hover(hover_text(e.pos));
     if (e.type == T::press && e.button == 1)
     {
         if (e.pos.x >= chip_.x && e.pos.x < chip_.x + chip_.w && e.pos.y >= chip_.y && e.pos.y < chip_.y + chip_.h)
@@ -1337,6 +1393,7 @@ bool MapView::pointer(const rap::pointer_event& e)
     {
         const bool click = dragging_ && !moved_;
         dragging_ = false;
+        set_hover(hover_text(e.pos));  // where the drag ended
         const Drawn* pin = click ? pin_at(e.pos) : nullptr;
         plain_click_ = click && !pin && !over_selected(e.pos);
         if (pin)
@@ -1372,6 +1429,8 @@ bool MapView::scroll(const rap::scroll_event& e)
 {
     if (!has_)
         return false;
+    pointer_here_ = true;
+    pointer_at_ = e.pos;
     const double notches = -(e.precise ? e.dy / 40 : e.dy);
     const double zoom = std::clamp(zoom_ + notches * kZoomStep, double(kMinZoom), double(kMaxZoom));
     if (zoom == zoom_)

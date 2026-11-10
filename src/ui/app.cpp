@@ -68,6 +68,11 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     map_view_ = std::make_unique<MapView>(ui_, cfg_);
     map_view_->on_open = [this](double latitude, double longitude) { open_url(cfg_.map_link(latitude, longitude)); };
     map_view_->on_pick = [this](const std::string& path) { open_pin(path); };
+    map_view_->on_hover = [this](const std::string& text)
+    {
+        if (map_canvas_ && !map_overlay_on_)
+            map_canvas_->set_tooltip(text);
+    };
     lenses::allow_downloads(cfg_.lens_downloads);
     build_ui();
     view_->on_paint_over = [this](rap::painter& p, rap::size_f size)

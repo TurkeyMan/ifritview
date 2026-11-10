@@ -71,6 +71,7 @@ public:
 
     std::function<void(double latitude, double longitude)> on_open;  // double-clicked
     std::function<void(const std::string& path)> on_pick;            // a gray pin clicked
+    std::function<void(const std::string& text)> on_hover;           // what the pointer's over, for a tooltip; "" for none
 
 private:
     struct Tile
@@ -119,6 +120,11 @@ private:
     struct Drawn;
     const Drawn* pin_at(rap::point_f q) const;
     bool over_selected(rap::point_f q) const;
+    std::string hover_text(rap::point_f q) const;
+    void set_hover(const std::string& text, bool always = false);
+    std::string hovering_;  // what on_hover was last told
+    rap::point_f pointer_at_{};  // where the pointer last was over the map
+    bool pointer_here_ = false;  // and that it's still there
     void pick(size_t cluster);
 
     struct Drawn
