@@ -46,6 +46,13 @@ public:
     // Stops what's going (what it's read is kept), nothing more reported.
     void cancel();
 
+    // Some files changed or went: just those looked at again. `removed` has
+    // every path the map should drop (gone, and changed ones, which come back
+    // in `found` if they still have a position). Queued behind a scan, and
+    // dropped by the next scan or cancel, which cover them.
+    using Changes = std::function<void(std::vector<std::string> removed, std::vector<Located> found)>;
+    void update(std::vector<std::string> changed, std::vector<std::string> gone, Changes report);
+
 private:
     struct Job
     {
@@ -53,16 +60,24 @@ private:
         Report report;
         uint64_t serial = 0;
     };
+    struct Update
+    {
+        std::vector<std::string> changed, gone;
+        Changes report;
+        uint64_t serial = 0;  // the scan it follows: another scan, or a cancel, ends it
+    };
     struct Store;
 
     void run();
     void work(Store& store, const Job& job);
+    void work(Store& store, const Update& update);
     bool stale(const Job& job) const { return stop_ || serial_ != job.serial; }
 
     std::mutex mutex_;
     std::condition_variable wake_;
     bool have_job_ = false;
     Job job_;
+    std::deque<Update> updates_;
     std::atomic<bool> stop_{false};
     std::atomic<uint64_t> serial_{0};
     std::thread thread_;
