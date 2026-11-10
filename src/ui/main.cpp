@@ -1,6 +1,8 @@
 #include "app.h"
 #include "platform.h"
 #include "first_image.h"
+#include "folder_index.h"
+#include "pin_thumbs.h"
 #include "gpu_view.h"
 #include "decoders/decoder.h"
 #include "i18n.h"
@@ -59,6 +61,8 @@ namespace
 // (instead:jpeg, instead:libraw, instead:none, lens:on, lens:off first: the
 // G panel's checks; crs:Contrast2012=40 sets a develop setting by its XMP
 // name, as-shot puts them all back, save-xmp writes the sidecar).
+// forget-locations does what the Maps settings' button does; maps-off turns
+// both maps off as Settings would.
 void run_step(App& app, const std::string& step)
 {
     std::fprintf(stderr, "script: %s (zoom %.3f)\n", step.c_str(), app.view().zoom());
@@ -180,6 +184,10 @@ void run_step(App& app, const std::string& step)
         app.script_instead(step.substr(8));
     else if (step == "lens:on" || step == "lens:off")
         app.script_lens(step == "lens:on");
+    else if (step == "forget-locations")
+        app.script_forget_locations();
+    else if (step == "maps-off")
+        app.script_maps_off();
     else if (step.rfind("export:", 0) == 0)
         app.script_export(step.substr(7));
     else if (step.rfind("crs:", 0) == 0)
@@ -351,6 +359,12 @@ int main(int argc, char** argv)
         return formats_report();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
         return gpu_render(argc - 2, argv + 2);
+    if (argc > 2 && std::strcmp(argv[1], "--check-forget") == 0)
+    {
+        const int index = check_index_forget(argv[2]);
+        const int thumbs = check_thumbs_forget(argv[2]);
+        return index | thumbs;
+    }
 
     // The language first: the toolkit takes it as it starts.
     start_translations(saved_language());

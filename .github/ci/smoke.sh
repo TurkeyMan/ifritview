@@ -24,3 +24,7 @@ head -c $((64 * 48 * 3)) /dev/urandom >> "$smoke"/big.ppm
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff
 "$build/ifritview" --plugins
 "$build/ifritview" --probe "$smoke"/red.ff
+# Forgetting saved photo locations: refused while another connection still
+# reads the old records (they'd stay in the journal), finished once it lets
+# go and on closing; nothing written back by what was under way.
+"$build/ifritview" --check-forget "$smoke"

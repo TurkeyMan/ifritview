@@ -163,6 +163,8 @@ struct State
     State(Config& c, std::function<void(bool)> d) : cfg(c), done(std::move(d)) {}
     Config& cfg;
     std::function<void(bool)> done;
+    ForgetLocations forget_locations;
+    std::weak_ptr<State> self;  // for what calls back after a click
     std::unique_ptr<rap::window> window;
     bool finished = false;
 
@@ -172,6 +174,7 @@ struct State
     rap::drop_down *raw_mode = nullptr, *map_provider = nullptr, *geo_provider = nullptr, *language = nullptr;
     rap::drop_down *street_map = nullptr, *satellite_map = nullptr;
     rap::check* map_live_toggle = nullptr;
+    rap::button* forget_locations_button = nullptr;
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
@@ -452,6 +455,28 @@ rap::node general_page(const Config& cfg, State& st)
                      {"", L::check{_("Show the other map in the street/satellite button"), cfg.map_live_toggle}
                               .tooltip(_("Fetches the other map's tiles too, as you move around the map; turn it off on a slow connection"))
                               .bind(st.map_live_toggle)},
+                     {"", L::button{_("Forget saved photo locations")}
+                              .tooltip(_("Deletes what IfritView keeps so the map shows a folder's photos at once: their GPS positions and "
+                                         "the pins' pictures. Nothing is kept while both maps are off"))
+                              .on_click(
+                                  [s]
+                                  {
+                                      if (!s->forget_locations)
+                                          return;
+                                      s->forget_locations_button->set_enabled(false);
+                                      s->forget_locations(
+                                          [self = s->self](bool forgotten)
+                                          {
+                                              const std::shared_ptr<State> st = self.lock();
+                                              if (!st || !st->window || st->finished)
+                                                  return;
+                                              st->forget_locations_button->set_text(
+                                                  forgotten ? _("Saved photo locations forgotten")
+                                                            : _("Couldn't delete them all (another IfritView window may be using them). Try again"));
+                                              st->forget_locations_button->set_enabled(!forgotten);
+                                          });
+                                  })
+                              .bind(st.forget_locations_button)},
                  }},
     }};
 }
@@ -759,7 +784,8 @@ rap::node about_page(rap::ui& ui)
 
 }  // namespace
 
-std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent, Config& cfg, std::function<void(bool)> done, int page)
+std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent, Config& cfg, std::function<void(bool)> done,
+                                               ForgetLocations forget_locations, int page)
 {
     const bool trace = std::getenv("IFRIT_TRACE");
     const auto t0 = std::chrono::steady_clock::now();
@@ -772,6 +798,8 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
         t = now;
     };
     auto st = std::make_shared<State>(cfg, std::move(done));
+    st->forget_locations = std::move(forget_locations);
+    st->self = st;
     // Each page is built the first time it's shown (the window owns them and
     // goes before the state does).
     State* s = st.get();

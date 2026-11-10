@@ -1257,7 +1257,9 @@ void App::image_presented()
 
 void App::scan_pins(bool again)
 {
-    const bool shown = map_overlay_on_ || (map_canvas_ && !fullscreen_ && metadata_visible_ && !pane_histogram_ && image_ && image_->has_location && map_view_->enabled());
+    // Never with the maps off, whatever was showing before they went.
+    const bool shown = map_view_->enabled() &&
+                       (map_overlay_on_ || (map_canvas_ && !fullscreen_ && metadata_visible_ && !pane_histogram_ && image_ && image_->has_location));
     if (!shown)
     {
         pins_key_.clear();  // looked at afresh when it next shows
@@ -1302,7 +1304,7 @@ std::string App::pins_key() const
 
 void App::update_pins(std::vector<std::string> changed, std::vector<std::string> gone)
 {
-    if (pins_key_.empty())
+    if (pins_key_.empty() || !map_view_->enabled())
         return;  // no map showing: it'll scan when it does
     if (!pins_complete_ || !folder_index_)
     {
@@ -1344,6 +1346,47 @@ void App::pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, b
     if (done || pins_live_)
         map_view_->set_pins(pins_building_);
     platform::trace("folder index: %zu geotags%s", pins_building_.size(), done ? ", all" : "");
+}
+
+void App::forget_locations(std::function<void(bool)> done)
+{
+    // The database and the pins' pictures, each on its own thread: `done`
+    // when both are through, told whether both went.
+    struct Parts
+    {
+        int left = 2;
+        bool forgotten = true;
+        std::function<void(bool)> done;
+    };
+    auto parts = std::make_shared<Parts>();
+    parts->done = std::move(done);
+    const auto part = [parts](bool forgotten)
+    {
+        platform::post_main(
+            [parts, forgotten]
+            {
+                parts->forgotten &= forgotten;
+                if (--parts->left == 0 && parts->done)
+                    parts->done(parts->forgotten);
+            });
+    };
+    // The pins go now, and what's on its way isn't wanted.
+    ++pins_serial_;
+    pins_key_.clear();
+    pins_dir_.clear();
+    pins_building_.clear();
+    pins_complete_ = false;
+    map_view_->forget_pins(part);
+    std::error_code e;
+    if (folder_index_ || std::filesystem::exists(rap::sys::path_from_utf8(FolderIndex::database_path()), e))
+    {
+        if (!folder_index_)
+            folder_index_ = std::make_unique<FolderIndex>();
+        folder_index_->forget(part);
+    }
+    else
+        part(true);  // never kept
+    scan_pins(true);  // the map, if it's showing, reads the folder afresh
 }
 
 void App::open_pin(const std::string& path)
@@ -2206,37 +2249,44 @@ void App::open_settings_page(int page)
         [this, old_raw_mode, old_apply_xmp, old_raw_crop](bool ok)
         {
             end_settings_ = nullptr;
-            if (!ok)
-                return;
-            cfg_.save();
-            set_decode_options(decode_options_for(cfg_));
-            cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
-            geocoder_.set_provider(cfg_.geocoder_url);
-            lenses::allow_downloads(cfg_.lens_downloads);
-            if (image_)
-                request_place(image_);
-            video_.set_loop(cfg_.video_loop);
-            video_.set_muted(cfg_.video_muted);
-            view_->set_video_muted(cfg_.video_muted);
-            list_folder({});
-            smooth_toggle_->set_checked(cfg_.smooth_upscale());
-            xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
-            window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
-            view_->config_changed();
-            map_view_->config_changed();
-            refresh_metadata();
-            const bool reload =
-                ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->is_raw) ||
-                (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
-            if (reload)
-            {
-                cache_.erase(image_path_);
-                image_.reset();
-                load_current();
-            }
-            update_status();
+            if (ok)
+                apply_settings(old_raw_mode, old_apply_xmp, old_raw_crop);
         },
-        page);
+        [this](std::function<void(bool)> done) { forget_locations(std::move(done)); }, page);
+}
+
+void App::apply_settings(const std::string& old_raw_mode, bool old_apply_xmp, bool old_raw_crop)
+{
+    cfg_.save();
+    set_decode_options(decode_options_for(cfg_));
+    cache_.set_budget(size_t(cfg_.cache_megabytes) << 20);
+    geocoder_.set_provider(cfg_.geocoder_url);
+    lenses::allow_downloads(cfg_.lens_downloads);
+    if (image_)
+        request_place(image_);
+    video_.set_loop(cfg_.video_loop);
+    video_.set_muted(cfg_.video_muted);
+    view_->set_video_muted(cfg_.video_muted);
+    list_folder({});
+    smooth_toggle_->set_checked(cfg_.smooth_upscale());
+    xmp_toggle_->set_checked(cfg_.apply_xmp_edits);
+    window_->set_min_size({float(cfg_.min_window_width), float(cfg_.min_window_height)});
+    view_->config_changed();
+    map_view_->config_changed();
+    refresh_metadata();
+    // Both maps off: nothing's kept of where the photos were, nor read again
+    // till a map's on. After the map's been hidden.
+    if (cfg_.map_tile_url.empty() && cfg_.map_satellite_url.empty())
+        forget_locations();
+    const bool reload = ((cfg_.raw_mode != old_raw_mode || cfg_.raw_camera_crop != old_raw_crop) && image_ && image_->is_raw) ||
+                        (cfg_.apply_xmp_edits != old_apply_xmp && image_ && image_->xmp.present);
+    if (reload)
+    {
+        cache_.erase(image_path_);
+        image_.reset();
+        load_current();
+    }
+    update_status();
 }
 
 // -- status -------------------------------------------------------------------

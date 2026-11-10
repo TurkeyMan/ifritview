@@ -14,9 +14,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <mutex>
 #include <new>
 #include <span>
 #include <system_error>
+#include <thread>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -32,9 +36,15 @@ constexpr int kSide = 112;                        // pixels: enough for a pin on
 constexpr char kMagic[4] = {'I', 'F', 'T', '1'};
 constexpr uintmax_t kDiskBudget = uintmax_t(256) << 20;
 
+std::string& kept_in()
+{
+    static std::string dir;
+    return dir;
+}
+
 std::string thumbs_dir()
 {
-    return platform::join_path(platform::cache_dir(), "pin-thumbs");
+    return kept_in().empty() ? platform::join_path(platform::cache_dir(), "pin-thumbs") : kept_in();
 }
 
 std::string file_for(const std::string& key)
@@ -259,22 +269,70 @@ void ThumbLoader::want(std::vector<Request> requests)
     wake_.notify_all();
 }
 
+uint64_t ThumbLoader::forget(std::function<void(bool)> done)
+{
+    uint64_t generation = 0;
+    {
+        std::lock_guard lock(mutex_);
+        queue_.clear();
+        working_.clear();  // what's being made is from before: asked for again, it's made again
+        forget_ = true;
+        if (done)
+            forgotten_.push_back(std::move(done));
+        generation = ++generation_;
+    }
+    wake_.notify_all();
+    return generation;
+}
+
+void ThumbLoader::keep_in(std::string dir)
+{
+    kept_in() = std::move(dir);
+}
+
+bool ThumbLoader::forget_kept()
+{
+    std::error_code e;
+    fs::remove_all(rap::sys::path_from_utf8(thumbs_dir()), e);
+    if (e)
+        platform::trace("pin thumbnails: not deleted: %s", e.message().c_str());
+    return !e;
+}
+
 void ThumbLoader::run()
 {
     platform::lower_thread_priority();
     while (true)
     {
         Request request;
+        uint64_t generation = 0;
         {
             std::unique_lock lock(mutex_);
             working_.clear();
-            wake_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+            wake_.wait(lock, [this] { return stop_ || forget_ || !queue_.empty(); });
+            // Forgetting's done before closing too, after what was being made.
+            if (std::exchange(forget_, false))
+            {
+                std::vector<std::function<void(bool)>> forgotten = std::move(forgotten_);
+                forgotten_.clear();
+                lock.unlock();
+                const bool deleted = forget_kept();
+                for (const auto& done : forgotten)
+                    done(deleted);
+                continue;
+            }
             if (stop_)
                 return;
             request = std::move(queue_.front());
             queue_.pop_front();
             working_ = request.key;
+            generation = generation_;
         }
+        const auto current = [&]
+        {
+            std::lock_guard lock(mutex_);
+            return generation == generation_;
+        };
         std::shared_ptr<Picture> picture;
         try
         {
@@ -282,7 +340,7 @@ void ThumbLoader::run()
             if (!picture)
             {
                 picture = make(request);
-                if (picture)
+                if (picture && current())  // else forgotten meanwhile (and if then, deleted next)
                     keep(request.key, *picture);
             }
         }
@@ -292,10 +350,113 @@ void ThumbLoader::run()
         }
         try
         {
-            done_(request.key, std::move(picture));
+            done_(request.key, std::move(picture), generation);
         }
         catch (const std::bad_alloc&)
         {
         }
     }
+}
+
+int check_thumbs_forget(const std::string& dir)
+{
+    using namespace std::chrono_literals;
+    const std::string kept = platform::join_path(dir, "check-thumbs");
+    const fs::path kept_path = rap::sys::path_from_utf8(kept);
+    ThumbLoader::keep_in(kept);
+    std::error_code e;
+    fs::remove_all(kept_path, e);
+    const auto fail = [](const char* what)
+    {
+        std::fprintf(stderr, "check-thumbs-forget: %s\n", what);
+        return 1;
+    };
+    const auto none_kept = [&] { return !fs::exists(kept_path, e) || fs::is_empty(kept_path, e); };
+
+    // A big plain BMP, slow enough to decode that it's still being made when
+    // the pictures are forgotten.
+    const int w = 4000, h = 3000;
+    const uint32_t row = uint32_t(w) * 3, pixels = row * uint32_t(h);
+    std::vector<uint8_t> bmp(54 + pixels, 0x80);
+    const auto put32 = [&](size_t at, uint32_t v)
+    {
+        for (int i = 0; i < 4; ++i)
+            bmp[at + size_t(i)] = uint8_t(v >> (8 * i));
+    };
+    std::memset(bmp.data(), 0, 54);
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    put32(2, uint32_t(bmp.size()));
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, uint32_t(w));
+    put32(22, uint32_t(h));
+    bmp[26] = 1;
+    bmp[28] = 24;
+    put32(34, pixels);
+    const std::string photo = platform::join_path(dir, "check-thumb.bmp");
+    std::ofstream(rap::sys::path_from_utf8(photo), std::ios::binary).write(reinterpret_cast<const char*>(bmp.data()), std::streamsize(bmp.size()));
+
+    std::mutex m;
+    std::vector<uint64_t> handed;
+    {
+        ThumbLoader loader(
+            [&](const std::string&, std::shared_ptr<ThumbLoader::Picture>, uint64_t generation)
+            {
+                std::lock_guard lock(m);
+                handed.push_back(generation);
+            });
+        // One made and kept, so there's something to forget.
+        loader.want({{"before", photo, 1}});
+        for (int i = 0; i < 200 && none_kept(); ++i)
+            std::this_thread::sleep_for(50ms);
+        if (none_kept())
+        {
+            std::printf("check-thumbs-forget: skipped (this platform can't decode a BMP)\n");
+            return 0;
+        }
+        // Another, being made as they're forgotten.
+        loader.want({{"during", photo, 1}});
+        std::this_thread::sleep_for(20ms);
+        std::promise<bool> deleted;
+        const uint64_t now = loader.forget([&](bool d) { deleted.set_value(d); });
+        if (!deleted.get_future().get())
+            return fail("the kept pictures couldn't be deleted");
+        std::this_thread::sleep_for(500ms);  // time for what was being made to be kept, if it would be
+        std::lock_guard lock(m);
+        for (const uint64_t g : handed)
+            if (g == now)
+                return fail("a picture asked for before forgetting was handed back as current");
+    }
+    if (fs::exists(kept_path, e))
+        return fail("a picture being made as they were forgotten was kept");
+
+    // The picture being made as they're forgotten, asked for again straight
+    // after (the map's pins come back): made again, and handed back as current.
+    {
+        std::promise<void> current;
+        uint64_t now = ~uint64_t(0);
+        bool seen = false;
+        ThumbLoader loader(
+            [&](const std::string& key, std::shared_ptr<ThumbLoader::Picture>, uint64_t generation)
+            {
+                std::lock_guard lock(m);
+                if (key == "again" && generation == now && !seen)
+                {
+                    seen = true;
+                    current.set_value();
+                }
+            });
+        loader.want({{"again", photo, 1}});
+        std::this_thread::sleep_for(20ms);
+        {
+            std::lock_guard lock(m);
+            now = loader.forget();
+        }
+        loader.want({{"again", photo, 1}});
+        if (current.get_future().wait_for(10s) != std::future_status::ready)
+            return fail("a picture asked for again after forgetting, while it was being made, never came");
+    }
+    std::printf("check-thumbs-forget: ok\n");
+    return 0;
 }

@@ -59,6 +59,9 @@ public:
         int64_t modified = 0;  // the thumbnail's made anew when it changes
     };
     void set_pins(const std::vector<Pin>& pins);
+    // The gray pins and their pictures dropped, here and in the cache folder;
+    // `done` (on another thread, maybe) told whether those files went.
+    void forget_pins(std::function<void(bool deleted)> done);
 
     void paint(rap::painter& p, rap::size_f size);
     bool pointer(const rap::pointer_event& e);
@@ -149,7 +152,7 @@ private:
     void draw_pin(rap::painter& p, float x, float y, const Placed* placed, int count, bool selected, Drawn* hit);
     void ask_thumbs(const std::vector<const Placed*>& wanted);
     void trim_thumbs();
-    void thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture);
+    void thumb_ready(const std::string& key, std::shared_ptr<ThumbLoader::Picture> picture, uint64_t generation);
     struct Cluster
     {
         double x = 0, y = 0;
@@ -178,6 +181,7 @@ private:
     std::vector<std::string> asked_;
     std::shared_ptr<char> alive_ = std::make_shared<char>();
     std::unique_ptr<ThumbLoader> loader_;  // made when first wanted
+    uint64_t thumbs_generation_ = 0;       // the loader's, since it last forgot
     enum class Gesture
     {
         none,
