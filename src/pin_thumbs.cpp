@@ -5,7 +5,13 @@
 
 #include <rapport/sys.h>
 
+#include <glib.h>
+#include <glib/gstdio.h>
+#include <zlib.h>
+
 #include <algorithm>
+#include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <new>
@@ -17,8 +23,137 @@ namespace fs = std::filesystem;
 namespace
 {
 
-constexpr int kSide = 112;                        // pixels: enough for a pin on a 2x display
 constexpr uintmax_t kMaxWhole = uintmax_t(48) << 20;  // a file decoded whole just for its pin
+
+// Made once, kept in the cache folder: the photo's key (its path and modified
+// time) names the file, so a changed photo's is simply not found. A little
+// header, then the pixels, compressed.
+constexpr int kSide = 112;                        // pixels: enough for a pin on a 2x display
+constexpr char kMagic[4] = {'I', 'F', 'T', '1'};
+constexpr uintmax_t kDiskBudget = uintmax_t(256) << 20;
+
+std::string thumbs_dir()
+{
+    return platform::join_path(platform::cache_dir(), "pin-thumbs");
+}
+
+std::string file_for(const std::string& key)
+{
+    // FNV-1a, 64 bits: a name, not a secret.
+    uint64_t h = 1469598103934665603ull;
+    for (const unsigned char c : key)
+        h = (h ^ c) * 1099511628211ull;
+    char name[32];
+    std::snprintf(name, sizeof name, "%016llx.thumb", static_cast<unsigned long long>(h));
+    return platform::join_path(thumbs_dir(), name);
+}
+
+std::shared_ptr<ThumbLoader::Picture> load_kept(const std::string& key)
+{
+    // Never bigger than one of ours could be: anything else isn't read at all.
+    const fs::path path = rap::sys::path_from_utf8(file_for(key));
+    std::error_code ec;
+    const uintmax_t file_size = fs::file_size(path, ec);
+    const uintmax_t largest = 12 + key.size() + compressBound(uLong(kSide) * kSide * 4);
+    if (ec || file_size > largest)
+        return nullptr;
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return nullptr;
+    char head[12];
+    if (!in.read(head, sizeof head) || std::memcmp(head, kMagic, 4) != 0)
+        return nullptr;
+    const int side = int(uint8_t(head[4])) | int(uint8_t(head[5])) << 8;
+    const int format = uint8_t(head[6]);
+    const uint32_t key_size = uint32_t(uint8_t(head[8])) | uint32_t(uint8_t(head[9])) << 8;
+    if (side != kSide || format > 1 || key_size != key.size())
+        return nullptr;
+    std::string stored(key_size, '\0');
+    if (!in.read(stored.data(), key_size) || stored != key)
+        return nullptr;  // another photo's, its name the same by chance
+    const std::string packed{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    auto picture = std::make_shared<ThumbLoader::Picture>();
+    picture->side = side;
+    picture->format = rap::pixel_format(format);
+    picture->pixels.resize(size_t(side) * side * 4);
+    uLongf size = uLongf(picture->pixels.size());
+    if (uncompress(picture->pixels.data(), &size, reinterpret_cast<const Bytef*>(packed.data()), uLong(packed.size())) != Z_OK ||
+        size != picture->pixels.size())
+        return nullptr;
+    return picture;
+}
+
+// The oldest made go until what's left fits.
+void trim_kept()
+{
+    struct Entry
+    {
+        fs::path path;
+        fs::file_time_type when;
+        uintmax_t size;
+    };
+    std::vector<Entry> files;
+    uintmax_t total = 0;
+    std::error_code ec;
+    for (fs::directory_iterator it(rap::sys::path_from_utf8(thumbs_dir()), ec), end; !ec && it != end; it.increment(ec))
+    {
+        std::error_code e;
+        const uintmax_t size = it->file_size(e);
+        const fs::file_time_type when = it->last_write_time(e);
+        if (!e)
+        {
+            files.push_back({it->path(), when, size});
+            total += size;
+        }
+    }
+    if (total <= kDiskBudget)
+        return;
+    std::sort(files.begin(), files.end(), [](const Entry& a, const Entry& b) { return a.when < b.when; });
+    for (const Entry& f : files)
+    {
+        if (total <= kDiskBudget)
+            break;
+        std::error_code e;
+        if (fs::remove(f.path, e))
+            total -= f.size;
+    }
+}
+
+void keep(const std::string& key, const ThumbLoader::Picture& picture)
+{
+    static int written = 0;
+    const std::string dir = thumbs_dir();
+    if (g_mkdir_with_parents(dir.c_str(), 0700) != 0)
+        return;
+    std::vector<uint8_t> packed(compressBound(uLong(picture.pixels.size())));
+    uLongf size = uLongf(packed.size());
+    if (compress2(packed.data(), &size, picture.pixels.data(), uLong(picture.pixels.size()), 6) != Z_OK)
+        return;
+    const uint8_t head[12] = {uint8_t(kMagic[0]), uint8_t(kMagic[1]), uint8_t(kMagic[2]), uint8_t(kMagic[3]), uint8_t(picture.side), uint8_t(picture.side >> 8),
+                              uint8_t(picture.format), 0, uint8_t(key.size()), uint8_t(key.size() >> 8), 0, 0};
+    if (key.size() > 0xFFFF)
+        return;
+    const std::string path = file_for(key);
+    char suffix[32];
+    std::snprintf(suffix, sizeof suffix, ".%08x.partial", unsigned(g_random_int()));
+    const fs::path target = rap::sys::path_from_utf8(path), partial = rap::sys::path_from_utf8(path + suffix);
+    bool ok = false;
+    {
+        std::ofstream out(partial, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(head), sizeof head);
+        out.write(key.data(), std::streamsize(key.size()));
+        out.write(reinterpret_cast<const char*>(packed.data()), std::streamsize(size));
+        out.close();
+        ok = bool(out);
+    }
+    std::error_code ec;
+    if (ok)
+        fs::rename(partial, target, ec);
+    if (!ok || ec)
+        fs::remove(partial, ec);
+    if (written++ % 256 == 0)
+        trim_kept();
+}
 
 // The middle square of `d`, averaged down to kSide, turned upright.
 std::shared_ptr<ThumbLoader::Picture> square(const rap::sys::decoded_image& d, int orientation)
@@ -143,7 +278,13 @@ void ThumbLoader::run()
         std::shared_ptr<Picture> picture;
         try
         {
-            picture = make(request);
+            picture = load_kept(request.key);
+            if (!picture)
+            {
+                picture = make(request);
+                if (picture)
+                    keep(request.key, *picture);
+            }
         }
         catch (const std::bad_alloc&)
         {
