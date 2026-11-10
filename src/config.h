@@ -90,7 +90,7 @@ struct Config
     std::string map_tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
     std::string map_satellite_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?blankTile=false";
     bool map_satellite = false;
-    int map_height = 280;  // the map's share of the info pane
+    int map_height = 0;  // the map's height as its divider was last dragged; 0: a third of the pane, up to 4:3
     bool map_overlay = false;  // over the image in fullscreen
     bool map_live_toggle = true;  // the street/satellite button shows the other map
     // Reverse geocoding provider, {lat}/{lon} template; empty = off.
