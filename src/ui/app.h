@@ -328,6 +328,10 @@ private:
     void refresh_map();
     void scan_pins(bool again);                  // the folder's geotags, for the map
     void pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, bool done);
+    std::string pins_key() const;
+    void update_pins(std::vector<std::string> changed, std::vector<std::string> gone);
+    void pins_changed(uint64_t serial, std::vector<std::string> removed, std::vector<FolderIndex::Located> found);
+    bool pins_complete_ = false;  // the last scan's run to the end
     void open_pin(const std::string& path);
     std::unique_ptr<FolderIndex> folder_index_;  // made when a map first wants it
     std::string pins_key_, pins_dir_;            // what was scanned

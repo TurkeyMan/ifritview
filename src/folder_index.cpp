@@ -344,6 +344,7 @@ void FolderIndex::scan(std::vector<std::string> paths, Report report)
         job_.report = std::move(report);
         job_.serial = ++serial_;
         have_job_ = true;
+        updates_.clear();  // the scan looks at everything
     }
     wake_.notify_all();
 }
@@ -353,6 +354,7 @@ void FolderIndex::cancel()
     std::lock_guard lock(mutex_);
     have_job_ = false;
     job_ = {};
+    updates_.clear();
     ++serial_;
 }
 
@@ -364,21 +366,117 @@ void FolderIndex::run()
     while (true)
     {
         Job job;
+        Update update;
+        bool scanning = false;
         {
             std::unique_lock lock(mutex_);
-            wake_.wait(lock, [this] { return stop_ || have_job_; });
+            wake_.wait(lock, [this] { return stop_ || have_job_ || !updates_.empty(); });
             if (stop_)
                 return;
-            job = std::move(job_);
-            have_job_ = false;
+            if (have_job_)
+            {
+                job = std::move(job_);
+                have_job_ = false;
+                scanning = true;
+            }
+            else
+            {
+                update = std::move(updates_.front());
+                updates_.pop_front();
+            }
         }
         if (!opened)
         {
             store.open();
             opened = true;
         }
-        work(store, job);
+        if (scanning)
+            work(store, job);
+        else
+            work(store, update);
     }
+}
+
+void FolderIndex::update(std::vector<std::string> changed, std::vector<std::string> gone, Changes report)
+{
+    {
+        std::lock_guard lock(mutex_);
+        updates_.push_back({std::move(changed), std::move(gone), std::move(report), serial_});
+    }
+    wake_.notify_all();
+}
+
+void FolderIndex::work(Store& store, const Update& update)
+{
+    // A directory at a time, as they're stored: its block changed where the
+    // files did, the rest kept as it was.
+    std::map<fs::path, std::pair<std::vector<const std::string*>, std::vector<const std::string*>>> folders;
+    for (const std::string& path : update.changed)
+        folders[rap::sys::path_from_utf8(path).parent_path()].first.push_back(&path);
+    for (const std::string& path : update.gone)
+        folders[rap::sys::path_from_utf8(path).parent_path()].second.push_back(&path);
+
+    std::vector<std::string> removed = update.gone;
+    std::vector<Located> found;
+    const auto ended = [&] { return stop_ || serial_ != update.serial; };
+    for (const auto& [dir, files] : folders)
+    {
+        if (ended())
+            return;
+        const std::string key = directory_key(dir);
+        std::vector<FileRecord> records = store.load(key);
+        bool dirty = false;
+        const auto named = [&](const std::string& path)
+        { return rap::sys::path_to_utf8(rap::sys::path_from_utf8(path).filename()); };
+        for (const std::string* path : files.second)
+        {
+            const std::string name = named(*path);
+            const auto before = records.size();
+            records.erase(std::remove_if(records.begin(), records.end(), [&](const FileRecord& r) { return r.name == name; }), records.end());
+            dirty |= records.size() != before;
+        }
+        bool stopped = false;
+        for (const std::string* path : files.first)
+        {
+            if (ended())
+            {
+                stopped = true;  // what's been read is kept, nothing reported
+                break;
+            }
+            removed.push_back(*path);
+            const fs::path p = rap::sys::path_from_utf8(*path);
+            std::error_code e1, e2;
+            const auto size = fs::file_size(p, e1);
+            const auto when = fs::last_write_time(p, e2);
+            if (e1 || e2)
+                continue;  // gone again already
+            FileRecord record;
+            record.name = named(*path);
+            record.size = int64_t(size);
+            record.mtime = millis_of(when);
+            const auto at = std::find_if(records.begin(), records.end(), [&](const FileRecord& r) { return r.name == record.name; });
+            if (at != records.end() && at->size == record.size && at->mtime == record.mtime)
+                record = *at;  // as it was: nothing to read
+            else if (!read_file_record(*path, record))
+                continue;  // not readable yet: the next change, or scan, has it
+            else
+            {
+                if (at != records.end())
+                    *at = record;
+                else
+                    records.push_back(record);
+                dirty = true;
+            }
+            if (record.has_location)
+                found.push_back({*path, record.latitude, record.longitude, record.orientation, record.mtime});
+        }
+        if (dirty)
+            store.save(key, records);
+        if (stopped)
+            return;
+    }
+    if (!ended())
+        update.report(std::move(removed), std::move(found));
 }
 
 void FolderIndex::work(Store& store, const Job& job)

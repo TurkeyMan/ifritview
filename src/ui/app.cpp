@@ -24,6 +24,7 @@
 #include <glib/gstdio.h>
 
 #include <algorithm>
+#include <unordered_set>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -1058,6 +1059,7 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         return rap::sys::path_to_utf8(rel.make_preferred());
     };
     bool rescan = false;
+    std::vector<std::string> changed, gone;  // for the map's pins
     for (const rap::sys::file_event& e : batch.events)
     {
         const std::optional<std::string> listed_as = batch.overflow ? std::nullopt : listed_name(e.path);
@@ -1075,7 +1077,10 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         }
         switch (e.what)
         {
-            case K::removed: listed |= folder_.remove(name); break;
+            case K::removed:
+                listed |= folder_.remove(name);
+                gone.push_back(full);
+                break;
             // Added under the shown file's name: a fresh temporary renamed
             // over it within the settle time comes as that, the watch not
             // knowing the name was there.
@@ -1083,6 +1088,8 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
             case K::modified:
                 listed |= folder_.add(name, cfg_);  // one that wasn't readable before, say
                 reload_shown |= name == folder_.current_name();
+                if (folder_.contains(name))
+                    changed.push_back(full);
                 break;
             case K::renamed:
             {
@@ -1093,6 +1100,9 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
                 reload_shown |= !shown && name == folder_.current_name();
                 listed |= folder_.rename(from, name, cfg_);
                 cache_.erase(rap::sys::path_to_utf8(e.old_path));
+                gone.push_back(rap::sys::path_to_utf8(e.old_path));
+                if (folder_.contains(name))
+                    changed.push_back(full);
                 if (shown)
                     image_path_ = folder_.current();  // the same image, by its new name
                 break;
@@ -1109,8 +1119,10 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         image_path_.clear();
         load_current();
     }
-    if (!batch.events.empty() || batch.overflow)
-        scan_pins(true);
+    // A relist (an overflow, a folder inside) brings a scan of its own; else
+    // just what changed is looked at again.
+    if (!batch.overflow && !rescan && (!changed.empty() || !gone.empty()))
+        update_pins(std::move(changed), std::move(gone));
     platform::trace("folder changed: %zu events%s, %d files", batch.events.size(), batch.overflow ? " (overflow)" : "", folder_.count());
     if (listed || reload_shown)
     {
@@ -1243,7 +1255,7 @@ void App::scan_pins(bool again)
             folder_index_->cancel();
         return;
     }
-    const std::string key = folder_.directory() + "|" + std::to_string(folder_.count()) + "|" + std::to_string(pins_listing_) + (cfg_.recursive ? "|r" : "");
+    const std::string key = pins_key();
     if (!again && key == pins_key_)
         return;
     pins_key_ = key;
@@ -1252,6 +1264,7 @@ void App::scan_pins(bool again)
     if (pins_live_)
         map_view_->set_pins({});
     pins_building_.clear();
+    pins_complete_ = false;
     if (!folder_index_)
         folder_index_ = std::make_unique<FolderIndex>();
     std::vector<std::string> paths;
@@ -1270,12 +1283,53 @@ void App::scan_pins(bool again)
                         });
 }
 
+// What a scan of the folder covers: another of these is another scan.
+std::string App::pins_key() const
+{
+    return folder_.directory() + "|" + std::to_string(folder_.count()) + "|" + std::to_string(pins_listing_) + (cfg_.recursive ? "|r" : "");
+}
+
+void App::update_pins(std::vector<std::string> changed, std::vector<std::string> gone)
+{
+    if (pins_key_.empty())
+        return;  // no map showing: it'll scan when it does
+    if (!pins_complete_ || !folder_index_)
+    {
+        scan_pins(true);  // the scan's still going: it starts again, with the changes
+        return;
+    }
+    pins_key_ = pins_key();  // the count may have changed, not what's covered
+    folder_index_->update(std::move(changed), std::move(gone),
+                          [serial = pins_serial_](std::vector<std::string> removed, std::vector<FolderIndex::Located> found)
+                          {
+                              platform::post_main(
+                                  [serial, removed = std::move(removed), found = std::move(found)]() mutable
+                                  {
+                                      if (s_app)
+                                          s_app->pins_changed(serial, std::move(removed), std::move(found));
+                                  });
+                          });
+}
+
+void App::pins_changed(uint64_t serial, std::vector<std::string> removed, std::vector<FolderIndex::Located> found)
+{
+    if (serial != pins_serial_)
+        return;  // a scan since covers it
+    const std::unordered_set<std::string> drop(removed.begin(), removed.end());
+    std::erase_if(pins_building_, [&](const MapView::Pin& p) { return drop.contains(p.path); });
+    for (FolderIndex::Located& f : found)
+        pins_building_.push_back({std::move(f.path), f.latitude, f.longitude, f.orientation, f.mtime});
+    map_view_->set_pins(pins_building_);
+    platform::trace("folder index: %zu changed, %zu geotags", removed.size(), pins_building_.size());
+}
+
 void App::pins_found(uint64_t serial, std::vector<FolderIndex::Located> found, bool done)
 {
     if (serial != pins_serial_)
         return;  // an earlier scan's
     for (FolderIndex::Located& f : found)
         pins_building_.push_back({std::move(f.path), f.latitude, f.longitude, f.orientation, f.mtime});
+    pins_complete_ = done;
     if (done || pins_live_)
         map_view_->set_pins(pins_building_);
     platform::trace("folder index: %zu geotags%s", pins_building_.size(), done ? ", all" : "");
