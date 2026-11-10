@@ -40,8 +40,18 @@ public:
     // On the index's thread: more of what's been found, and whether that's all.
     using Report = std::function<void(std::vector<Located> found, bool done)>;
 
-    // `database`: where it's kept, if not in the cache folder.
+    // How long it waits: for another window's hold on the database, and
+    // between tries of a forget that couldn't finish.
+    struct Waits
+    {
+        int busy_ms = 1000;
+        int retry_ms = 5000;
+    };
+    // `database`: where it's kept, if not in the cache folder; `waits`
+    // shorter for --check-forget. (Two constructors, not a default argument:
+    // Waits's own defaults can't be used in one while this class is incomplete.)
     explicit FolderIndex(std::string database = database_path());
+    FolderIndex(std::string database, Waits waits);
     ~FolderIndex();  // waits for its thread
     FolderIndex(const FolderIndex&) = delete;
     FolderIndex& operator=(const FolderIndex&) = delete;
@@ -91,6 +101,7 @@ private:
     bool stale(const Job& job) const { return stop_ || serial_ != job.serial; }
 
     std::string database_;
+    Waits waits_;
     std::mutex mutex_;
     std::condition_variable wake_;
     bool have_job_ = false;
