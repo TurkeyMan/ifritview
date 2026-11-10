@@ -11,6 +11,21 @@
 namespace
 {
 
+// An EXIF date ("YYYY:MM:DD hh:mm:ss") in seconds from 1970, as if UTC; 0 if
+// it isn't one.
+int64_t exif_time(const std::string& text)
+{
+    int Y = 0, M = 0, D = 0, h = 0, m = 0, s = 0;
+    if (std::sscanf(text.c_str(), "%4d:%2d:%2d %2d:%2d:%2d", &Y, &M, &D, &h, &m, &s) != 6 || Y <= 0 || M < 1 || M > 12 || D < 1 || D > 31 || h < 0 || h >= 24 ||
+        m < 0 || m >= 60 || s < 0 || s > 60)
+        return 0;
+    // Days from 1970 by the civil calendar.
+    const int y = M <= 2 ? Y - 1 : Y;
+    const int era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
+    const int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return (int64_t(era) * 146097 + doe - 719468) * 86400 + h * 3600 + m * 60 + s;
+}
+
 struct Visit
 {
     Image* out;
@@ -66,19 +81,7 @@ ExifSummary read(ExifData* ed, Image& out)
     if (summary.color_space == "Adobe RGB (1998)")
         out.declared_space = ColorSpace::adobe_rgb();
     if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_EXIF], EXIF_TAG_DATE_TIME_ORIGINAL))
-    {
-        int Y = 0, M = 0, D = 0, h = 0, m = 0, s = 0;
-        const std::string text(reinterpret_cast<const char*>(e->data), e->size);
-        if (std::sscanf(text.c_str(), "%4d:%2d:%2d %2d:%2d:%2d", &Y, &M, &D, &h, &m, &s) == 6 && Y > 0 && M >= 1 && M <= 12 && D >= 1 && D <= 31 && h >= 0 &&
-            h < 24 && m >= 0 && m < 60 && s >= 0 && s <= 60)
-        {
-            // Days from 1970 by the civil calendar.
-            const int y = M <= 2 ? Y - 1 : Y;
-            const int era = y / 400, yoe = y - era * 400, mp = (M + 9) % 12;
-            const int doy = (153 * mp + 2) / 5 + D - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-            summary.taken = (int64_t(era) * 146097 + doe - 719468) * 86400 + h * 3600 + m * 60 + s;
-        }
-    }
+        summary.taken = exif_time(std::string(reinterpret_cast<const char*>(e->data), e->size));
     if (ExifEntry* e = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_MODEL))
     {
         char buf[128];
@@ -162,53 +165,77 @@ ExifData* load(const uint8_t* data, size_t size)
 namespace
 {
 
-// The GPS position straight from a TIFF structure. libexif looks no further
-// than the first 64 KB of a block, and in some raws (a phone's DNG, a drone's)
-// the position's stored after that. Every offset is checked.
-bool tiff_location(const uint8_t* d, size_t n, double& latitude, double& longitude)
+// A TIFF structure read directly, every offset checked against its size.
+struct Tiff
 {
-    if (n < 8 || !((d[0] == 'I' && d[1] == 'I') || (d[0] == 'M' && d[1] == 'M')))
-        return false;
-    const bool little = d[0] == 'I';
-    if (little ? d[2] != 42 || d[3] != 0 : d[2] != 0 || d[3] != 42)
-        return false;  // not TIFF's magic: not something to read
-    const auto u16 = [&](size_t at) { return little ? uint32_t(d[at]) | uint32_t(d[at + 1]) << 8 : uint32_t(d[at]) << 8 | uint32_t(d[at + 1]); };
-    const auto u32 = [&](size_t at)
+    const uint8_t* d = nullptr;
+    size_t n = 0;
+    bool little = true;
+
+    // False unless it starts with a TIFF header.
+    bool open(const uint8_t* data, size_t size)
+    {
+        d = data;
+        n = data ? size : 0;
+        if (n < 8 || !((d[0] == 'I' && d[1] == 'I') || (d[0] == 'M' && d[1] == 'M')))
+            return false;
+        little = d[0] == 'I';
+        return little ? d[2] == 42 && d[3] == 0 : d[2] == 0 && d[3] == 42;  // not TIFF's magic: not something to read
+    }
+    // Only at places already known to be inside the block.
+    uint32_t u16(size_t at) const { return little ? uint32_t(d[at]) | uint32_t(d[at + 1]) << 8 : uint32_t(d[at]) << 8 | uint32_t(d[at + 1]); }
+    uint32_t u32(size_t at) const
     {
         return little ? uint32_t(d[at]) | uint32_t(d[at + 1]) << 8 | uint32_t(d[at + 2]) << 16 | uint32_t(d[at + 3]) << 24
                       : uint32_t(d[at]) << 24 | uint32_t(d[at + 1]) << 16 | uint32_t(d[at + 2]) << 8 | uint32_t(d[at + 3]);
-    };
+    }
+    size_t first() const { return u32(4); }
     // The entry for `tag` in the directory at `dir`, or 0.
-    const auto find = [&](size_t dir, uint32_t tag) -> size_t
+    size_t find(size_t dir, uint32_t tag) const
     {
-        if (dir + 2 > n)
+        if (dir >= n || n - dir < 2)
             return 0;
         const uint32_t count = u16(dir);
-        for (uint32_t i = 0; i < count && dir + 2 + (i + 1) * size_t(12) <= n; ++i)
+        for (uint32_t i = 0; i < count && (n - dir - 2) / 12 > i; ++i)
             if (const size_t entry = dir + 2 + i * size_t(12); u16(entry) == tag)
                 return entry;
         return 0;
-    };
-    const size_t pointer = find(u32(4), 0x8825);
-    if (!pointer || (u16(pointer + 2) != 4 && u16(pointer + 2) != 13) || u32(pointer + 4) != 1)
-        return false;  // the GPS directory's place, as a single LONG (or IFD) only
-    const size_t gps = u32(pointer + 8);
+    }
+    // A SHORT entry's value, or 0.
+    uint32_t short_value(size_t entry) const { return entry && u16(entry + 2) == 3 && u32(entry + 4) >= 1 ? u16(entry + 8) : 0; }
+    // An ASCII entry's text, up to its first NUL; empty if it's anything else.
+    std::string text(size_t entry) const
+    {
+        if (!entry || u16(entry + 2) != 2)
+            return {};
+        const size_t count = u32(entry + 4);
+        const size_t at = count <= 4 ? entry + 8 : u32(entry + 8);
+        if (at > n || n - at < count || count > 4096)
+            return {};
+        const char* s = reinterpret_cast<const char*>(d + at);
+        return std::string(s, std::find(s, s + count, '\0'));
+    }
+};
+
+// The position in the GPS directory at `gps`.
+bool gps_location(const Tiff& t, size_t gps, double& latitude, double& longitude)
+{
     const auto coordinate = [&](uint32_t ref_tag, uint32_t value_tag, char negative, double limit, double& result)
     {
-        const size_t value = find(gps, value_tag), ref = find(gps, ref_tag);
+        const size_t value = t.find(gps, value_tag), ref = t.find(gps, ref_tag);
         // Exactly three RATIONALs, and a one-letter hemisphere (ASCII, held in the entry).
-        if (!value || u16(value + 2) != 5 || u32(value + 4) != 3 || !ref || u16(ref + 2) != 2 || u32(ref + 4) < 1 || u32(ref + 4) > 4)
+        if (!value || t.u16(value + 2) != 5 || t.u32(value + 4) != 3 || !ref || t.u16(ref + 2) != 2 || t.u32(ref + 4) < 1 || t.u32(ref + 4) > 4)
             return false;
-        const char hemisphere = char(d[ref + 8]);
+        const char hemisphere = char(t.d[ref + 8]);
         if (hemisphere != negative && hemisphere != (negative == 'S' ? 'N' : 'E'))
             return false;
-        const size_t at = u32(value + 8);
-        if (at + 24 > n)
+        const size_t at = t.u32(value + 8);
+        if (at > t.n || t.n - at < 24)
             return false;
         double parts[3];
         for (int i = 0; i < 3; ++i)
         {
-            const uint32_t over = u32(at + i * size_t(8)), under = u32(at + i * size_t(8) + 4);
+            const uint32_t over = t.u32(at + i * size_t(8)), under = t.u32(at + i * size_t(8) + 4);
             parts[i] = under ? double(over) / under : 0;
         }
         result = parts[0] + parts[1] / 60 + parts[2] / 3600;
@@ -217,6 +244,20 @@ bool tiff_location(const uint8_t* d, size_t n, double& latitude, double& longitu
         return result >= -limit && result <= limit;
     };
     return coordinate(1, 2, 'S', 90, latitude) && coordinate(3, 4, 'W', 180, longitude);
+}
+
+// The GPS position straight from a TIFF structure. libexif looks no further
+// than the first 64 KB of a block, and in some raws (a phone's DNG, a drone's)
+// the position's stored after that.
+bool tiff_location(const uint8_t* d, size_t n, double& latitude, double& longitude)
+{
+    Tiff t;
+    if (!t.open(d, n))
+        return false;
+    const size_t pointer = t.find(t.first(), 0x8825);
+    if (!pointer || (t.u16(pointer + 2) != 4 && t.u16(pointer + 2) != 13) || t.u32(pointer + 4) != 1)
+        return false;  // the GPS directory's place, as a single LONG (or IFD) only
+    return gps_location(t, t.u32(pointer + 8), latitude, longitude);
 }
 
 }  // namespace
@@ -272,4 +313,26 @@ std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size)
         exif_data_unref(ed);
     }
     return thumbnail;
+}
+
+ExifSummary read_cr3_exif(std::span<const uint8_t> ifd0, std::span<const uint8_t> exif, std::span<const uint8_t> gps, Image& out)
+{
+    ExifSummary summary;
+    Tiff t;
+    if (t.open(ifd0.data(), ifd0.size()))
+    {
+        if (const uint32_t o = t.short_value(t.find(t.first(), 0x0112)); o >= 1 && o <= 8)
+            summary.orientation = int(o);
+        summary.camera = t.text(t.find(t.first(), 0x0110));
+    }
+    if (t.open(exif.data(), exif.size()))
+        summary.taken = exif_time(t.text(t.find(t.first(), 0x9003)));
+    double latitude = 0, longitude = 0;
+    if (t.open(gps.data(), gps.size()) && gps_location(t, t.first(), latitude, longitude))
+    {
+        out.has_location = true;
+        out.latitude = latitude;
+        out.longitude = longitude;
+    }
+    return summary;
 }

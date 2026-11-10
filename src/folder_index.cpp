@@ -27,7 +27,7 @@ namespace
 {
 
 constexpr size_t kHead = size_t(1) << 20;  // where a file's metadata is, nearly always
-constexpr int kSchema = 2;  // the blocks' times in milliseconds
+constexpr int kSchema = 3;  // 2: the blocks' times in milliseconds; 3: CR3s read
 constexpr int64_t kBudget = int64_t(64) << 20;
 constexpr int64_t kDay = 86400;
 
@@ -93,6 +93,204 @@ bool is_heif(const uint8_t* d, size_t n)
     return std::any_of(std::begin(brands), std::end(brands), [&](const char* b) { return std::memcmp(d + 8, b, 4) == 0; });
 }
 
+// A Canon CR3, by its file type box (its brand past a 64-bit size, if it has one).
+bool is_cr3(const uint8_t* d, size_t n)
+{
+    if (n < 12 || std::memcmp(d + 4, "ftyp", 4) != 0)
+        return false;
+    const size_t brand = big32(d) == 1 ? 16 : 8;
+    return n >= brand + 4 && std::memcmp(d + brand, "crx ", 4) == 0;
+}
+
+// What a CR3 keeps of its metadata, in boxes found by seeking from one to the
+// next, the file itself (raw data and all, tens of MB) never read: its EXIF
+// as moov/uuid(Canon)/CMT1, CMT2 and CMT4, and its small preview, THMB,
+// beside them (or the larger PRVW, in a box of its own, if there's no THMB).
+struct Cr3
+{
+    std::vector<uint8_t> ifd0, exif, gps, thumbnail;
+};
+
+struct Box
+{
+    char type[4]{};
+    uint64_t body = 0, end = 0;  // past the header (and a uuid's id); the box's end
+    uint8_t id[16]{};            // a uuid box's
+};
+
+class BoxFile
+{
+public:
+    explicit BoxFile(const fs::path& path) : in_(path, std::ios::binary)
+    {
+        if (in_ && in_.seekg(0, std::ios::end))
+        {
+            const std::streamoff end = in_.tellg();
+            size_ = end > 0 ? uint64_t(end) : 0;
+        }
+    }
+    uint64_t size() const { return size_; }
+    // Whether a read of what's in the file failed: not the file's fault, so
+    // nothing found is to be believed.
+    bool failed() const { return failed_; }
+
+    // False for a place past the file's end, as a box can claim, or if the
+    // read itself fails (failed() says which).
+    bool read(uint64_t at, void* out, size_t n)
+    {
+        if (at > size_ || size_ - at < n)
+            return false;
+        in_.clear();
+        if (in_.seekg(std::streamoff(at)))
+            in_.read(static_cast<char*>(out), std::streamsize(n));
+        if (in_ && size_t(in_.gcount()) == n)
+            return true;
+        failed_ = true;
+        return false;
+    }
+
+    // The box at `at`, which must end by `end`: false if there isn't one that fits.
+    bool box(uint64_t at, uint64_t end, Box& box)
+    {
+        uint8_t h[16];
+        if (at >= end || end - at < 8 || !read(at, h, 8))
+            return false;
+        uint64_t size = big32(h), header = 8;
+        if (size == 1)
+        {
+            if (end - at < 16 || !read(at + 8, h + 8, 8))
+                return false;
+            size = uint64_t(big32(h + 8)) << 32 | big32(h + 12);
+            header = 16;
+        }
+        else if (size == 0)
+            size = end - at;  // to the end of what holds it
+        if (size < header || size > end - at)
+            return false;
+        std::memcpy(box.type, h + 4, 4);
+        box.body = at + header;
+        box.end = at + size;
+        if (std::memcmp(box.type, "uuid", 4) == 0)
+        {
+            if (box.end - box.body < 16 || !read(box.body, box.id, 16))
+                return false;
+            box.body += 16;
+        }
+        return true;
+    }
+
+    // A box's contents, if they're no more than `limit` bytes.
+    bool body(const Box& box, size_t limit, std::vector<uint8_t>& out)
+    {
+        const uint64_t n = box.end - box.body;
+        if (n > limit)
+            return false;
+        out.resize(size_t(n));
+        if (read(box.body, out.data(), out.size()))
+            return true;
+        out.clear();
+        return false;
+    }
+
+private:
+    std::ifstream in_;
+    uint64_t size_ = 0;
+    bool failed_ = false;
+};
+
+// Calls `each` for the boxes from `at` to `end`, until it returns false, one
+// doesn't fit or the file can't be read. Only so many: a file of nothing but
+// tiny boxes isn't walked for ever.
+template <class Each>
+void for_each_box(BoxFile& file, uint64_t at, uint64_t end, Each each)
+{
+    Box box;
+    for (int i = 0; i < 1024 && !file.failed() && file.box(at, end, box); ++i, at = box.end)
+        if (!each(box))
+            return;
+}
+
+bool is(const Box& box, const char* type)
+{
+    return std::memcmp(box.type, type, 4) == 0;
+}
+
+// A THMB's or PRVW's JPEG: after a version, the picture's size and the
+// JPEG's length (at 8 in a THMB, 12 in a PRVW), the JPEG from 16 on.
+std::vector<uint8_t> preview_jpeg(BoxFile& file, const Box& box, size_t length_at, size_t limit)
+{
+    uint8_t h[16];
+    if (box.end - box.body < 16 || !file.read(box.body, h, 16))
+        return {};
+    const uint32_t length = big32(h + length_at);
+    if (length < 4 || length > limit || length > box.end - box.body - 16)
+        return {};
+    std::vector<uint8_t> jpeg(length);
+    if (!file.read(box.body + 16, jpeg.data(), jpeg.size()) || jpeg[0] != 0xFF || jpeg[1] != 0xD8)
+        return {};
+    return jpeg;
+}
+
+// False if the file couldn't be read, to be tried again; one without these
+// boxes, or with boxes that don't fit, is read fine and leaves `out` empty.
+// Each box is looked for only where it belongs, so nothing's walked deeper
+// than that.
+bool read_cr3(const fs::path& path, bool want_thumbnail, Cr3& out)
+{
+    static const uint8_t canon[16] = {0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b, 0x6a, 0x48};
+    static const uint8_t preview[16] = {0xea, 0xf4, 0x2b, 0x5e, 0x1c, 0x98, 0x4b, 0x88, 0xb9, 0xfb, 0xb7, 0xdc, 0x40, 0x6e, 0x4d, 0x16};
+    constexpr size_t kTiffLimit = size_t(1) << 20, kThumbLimit = size_t(1) << 20, kPreviewLimit = size_t(8) << 20;
+    BoxFile file(path);
+    if (!file.size())
+        return false;
+    bool seen_canon = false;
+    // The Canon box's own boxes: the EXIF blocks and the THMB.
+    const auto canon_box = [&](const Box& c)
+    {
+        if (is(c, "CMT1"))
+            file.body(c, kTiffLimit, out.ifd0);
+        else if (is(c, "CMT2"))
+            file.body(c, kTiffLimit, out.exif);
+        else if (is(c, "CMT4"))
+            file.body(c, kTiffLimit, out.gps);
+        else if (is(c, "THMB") && want_thumbnail)
+            if (std::vector<uint8_t> jpeg = preview_jpeg(file, c, 8, kThumbLimit); !jpeg.empty())
+                out.thumbnail = std::move(jpeg);  // over a PRVW found first, only if it's usable
+        return true;
+    };
+    for_each_box(file, 0, file.size(),
+                 [&](const Box& top)
+                 {
+                     if (is(top, "moov") && !seen_canon)
+                         for_each_box(file, top.body, top.end,
+                                      [&](const Box& b)
+                                      {
+                                          if (!is(b, "uuid") || std::memcmp(b.id, canon, 16) != 0)
+                                              return true;
+                                          seen_canon = true;
+                                          for_each_box(file, b.body, b.end, canon_box);
+                                          return false;
+                                      });
+                     else if (is(top, "uuid") && std::memcmp(top.id, preview, 16) == 0)
+                     {
+                         // Eight bytes of its own, then the PRVW box.
+                         if (want_thumbnail && out.thumbnail.empty() && top.end - top.body > 8)
+                             for_each_box(file, top.body + 8, top.end,
+                                          [&](const Box& b)
+                                          {
+                                              if (!is(b, "PRVW"))
+                                                  return true;
+                                              out.thumbnail = preview_jpeg(file, b, 12, kPreviewLimit);
+                                              return false;
+                                          });
+                     }
+                     else if (is(top, "mdat"))
+                         return false;  // the raw data: the boxes wanted are all before it
+                     return !file.failed();
+                 });
+    return !file.failed();
+}
+
 // Lower case on Windows, whose paths don't care, with one kind of slash.
 std::string directory_key(const fs::path& dir)
 {
@@ -121,6 +319,22 @@ bool read_file_record(const std::string& path, FileRecord& record)
         return false;
     const uint8_t* d = reinterpret_cast<const uint8_t*>(bytes.data());
     const size_t n = bytes.size();
+
+    if (is_cr3(d, n))
+    {
+        Cr3 cr3;
+        if (!read_cr3(p, false, cr3))
+            return false;
+        Image parsed;
+        const ExifSummary summary = read_cr3_exif(cr3.ifd0, cr3.exif, cr3.gps, parsed);
+        record.orientation = uint8_t(summary.orientation);
+        record.camera = summary.camera;
+        record.taken = summary.taken;
+        record.has_location = parsed.has_location;
+        record.latitude = parsed.latitude;
+        record.longitude = parsed.longitude;
+        return true;
+    }
 
     std::vector<uint8_t> exif;
     if (is_tiff(d, n))
@@ -167,9 +381,16 @@ bool read_file_record(const std::string& path, FileRecord& record)
 std::vector<uint8_t> embedded_thumbnail(const std::string& path)
 {
 #ifdef HAVE_EXIF
-    const std::string bytes = read_bytes(rap::sys::path_from_utf8(path), kHead);
+    const fs::path p = rap::sys::path_from_utf8(path);
+    const std::string bytes = read_bytes(p, kHead);
     const uint8_t* d = reinterpret_cast<const uint8_t*>(bytes.data());
     const size_t n = bytes.size();
+    if (is_cr3(d, n))
+    {
+        Cr3 cr3;
+        read_cr3(p, true, cr3);
+        return std::move(cr3.thumbnail);
+    }
     std::vector<uint8_t> exif;
     if (is_tiff(d, n))
         exif.assign(d, d + n);
@@ -198,6 +419,7 @@ struct FolderIndex::Store
     sqlite3_stmt* put = nullptr;
     sqlite3_stmt* touch = nullptr;
     int writes = 0;
+    int failure = SQLITE_OK;  // what went wrong bringing an older database up to date
 
     ~Store() { close(); }
 
@@ -213,26 +435,113 @@ struct FolderIndex::Store
 
     bool exec(const char* sql) { return sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK; }
 
+    // The database's version, in `version`: SQLite's code if it can't be read.
+    int user_version(int& version)
+    {
+        sqlite3_stmt* st = nullptr;
+        int rc = sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &st, nullptr);
+        if (rc == SQLITE_OK)
+        {
+            rc = sqlite3_step(st);
+            if (rc == SQLITE_ROW)
+            {
+                version = sqlite3_column_int(st, 0);
+                rc = SQLITE_OK;
+            }
+            else if (rc == SQLITE_DONE)
+                rc = SQLITE_ERROR;  // no answer is no version either
+        }
+        sqlite3_finalize(st);
+        return rc;
+    }
+
+    // Version 2 knew nothing of a CR3's metadata, so its CR3s are dropped
+    // from their blocks, to be read again, everything else kept, and the
+    // version moved on with them. All or nothing: SQLite's code for what
+    // failed, the database left as it was.
+    int forget_cr3s()
+    {
+        int rc = sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+        if (rc != SQLITE_OK)
+            return rc;
+        // Read again, now that no other window can be at it.
+        int version = 0;
+        rc = user_version(version);
+        if (rc != SQLITE_OK || version != 2)
+        {
+            exec("ROLLBACK");
+            if (rc != SQLITE_OK)
+                return rc;
+            // Brought up to date by another window just now; any other
+            // version, from who knows what, is left alone for now.
+            return version == kSchema ? SQLITE_OK : SQLITE_BUSY;
+        }
+        std::vector<std::pair<std::string, std::vector<uint8_t>>> changed;
+        sqlite3_stmt* all = nullptr;
+        rc = sqlite3_prepare_v2(db, "SELECT path, block FROM dirs", -1, &all, nullptr);
+        while (rc == SQLITE_OK)
+        {
+            const int step = sqlite3_step(all);
+            if (step != SQLITE_ROW)
+            {
+                rc = step == SQLITE_DONE ? SQLITE_OK : step;
+                break;
+            }
+            const auto* block = static_cast<const uint8_t*>(sqlite3_column_blob(all, 1));
+            std::vector<FileRecord> records;
+            if (!block || !decode_folder_block(block, size_t(sqlite3_column_bytes(all, 1)), records))
+                continue;  // unreadable either way; load() makes nothing of it
+            const auto cr3 = [](const FileRecord& r)
+            { return r.name.size() > 4 && g_ascii_strcasecmp(r.name.c_str() + r.name.size() - 4, ".cr3") == 0; };
+            if (std::none_of(records.begin(), records.end(), cr3))
+                continue;
+            records.erase(std::remove_if(records.begin(), records.end(), cr3), records.end());
+            if (const unsigned char* key = sqlite3_column_text(all, 0))
+                changed.emplace_back(reinterpret_cast<const char*>(key), encode_folder_block(records));
+        }
+        sqlite3_finalize(all);
+        sqlite3_stmt* update = nullptr;
+        if (rc == SQLITE_OK)
+            rc = sqlite3_prepare_v2(db, "UPDATE dirs SET block=? WHERE path=?", -1, &update, nullptr);
+        for (size_t i = 0; rc == SQLITE_OK && i < changed.size(); ++i)
+        {
+            sqlite3_bind_blob(update, 1, changed[i].second.data(), int(changed[i].second.size()), SQLITE_STATIC);
+            sqlite3_bind_text(update, 2, changed[i].first.c_str(), -1, SQLITE_STATIC);
+            const int step = sqlite3_step(update);
+            rc = step == SQLITE_DONE ? SQLITE_OK : step;
+            sqlite3_reset(update);
+        }
+        sqlite3_finalize(update);
+        char set[48];
+        std::snprintf(set, sizeof set, "PRAGMA user_version=%d", kSchema);
+        if (rc == SQLITE_OK)
+            rc = sqlite3_exec(db, set, nullptr, nullptr, nullptr);
+        if (rc == SQLITE_OK)
+            rc = sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr);
+        if (rc != SQLITE_OK)
+            exec("ROLLBACK");
+        return rc;
+    }
+
     bool open_file(const std::string& path)
     {
+        failure = SQLITE_OK;
         if (sqlite3_open(path.c_str(), &db) != SQLITE_OK)
             return false;
         sqlite3_busy_timeout(db, 1000);
         exec("PRAGMA journal_mode=WAL");
         exec("PRAGMA synchronous=NORMAL");
         int version = 0;
-        sqlite3_stmt* st = nullptr;
-        if (sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &st, nullptr) != SQLITE_OK)
+        if (user_version(version) != SQLITE_OK)
             return false;
-        if (sqlite3_step(st) == SQLITE_ROW)
-            version = sqlite3_column_int(st, 0);
-        else
+        if (version == 2)
         {
-            sqlite3_finalize(st);
-            return false;
+            // Failing, the database stays as it is, to be tried again, not reset.
+            failure = forget_cr3s();
+            if (failure != SQLITE_OK)
+                return false;
         }
-        sqlite3_finalize(st);
-        if (version != kSchema && !exec("DROP TABLE IF EXISTS dirs"))
+        else if (version != kSchema && !exec("DROP TABLE IF EXISTS dirs"))
             return false;
         char set[48];
         std::snprintf(set, sizeof set, "PRAGMA user_version=%d", kSchema);
@@ -259,7 +568,7 @@ struct FolderIndex::Store
             return;
         // Busy or locked is another window at work: this session goes without.
         // Only a database that's really damaged is started again.
-        const int code = db ? sqlite3_errcode(db) & 0xFF : SQLITE_CANTOPEN;
+        const int code = !db ? SQLITE_CANTOPEN : (failure != SQLITE_OK ? failure : sqlite3_errcode(db)) & 0xFF;
         if ((code == SQLITE_CORRUPT || code == SQLITE_NOTADB) && reset())
         {
             close();

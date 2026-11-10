@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -218,6 +219,11 @@ struct ExifSummary
 ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
 // The preview stored in an EXIF payload (usually a JPEG); empty if none.
 std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size);
+// A Canon CR3's EXIF, which it keeps as separate TIFF structures (its CMT1,
+// CMT2 and CMT4 boxes): IFD0, the Exif IFD and the GPS IFD, any of them
+// possibly empty. Only the orientation, camera, time taken and position
+// are read, for the folder index.
+ExifSummary read_cr3_exif(std::span<const uint8_t> ifd0, std::span<const uint8_t> exif, std::span<const uint8_t> gps, Image& out);
 #endif
 
 #ifdef HAVE_HEIF
