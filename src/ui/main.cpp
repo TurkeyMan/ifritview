@@ -117,6 +117,14 @@ void run_step(App& app, const std::string& step)
         app.script_drag_pane_native(std::stof(step.substr(17)));  // as drag-pane, through the splitter's mouse handling
     else if (step.rfind("drag-pane:", 0) == 0)
         app.script_drag_pane(std::stof(step.substr(10)));  // "drag-pane:-200": the divider 200 px left
+    else if (step.rfind("drag-map:", 0) == 0)
+        app.script_drag_map(std::stof(step.substr(9)));  // "drag-map:-100": the map's divider 100 px up, the map taller
+    else if (step.rfind("resize:", 0) == 0)
+    {
+        float w = 0, h = 0;  // "resize:1200,900": the window's content, logical px
+        if (std::sscanf(step.c_str() + 7, "%f,%f", &w, &h) == 2)
+            app.script_resize({w, h});
+    }
     else if (step == "xmp")
         app.script_toggle_xmp();
     else if (step == "volume")

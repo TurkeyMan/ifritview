@@ -102,6 +102,8 @@ public:
     void script_show_volume() { view_->script_show_volume(); }
     void script_toggle_xmp();
     void script_drag_pane(float by);  // the info pane's divider moved by `by` px, as a drag moves it
+    void script_drag_map(float by);   // the map's divider moved down by `by` px and let go
+    void script_resize(rap::size_f size) { window_->resize(size); }
     // The same through the splitter's own mouse handling (Windows: its bar
     // posted a press, moves and a release), as a drag with the mouse runs.
     void script_drag_pane_native(float by);
@@ -323,7 +325,14 @@ private:
     rap::rect_f map_overlay_rect_{};  // where it was last painted
     void restore_map_height();
     void map_resized();
+    void map_divider_moved();
     float map_split_total_ = 0;  // the pane's height, last seen
+    float map_width_ = 0;        // the map's width, last seen: it caps the height until the divider's dragged
+    float map_shaped_width_ = 0;  // the width it was last shaped to
+    float map_pane_height();      // the pane's height now: see there
+    float map_pane_height_ = 0, map_reported_height_ = 0, map_view_height_ = 0;
+    float map_applied_height_ = 0, map_previous_height_ = 0;  // the heights the map was last given, and before that
+    float auto_map_height(float pane) const;
     std::unique_ptr<MapView> map_view_;
     void refresh_map();
     void scan_pins(bool again);                  // the folder's geotags, for the map

@@ -416,7 +416,13 @@ void App::build_ui()
                                         .on_paint([this](rap::painter& p, rap::size_f size) { map_view_->paint(p, size); })
                                         .on_pointer([this](const rap::pointer_event& e) { return map_view_->pointer(e); })
                                         .on_scroll([this](const rap::scroll_event& e) { return map_view_->scroll(e); })
-                                        .on_resize([this](rap::size_f) { map_resized(); })
+                                        .on_resize(
+                                            [this](rap::size_f size)
+                                            {
+                                                if (size.w > 0)
+                                                    map_width_ = size.w;
+                                                map_resized();
+                                            })
                                         .bind(map_canvas_)
                                         .height(rap::extent{100, rap::extent::unit::px})}
                                     .bind(map_split_)
@@ -592,7 +598,7 @@ void App::build_ui()
     view_->on_resized = [this]
     {
         if (map_canvas_)
-            map_resized();  // the window changed: the map keeps the height it was given
+            ui_.post([this] { map_resized(); });  // the window changed, its pane laid out after the view
         if (refit_after_layout_)
             refit_after_pane_toggle();
         else if (refit_when_laid_out_)

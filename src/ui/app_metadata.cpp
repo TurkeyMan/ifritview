@@ -369,34 +369,111 @@ void App::refresh_metadata()
     refresh_map();
 }
 
-// The height the map was last dragged to, as far as the pane allows.
-void App::restore_map_height()
+// The info pane's height, which the window changes. Windows' splitter reports
+// the sizes it was last given or dragged to, not the ones the window's layout
+// gave it: the details, which take what the window gains or loses, don't
+// follow. A total that hasn't changed is taken to have changed as the view's
+// height did, the two side by side.
+float App::map_pane_height()
 {
     const std::vector<float> sizes = map_split_->sizes();
     if (sizes.size() != 2)
-        return;
-    const float total = sizes[0] + sizes[1];
+        return 0;
+    const float reported = sizes[0] + sizes[1];
+    const float view = view_->canvas() ? view_->canvas()->size().h : 0;
+    float height = reported;
+    if (map_pane_height_ > 0 && std::abs(reported - map_reported_height_) < 1)
+        height = map_pane_height_ + (view - map_view_height_);
+    map_pane_height_ = height;
+    map_reported_height_ = reported;
+    map_view_height_ = view;
+    return height;
+}
+
+// Until the divider's been dragged: a third of the pane, the details the other
+// two, but no taller than 4:3, the details taking the rest.
+float App::auto_map_height(float pane) const
+{
+    const float width = map_width_ > 0 ? map_width_ : float(cfg_.metadata_pane_width);
+    return std::round(std::min(std::max(100.f, std::min(pane / 3, width * 3 / 4)), std::max(100.f, pane - 80)));
+}
+
+// The height the map was last dragged to, or the automatic one. As far as the
+// pane allows: the details keep 80 px, the map 100.
+void App::restore_map_height()
+{
+    const float total = map_pane_height();
     if (total <= 0)
         return;
-    const float height = std::min(float(cfg_.map_height), std::max(100.f, total - 80));
+    const float height = cfg_.map_height > 0 ? std::round(std::min(float(cfg_.map_height), std::max(100.f, total - 80)))
+                                              : auto_map_height(total);
+    if (std::abs(height - map_applied_height_) >= 1)
+    {
+        map_previous_height_ = map_applied_height_;
+        map_applied_height_ = height;
+    }
+    if (std::abs(map_split_->sizes()[1] - height) < 1)
+    {
+        map_previous_height_ = 0;
+        return;  // as it is (and a window resize leaves a dragged height to the layout)
+    }
     map_split_->set_sizes({total - height, height});
+    map_reported_height_ = total;
 }
 
 // The window changing the pane's height leaves the map the height it was
-// dragged to, the details taking the difference. (A drag leaves the total as
-// it was: that's not this.)
+// dragged to, the details taking the difference; not yet dragged, the map's
+// shaped again to the pane's new size, or its new width. (A drag of the map's
+// divider changes neither: that's not this.)
 void App::map_resized()
 {
     if (!map_split_bound_)
         refresh_map();
-    const std::vector<float> sizes = map_split_->sizes();
-    if (sizes.size() != 2 || !map_shown_)
+    if (!map_shown_ || map_split_->sizes().size() != 2)
         return;
-    const float total = sizes[0] + sizes[1];
-    if (std::abs(total - map_split_total_) < 1)
+    if (std::abs(map_split_->sizes()[1] - map_applied_height_) < 1)
+        map_previous_height_ = 0;  // laid out at the height it was given: the one before is no longer in flight
+    const float total = map_pane_height();
+    const bool reshape = cfg_.map_height <= 0 && std::abs(map_width_ - map_shaped_width_) >= 1;
+    if (std::abs(total - map_split_total_) < 1 && !reshape)
         return;
     map_split_total_ = total;
+    map_shaped_width_ = map_width_;
     ui_.post([this] { restore_map_height(); });
+}
+
+// Only a drag of the divider keeps a height: from then on it's the user's.
+// Not every on_moved is one: rapport's GTK4 splitter (e083b7c) reports a
+// press anywhere in the map or the details that's let go after the sizes
+// changed. So a map the height it was last given, or the one before while
+// that's still in flight (GTK lays it out after set_sizes, not in it; cleared
+// once the map's laid out at the new one), or the automatic height for the
+// pane as it is while the map's automatic, isn't taken for a choice; a drag
+// that lands there leaves it automatic, which is no loss.
+void App::map_divider_moved()
+{
+    const std::vector<float> sizes = map_split_->sizes();
+    if (sizes.size() != 2 || !map_shown_ || sizes[1] < 100)
+        return;
+    const float height = sizes[1];
+    auto near = [height](float h) { return h > 0 && std::abs(height - h) < 1.5f; };
+    if (near(map_applied_height_) || near(map_previous_height_) ||
+        (cfg_.map_height <= 0 && near(auto_map_height(map_pane_height()))))
+        return;
+    cfg_.map_height = int(std::round(height));
+    cfg_.save();
+    map_applied_height_ = height;  // the user's: a drag back to the old height counts too
+    map_previous_height_ = 0;
+}
+
+// The map's divider dragged down by `by` px and let go, as on_moved sees it.
+void App::script_drag_map(float by)
+{
+    const std::vector<float> sizes = map_split_ ? map_split_->sizes() : std::vector<float>{};
+    if (sizes.size() != 2)
+        return;
+    map_split_->set_sizes({sizes[0] + by, sizes[1] - by});
+    ui_.post([this] { map_divider_moved(); });
 }
 
 void App::refresh_map()
@@ -409,16 +486,7 @@ void App::refresh_map()
     if (map_canvas_ && !map_split_bound_)
     {
         map_split_bound_ = true;
-        map_split_->on_moved(
-            [this]
-            {
-                const std::vector<float> sizes = map_split_->sizes();
-                if (sizes.size() == 2 && map_shown_ && sizes[1] >= 100)
-                {
-                    cfg_.map_height = int(sizes[1]);
-                    cfg_.save();
-                }
-            });
+        map_split_->on_moved([this] { map_divider_moved(); });
     }
     if (map_overlay_on_)
         map_view_->attach([this] { view_->redraw(); });
