@@ -110,6 +110,10 @@ void App::plugins_loaded()
 
 App::~App()
 {
+    // However the loop ended (quit() or not): the window's torn down after.
+    quitting_ = true;
+    if (map_split_)
+        map_split_->on_moved(nullptr);
     s_app = nullptr;
     watch_.reset();  // its thread joined before anything it reports to goes
     stop_video();
@@ -421,7 +425,9 @@ void App::build_ui()
                                             {
                                                 if (size.w > 0)
                                                     map_width_ = size.w;
-                                                map_resized();
+                                                // Once the splitter's laid out: Windows' reports
+                                                // its sizes only after placing its panes.
+                                                ui_.post([this] { map_resized(); });
                                             })
                                         .bind(map_canvas_)
                                         .height(rap::extent{100, rap::extent::unit::px})}
@@ -977,6 +983,11 @@ int App::run()
 
 void App::quit()
 {
+    // The window's torn down after: nothing the divider does from here is
+    // the user's choice of the map's height.
+    quitting_ = true;
+    if (map_split_)
+        map_split_->on_moved(nullptr);
     flush_xmp();
     ui_.quit();
 }

@@ -434,6 +434,7 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
         script = ui.timer(ms ? std::atoi(ms) : 400, true,
                               [&]
                               {
+                                  app.script_settle();
                                   if (next < steps.size())
                                       run_step(app, steps[next++]);
                               });
