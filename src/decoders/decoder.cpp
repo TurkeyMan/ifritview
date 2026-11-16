@@ -299,6 +299,9 @@ static const std::vector<const Decoder*>& builtin_decoders()
         v.push_back(&bti_decoder());
         v.push_back(&pvr_decoder());
         v.push_back(&exr_decoder());
+#ifdef HAVE_SVG
+        v.push_back(&svg_decoder());
+#endif
         v.push_back(&stb_decoder());
         v.push_back(&pixbuf_decoder());  // catch-all, must stay last
         return v;

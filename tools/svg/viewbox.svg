@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- No width or height: the view box gives the size (4:1, so 2048 x 512). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 40 10">
+  <rect x="-10" y="-10" width="40" height="10" fill="#246"/>
+  <circle cx="10" cy="-5" r="4" fill="#fd5"/>
+</svg>

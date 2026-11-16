@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- References written as lunasvg reads them: spaces around '=', entities in
+     id and href, '>' inside a quoted value. Three green squares on grey. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="40">
+  <style><![CDATA[ rect { stroke: #050; } ]]></style>
+  <rect width="120" height="40" fill="#ccc"/>
+  <defs>
+    <rect id = 'sq' width="30" height="30" fill="#2a2"/>
+    <g id="&#x61;&amp;b" data-note="a > b"><use href  =  "#sq" x="45" y="5"/></g>
+  </defs>
+  <use xlink:href="#sq" x="5" y="5"/>
+  <use xlink:href="&#35;a&amp;b"/>
+  <use data-note=">" href="#sq" x="85" y="5"/>
+</svg>

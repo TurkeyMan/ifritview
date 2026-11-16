@@ -20,6 +20,8 @@
     "zstd",
     "sqlite3",
     "bzip2",
+    "lunasvg",
+    { "name": "plutovg", "features": ["font-face-cache"] },
     { "name": "pkgconf", "host": true }
   ]
 }
