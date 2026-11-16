@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="10">
+<!-- 1 KB of text copied through <use>s of <use>s, each copy held whole by
+     lunasvg: smoke.sh draws it, then refuses it under a budget its
+     elements alone fit in. -->
+<defs>
+<text id="t0" font-size="1" y="1">IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView IfritView Ifri</text>
+<g id="t1"><use href="#t0" y="0"/><use href="#t0" y="1"/><use href="#t0" y="2"/><use href="#t0" y="3"/><use href="#t0" y="4"/><use href="#t0" y="5"/><use href="#t0" y="6"/><use href="#t0" y="7"/><use href="#t0" y="8"/><use href="#t0" y="9"/></g>
+</defs>
+<use href="#t1" x="0"/><use href="#t1" x="10"/><use href="#t1" x="20"/>
+</svg>

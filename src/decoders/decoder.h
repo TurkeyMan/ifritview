@@ -234,3 +234,4 @@ bool heif_stored_exif(const std::string& path, std::vector<uint8_t>& exif, int& 
 #endif
 
 const Decoder& exr_decoder();
+const Decoder& svg_decoder();

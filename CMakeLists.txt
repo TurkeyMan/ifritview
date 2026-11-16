@@ -290,6 +290,54 @@ ifrit_backend(jxl  HAVE_JXL  src/decoders/jxl.cpp  libjxl)
 ifrit_backend(tiff HAVE_TIFF src/decoders/tiff.cpp libtiff-4)
 ifrit_backend(iptc HAVE_IPTC src/decoders/iptc.cpp libiptcdata)
 
+# SVG through lunasvg (MIT, drawing with its plutovg): the system's or vcpkg's
+# when there is one, otherwise its release, fetched and built in (few
+# distributions package it).
+option(IFRIT_WITH_SVG "Build the SVG decoder" ON)
+if(IFRIT_WITH_SVG)
+  pkg_check_modules(LUNASVG IMPORTED_TARGET lunasvg>=3)
+  if(LUNASVG_FOUND)
+    target_link_libraries(ifrit_core PRIVATE PkgConfig::LUNASVG)
+    message(STATUS "svg: enabled (lunasvg ${LUNASVG_VERSION})")
+  else()
+    # Their releases, sources only: built here, nothing of them installed.
+    # plutovg as vcpkg has it, not the older copy in lunasvg's tarball.
+    include(FetchContent)
+    FetchContent_Declare(lunasvg
+      URL https://github.com/sammycage/lunasvg/archive/refs/tags/v3.5.0.tar.gz
+      URL_HASH SHA256=1abf1472ee6c4d19797916e8cc3c2e4b628e0d81178ffac60bdb0d457e32c690
+      SOURCE_SUBDIR none)
+    FetchContent_Declare(plutovg
+      URL https://github.com/sammycage/plutovg/archive/refs/tags/v1.3.3.tar.gz
+      URL_HASH SHA256=2b0d17a6e016f47b86f9c00e2cb82600041b1ea1f7d2a00c2d46ae542cbfed3c
+      SOURCE_SUBDIR none)
+    FetchContent_MakeAvailable(lunasvg plutovg)
+    enable_language(C)
+    file(GLOB IFRIT_LUNASVG_SOURCES ${lunasvg_SOURCE_DIR}/source/*.cpp ${plutovg_SOURCE_DIR}/source/*.c)
+    add_library(ifrit_lunasvg STATIC ${IFRIT_LUNASVG_SOURCES})
+    target_include_directories(ifrit_lunasvg PUBLIC ${lunasvg_SOURCE_DIR}/include
+      PRIVATE ${lunasvg_SOURCE_DIR}/source ${plutovg_SOURCE_DIR}/include)
+    target_compile_definitions(ifrit_lunasvg PUBLIC LUNASVG_BUILD_STATIC PRIVATE LUNASVG_BUILD PLUTOVG_BUILD PLUTOVG_BUILD_STATIC)
+    target_compile_options(ifrit_lunasvg PRIVATE "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
+    set_target_properties(ifrit_lunasvg PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    # As plutovg's own build: C11 threads for its font cache's locks (several
+    # decodes share it), else they compile to nothing; Windows has its own.
+    include(CheckIncludeFile)
+    check_include_file(threads.h IFRIT_HAVE_THREADS_H)
+    if(IFRIT_HAVE_THREADS_H)
+      target_compile_definitions(ifrit_lunasvg PRIVATE HAVE_THREADS_H)
+    elseif(NOT WIN32)
+      message(FATAL_ERROR "lunasvg built in needs C11 <threads.h> for plutovg's locks")
+    endif()
+    find_package(Threads REQUIRED)
+    target_link_libraries(ifrit_lunasvg PRIVATE Threads::Threads $<$<NOT:$<PLATFORM_ID:Windows>>:m>)
+    target_link_libraries(ifrit_core PRIVATE ifrit_lunasvg)
+    message(STATUS "svg: enabled (lunasvg 3.5.0, built in)")
+  endif()
+  target_sources(ifrit_core PRIVATE src/decoders/svg.cpp)
+  target_compile_definitions(ifrit_core PUBLIC HAVE_SVG)
+endif()
+
 # TurboJPEG, libjpeg-turbo's other library: its lossless transform saves a
 # JPEG's turns, flips and crop without re-encoding (optional).
 option(IFRIT_WITH_TURBOJPEG "Lossless JPEG turns and crops" ON)

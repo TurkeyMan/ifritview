@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="160" height="160">
+  <style>.arm { fill: #c60; stroke: #000; }</style>
+  <rect width="160" height="160" fill="#eee"/>
+  <g transform="translate(80 80)">
+    <rect id="arm" class="arm" x="-5" y="-70" width="10" height="60"/>
+    <use xlink:href="#arm" transform="rotate(45)"/>
+    <use xlink:href="#arm" transform="rotate(90) scale(1 0.5)"/>
+    <use xlink:href="#arm" transform="rotate(180) skewX(20)"/>
+    <g transform="matrix(0.7 -0.7 0.7 0.7 0 0)"><use xlink:href="#arm"/></g>
+  </g>
+</svg>

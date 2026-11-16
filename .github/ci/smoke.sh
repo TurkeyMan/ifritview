@@ -19,6 +19,24 @@ printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > "$smoke"/rgb.ppm
 printf 'P6\n64 48\n255\n' > "$smoke"/big.ppm
 head -c $((64 * 48 * 3)) /dev/urandom >> "$smoke"/big.ppm
 "$build/ifritview" --process "$smoke"/big.ppm shrink:23,17 info
+# SVG: drawn 2048 px on its longer side (the view box alone gives the
+# shape), gzipped too; a broken one refused, not crashed on (1 is a refusal).
+svg=$(dirname "$0")/../../tools/svg
+"$build/ifritview" --process "$svg"/viewbox.svg info | grep -q '^2048 x 512, SVG'
+gzip -c "$svg"/shapes.svg > "$smoke"/shapes.svgz
+"$build/ifritview" --process "$smoke"/shapes.svgz info | grep -q '^2048 x 1229, SVGZ, alpha'
+"$build/ifritview" --process "$svg"/broken.svg info || [ $? = 1 ]
+# References written loosely (spaces around '=', entities, '>' in a value),
+# which the check against runaway <use>s reads as lunasvg does.
+"$build/ifritview" --process "$svg"/references.svg info | grep -q '^2048 x 683, SVG'
+# Text is paid for in every copy lunasvg makes of it: text-copies.svg's
+# elements come to some 32 KB of the budget and its seventy copies of 1 KB
+# of text to 72 KB more, so it's drawn, but refused under a 64 KB budget.
+"$build/ifritview" --process "$svg"/text-copies.svg info | grep -q '^2048 x 512, SVG'
+if IFRIT_SVG_BUDGET=65536 "$build/ifritview" --process "$svg"/text-copies.svg info 2>/dev/null | grep -q '^2048 x'; then
+  echo "text-copies.svg was drawn past its budget" >&2
+  exit 1
+fi
 # A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
 # packaged), reading a 1x1 image.
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff
