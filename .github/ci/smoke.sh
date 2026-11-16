@@ -37,6 +37,21 @@ if IFRIT_SVG_BUDGET=65536 "$build/ifritview" --process "$svg"/text-copies.svg in
   echo "text-copies.svg was drawn past its budget" >&2
   exit 1
 fi
+# A GIMP XCF, the same four pixels as rgb.ppm: version 11 (64-bit
+# pointers), one RGBA layer in one uncompressed tile.
+printf 'gimp xcf v011\0\0\0\0\2\0\0\0\2\0\0\0\0\0\0\0\226\0\0\0\021\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\107\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0' > "$smoke"/rgb.xcf
+printf '\0\0\0\2\0\0\0\2\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\157\0\0\0\0\0\0\0\0' >> "$smoke"/rgb.xcf
+printf '\0\0\0\2\0\0\0\2\0\0\0\4\0\0\0\0\0\0\0\213\0\0\0\0\0\0\0\0\0\0\0\2\0\0\0\2\0\0\0\0\0\0\0\243\0\0\0\0\0\0\0\0' >> "$smoke"/rgb.xcf
+printf '\377\0\0\377\0\377\0\377\0\0\377\377\377\377\377\377' >> "$smoke"/rgb.xcf
+"$build/ifritview" --process "$smoke"/rgb.xcf diff:"$smoke"/rgb.ppm | grep -q '^identical'
+# The same with its composite mode and space INT32_MIN, values GIMP
+# doesn't have: shown as Normal all the same.
+printf 'gimp xcf v011\0\0\0\0\2\0\0\0\2\0\0\0\0\0\0\0\226\0\0\0\021\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\107\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0' > "$smoke"/odd.xcf
+printf '\0\0\0\2\0\0\0\2\0\0\0\1\0\0\0\0\0\0\0\043\0\0\0\4\200\0\0\0\0\0\0\044\0\0\0\4\200\0\0\0' >> "$smoke"/odd.xcf
+printf '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\207\0\0\0\0\0\0\0\0' >> "$smoke"/odd.xcf
+printf '\0\0\0\2\0\0\0\2\0\0\0\4\0\0\0\0\0\0\0\243\0\0\0\0\0\0\0\0\0\0\0\2\0\0\0\2\0\0\0\0\0\0\0\273\0\0\0\0\0\0\0\0' >> "$smoke"/odd.xcf
+printf '\377\0\0\377\0\377\0\377\0\0\377\377\377\377\377\377' >> "$smoke"/odd.xcf
+"$build/ifritview" --process "$smoke"/odd.xcf diff:"$smoke"/rgb.ppm | grep -q '^identical'
 # A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
 # packaged), reading a 1x1 image.
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff

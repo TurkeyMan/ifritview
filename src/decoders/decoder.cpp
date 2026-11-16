@@ -283,6 +283,7 @@ static const std::vector<const Decoder*>& builtin_decoders()
         v.push_back(&tim_decoder());
         v.push_back(&ilbm_decoder());
         v.push_back(&pcx_decoder());
+        v.push_back(&xcf_decoder());
         v.push_back(&netpbm_decoder());
         v.push_back(&dds_decoder());
         v.push_back(&vtf_decoder());
