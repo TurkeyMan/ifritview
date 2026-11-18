@@ -150,6 +150,7 @@ const Decoder& tim_decoder();
 const Decoder& video_decoder();
 const Decoder& ilbm_decoder();
 const Decoder& pcx_decoder();
+const Decoder& xcf_decoder();
 const Decoder& netpbm_decoder();
 const Decoder& dds_decoder();
 const Decoder& vtf_decoder();
