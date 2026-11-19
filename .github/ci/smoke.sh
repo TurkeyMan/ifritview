@@ -37,6 +37,14 @@ if IFRIT_SVG_BUDGET=65536 "$build/ifritview" --process "$svg"/text-copies.svg in
   echo "text-copies.svg was drawn past its budget" >&2
   exit 1
 fi
+# A raw still being copied: a CR2 whose strip runs past the end of the file,
+# and one with nothing written yet, are refused as not all there (read again
+# when they're done), not shown as what another decoder makes of them.
+printf 'II*\000\020\000\000\000CR\002\000\000\000\000\000\003\000\000\001\003\000\001\000\000\000\100\000\000\000\021\001\004\000\001\000\000\000\072\000\000\000\027\001\004\000\001\000\000\000\000\000\001\000\000\000\000\000' > "$smoke"/cut.cr2
+: > "$smoke"/empty.cr2
+for raw in cut empty; do
+  "$build/ifritview" --probe "$smoke"/$raw.cr2 | grep -q "still being copied"
+done
 # A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
 # packaged), reading a 1x1 image.
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff

@@ -43,16 +43,23 @@ Loader::~Loader()
         t.join();
 }
 
-std::shared_ptr<const FileBlob> Loader::take_read(const std::string& path)
+bool Loader::take_read(const std::string& path, Job& job)
 {
     for (auto it = read_.begin(); it != read_.end(); ++it)
         if (it->path == path)
         {
-            std::shared_ptr<const FileBlob> file = std::move(it->file);
+            job.file = std::move(it->file);
+            job.changes = it->changes;
             read_.erase(it);
-            return file;
+            return true;
         }
-    return nullptr;
+    return false;
+}
+
+uint64_t Loader::changes(const std::string& path) const
+{
+    const auto it = changes_.find(key_file(path));
+    return it == changes_.end() ? 0 : it->second;
 }
 
 bool Loader::busy_with(const std::string& path) const
@@ -80,7 +87,8 @@ void Loader::request_develop(uint64_t generation, const std::string& path)
             develop_.reset();
             return;
         }
-        develop_ = Job{generation, path, take_read(path)};
+        develop_ = Job{generation, path, nullptr};
+        take_read(path, *develop_);
     }
     reader_wake_.notify_one();
     worker_wake_.notify_one();
@@ -108,6 +116,20 @@ void Loader::cancel_develop(const std::string& path)
         develop_.reset();
 }
 
+void Loader::file_changed(const std::string& file)
+{
+    {
+        std::lock_guard lock(mutex_);
+        ++changes_[file];
+        const auto of_file = [&](const std::string& path) { return key_file(path) == file; };
+        std::erase_if(read_, [&](const Job& j) { return of_file(j.path); });
+        std::erase_if(developing_, of_file);  // the ones running finish stale
+        if (develop_ && of_file(develop_->path))
+            develop_->file.reset();  // read again
+    }
+    reader_wake_.notify_one();
+}
+
 void Loader::set_stand_in_fit(int width, int height)
 {
     std::lock_guard lock(mutex_);
@@ -131,14 +153,23 @@ void Loader::post(Result* r, Lane lane)
         priority);
 }
 
-void Loader::decode_into(Result& r)
+void Loader::decode_into(Result& r, const Job& job)
 {
     r.picked_us = g_get_monotonic_time();
+    r.stamp = job.file->stamp;
     if (!decode_image_part(key_file(r.path), key_part(r.path), *r.image, r.error))  // r.path: a part's key
+    {
+        r.incomplete = r.image->incomplete;
         r.image.reset();
+    }
     else
+    {
+        r.image->stamp = job.file->stamp;
         r.image->build_mips();
+    }
     r.decoded_us = g_get_monotonic_time();
+    std::lock_guard lock(mutex_);
+    r.stale = changes(job.path) != job.changes;
 }
 
 void Loader::run_foreground()
@@ -153,7 +184,8 @@ void Loader::run_foreground()
                 return;
             job = *pending_;
             pending_.reset();
-            job.file = take_read(job.path);  // the reader got to it first
+            if (!take_read(job.path, job))  // the reader got to it first
+                job.changes = changes(job.path);
             set_preview_fit(fit_w_, fit_h_);
         }
         // Read here, not queued behind the reader: the image on screen always wins.
@@ -171,19 +203,23 @@ void Loader::run_foreground()
         const bool first_image = key_part(job.path) == ImagePart{};  // only a file's first image has one
         if (first_image && !decode_is_quick(job.path) && decode_preview(job.path, *preview))
         {
+            preview->stamp = job.file->stamp;
             preview->build_mips();
-            post(new Result{job.generation, job.path, preview, {}, true}, Lane::Foreground);
+            auto* r = new Result{job.generation, job.path, preview, {}, true};
+            r->stamp = job.file->stamp;
             {
                 std::lock_guard lock(mutex_);
-                if (std::find(developing_.begin(), developing_.end(), job.path) == developing_.end())
-                    develop_ = Job{job.generation, job.path, std::move(job.file)};
+                r->stale = changes(job.path) != job.changes;
+                if (!r->stale && std::find(developing_.begin(), developing_.end(), job.path) == developing_.end())
+                    develop_ = std::move(job);
             }
+            post(r, Lane::Foreground);
             release_file_bytes();
             worker_wake_.notify_one();
             continue;
         }
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
-        decode_into(*r);
+        decode_into(*r, job);
         release_file_bytes();
         post(r, Lane::Foreground);
     }
@@ -198,6 +234,7 @@ void Loader::run_reader()
     {
         std::string path;
         bool for_develop = false;
+        uint64_t changed = 0;
         {
             std::unique_lock lock(mutex_);
             reader_wake_.wait(lock,
@@ -219,6 +256,7 @@ void Loader::run_reader()
                 prefetch_.erase(prefetch_.begin());
             }
             reading_ = path;
+            changed = changes(path);
         }
         const gint64 t0 = g_get_monotonic_time();
         std::shared_ptr<const FileBlob> file = read_file(key_file(path));
@@ -226,16 +264,22 @@ void Loader::run_reader()
         {
             std::lock_guard lock(mutex_);
             reading_.clear();
+            const bool stale = changes(path) != changed;  // changed as it was read: read again, or not at all
             platform::trace("loader: read %s%s, %.1f MB in %.1f ms (%.0f MB/s); %zu read waiting, %zu decoding", base_name(path).c_str(),
                             for_develop ? " (develop)" : "", mb, ms, ms > 0 ? mb / ms * 1000 : 0.0, read_.size() + (for_develop ? 0 : 1),
                             in_flight_.size());
-            if (for_develop)
+            if (stale)
+                ;
+            else if (for_develop)
             {
                 if (develop_ && develop_->path == path && !develop_->file)
+                {
                     develop_->file = std::move(file);
+                    develop_->changes = changed;
+                }
             }
             else if (std::find(order_.begin(), order_.end(), path) != order_.end())
-                read_.push_back(Job{0, path, std::move(file)});
+                read_.push_back(Job{0, path, std::move(file), changed});
         }
         worker_wake_.notify_one();
     }
@@ -283,16 +327,17 @@ void Loader::run_worker(unsigned index)
         provide_file_bytes(key_file(job.path), job.file);
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
         if (full)
-            decode_into(*r);
+            decode_into(*r, job);
         else if (key_part(job.path) == ImagePart{} && decode_preview(job.path, *r->image))
         {
             r->preview = true;
+            r->stamp = r->image->stamp = job.file->stamp;
             r->image->build_mips();
         }
         else
         {
             provide_file_bytes(key_file(job.path), job.file);  // a failed preview may have let them go
-            decode_into(*r);
+            decode_into(*r, job);
         }
         release_file_bytes();
         job.file.reset();
@@ -300,7 +345,8 @@ void Loader::run_worker(unsigned index)
         {
             std::lock_guard lock(mutex_);
             in_flight_.erase(std::find(in_flight_.begin(), in_flight_.end(), job.path));
-            if (full)
+            r->stale = changes(job.path) != job.changes;
+            if (full && !r->stale)  // (file_changed took a stale one out)
                 developing_.erase(std::find(developing_.begin(), developing_.end(), job.path));
         }
         post(r, is_develop ? Lane::Develop : Lane::Prefetch);
