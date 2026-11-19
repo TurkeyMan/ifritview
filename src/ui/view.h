@@ -254,6 +254,11 @@ private:
     OverlaySections overlay_;
     std::shared_ptr<Image> image_;
     std::shared_ptr<Image> previewed_;  // the real image while a preview stands in for it
+    // The width zoom_ was worked out for: an image whose size changes in
+    // place (a raw's develop adopted over its smaller embedded JPEG, a crop,
+    // a turn) has its zoom rescaled from it. Not base_'s, which the GPU's
+    // drawing never makes.
+    int zoom_width_ = 0;
 
     // Uploaded pixels: the image itself, a downscaled copy for the current
     // zoom, and a checkerboard for transparency.
