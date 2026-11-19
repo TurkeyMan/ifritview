@@ -321,6 +321,110 @@ double illuminant_temperature(int light)
     return light >= 0 && light < 25 ? kelvin[light] : 0;
 }
 
+// A JPEG (a raw's lossless readout, its embedded preview) whose last bytes,
+// where its end marker goes, were never written: zeros. A copy that sets the
+// file's size first, then fills it in order, leaves that until it's done.
+bool jpeg_unwritten(const uint8_t* p, size_t n)
+{
+    if (n < 64 || p[0] != 0xFF || p[1] != 0xD8)
+        return false;
+    return std::all_of(p + n - 64, p + n, [](uint8_t b) { return b == 0; });
+}
+
+// A raw in a TIFF's whose directories say truly where its data lies and
+// how long it is: a CR2, a DNG, or a TIFF from a maker known to write them
+// so. (Not every maker's do: a Hasselblad 3FR gives its compressed readout
+// the length it would have uncompressed, past the end of the file.)
+bool tiff_lengths_true(const uint8_t* file, size_t size)
+{
+    if (size < 16 || !((file[0] == 'I' && file[1] == 'I' && file[2] == 42 && file[3] == 0) || (file[0] == 'M' && file[1] == 'M' && file[2] == 0 && file[3] == 42)))
+        return false;
+    if (std::memcmp(file + 8, "CR\x02", 3) == 0)
+        return true;
+    const bool le = file[0] == 'I';
+    const auto u16 = [&](uint64_t at) -> uint32_t { return le ? file[at] | file[at + 1] << 8 : file[at] << 8 | file[at + 1]; };
+    const auto u32 = [&](uint64_t at) -> uint32_t { return le ? u16(at) | u16(at + 2) << 16 : u16(at) << 16 | u16(at + 2); };
+    const uint64_t ifd = u32(4);
+    if (ifd + 2 > size)
+        return true;  // (cut short before its first directory's even there: the walk says so)
+    static const char* const makers[] = {"Canon", "NIKON", "SONY", "PENTAX", "RICOH", "SAMSUNG"};
+    for (uint32_t k = 0, n = u16(ifd); k < n && ifd + 2 + 12 * uint64_t(k + 1) <= size; ++k)
+    {
+        const uint64_t e = ifd + 2 + 12 * uint64_t(k);
+        const uint32_t tag = u16(e), count = u32(e + 4);
+        if (tag == 0xC612)
+            return true;  // DNGVersion
+        if (tag == 0x10F && u16(e + 2) == 2 && count > 4)  // Make, beyond the entry
+        {
+            const uint64_t at = u32(e + 8);
+            for (const char* m : makers)
+                if (at + std::strlen(m) <= size && std::memcmp(file + at, m, std::strlen(m)) == 0)
+                    return true;
+        }
+    }
+    return false;
+}
+
+// A TIFF-based raw (a CR2, a NEF, a DNG...) that ends before what its
+// directories point at: one still being copied. Its directories, the ones
+// they lead to (SubIFDs, EXIF) and the strips and tiles each holds.
+bool tiff_cut_short(const uint8_t* file, size_t size)
+{
+    if (!tiff_lengths_true(file, size))
+        return false;
+    const bool le = file[0] == 'I';
+    const auto u16 = [&](uint64_t at) -> uint32_t { return le ? file[at] | file[at + 1] << 8 : file[at] << 8 | file[at + 1]; };
+    const auto u32 = [&](uint64_t at) -> uint32_t { return le ? u16(at) | u16(at + 2) << 16 : u16(at) << 16 | u16(at + 2); };
+    std::vector<uint32_t> todo{u32(4)}, seen;
+    while (!todo.empty() && seen.size() < 64)
+    {
+        const uint64_t ifd = todo.back();
+        todo.pop_back();
+        if (!ifd || std::find(seen.begin(), seen.end(), uint32_t(ifd)) != seen.end())
+            continue;
+        seen.push_back(uint32_t(ifd));
+        if (ifd + 2 > size)
+            return true;
+        const uint32_t n = u16(ifd);
+        if (n == 0 || ifd + 2 + 12 * uint64_t(n) + 4 > size)
+            return true;  // (none: zeros, where a copy that sized the file first hasn't been yet)
+        // A value: in the entry if it fits, else where the entry points.
+        const auto values = [&](uint64_t e, std::vector<uint32_t>& out) -> bool
+        {
+            const uint32_t type = u16(e + 2), count = u32(e + 4);
+            const unsigned each = type == 3 ? 2 : type == 4 || type == 13 ? 4 : 0;
+            if (!each || count == 0 || count > 1 << 20)
+                return true;
+            const uint64_t at = uint64_t(each) * count <= 4 ? e + 8 : u32(e + 8);
+            if (at + uint64_t(each) * count > size)
+                return false;
+            for (uint32_t i = 0; i < count; ++i)
+                out.push_back(each == 2 ? u16(at + 2 * i) : u32(at + 4 * i));
+            return true;
+        };
+        // Strips, tiles, and a JPEG thumbnail: where each lies, how long it is.
+        static constexpr uint32_t kWhere[3] = {0x111, 0x144, 0x201}, kLength[3] = {0x117, 0x145, 0x202};
+        std::vector<uint32_t> offsets[3], lengths[3];
+        for (uint32_t k = 0; k < n; ++k)
+        {
+            const uint64_t e = ifd + 2 + 12 * uint64_t(k);
+            const uint32_t tag = u16(e);
+            std::vector<uint32_t> v;
+            for (int i = 0; i < 3; ++i)
+                if ((tag == kWhere[i] && !values(e, offsets[i])) || (tag == kLength[i] && !values(e, lengths[i])))
+                    return true;
+            if ((tag == 0x14A || tag == 0x8769) && values(e, v))
+                todo.insert(todo.end(), v.begin(), v.end());
+        }
+        for (int i = 0; i < 3; ++i)
+            for (size_t j = 0; j < std::min(offsets[i].size(), lengths[i].size()); ++j)
+                if (uint64_t(offsets[i][j]) + lengths[i][j] > size || jpeg_unwritten(file + offsets[i][j], lengths[i][j]))
+                    return true;
+        todo.push_back(u32(ifd + 2 + 12 * uint64_t(n)));
+    }
+    return false;
+}
+
 // LibRaw with the step of its unpack that reads the black level from the
 // sensor's masked border, for a readout unpacked here instead.
 class RawAccess : public LibRaw
@@ -344,6 +448,19 @@ public:
     {
         libraw_decoder_info_t info{};
         return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name ? info.decoder_name : "";
+    }
+    // The embedded JPEG it opens with isn't all there: one still being
+    // copied. Either the file ends before it does, or (a copy that sets the
+    // file's size first, then fills it in) its end is zeros, not written yet.
+    // Once opened; raws whose TIFF directories are to be trusted on it only.
+    bool thumb_cut_short(const uint8_t* file, size_t size) const
+    {
+        if (!tiff_lengths_true(file, size))
+            return false;
+        const INT64 at = libraw_internal_data.internal_data.toffset, n = imgdata.thumbnail.tlength;
+        if (at <= 0 || n <= 0)
+            return false;  // not known where it lies
+        return uint64_t(at) + uint64_t(n) > size || jpeg_unwritten(file + at, size_t(n));
     }
     using LibRaw::is_phaseone_compressed;  // any of Phase One's loaders, compressed or not
     // A Phase One's (its loaders') black and corrections of its readout,
@@ -1776,8 +1893,8 @@ bool preview(const std::string& path, Image& out)
 {
     if (decode_options().raw_mode == DecodeOptions::RawMode::Preview)
         return false;
-    auto raw_ptr = std::make_unique<LibRaw>();  // on the heap: hundreds of KB
-    LibRaw& raw = *raw_ptr;
+    auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB
+    RawAccess& raw = *raw_ptr;
     double bias = 0;
     raw.set_exifparser_handler(on_exif_tag, &bias);  // the slider rests at the camera's compensation even on the preview
     const uint8_t* bytes = nullptr;
@@ -1789,6 +1906,8 @@ bool preview(const std::string& path, Image& out)
     std::string error;
     int fit_w = 0, fit_h = 0;
     preview_fit(fit_w, fit_h);
+    if (raw.thumb_cut_short(bytes, size))
+        return false;  // its JPEG not all there yet (grey below what is): the full decode says why
     if (!decode_preview(raw, out, error, fit_w, fit_h))
         return false;
     platform::trace("raw: preview %dx%d, opened in %.1f ms, decoded in %.1f ms", out.width, out.height, (t1 - t0) / 1000.0,
@@ -1858,6 +1977,15 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     int r = raw.open_buffer(bytes, size);
     if (std::getenv("IFRIT_TRACE"))
         std::fprintf(stderr, "raw: file read in %.0f ms, opened in %.0f ms\n", (t_open - t_read) / 1000.0, (g_get_monotonic_time() - t_open) / 1000.0);
+    // Still being copied: what's there of the readout would be shown as if
+    // it were all of it (the rest black, or noise), or it can't be opened
+    // and something else would take it (its TIFF wrapper's JPEG).
+    if (tiff_cut_short(bytes, size))
+    {
+        out.incomplete = true;
+        error = "the file isn't all there yet (still being copied?)";
+        return false;
+    }
     if (r != LIBRAW_SUCCESS)
     {
         error = libraw_strerror(r);
@@ -2035,8 +2163,8 @@ bool quick(const std::string& path)
     if (!file_bytes(path, bytes, size))
         return false;
     int predictor = 0;
-    if (locate_cr2(bytes, size, offset, length, slices))
-        return ljpeg::takes(bytes + offset, length, &predictor) && predictor == 1;
+    if (locate_cr2(bytes, size, offset, length, slices))  // (all there: its preview first while it isn't)
+        return !jpeg_unwritten(bytes + offset, length) && ljpeg::takes(bytes + offset, length, &predictor) && predictor == 1;
     // A NEF, PEF, DNG or Sony's ARW of the kind decoded on the GPU, or a
     // Bayer readout stored uncompressed (opening it reads only its headers).
     // On the heap: a LibRaw is hundreds of KB.

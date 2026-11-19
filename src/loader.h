@@ -13,7 +13,34 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
+
+// A file not all there yet (still being copied), to be read again once it's
+// done: once it has changed from how it was read, or the folder's watch has
+// said it changed (a copy into a file sized in full at the start can finish
+// with its size, and its time as finely as it's kept, as they were), and
+// then held still from one look to the next, with no word from the watch
+// in between.
+class FileSettle
+{
+public:
+    FileSettle() = default;
+    FileSettle(FileStamp read, FileStamp now) : read_(read), seen_(now) {}
+    void stirred() { changed_ = stirred_ = true; }  // the watch says it changed
+    bool look(FileStamp now);                       // at each look: true once it's settled
+
+private:
+    FileStamp read_, seen_;  // the file as read, and as last looked at
+    bool changed_ = false;   // since it was read
+    bool stirred_ = false;   // since the last look
+};
+
+// --check-loader: what's decoded of a file that then changes arrives stale,
+// though it changed only after the decode was done; a file's time is kept
+// finer than the second; and a file still coming in is taken as settled
+// only once it's changed and held still.
+int check_loader(const std::string& dir);
 
 // Decoding off the main thread, with the image being navigated to always
 // first. A dedicated foreground worker handles only that image (its preview,
@@ -36,6 +63,9 @@ public:
         bool preview = false;                  // a quick stand-in; the real decode follows
         bool prefetch = false;                 // decoded ahead of time; cache it, don't show it
         bool cached = false;                   // served from the cache: pixels already carry any edits
+        bool incomplete = false;               // failed: the file isn't all there yet (still being copied)
+        bool stale = false;                    // read before the file last changed (file_changed), up to its delivery: out of date
+        FileStamp stamp{};                     // the file as it was read for it
         gint64 picked_us = 0, decoded_us = 0;  // trace: loader timeline
     };
     using Callback = std::function<void(Result&)>;  // runs on the UI thread
@@ -53,6 +83,10 @@ public:
     void prefetch(std::vector<std::string> paths);
     // The develop asked for `path` isn't needed after all (shown in full already).
     void cancel_develop(const std::string& path);
+    // `file` changed on disk (grew, was rewritten): what was read of it goes,
+    // and what's decoding from those bytes comes back stale, not counted as
+    // decoding it (a develop asked for again isn't taken for one of those).
+    void file_changed(const std::string& file);
     // A stand-in (a raw's embedded JPEG) need only cover this many pixels:
     // it's decoded smaller when it can be. 0: full size.
     void set_stand_in_fit(int width, int height);
@@ -68,18 +102,21 @@ private:
         Develop,
         Prefetch
     };
-    void post(Result* r, Lane lane);
-    void decode_into(Result& r);
+    // `changed`: its file's changes_ as it was read, checked again as it's delivered.
+    void post(Result* r, Lane lane, uint64_t changed);
 
     struct Job
     {
         uint64_t generation;
         std::string path;
         std::shared_ptr<const FileBlob> file;  // read, or null for the reader to read
+        uint64_t changes = 0;                  // the file's changes_ as it began to be read
     };
     // The file read for `path` and waiting for a worker, if any, taken from
-    // the queue. Under the lock.
-    std::shared_ptr<const FileBlob> take_read(const std::string& path);
+    // the queue into `job`. Under the lock.
+    bool take_read(const std::string& path, Job& job);
+    uint64_t changes(const std::string& path) const;  // how often its file has changed. Under the lock.
+    void decode_into(Result& r, const Job& job);  // stamped, and marked stale, from `job`
     bool busy_with(const std::string& path) const;  // being read, or waiting or decoded in full. Under the lock.
 
     Callback callback_;
@@ -94,6 +131,7 @@ private:
     std::string reading_;                   // the reader's file now
     std::vector<std::string> developing_;   // full decodes running (develops, and prefetches that go as far)
     std::vector<std::string> in_flight_;    // every decode the workers are running
+    std::unordered_map<std::string, uint64_t> changes_;  // file_changed() calls, by file
     unsigned workers_ = 1;
     int fit_w_ = 0, fit_h_ = 0;  // set_stand_in_fit
     bool stop_ = false;

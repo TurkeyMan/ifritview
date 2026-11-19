@@ -7,12 +7,15 @@
 #include "half.h"
 #include "parallel.h"
 
+#include <rapport/sys.h>
+
 #include <glib.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <utility>
 
 namespace
@@ -541,6 +544,22 @@ namespace
 constexpr char kPartMark = '\x1f';  // ASCII unit separator: in no real path
 }
 
+FileStamp FileStamp::of(const std::string& path)
+{
+    // The time as finely as the file system keeps it, not to the second: a
+    // copy that sized the file in full at the start may finish within the
+    // second it was read in.
+    std::error_code e;
+    const std::filesystem::path p = rap::sys::path_from_utf8(path);
+    const auto size = std::filesystem::file_size(p, e);
+    if (e)
+        return {};
+    const auto when = std::filesystem::last_write_time(p, e);
+    if (e)
+        return {};
+    return {int64_t(size), int64_t(when.time_since_epoch().count())};
+}
+
 std::string part_key(const std::string& path, ImagePart part)
 {
     if (part == ImagePart{})
@@ -746,6 +765,8 @@ void Image::adopt(Image&& f)
     }
     pending_edits.clear();
     ++generation;  // new data in place: what the GPU kept of the old is stale
+    if (f.stamp.known())
+        stamp = f.stamp;  // read again for it, maybe grown since
     width = f.width;
     height = f.height;
     stride = f.stride;

@@ -359,6 +359,8 @@ int main(int argc, char** argv)
         return formats_report();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
         return gpu_render(argc - 2, argv + 2);
+    if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
+        return check_loader(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-forget") == 0)
     {
         const int index = check_index_forget(argv[2]);
