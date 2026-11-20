@@ -132,7 +132,8 @@ private:
         float input_to_xyz[3][3] = {};              // its data -> XYZ (a raw's: its colour matrix, before white balance)
         float as_shot[3] = {1, 1, 1};               // a raw's: what its level 0 was developed with, the least 1
         std::shared_ptr<const DngColour> dng;       // a DNG's colour: its data -> XYZ by white balance, in place of input_to_xyz
-        bool auto_exposure = false;                 // a raw developed here: scaled by its own 99th percentile
+        bool auto_exposure = false;                 // a raw developed here: scaled by its own measures (view.hlsli's auto_gain)
+        float preview_mid = 0;                      // and its camera JPEG's median luminance (RawMosaic's), 0: none
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's
         // Noise reduction and sharpening (detail.h): what the levels below

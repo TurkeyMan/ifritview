@@ -6,4 +6,5 @@
 #define kStatsMinimum 1098u // ~float bits of the least luminance above 0 (max of the complement: a min)
 #define kStatsMaximum 1099u // float bits of the greatest
 #define kStatsP99 1100u     // float: the 99th percentile's luminance (peak.hlsl), for auto exposure
-#define kStatsWords 1101u
+#define kStatsAutoGain 1101u // float: a raw developed on the GPU, its scale (peak.hlsl's, view.hlsli's auto_gain)
+#define kStatsWords 1102u
