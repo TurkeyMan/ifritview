@@ -110,7 +110,8 @@ struct ComposeParams
     uint32_t histogram_channels;
     float panel[4];
     float input_x[4], input_y[4], input_z[4];
-    int32_t auto_exposure, gain, adjusting, unused3;
+    int32_t auto_exposure, gain, adjusting;
+    float preview_mid;
     float to_working[3][4], from_working[3][4];
 };
 static_assert(sizeof(ComposeParams) == 336, "as view.hlsli's cbuffer packs");
@@ -245,8 +246,8 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                           if (count)
                           {
                               float scale = exposure;
-                              if (automatic && as_float(word(read->stats, kStatsP99)) > 0)
-                                  scale /= as_float(word(read->stats, kStatsP99));  // as auto_gain() has it
+                              if (automatic && as_float(word(read->stats, kStatsAutoGain)) > 0)
+                                  scale *= as_float(word(read->stats, kStatsAutoGain));  // as auto_gain() has it
                               d.minimum = as_float(~word(read->stats, kStatsMinimum)) * scale;
                               d.maximum = as_float(word(read->stats, kStatsMaximum)) * scale;
                               d.peak = as_float(word(read->stats, kStatsPeak)) * scale;
@@ -922,6 +923,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     s.scene_gain = 1;
     s.tonable = image.tonable();
     s.auto_exposure = false;
+    s.preview_mid = 0;
     s.dng.reset();
     std::memcpy(s.input_to_xyz, kXyzFrom709, sizeof s.input_to_xyz);
     if (const RawMosaic* m = image.mosaic.get())
@@ -1117,6 +1119,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         std::memcpy(s.as_shot, m->as_shot, sizeof s.as_shot);
         s.dng = m->dng;
         s.auto_exposure = true;
+        s.preview_mid = m->preview_mid;
         s.measured = false;
         return true;
     }
@@ -1493,7 +1496,7 @@ bool GpuView::begin_frame(const Frame& f, rap::gpu::texture_ptr& out, rap::frame
 
 // The compose pass's parameters for showing `s` as `f` has it, but for
 // the image's place and the resampling.
-static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure,
+static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure, float preview_mid,
                         const float input_to_xyz[3][3], const float as_shot[3], const DngColour* dng, bool measured, ComposeParams& cp)
 {
     set_linear(cp.background, f.background);
@@ -1522,6 +1525,7 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
             cp.input_z[j] = input_to_xyz[2][j] * wb[j];
         }
     cp.auto_exposure = auto_exposure ? 1 : 0;
+    cp.preview_mid = auto_exposure ? preview_mid : 0;
     cp.measured = measured ? 1 : 0;
     if (const AdjustTables* t = f.adjust.get())
     {
@@ -1598,7 +1602,7 @@ void GpuView::count(Source& s, const Frame& f)
 {
     follow_detail(s, f.detail);  // the levels it counts are made with it
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.preview_mid, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     cp.measured = 1;
@@ -1643,7 +1647,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         return true;  // `ready` left as it was
     follow_detail(s, f.detail);
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.preview_mid, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
     cp.measured = s.measured ? 1 : 0;
     const double shown_w = width * f.zoom, shown_h = height * f.zoom;
@@ -1847,7 +1851,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         difference_adjust_ != adjusted || (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
     {
         ComposeParams cp{};
-        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.preview_mid, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
         cp.measured = s.measured ? 1 : 0;
         cp.gain = std::clamp(gain, 1, 255);

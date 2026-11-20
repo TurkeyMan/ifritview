@@ -128,6 +128,7 @@ struct RawMosaic
     bool grey = false;           // no filter (a monochrome sensor): each photosite grey, no demosaic
     float white = 65535;         // saturation, in data units
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
+    float preview_mid = 0;       // the camera's JPEG's median luminance, linear (0..1); 0: none, or black
     bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature

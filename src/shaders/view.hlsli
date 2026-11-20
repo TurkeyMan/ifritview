@@ -43,10 +43,10 @@ cbuffer Params : register(b0)
     float4 input_x;     // rows of the image's data -> XYZ (its colour matrix, a raw's white balance in it)
     float4 input_y;
     float4 input_z;
-    int auto_exposure;  // 1: a raw developed on the GPU, its scale from its own 99th percentile (auto_gain)
+    int auto_exposure;  // 1: a raw developed on the GPU, its scale from its own measures (auto_gain)
     int gain;           // the difference pass: its errors amplified by this (1..255)
     int adjusting;      // bit 0: the develop controls' tables apply (edit.hlsli, t4 and t5); bit 1: their channel curves too
-    int unused3;
+    float preview_mid;  // auto_exposure: the camera's JPEG's median luminance, linear; 0: none
     float4 to_working_x;  // XYZ to the edit's working space (rows); w of the first: its tone table's top, encoded
     float4 to_working_y;
     float4 to_working_z;
@@ -66,15 +66,16 @@ ByteAddressBuffer stats : register(t8);
 #endif
 #include "stats_layout.hlsli"
 
-// The scene's luminance scale for a raw developed on the GPU: its 99th
-// percentile at SDR white, as LibRaw's auto-brightening does (the roll-off
-// takes the 1% above). 1 for the rest.
+// The scene's luminance scale for a raw developed on the GPU (peak.hlsl's):
+// its 99th percentile at SDR white, as LibRaw's auto-brightening does (the
+// roll-off takes the 1% above), held to the camera's JPEG's brightness and
+// to 2 stops up. 1 for the rest.
 float auto_gain()
 {
     if (!auto_exposure || !measured)
         return 1;
-    const float p99 = asfloat(stats.Load(kStatsP99 * 4));
-    return p99 > 0 ? 1 / p99 : 1;
+    const float gain = asfloat(stats.Load(kStatsAutoGain * 4));
+    return gain > 0 ? gain : 1;
 }
 
 // The edit: a colour of the image's data (its own space: input_x/y/z take

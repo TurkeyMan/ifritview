@@ -210,6 +210,37 @@ std::vector<float> match_tone_to_preview(const LinearData& linear, const Image& 
     return tone;
 }
 
+// The median luminance of the camera's own JPEG, linear (its sRGB decoded):
+// how bright the camera meant the picture, for the GPU develop's exposure.
+// Read from a small decode of it (a few milliseconds); 0 where there's none.
+float preview_median(LibRaw& raw)
+{
+    Image preview;
+    std::string ignored;
+    if (!decode_preview(raw, preview, ignored, 512, 512) || preview.width <= 0 || preview.height <= 0)
+        return 0;
+    float decode[256];
+    for (int v = 0; v < 256; ++v)
+    {
+        const double c = v / 255.0;
+        decode[v] = float(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4));
+    }
+    std::vector<float> luminance;
+    luminance.reserve(size_t(preview.width) * preview.height);
+    for (int y = 0; y < preview.height; ++y)
+    {
+        const uint32_t* p = preview.row(y);
+        for (int x = 0; x < preview.width; ++x)
+        {
+            const uint32_t v = p[x];
+            luminance.push_back(0.2126f * decode[(v >> 16) & 0xFF] + 0.7152f * decode[(v >> 8) & 0xFF] + 0.0722f * decode[v & 0xFF]);
+        }
+    }
+    const auto mid = luminance.begin() + luminance.size() / 2;
+    std::nth_element(luminance.begin(), mid, luminance.end());
+    return *mid;
+}
+
 bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
 {
     raw.imgdata.params.half_size = half ? 1 : 0;
@@ -1712,6 +1743,9 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
     for (int c = 0; c < 3; ++c)
         m->as_shot[c] = m->grey ? 1 : mul[c] / least;  // grey: no colours to balance
     m->balanced = (col.as_shot_wb_applied & LIBRAW_ASWB_APPLIED) != 0;
+    m->preview_mid = preview_median(raw);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "raw: the camera's JPEG's median luminance %g\n", m->preview_mid);
     m->dng = raw.dng_colour;
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j)
