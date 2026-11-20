@@ -32,12 +32,6 @@ size_t ImageCache::image_bytes(const Image& image)
     return n;
 }
 
-int64_t ImageCache::file_mtime(const std::string& path)
-{
-    GStatBuf st;
-    return g_stat(path.c_str(), &st) == 0 ? int64_t(st.st_mtime) : 0;
-}
-
 // A quarter of what the system has free, but at least 1 GB (a developed
 // 24 MP raw is ~240 MB) and never more than half of what's free, capped at 8 GB.
 size_t ImageCache::automatic_budget()
@@ -72,7 +66,7 @@ bool ImageCache::get(const std::string& path, Entry& entry)
     auto it = slots_.find(path);
     if (it == slots_.end())
         return false;
-    if (it->second.entry.mtime != file_mtime(key_file(path)))  // `path` may be a part's key
+    if (it->second.entry.stamp != FileStamp::of(key_file(path)))  // `path` may be a part's key
     {  // changed on disk since
         erase(path);
         return false;

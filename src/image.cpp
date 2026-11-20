@@ -8,6 +8,7 @@
 #include "parallel.h"
 
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -541,6 +542,14 @@ namespace
 constexpr char kPartMark = '\x1f';  // ASCII unit separator: in no real path
 }
 
+FileStamp FileStamp::of(const std::string& path)
+{
+    GStatBuf st;
+    if (g_stat(path.c_str(), &st) != 0)
+        return {};
+    return {int64_t(st.st_size), int64_t(st.st_mtime)};
+}
+
 std::string part_key(const std::string& path, ImagePart part)
 {
     if (part == ImagePart{})
@@ -746,6 +755,8 @@ void Image::adopt(Image&& f)
     }
     pending_edits.clear();
     ++generation;  // new data in place: what the GPU kept of the old is stale
+    if (f.stamp.known())
+        stamp = f.stamp;  // read again for it, maybe grown since
     width = f.width;
     height = f.height;
     stride = f.stride;

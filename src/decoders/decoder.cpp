@@ -161,7 +161,8 @@ bool try_decode(const Decoder& d, const std::string& path, Image& out, std::stri
 std::shared_ptr<const FileBlob> read_file(const std::string& path)
 {
     auto blob = std::make_shared<FileBlob>();
-    const int64_t n = platform::file_size(path);
+    blob->stamp = FileStamp::of(path);
+    const int64_t n = blob->stamp.size;
     if (FILE* f = n >= 0 ? platform::fopen(path, "rb") : nullptr)
     {
         blob->data.resize(size_t(n));
@@ -376,28 +377,44 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
         error = "cannot open file";
         return false;
     }
+    if (size == 0)
+    {
+        out.incomplete = true;  // made, nothing written to it yet
+        error = "the file is empty (still being copied?)";
+        release_file_bytes();
+        return false;
+    }
     const uint8_t* head = data;
     const size_t head_len = std::min<size_t>(size, 64);
     MetadataPass meta(path, data, size);
 
     bool ok = false;
+    // A decoder that finds the file cut short (still being copied) ends the
+    // search: another taking it (a raw's TIFF wrapper, its embedded JPEG
+    // passed off as the image) would show something that isn't it.
+    bool incomplete = false;
+    const auto take = [&](const Decoder& d)
+    {
+        ok = try_decode(d, path, out, error, part);
+        incomplete = !ok && out.incomplete;
+    };
     std::set<const Decoder*> tried;
     // By extension, then by content.
     const auto attempt = [&](const std::vector<const Decoder*>& list)
     {
         for (const Decoder* d : list)
         {
-            if (ok || tried.count(d) || !claims_extension(*d, ext))
+            if (ok || incomplete || tried.count(d) || !claims_extension(*d, ext))
                 continue;
             tried.insert(d);
-            ok = try_decode(*d, path, out, error, part);
+            take(*d);
         }
         for (const Decoder* d : list)
         {
-            if (ok || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
+            if (ok || incomplete || tried.count(d) || !d->sniff || !d->sniff(head, head_len))
                 continue;
             tried.insert(d);
-            ok = try_decode(*d, path, out, error, part);
+            take(*d);
         }
     };
 #ifdef HAVE_RAW
@@ -406,20 +423,20 @@ bool decode_image_part(const std::string& path, ImagePart part, Image& out, std:
     if (raw_decoder().sniff(head, head_len))
     {
         tried.insert(&raw_decoder());
-        ok = try_decode(raw_decoder(), path, out, error, part);
+        take(raw_decoder());
     }
 #endif
     attempt(decoders());
     // Nothing built in took it, but a plugin may: wait for them to load
     // (only such files ever wait) and try theirs.
-    if (!ok && !plugins::ready())
+    if (!ok && !incomplete && !plugins::ready())
     {
         plugins::wait();
         attempt(decoders());
     }
     const Decoder* fallback = decoders().back();
-    if (!ok && !tried.count(fallback))
-        ok = try_decode(*fallback, path, out, error, part);
+    if (!ok && !incomplete && !tried.count(fallback))
+        take(*fallback);
     if (ok)
     {
         meta.finish(out);

@@ -1131,10 +1131,16 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
             }
         }
         cache_.erase(full);  // what was cached of it is out of date
+        loader_.file_changed(full);  // and what's being read or decoded of it
+        if (e.what == K::renamed)
+            loader_.file_changed(rap::sys::path_to_utf8(e.old_path));
     }
     if (rescan)
         list_folder({});
-    if (reload_shown && !pasted_)
+    // Still coming in, as far as it was read: read again once it's settled
+    // (await_complete), not at each pause in the copy.
+    const bool coming = incomplete_tick_ && incomplete_key_ == image_key_;
+    if (reload_shown && !pasted_ && !coming)
     {
         // Rewritten: read it again. Not via the cache, which leaving it would
         // fill with what's shown now, dated as the new file.
@@ -1150,8 +1156,9 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
     {
         update_title();
         update_status();
-        schedule_prefetch();
     }
+    if (listed || reload_shown || !changed.empty())
+        schedule_prefetch();  // what changed, read again
 }
 
 void App::load_current(const std::string& file)
@@ -1177,11 +1184,13 @@ void App::load_current(const std::string& file)
     }
     stop_video();
     leave_image();
+    incomplete_tick_ = {};
     ++load_generation_;
     ImageCache::Entry hit;
     if (cache_.get(key, hit))
     {
         Loader::Result r{load_generation_, key, hit.image, {}, hit.image->is_preview(), false, true};
+        r.stamp = hit.stamp;
         on_loaded(r);
         return;
     }
@@ -1519,6 +1528,10 @@ void App::folder_listed(Folder::Listing listing, bool again, double ms)
 
 void App::on_loaded(Loader::Result& r)
 {
+    // Read before its file last changed: what's read of it now follows, or
+    // it's read again when wanted.
+    if (r.stale)
+        return;
     if (r.image)
         request_place(r.image);  // prefetched neighbours get their place name looked up ahead of time
     if (r.prefetch && r.image && !r.preview)
@@ -1533,11 +1546,18 @@ void App::on_loaded(Loader::Result& r)
             return;
         }
     }
+    // The whole image failed for one shown as its preview: a develop asked
+    // for it took this for its own (it was underway), so this is its answer.
+    if (r.prefetch && !r.image && image_ && image_key_ == r.path && image_->is_preview())
+    {
+        r.prefetch = false;
+        r.generation = load_generation_;
+    }
     if (r.prefetch)
     {
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_key_ && !cache_.contains(r.path))
-            cache_.put(r.path, {r.image, ImageCache::file_mtime(key_file(r.path))});
+            cache_.put(r.path, {r.image, r.stamp});
         if (r.image && r.path == current_key() && (!image_ || image_key_ != r.path) && !pasted_)
         {  // the user moved onto it while it was decoding: it's here before the stand-in
             r.generation = load_generation_;
@@ -1607,7 +1627,13 @@ void App::on_loaded(Loader::Result& r)
     // as its stand-in: the stand-in stays, said to be all there is.
     if (!r.image && !r.preview && image_ && image_->is_preview() && image_key_ == r.path)
     {
-        status_message_ = rap::i18n::format(_("Can't develop this raw ({0}): showing the camera's embedded JPEG"), r.error);
+        if (r.incomplete)
+        {
+            status_message_ = _("This raw isn't all there yet (still being copied?): showing the camera's embedded JPEG");
+            await_complete(r.path, r.stamp);
+        }
+        else
+            status_message_ = rap::i18n::format(_("Can't develop this raw ({0}): showing the camera's embedded JPEG"), r.error);
         busy_message_.clear();
         update_status();
         return;
@@ -1626,6 +1652,8 @@ void App::on_loaded(Loader::Result& r)
         update_status();
         update_title();
         image_presented();
+        if (r.incomplete)
+            await_complete(r.path, r.stamp);
         return;
     }
     stop_animation();
@@ -1862,7 +1890,12 @@ void App::leave_image()
     if (image_->edited)
         cache_.erase(image_key_);
     else
-        cache_.put(image_key_, {image_, ImageCache::file_mtime(image_path_)}, !flicking());  // flicking on: what's behind goes first
+    {
+        // Dated as the file was read for it, not as it is now: a file that's
+        // grown or changed since isn't served from it.
+        const FileStamp stamp = image_->stamp.known() ? image_->stamp : FileStamp::of(image_path_);
+        cache_.put(image_key_, {image_, stamp}, !flicking());  // flicking on: what's behind goes first
+    }
 }
 
 void App::crop_to_selection()
@@ -1984,6 +2017,35 @@ void App::request_place(const std::shared_ptr<Image>& image)
                              refresh_metadata();
                          }
                      });
+}
+
+void App::await_complete(const std::string& key, FileStamp read)
+{
+    incomplete_key_ = key;
+    incomplete_read_ = read;
+    incomplete_seen_ = FileStamp::of(key_file(key));
+    incomplete_tick_ = ui_.timer(1000, true,
+                                 [this]
+                                 {
+                                     if (incomplete_key_ != image_key_)
+                                         return;  // (load_current stops it)
+                                     const FileStamp now = FileStamp::of(key_file(incomplete_key_));
+                                     const bool settled = now == incomplete_seen_ && now != incomplete_read_;
+                                     incomplete_seen_ = now;
+                                     if (!settled)
+                                         return;
+                                     platform::trace("%s has settled at %lld bytes: read again", key_text(incomplete_key_).c_str(),
+                                                     (long long)now.size);
+                                     ui_.post([this] {  // not from inside the timer's own callback
+                                         if (incomplete_key_ != image_key_ || !incomplete_tick_)
+                                             return;
+                                         incomplete_tick_ = {};
+                                         cache_.erase(image_key_);
+                                         loader_.file_changed(image_path_);
+                                         image_path_.clear();
+                                         load_current();
+                                     });
+                                 });
 }
 
 void App::ensure_developed()
