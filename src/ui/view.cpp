@@ -351,6 +351,7 @@ void View::set_image(std::shared_ptr<Image> image)
     base_.reset();
     base_dirty_ = true;
     image_ = std::move(image);
+    zoom_width_ = image_ ? image_->width : 0;
     has_selection_ = false;
     drag_active_ = false;
     pressed_button_ = 0;
@@ -655,7 +656,8 @@ void View::image_replaced()
     drop_caches();
     if (!image_)
         return;
-    const int old_w = base_ ? base_->width() : image_->width;
+    const int old_w = zoom_width_ > 0 ? zoom_width_ : image_->width;
+    zoom_width_ = image_->width;
     if (base_ && base_->width() == image_->width && base_->height() == image_->height)
         base_->update(image_->pixels.data(), image_->stride);  // a video frame: same size, new pixels
     else
