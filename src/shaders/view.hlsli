@@ -82,6 +82,16 @@ float auto_gain()
 float3 edit(float3 c, float scale)
 {
     float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), c) * scale;
+    if (auto_exposure && tone == 0 && xyz.y > 0)
+    {
+        // A raw's toe: the darkest tones (the sensor's noise floor: a few
+        // hundredths of a percent of white) towards black, as a camera's
+        // curve takes them, and their colour towards grey, so the floor's
+        // tint and chroma noise don't show in a dark scene. A hundredth of
+        // white loses a third; middle grey 3%; hue kept.
+        const float y = xyz.y;
+        xyz = lerp(y * float3(0.95047, 1, 1.08883), xyz, y / (y + 0.01)) * (y / (y + 0.005));
+    }
     if (tone == 1)
     {
         // The camera's curve maps luminance; the colour scales with it, so hue
