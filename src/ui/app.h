@@ -367,6 +367,8 @@ private:
     rap::label *hist_peak_ = nullptr, *hist_max_ = nullptr, *hist_min_ = nullptr, *hist_average_ = nullptr, *hist_clipped_ = nullptr;
     bool pane_histogram_ = false;
     void toggle_pane();          // the pane in or out, with the window following
+    void restore_pane();         // at startup, the pane as it was last left
+    void remember_pane();        // which pane's open (if either), for next time
     void show_pane_content();    // the info or the histogram in it
     void show_pane_box();        // which of them shows, before it's filled in
     void fill_pane();            // the info or the histogram filled in

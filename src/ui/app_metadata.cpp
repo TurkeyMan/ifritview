@@ -43,10 +43,13 @@ void App::toggle_metadata()
     {
         pane_histogram_ = false;  // the pane stays: it shows the info instead
         show_pane_content();
-        return;
     }
-    pane_histogram_ = false;
-    toggle_pane();
+    else
+    {
+        pane_histogram_ = false;
+        toggle_pane();
+    }
+    remember_pane();
 }
 
 void App::toggle_histogram()
@@ -62,9 +65,34 @@ void App::toggle_histogram()
     {
         pane_histogram_ = true;
         show_pane_content();
-        return;
     }
-    pane_histogram_ = true;
+    else
+    {
+        pane_histogram_ = true;
+        toggle_pane();
+    }
+    remember_pane();
+}
+
+// The pane I or G left open (fullscreen hides it without closing it, so
+// leaves this as it was), opened the same way when IfritView next starts.
+void App::remember_pane()
+{
+    const std::string pane = !metadata_visible_ ? "" : pane_histogram_ ? "histogram" : "info";
+    if (pane == cfg_.pane)
+        return;
+    cfg_.pane = pane;
+    cfg_.save();
+}
+
+// Before the first image is asked for and the window shows: the window's
+// first fit counts the pane, and the map's split is set (preset_map_height,
+// in toggle_pane) before the pane's first laid out, as when it's toggled.
+void App::restore_pane()
+{
+    if (cfg_.pane.empty() || metadata_visible_)
+        return;
+    pane_histogram_ = cfg_.pane == "histogram";
     toggle_pane();
 }
 

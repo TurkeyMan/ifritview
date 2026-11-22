@@ -181,6 +181,9 @@ void Config::load()
     min_window_width = std::max(200, get_int(kf, kWindow, "min_width", min_window_width));
     min_window_height = std::max(150, get_int(kf, kWindow, "min_height", min_window_height));
     metadata_pane_width = std::clamp(get_int(kf, kWindow, "metadata_pane_width", metadata_pane_width), 240, 1600);
+    pane = get_string(kf, kWindow, "pane", pane);
+    if (pane != "info" && pane != "histogram")
+        pane.clear();
 
     // The filters by name; settings from before them said only smooth or not.
     if (!get_bool(kf, kView, "smooth_upscale", true))
@@ -299,6 +302,7 @@ bool Config::save() const
     g_key_file_set_integer(kf, kWindow, "min_width", min_window_width);
     g_key_file_set_integer(kf, kWindow, "min_height", min_window_height);
     g_key_file_set_integer(kf, kWindow, "metadata_pane_width", metadata_pane_width);
+    g_key_file_set_string(kf, kWindow, "pane", pane.c_str());
 
     g_key_file_set_string(kf, kView, "enlarge_filter", scale_filter_name(enlarge_filter));
     g_key_file_set_string(kf, kView, "shrink_filter", scale_filter_name(shrink_filter));

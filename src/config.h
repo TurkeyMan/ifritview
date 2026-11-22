@@ -42,6 +42,7 @@ struct Config
     int min_window_width = 640;  // logical pixels; the window never shrinks below this
     int min_window_height = 480;
     int metadata_pane_width = 420;  // the docked info pane, logical pixels; the divider is draggable
+    std::string pane;  // the pane open at launch, as I and G last left it: "info", "histogram", or empty: none
 
     // Viewing
     ScaleFilter enlarge_filter = ScaleFilter::Lanczos3;
