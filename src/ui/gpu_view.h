@@ -143,6 +143,7 @@ private:
         // inside.
         Detail detailed;
         rap::gpu::buffer_ptr noise;
+        rap::gpu::buffer_ptr clips;                 // a raw developed here: where its colours clip (clip.hlsl's)
         rap::gpu::texture_ptr region;
         int region_at[4] = {};
         size_t bytes() const;

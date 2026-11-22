@@ -139,6 +139,27 @@ float3 fit_display(float3 rgb, float y)
     return y + t * (rgb - y);
 }
 
+// A raw's highlights onto the display, by each colour's largest of R, G and
+// B (so a bright blue sky's blue is eased in, not pinned at the top with
+// its gradation lost; hue and saturation kept): unchanged up to a knee at
+// 75% of the display's peak, then a shoulder that takes the scene's own top
+// (its clip, or what it reaches: peak.hlsl's white point, `top`, after
+// exposure) to just under the peak, so the highlights the sensor kept get
+// the levels between, and what's past it on towards the peak. The same
+// whatever the exposure and SDR white; nothing to do when the top is under
+// the end already. A rational curve: its slope 1 at the knee, closed form
+// for where it ends.
+static const float kShoulderKnee = 0.75, kShoulderEnd = 0.975;
+
+float shoulder(float y, float top, float peak)
+{
+    const float knee = kShoulderKnee * peak, end = kShoulderEnd * peak;
+    if (y <= knee || top <= end)
+        return y;
+    const float u = top - knee, v = end - knee, a = u * v / (u - v);
+    return knee + (y - knee) / (1 + (y - knee) / a);
+}
+
 // A colour of the image's data as the display shows it (the edit, then the
 // display mapping), in the display's linear RGB (BT.709 until there's a
 // display description).
@@ -157,7 +178,18 @@ float3 tone_map(float3 c)
         float source_peak = asfloat(stats.Load(kStatsMaximum * 4)) * scale;
         if (adjusting & 1)
             source_peak = tone_lookup(source_peak, 0, to_working_x.w);
-        if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
+        if (auto_exposure)
+        {
+            // A raw developed here: its shoulder, to its own top.
+            float top = asfloat(stats.Load(kStatsWhite * 4)) * scale;
+            if (adjusting & 1)
+                top = tone_lookup(top, 0, to_working_x.w);
+            const float3 rgb = mul(kXyzToRgb709, xyz);
+            const float most = max(rgb.r, max(rgb.g, rgb.b));
+            if (most > 0)
+                y *= shoulder(most, top, display_peak) / most;
+        }
+        else if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
         {
             const float mapped = eetf(y, source_peak, display_peak, white);
             // Towards white as it nears the display's peak, as film does (only

@@ -930,6 +930,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     s.scene_gain = 1;
     s.tonable = image.tonable();
     s.auto_exposure = false;
+    s.clips.reset();
     s.anchor = 0;
     s.dng.reset();
     std::memcpy(s.input_to_xyz, kXyzFrom709, sizeof s.input_to_xyz);
@@ -1156,6 +1157,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         std::memcpy(s.as_shot, m->as_shot, sizeof s.as_shot);
         s.dng = m->dng;
         s.auto_exposure = true;
+        s.clips = clips;
         // The camera's own exposure: its middle grey where its JPEG would
         // have it, a stop over the raw's (about where cameras put it), and a
         // DNG's BaselineExposure on top.
@@ -1629,7 +1631,7 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     {
         d[i].program = i ? peak_ : stats_program_;
         d[i].inputs = view_inputs(counted, s, nullptr);
-        d[i].buffers = {histogram_, s.stats};
+        d[i].buffers = {histogram_, s.stats, s.clips ? s.clips : histogram_};
         d[i].uniforms = params;  // copied at run()
         d[i].groups[0] = i ? 1 : (counted->width() + 15) / 16;
         d[i].groups[1] = i ? 1 : (counted->height() + 15) / 16;
