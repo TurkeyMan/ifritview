@@ -1,4 +1,5 @@
 #include "app.h"
+#include "app_util.h"
 #include "platform.h"
 #include "first_image.h"
 #include "folder_index.h"
@@ -212,7 +213,8 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
 // --gpu-render IN OUT.ppm ZOOM [nearest|area|mitchell|catmullrom|lanczos3]:
 // IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
 // (lavapipe will do), into OUT; with how much of it isn't the background.
-// The view's GPU path checked without a window.
+// The view's GPU path checked without a window: a raw decoded as the
+// window's default settings have it (full size, developed on the GPU).
 static int gpu_render(int argc, char** argv)
 {
     if (argc < 3)
@@ -220,6 +222,7 @@ static int gpu_render(int argc, char** argv)
         std::fprintf(stderr, "--gpu-render IN OUT.ppm ZOOM [FILTER]\n");
         return 2;
     }
+    set_decode_options(decode_options_for(Config{}));
     auto image = std::make_shared<Image>();
     std::string error;
     if (!decode_image(argv[0], *image, error))

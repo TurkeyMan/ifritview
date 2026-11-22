@@ -8,8 +8,13 @@
 #include "../decoders/rawpacked.h"
 #include "../gpu.h"
 #include "../image.h"
+#include "../shaders/clip_layout.hlsli"
 #include "../shaders/stats_layout.hlsli"
 #include "../white_balance.h"
+#include "shaders/clip.h"
+#include "shaders/clip_find.h"
+#include "shaders/clip_linear.h"
+#include "shaders/clip_ycc.h"
 #include "shaders/compose.h"
 #include "shaders/decode.h"
 #include "shaders/detail.h"
@@ -118,7 +123,7 @@ static_assert(sizeof(ComposeParams) == 336, "as view.hlsli's cbuffer packs");
 struct DevelopParams
 {
     uint32_t cfa[4];   // each site's LibRaw colour, 2 bits, 16 a word; w: the period
-    float as_shot[4];  // w: saturation
+    float as_shot[4];  // w: the white the file states
     int32_t map_x[4], map_y[4];
     int32_t size[4];
     int32_t ycc[4];     // YCC: block height, formula, hue, luma offset
@@ -372,7 +377,9 @@ bool GpuView::programs(std::string& error)
           entry{&histogram_max_, shaders::histogram_max}, entry{&ljpeg_guess_, shaders::ljpeg_guess}, entry{&ljpeg_sync_, shaders::ljpeg_sync},
           entry{&ljpeg_resolve_, shaders::ljpeg_resolve}, entry{&ljpeg_decode_, shaders::ljpeg_decode},
           entry{&ljpeg_columns_, shaders::ljpeg_columns}, entry{&ljpeg_rows_, shaders::ljpeg_rows}, entry{&ljpeg_black_, shaders::ljpeg_black},
-          entry{&raw_blocks_, shaders::raw_blocks}, entry{&unpack_, shaders::unpack}, entry{&noise_, shaders::noise}})
+          entry{&raw_blocks_, shaders::raw_blocks}, entry{&unpack_, shaders::unpack}, entry{&noise_, shaders::noise},
+          entry{&clip_, shaders::clip}, entry{&clip_linear_, shaders::clip_linear}, entry{&clip_ycc_, shaders::clip_ycc},
+          entry{&clip_find_, shaders::clip_find}})
     {
         auto r = device_->compute_program(make());
         if (!r.program)
@@ -1062,9 +1069,31 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             }
             device_->run(std::span(&g, 1));
         }
+        // Where each colour clips, from the data as the develop reads it
+        // (clip.hlsl), for the develop to clip at.
+        auto clips = device_->create_buffer(kClipWords * 4);
+        if (!clips)
+        {
+            error = "too big for the GPU";
+            return false;
+        }
+        device_->clear(clips, 0);
+        {
+            rap::gpu::dispatch d[2];
+            d[0].program = m->ycc.block_h ? clip_ycc_ : m->channels == 3 ? clip_linear_ : clip_;
+            d[0].inputs = {sites};
+            d[0].buffers = {clips, levels ? levels : histogram_};
+            d[0].uniforms = bytes(p);
+            d[0].groups[0] = (m->width + 63) / 64;
+            d[0].groups[1] = (m->height + 63) / 64;
+            d[1].program = clip_find_;
+            d[1].buffers = {clips};
+            d[1].uniforms = bytes(p);
+            device_->run(std::span(d));
+        }
         pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
         pass.inputs = {sites, green ? green : sites};  // the second read only for X-Trans
-        pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};  // each read only when there
+        pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_, clips};  // the first two read only when there
         // A DNG whose lens is corrected (WarpRectilinear): the whole active
         // area developed as it lies, then warped into the framing as shown.
         const bool warp = corrections && (*m->corrections)[16] != 0;
@@ -1102,6 +1131,14 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             auto probe = std::make_shared<std::vector<std::byte>>(histogram_->size());
             device_->readback(histogram_, *probe, [probe, t_start]
                               { std::fprintf(stderr, "gpu: a raw uploaded and developed in %.1f ms\n", (g_get_monotonic_time() - t_start) / 1000.0); });
+            auto found = std::make_shared<std::vector<std::byte>>(clips->size());
+            device_->readback(clips, *found,
+                              [found]
+                              {
+                                  float f[3];
+                                  std::memcpy(f, found->data() + kClipFound * 4, sizeof f);
+                                  std::fprintf(stderr, "gpu: colours clip at R %.4f G %.4f B %.4f of the stated white (0: none found)\n", f[0], f[1], f[2]);
+                              });
         }
         s.levels.push_back(top);
         // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame

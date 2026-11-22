@@ -2,60 +2,34 @@
 // Each output pixel, in the image as shown (the camera's framing, turned as
 // it was held), comes from the photosite under it (corrected first, where
 // the raw has its own corrections of its mosaic: CORRECT): black taken off
-// and scaled to saturation, the as-shot white balance applied (the demosaic
-// follows colour edges far better on balanced data), the two missing
-// colours found (a Bayer's from Malvar-He-Cutler's 5 x 5 kernels, X-Trans's
-// from its green made first, GREEN; none for a monochrome sensor's: grey),
-// clipped at saturation (all channels at 1:
-// highlights stay neutral), and the balance taken off again. Linear camera
-// RGB out; the frame's own white balance and the camera's colour matrix are
-// the view's, per frame.
-cbuffer Params : register(b0)
-{
-    // The filter pattern (RawMosaic's) over 6 x 6 photosites, a whole number
-    // of it (Bayer's 2 x 2 or X-Trans's 6 x 6): each site's colour as LibRaw
-    // counts them (0 R, 1 G, 2 B, 3 the other G), 2 bits a site, row-major,
-    // 16 a word; w: its period (2 or 6).
-    uint4 cfa;
-    float4 as_shot;      // R, G, B multipliers, the least 1; w: saturation in data units
-    int4 map_x;          // photosite x = map_x.x * out.x + map_x.y * out.y + map_x.z
-    int4 map_y;          // photosite y = map_y.x * out.x + map_y.y * out.y + map_y.z
-    int4 size;           // the mosaic's width, height; z: black levels measured on the GPU (levels); w: the raw's own corrections
-    int4 ycc;            // YCC: block height, formula, hue, luma offset (RawMosaic::Ycc)
-    int4 ycc_at;         // YCC: the first block's x, y
-    float4 ycc_mul;      // YCC: sraw_mul; w: the guided fill's regularisation, in luma units squared
-    int4 flags;          // x: the data is white balanced already (the camera did it): not again; y: grey, no filter (a monochrome sensor)
-    float4 black[9];     // per site of the 6 x 6, data units (LINEAR, YCC: per channel, R, G, B in the first)
-};
+// and scaled to the stated white, the as-shot white balance applied (the
+// demosaic follows colour edges far better on balanced data), the two
+// missing colours found (a Bayer's from Malvar-He-Cutler's 5 x 5 kernels,
+// X-Trans's from its green made first, GREEN; none for a monochrome
+// sensor's: grey), clipped where the first colour to clip under the balance
+// does (clipped()), and the balance taken off again. Linear camera RGB out;
+// the frame's own white balance and the camera's colour matrix are the
+// view's, per frame.
+#include "develop.hlsli"
 
-// The as-shot balance, as it's still to be applied to the data.
-float3 to_balance()
+ByteAddressBuffer clips : register(t10);  // clip.hlsl's
+
+// Balanced values (1 = the stated white) clipped where the first colour to
+// clip does, all three there, and scaled so that's 1: what's clipped is
+// neutral white, as LibRaw's (-H 0) has it. Each colour's clip is where the
+// data shows its values piling up (clip.hlsl), else the stated white: a
+// camera's stated white can be well above where a colour really stops (a
+// Canon mRAW's green, a 12-bit NEF's), and clipped there the others went on
+// past it to 1, tinting what's clipped (sky pink).
+float3 clipped(float3 balanced)
 {
-    return flags.x ? 1 : as_shot.rgb;
+    float3 found = asfloat(clips.Load3(kClipFound * 4));
+    if (flags.y)
+        found = found.g;  // grey: counted as green
+    const float3 stops = (found + (found <= 0) * (1 - found)) * to_balance();  // none found: the stated white
+    const float white = min(min(stops.r, min(stops.g, stops.b)), 1.0);
+    return clamp(balanced, 0, white) / white;
 }
-
-// The pattern's site at photosite (x, y), x and y not negative (past the
-// right and bottom edges the pattern goes on). By 6, not the period: a
-// constant's remainder is a multiply, a uniform's a long division.
-uint site_at(int x, int y)
-{
-    return uint(y) % 6 * 6 + uint(x) % 6;
-}
-
-// LibRaw's colour at a site, as levels counts them.
-uint filter_of(uint i)
-{
-    return cfa[i / 16] >> (i % 16 * 2) & 3;
-}
-
-// The colour at (x, y): 0 R, 1 G, 2 B.
-int colour_at(int x, int y)
-{
-    const uint f = filter_of(site_at(x, y));
-    return f == 3 ? 1 : int(f);
-}
-
-ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count R G B G2, zeros
 
 #ifdef YCC
 // Canon's sRAW and mRAW as stored: luma at every photosite, the colour
@@ -66,24 +40,6 @@ ByteAddressBuffer levels : register(t8);  // ljpeg_black's: sum R G B G2, count 
 // across edges (He et al.'s guided filter, at the colour samples). Then
 // Canon's formula to camera RGB, and black, scale and the clip under the
 // as-shot balance as for the others.
-Texture2D<float4> pixels : register(t0);  // unorm 16: Y, then the colour differences + 8192, as int16
-
-int2 at(int x, int y)
-{
-    return int2(clamp(x, 0, size.x - 1), clamp(y, 0, size.y - 1));
-}
-
-float luma(int x, int y)
-{
-    return pixels.Load(int3(at(x, y), 0)).r * 65535 - ycc.w;
-}
-
-float2 chroma_at(int x, int y)
-{
-    const float2 v = round(pixels.Load(int3(at(x, y), 0)).gb * 65535);
-    return v - 65536 * (v >= 32768) - 8192;  // as int16, less the neutral offset
-}
-
 float4 main(float4 position : SV_Position) : SV_Target
 {
     const int2 o = int2(position.xy);
@@ -116,17 +72,8 @@ float4 main(float4 position : SV_Position) : SV_Target
     const float2 mean_c = sc / n, cov = syc / n - mean_y * mean_c;
     const float2 a = cov / (var_y + ycc_mul.w), b = mean_c - a * mean_y;
     const float2 cd = a * Y + b;  // the colour differences here: Cb, Cr
-    float3 rgb;
-    if (ycc.y == 1)
-    {
-        const float c1 = cd.x * 4 + ycc.z, c2 = cd.y * 4 + ycc.z;
-        rgb = Y + float3(50 * c1 + 22929 * c2, -5640 * c1 - 11751 * c2, 29040 * c1 - 101 * c2) / 16384;
-    }
-    else
-        rgb = Y + float3(cd.y, (-778 * cd.x - cd.y * 2048) / 4096, cd.x);
-    rgb *= ycc_mul.rgb;
-    rgb = (rgb - black[0].rgb) / (as_shot.w - black[0].rgb);
-    return float4(clamp(rgb * as_shot.rgb, 0, 1) / as_shot.rgb, 1);
+    const float3 rgb = (ycc_rgb(Y, cd) - black[0].rgb) / (as_shot.w - black[0].rgb);
+    return float4(clipped(rgb * as_shot.rgb) / as_shot.rgb, 1);
 }
 #elif defined(LINEAR)
 // Already R, G, B a photosite (a linear DNG, Canon's sRAW): black off and
@@ -141,7 +88,7 @@ float4 main(float4 position : SV_Position) : SV_Target
     const int y = clamp(map_y.x * o.x + map_y.y * o.y + map_y.z, 0, size.y - 1);
     const float3 d = pixels.Load(int3(x, y, 0)).rgb * 65535;
     const float3 rgb = (d - black[0].rgb) / (as_shot.w - black[0].rgb);
-    return float4(clamp(rgb * to_balance(), 0, 1) / as_shot.rgb, 1);
+    return float4(clipped(rgb * to_balance()) / as_shot.rgb, 1);
 }
 #else
 Texture2D<float> mosaic : register(t0);  // unorm 16: data / 65535
@@ -183,32 +130,6 @@ float map_gain(uint d, int x, int y, uint p)
     const float a = word_f(g + (r0 * cols + c0) * planes + q), b = word_f(g + (r0 * cols + c1) * planes + q);
     const float c = word_f(g + (r1 * cols + c0) * planes + q), e = word_f(g + (r1 * cols + c1) * planes + q);
     return lerp(lerp(a, b, tx), lerp(c, e, tx), ty);
-}
-
-// The black level as LibRaw's: measured where the sensor is masked (per
-// colour), if those were read and not mostly zero; else what the file says
-// for each site of the pattern. Read once a pixel (read_levels).
-static bool measured;
-static uint4 measured_sum, measured_count;
-
-void read_levels()
-{
-    measured = false;
-    if (size.z != 0)
-    {
-        measured_sum = levels.Load4(0), measured_count = levels.Load4(16);
-        const uint zero = levels.Load(32);
-        measured = zero < measured_count.x && measured_count.y && measured_count.z && measured_count.w;
-    }
-}
-
-// At photosite (x, y), data units.
-float black_at(int x, int y)
-{
-    const uint i = site_at(x, y);
-    if (measured)
-        return measured_sum[filter_of(i)] / measured_count[filter_of(i)];
-    return black[i / 4][i % 4];
 }
 
 #ifdef CORRECT
@@ -659,12 +580,12 @@ float4 main(float4 position : SV_Position) : SV_Target
     // lensfun's vignetting brings up what the lens darkened: what the sensor
     // clipped stays clipped (neutral), and the rest may pass it.
     if (size.w && word(2) == 2)
-        rgb = clamp(rgb, 0, 1) * rgb_gain(x, y);
+        rgb = clipped(rgb) * rgb_gain(x, y);
     else
     {
         if (size.w)
             rgb *= rgb_gain(x, y);
-        rgb = clamp(rgb, 0, 1);
+        rgb = clipped(rgb);
     }
     return float4(rgb / as_shot.rgb, 1);
 }

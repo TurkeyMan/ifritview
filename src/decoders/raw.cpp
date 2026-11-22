@@ -6,6 +6,7 @@
 #include "../parallel.h"
 #include "../platform.h"
 #include "../white_balance.h"
+#include "../shaders/clip_layout.hlsli"
 #include "crx.h"
 #include "decoder.h"
 #include "dng_opcodes.h"
@@ -210,6 +211,93 @@ std::vector<float> match_tone_to_preview(const LinearData& linear, const Image& 
     return tone;
 }
 
+// A colour's clip from its values counted as clip.hlsl counts them (bins
+// over the top of the range, as clip_layout.hlsli lays them out): where
+// they pile up, as clip.hlsl's FIND has it; 0 for none.
+float find_clip(const uint32_t* bin, uint64_t total)
+{
+    const int band = int(0.01 * kClipBins / kClipSpan + 0.5), window = int(0.0025 * kClipBins / kClipSpan + 0.5);
+    int top = int(kClipBins) - 1;
+    while (top > 0 && bin[top] == 0)
+        --top;
+    uint64_t best = 0;
+    int best_end = top;
+    for (int e = top; e > top - band && e >= window - 1; --e)
+    {
+        uint64_t s = 0;
+        for (int k = 0; k < window; ++k)
+            s += bin[e - k];
+        if (s > best)
+            best = s, best_end = e;
+    }
+    uint64_t below = 0;
+    for (int v = std::max(top - 2 * band, 0); v < std::max(top - band, 0); ++v)
+        below += bin[v];
+    if (best == 0 || best * 20000 < total || best * uint64_t(band) < 6 * below * uint64_t(window))
+        return 0;
+    uint64_t peak = 0;
+    int at = best_end;
+    for (int k = 0; k < window; ++k)
+        if (bin[best_end - k] > peak)
+            peak = bin[best_end - k], at = best_end - k;
+    int edge = at;
+    while (edge > 0 && uint64_t(bin[edge - 1]) * 10 >= peak)
+        --edge;
+    return kClipFrom + float(edge - 1) * kClipSpan / kClipBins;
+}
+
+// LibRaw's white (its maximum) lowered to where the first colour to clip
+// under the as-shot balance really does, as the GPU's develop clips
+// (develop.hlsl's clipped()), from a Bayer or X-Trans mosaic's own values.
+// LibRaw only lowers it to the data's overall largest value (and only when
+// that's within 75% of it): a 12-bit NEF whose greens stop at 3939 while its
+// reds reach 4095 kept its sky pink. Others (a Canon sRAW, a linear DNG)
+// are left to LibRaw's.
+void clip_where_measured(LibRaw& raw)
+{
+    auto& col = raw.imgdata.color;
+    const auto& id = raw.imgdata.idata;
+    const auto& sz = raw.imgdata.sizes;
+    const ushort* data = raw.imgdata.rawdata.raw_image;
+    if (!data || !id.filters || id.colors != 3 || col.maximum <= col.black)
+        return;
+    if (sz.top_margin + sz.height > sz.raw_height || sz.left_margin + sz.width > sz.raw_width)
+        return;  // a SuperCCD's readout, laid out otherwise
+    std::vector<uint32_t> bins(3 * kClipBins, 0);
+    uint64_t total[3] = {};
+    const size_t pitch = sz.raw_pitch / 2;
+    const float range = float(col.maximum) - float(col.black);
+    for (int y = 0; y < sz.height; ++y)
+        for (int x = 0; x < sz.width; ++x)
+        {
+            const int f = raw.COLOR(y, x), c = f == 3 ? 1 : f;
+            if (c < 0 || c > 2)
+                continue;
+            const float b = float(col.black + col.cblack[f]);
+            const float v = (float(data[size_t(y + sz.top_margin) * pitch + size_t(x + sz.left_margin)]) - b) / (range - float(col.cblack[f]));
+            ++total[c];
+            if (v >= kClipFrom)
+                ++bins[c * kClipBins + std::min(unsigned((v - kClipFrom) / kClipSpan * kClipBins), kClipBins - 1)];
+        }
+    float mul[3] = {col.cam_mul[0], col.cam_mul[1], col.cam_mul[2]};
+    if (!(mul[0] > 0 && mul[1] > 0 && mul[2] > 0))
+        for (int c = 0; c < 3; ++c)
+            mul[c] = col.pre_mul[c] > 0 ? col.pre_mul[c] : 1;
+    const float least = std::min({mul[0], mul[1], mul[2]});
+    float white = 1;
+    for (int c = 0; c < 3; ++c)
+    {
+        const float found = find_clip(bins.data() + c * kClipBins, total[c]);
+        white = std::min(white, (found > 0 ? found : 1) * mul[c] / least);
+    }
+    if (white >= 1)
+        return;
+    // Its copy too: dcraw_process starts again from the colour data as unpacked.
+    col.maximum = raw.imgdata.rawdata.color.maximum = col.black + unsigned(range * white);
+    raw.imgdata.params.adjust_maximum_thr = 0;  // ours, not the data's overall largest
+    platform::trace("raw: white lowered to %u, where the first colour to clip under the balance does", col.maximum);
+}
+
 bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
 {
     raw.imgdata.params.half_size = half ? 1 : 0;
@@ -239,6 +327,7 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
                             float(c.maximum) - float(c.black), mono);
         }
     }
+    clip_where_measured(raw);
     r = raw.dcraw_process();
     if (r != LIBRAW_SUCCESS)
     {

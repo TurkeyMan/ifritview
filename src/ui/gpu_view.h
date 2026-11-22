@@ -266,6 +266,7 @@ private:
     rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
     rap::gpu::program_ptr develop_impulse_;  // its hot and cold photosites taken out, before the demosaic
     rap::gpu::program_ptr develop_green_;    // X-Trans's green, before the develop
+    rap::gpu::program_ptr clip_, clip_linear_, clip_ycc_, clip_find_;  // where a raw's colours clip, before its develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::program_ptr mosaic_linear_;  // a linear DNG's readout: three colours a photosite
     rap::gpu::texture_ptr rows_[2];  // the first pass's output, reused while big enough (a swipe's two images each have one)
