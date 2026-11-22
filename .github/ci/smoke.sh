@@ -52,6 +52,18 @@ printf '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\207\0\0\0\0\0\0\0\0' >> "$smoke"/odd.xcf
 printf '\0\0\0\2\0\0\0\2\0\0\0\4\0\0\0\0\0\0\0\243\0\0\0\0\0\0\0\0\0\0\0\2\0\0\0\2\0\0\0\0\0\0\0\273\0\0\0\0\0\0\0\0' >> "$smoke"/odd.xcf
 printf '\377\0\0\377\0\377\0\377\0\0\377\377\377\377\377\377' >> "$smoke"/odd.xcf
 "$build/ifritview" --process "$smoke"/odd.xcf diff:"$smoke"/rgb.ppm | grep -q '^identical'
+# A raw still being copied: a CR2 whose strip runs past the end of the file,
+# and one with nothing written yet, are refused as not all there (read again
+# when they're done), not shown as what another decoder makes of them.
+printf 'II*\000\020\000\000\000CR\002\000\000\000\000\000\003\000\000\001\003\000\001\000\000\000\100\000\000\000\021\001\004\000\001\000\000\000\072\000\000\000\027\001\004\000\001\000\000\000\000\000\001\000\000\000\000\000' > "$smoke"/cut.cr2
+: > "$smoke"/empty.cr2
+for raw in cut empty; do
+  "$build/ifritview" --probe "$smoke"/$raw.cr2 | grep -q "still being copied"
+done
+# A decode of a file that changes before the viewer takes it arrives stale;
+# a file's time is kept finer than the second; and one still coming in is
+# read again once it's changed (or its watch said so) and held still.
+"$build/ifritview" --check-loader "$smoke"
 # A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
 # packaged), reading a 1x1 image.
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff

@@ -16,7 +16,7 @@ public:
     struct Entry
     {
         std::shared_ptr<Image> image;
-        int64_t mtime = 0;  // file modification time when decoded
+        FileStamp stamp;  // the file as read for it: a different size or time and it's out of date
     };
 
     // Budget in bytes; 0 picks a share of the memory available right now.
@@ -25,7 +25,7 @@ public:
     // `soon` false: the first to go when over budget (an image left behind
     // while flicking ahead), not the last.
     void put(const std::string& path, Entry entry, bool soon = true);
-    bool get(const std::string& path, Entry& entry);  // refreshes recency, checks mtime
+    bool get(const std::string& path, Entry& entry);  // refreshes recency, checks the file's still as read
     bool contains(const std::string& path) const;
     bool peek(const std::string& path, Entry& entry) const;  // as get, but not counted as a use
     void erase(const std::string& path);
@@ -35,7 +35,6 @@ public:
     void set_budget(size_t budget);
 
     static size_t image_bytes(const Image& image);
-    static int64_t file_mtime(const std::string& path);
     static size_t automatic_budget();
 
 private:

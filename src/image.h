@@ -270,6 +270,18 @@ ImagePart key_part(const std::string& key);
 // For people (traces): "file.pdf [2.0]", the page and level as the key has them.
 std::string key_text(const std::string& key);
 
+// A file as it was when read: its size and modification time. What's
+// decoded from it is out of date once the file's differ (a file still being
+// copied grows; one rewritten changes).
+struct FileStamp
+{
+    int64_t size = -1;  // -1: unknown
+    int64_t mtime = 0;  // in the file system's own ticks (100 ns on Windows, 1 ns elsewhere): only compared
+    bool known() const { return size >= 0; }
+    bool operator==(const FileStamp&) const = default;
+    static FileStamp of(const std::string& path);  // as the file is now; unknown if it can't be looked at
+};
+
 struct Image
 {
     int width = 0;
@@ -381,6 +393,14 @@ struct Image
     // Changes whenever the image's data changes in place (a develop landing,
     // a turn, a crop, a video frame): what the GPU keeps of it is out of date.
     uint64_t generation = 1;
+    // The file as it was read for these pixels (unknown when they weren't
+    // read by the loader): a cached copy is good while the file still is.
+    FileStamp stamp;
+    // The file ended before the image did, or where it should have the
+    // image's data has none written yet: one still being copied. Set by a
+    // decoder that fails for it; nothing else is tried, and it's read again
+    // once the file's done.
+    bool incomplete = false;
 
     // Take the final pixels of this same file: pending edits are replayed on
     // them, then they replace ours in place (metadata merged, identity kept).

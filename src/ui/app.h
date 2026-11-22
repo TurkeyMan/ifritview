@@ -316,6 +316,15 @@ private:
     std::unique_ptr<rap::sys::directory_watch> watch_;
     std::string watched_dir_;          // what watch_ watches
     bool watched_recursive_ = false;   // and whether the folders inside it too
+    // The image shown is of a file not all there yet (still being copied):
+    // looked at each second, and read again once it has changed from how it
+    // was read, or its watch said it changed, and then held still for a
+    // second (a watch of a network drive may not say, and needn't read it
+    // again at each pause in the copy).
+    void await_complete(const std::string& key, FileStamp read);
+    rap::subscription incomplete_tick_;
+    std::string incomplete_key_;    // what await_complete waits on
+    FileSettle incomplete_settle_;  // and whether it's done
     std::array<int, 2> video_shape_{};  // the video frame last fitted to
     rap::label* status_left_ = nullptr;
     rap::label* status_center_ = nullptr;

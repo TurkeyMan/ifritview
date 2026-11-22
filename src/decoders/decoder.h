@@ -77,6 +77,7 @@ struct FileBlob
 {
     PixelBuffer data;  // huge-page backed when large: a 25 MB raw faults in a dozen times, not thousands
     bool ok = false;
+    FileStamp stamp;  // the file's size and time as it was read
 };
 std::shared_ptr<const FileBlob> read_file(const std::string& path);
 // This thread's next decode of `path` takes its bytes from `blob` (read by
