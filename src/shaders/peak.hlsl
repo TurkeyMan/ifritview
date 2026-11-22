@@ -4,6 +4,9 @@
 #define COMPUTE
 #include "view.hlsli"
 
+RWByteAddressBuffer clips : register(u2);  // a raw's: clip.hlsl's (develop.hlsli's layout)
+#include "clip_layout.hlsli"
+
 [numthreads(1, 1, 1)]
 void main()
 {
@@ -52,4 +55,28 @@ void main()
         gain = anchor * exp2(clamp(log2(min(bright, max(key, anchor)) / anchor), -1.0, up));
     }
     stats.Store(kStatsAutoGain * 4, asuint(gain));
+
+    // A raw's white point, where its highlight shoulder ends (view.hlsli's
+    // shoulder()), in the shoulder's terms (each pixel's largest of R, G and
+    // B): where it clips, 1 as the develop leaves it, if any of its colours
+    // does; else the 99.9th percentile, the top of what it has (a few
+    // specular glints past it don't count).
+    float top = 0;
+    seen = 0;
+    for (int k = 1023; k >= 0 && total; --k)
+    {
+        seen += stats.Load((kStatsBrightest + k) * 4);
+        if (seen * 1000 >= total)
+        {
+            top = exp2(float(k + 1) * 32 / 1024 - 20);
+            break;
+        }
+    }
+    if (anchor > 0)
+    {
+        const float3 found = asfloat(clips.Load3(kClipFound * 4));
+        if (any(found > 0))
+            top = 1;
+    }
+    stats.Store(kStatsWhite * 4, asuint(top));
 }

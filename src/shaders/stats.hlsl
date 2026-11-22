@@ -6,7 +6,7 @@
 #define COMPUTE
 #include "view.hlsli"
 
-groupshared uint local_luminance[1024];
+groupshared uint local_luminance[1024], local_brightest[1024];
 groupshared uint local_extents[72];
 groupshared uint local_count, local_opaque;
 groupshared uint local_least, local_most;
@@ -15,7 +15,7 @@ groupshared uint local_least, local_most;
 void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
 {
     for (uint i = index; i < 1024; i += 256)
-        local_luminance[i] = 0;
+        local_luminance[i] = local_brightest[i] = 0;
     if (index < 72)
         local_extents[index] = 0;
     if (index == 0)
@@ -36,6 +36,9 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
             {
                 const uint bin = uint(clamp((log2(xyz.y) + 20) * 1024 / 32, 0.0, 1023.0));
                 InterlockedAdd(local_luminance[bin], 1u);
+                const float3 rgb = mul(kXyzToRgb709, xyz);
+                const float most = max(max(rgb.r, max(rgb.g, rgb.b)), 1e-9);
+                InterlockedAdd(local_brightest[uint(clamp((log2(most) + 20) * 1024 / 32, 0.0, 1023.0))], 1u);
                 InterlockedAdd(local_count, 1u);
                 InterlockedMax(local_least, ~asuint(xyz.y));  // positive floats order as their bits
                 InterlockedMax(local_most, asuint(xyz.y));
@@ -53,8 +56,12 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     }
     GroupMemoryBarrierWithGroupSync();
     for (uint j = index; j < 1024; j += 256)
+    {
         if (local_luminance[j])
             stats.InterlockedAdd((kStatsLuminance + j) * 4, local_luminance[j]);
+        if (local_brightest[j])
+            stats.InterlockedAdd((kStatsBrightest + j) * 4, local_brightest[j]);
+    }
     if (index < 72 && local_extents[index])
         stats.InterlockedMax((kStatsExtents + index) * 4, local_extents[index]);
     if (index == 0 && local_count)
