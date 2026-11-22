@@ -8,7 +8,7 @@
 
 groupshared uint local_luminance[1024];
 groupshared uint local_extents[72];
-groupshared uint local_count;
+groupshared uint local_count, local_opaque;
 groupshared uint local_least, local_most;
 
 [numthreads(16, 16, 1)]
@@ -19,7 +19,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     if (index < 72)
         local_extents[index] = 0;
     if (index == 0)
-        local_count = local_least = local_most = 0;
+        local_count = local_opaque = local_least = local_most = 0;
     GroupMemoryBarrierWithGroupSync();
 
     uint w, h;
@@ -29,6 +29,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         const float4 c = source.Load(int3(id.xy, 0));
         if (c.a > 0)
         {
+            InterlockedAdd(local_opaque, 1u);
             const float3 rgb = c.rgb / c.a;
             const float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), rgb);
             if (xyz.y > 0)
@@ -62,4 +63,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         stats.InterlockedMax(kStatsMinimum * 4, local_least);
         stats.InterlockedMax(kStatsMaximum * 4, local_most);
     }
+    if (index == 0 && local_opaque)
+        stats.InterlockedAdd(kStatsOpaque * 4, local_opaque);
 }
