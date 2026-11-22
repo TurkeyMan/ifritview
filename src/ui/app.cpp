@@ -84,6 +84,7 @@ App::App(rap::ui& ui, std::shared_future<Config> settings) : ui_(ui), loader_([t
     };
     view_->on_pointer_over = [this](const rap::pointer_event& e) { return map_overlay_on_ && map_view_->pointer_in(e, map_overlay_rect_); };
     view_->on_scroll_over = [this](const rap::scroll_event& e) { return map_overlay_on_ && map_view_->scroll_in(e, map_overlay_rect_); };
+    restore_pane();
     // Format plugins load on a thread of their own, the first image never
     // waiting for them; once they're in, their formats join the folder.
     s_app = this;
@@ -670,6 +671,11 @@ void App::build_ui()
 void App::show_window()
 {
     platform::trace("showing the window");
+    // The info pane open from the start: its map's split set again for the
+    // window as the first image fitted it (where the toolkit lays a hidden
+    // window out), so the map's at its height in the first frame.
+    if (metadata_visible_ && !pane_histogram_)
+        preset_map_height();
     window_->show();
     platform::trace("window shown");
     view_->canvas()->focus();
