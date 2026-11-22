@@ -20,7 +20,12 @@ ByteAddressBuffer clips : register(t10);  // clip.hlsl's
 // data shows its values piling up (clip.hlsl), else the stated white: a
 // camera's stated white can be well above where a colour really stops (a
 // Canon mRAW's green, a 12-bit NEF's), and clipped there the others went on
-// past it to 1, tinting what's clipped (sky pink).
+// past it to 1, tinting what's clipped (sky pink). Where a colour nears its
+// own clip (from 80% of the way, neutral there), and where the white cuts
+// one short (from 3% under it, neutral wherever it cuts: red over a warm
+// sky, held at green's clip), the colour eases to neutral at its brightest:
+// what's lost its hue is white, not tinted by what's left, while a bright
+// colour under the white (a blue sky) keeps its own.
 float3 clipped(float3 balanced)
 {
     float3 found = asfloat(clips.Load3(kClipFound * 4));
@@ -28,7 +33,11 @@ float3 clipped(float3 balanced)
         found = found.g;  // grey: counted as green
     const float3 stops = (found + (found <= 0) * (1 - found)) * to_balance();  // none found: the stated white
     const float white = min(min(stops.r, min(stops.g, stops.b)), 1.0);
-    return clamp(balanced, 0, white) / white;
+    const float3 c = clamp(balanced, 0, white);
+    const float3 near = balanced / stops;
+    const float own = smoothstep(0.8, 1.0, max(near.r, max(near.g, near.b)));
+    const float cut = smoothstep(0.97, 1.0, max(balanced.r, max(balanced.g, balanced.b)) / white);
+    return lerp(c, max(c.r, max(c.g, c.b)), max(own, cut)) / white;
 }
 
 #ifdef YCC
