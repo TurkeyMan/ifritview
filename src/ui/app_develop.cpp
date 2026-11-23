@@ -240,10 +240,12 @@ rap::node App::develop_panel()
                          .on_toggled([this](bool on) { show_instead(on ? Instead::CameraJpeg : Instead::Nothing); })
                          .bind(camera_jpeg_check_)
                          .tooltip(_("Show the camera's own rendering, the JPEG embedded in the raw, instead of the raw as developed here"))},
-                {"", L::check{_("LibRaw's develop")}
+                {"", L::check{_("LibRaw (dcraw defaults, reference)")}
                          .on_toggled([this](bool on) { show_instead(on ? Instead::LibRaw : Instead::Nothing); })
                          .bind(libraw_check_)
-                         .tooltip(_("Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"))},
+                         .tooltip(_("Show the raw as LibRaw develops it with dcraw's defaults, on the CPU (slower): the camera's white "
+                                    "balance and matrix to sRGB, highlights clipped, its auto-brightening and BT.709 curve. "
+                                    "A reference, shown as it is: the exposure and develop settings here don't change it"))},
                 {"", L::check{_("Lens correction"), cfg_.lens_correction}
                          .on_toggled([this](bool on) { set_lens_correction(on, true); })
                          .bind(lens_check_)
@@ -255,7 +257,7 @@ rap::node App::develop_panel()
 // The sliders to the image's settings: its process's basic controls, the rest.
 void App::sync_knobs()
 {
-    const bool shown = image_ && !image_->is_video && !view_->comparing();
+    const bool shown = image_ && !image_->is_video && !image_->reference && !view_->comparing();
     develop_box_->set_visible(shown);
     if (!shown)
     {

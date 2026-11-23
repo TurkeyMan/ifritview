@@ -2047,12 +2047,12 @@ msgid "This raw has no embedded JPEG"
 msgstr "Dieses Raw enthält kein eingebettetes JPEG"
 
 #: src/ui/app.cpp
-msgid "LibRaw's develop"
-msgstr "LibRaws Entwicklung"
+msgid "LibRaw (dcraw defaults, reference)"
+msgstr "LibRaw (dcraw-Standard, Referenz)"
 
 #: src/ui/app.cpp
-msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
-msgstr "Das Raw so zeigen, wie LibRaw es auf der CPU entwickelt (langsamer), statt wie hier auf der GPU entwickelt"
+msgid "Show the raw as LibRaw develops it with dcraw's defaults, on the CPU (slower): the camera's white balance and matrix to sRGB, highlights clipped, its auto-brightening and BT.709 curve. A reference, shown as it is: the exposure and develop settings here don't change it"
+msgstr "Das Raw so zeigen, wie LibRaw es mit den Standardwerten von dcraw auf der CPU entwickelt (langsamer): der Weißabgleich und die Matrix der Kamera nach sRGB, Lichter abgeschnitten, seine automatische Aufhellung und die BT.709-Kurve. Eine Referenz, so gezeigt, wie sie ist: Belichtung und Entwicklungseinstellungen hier ändern sie nicht"
 
 #: src/ui/app.cpp
 msgid "Lens correction"

@@ -2022,11 +2022,11 @@ msgid "This raw has no embedded JPEG"
 msgstr ""
 
 #: src/ui/app.cpp
-msgid "LibRaw's develop"
+msgid "LibRaw (dcraw defaults, reference)"
 msgstr ""
 
 #: src/ui/app.cpp
-msgid "Show the raw as LibRaw develops it, on the CPU (slower), instead of as developed here on the GPU"
+msgid "Show the raw as LibRaw develops it with dcraw's defaults, on the CPU (slower): the camera's white balance and matrix to sRGB, highlights clipped, its auto-brightening and BT.709 curve. A reference, shown as it is: the exposure and develop settings here don't change it"
 msgstr ""
 
 #: src/ui/app.cpp

@@ -225,11 +225,17 @@ std::shared_ptr<const void> file_bytes_owner()
 namespace
 {
 thread_local bool t_cpu_develop = false;
+thread_local bool t_reference = false;
 }
 
 void develop_raws_on_cpu(bool on)
 {
     t_cpu_develop = on;
+}
+
+void develop_raws_as_reference(bool on)
+{
+    t_reference = on;
 }
 
 void set_decode_options(const DecodeOptions& options)
@@ -242,8 +248,9 @@ DecodeOptions decode_options()
 {
     std::lock_guard lock(g_options_mutex);
     DecodeOptions o = g_options;
-    if (t_cpu_develop)
+    if (t_cpu_develop || t_reference)
         o.gpu_develop = o.gpu_decode = false;
+    o.libraw_reference = t_reference;
     return o;
 }
 

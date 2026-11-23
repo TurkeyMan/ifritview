@@ -53,12 +53,19 @@ struct DecodeOptions
     // compressed for the GPU to decode too (RawMosaic::stream): the CPU only
     // reads the file.
     bool gpu_decode = false;
+    // Raws as LibRaw develops them at dcraw's defaults, a reference shown as
+    // it is (Image::reference), rather than our linear CPU develop: only for
+    // the develop panel's LibRaw option (develop_raws_as_reference()).
+    bool libraw_reference = false;
 };
 void set_decode_options(const DecodeOptions& options);
 DecodeOptions decode_options();
 // This thread's decodes develop raws on the CPU (LibRaw's develop) whatever
 // the options say: for comparing the GPU's develop with it.
 void develop_raws_on_cpu(bool on);
+// This thread's decodes develop raws as LibRaw's reference (on the CPU,
+// DecodeOptions::libraw_reference): for the develop panel's LibRaw option.
+void develop_raws_as_reference(bool on);
 
 // The file being decoded, read once per decode on this thread. Every reader
 // (the decoder, EXIF, XMP, the format sniffers) takes its bytes from here

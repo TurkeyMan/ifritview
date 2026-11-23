@@ -397,6 +397,111 @@ bool decode_full(LibRaw& raw, bool half, Image& out, std::string& error)
     return true;
 }
 
+// LibRaw's colour for a raw as it opened, before anything of ours (a DNG's
+// colour as its specification has it, a known bad matrix put right) changed
+// it for the GPU's develop: what LibRaw's own develop starts from.
+struct LibRawColour
+{
+    float cam_mul[4], pre_mul[4], rgb_cam[3][4], cam_xyz[4][3];
+    unsigned black, maximum;
+    explicit LibRawColour(const LibRaw& raw)
+    {
+        const auto& c = raw.imgdata.color;
+        std::memcpy(cam_mul, c.cam_mul, sizeof cam_mul);
+        std::memcpy(pre_mul, c.pre_mul, sizeof pre_mul);
+        std::memcpy(rgb_cam, c.rgb_cam, sizeof rgb_cam);
+        std::memcpy(cam_xyz, c.cam_xyz, sizeof cam_xyz);
+        black = c.black, maximum = c.maximum;
+    }
+    void restore(LibRaw& raw) const
+    {
+        auto& c = raw.imgdata.color;
+        std::memcpy(c.cam_mul, cam_mul, sizeof cam_mul);
+        std::memcpy(c.pre_mul, pre_mul, sizeof pre_mul);
+        std::memcpy(c.rgb_cam, rgb_cam, sizeof rgb_cam);
+        std::memcpy(c.cam_xyz, cam_xyz, sizeof cam_xyz);
+        c.black = black, c.maximum = maximum;
+    }
+};
+
+// LibRaw's develop as dcraw's defaults have it, the reference other raw
+// developers are compared with: the camera's white balance, its matrix to
+// sRGB, highlights clipped (-H 0), the 1% auto-brightening and BT.709's
+// curve (gamm 0.45, 4.5), at 16 bits. Shown as it is, as a JPEG would be:
+// no exposure, curve or edits of ours on it. Only the camera's framing, its
+// orientation and the half-size decode (raw_mode) are ours. Only for
+// DecodeOptions::libraw_reference (the develop panel's LibRaw option).
+bool decode_reference(LibRaw& raw, const LibRawColour& colour, bool half, Image& out, std::string& error)
+{
+    colour.restore(raw);
+    auto& params = raw.imgdata.params;
+    params.half_size = half ? 1 : 0;
+    params.use_camera_wb = 1;
+    params.output_color = 1;  // sRGB
+    params.highlight = 0;
+    params.no_auto_bright = 0;
+    params.auto_bright_thr = LIBRAW_DEFAULT_AUTO_BRIGHTNESS_THRESHOLD;
+    params.bright = 1;
+    params.gamm[0] = 0.45;
+    params.gamm[1] = 4.5;
+    params.output_bps = 16;
+    const bool framed = apply_camera_crop(raw);
+    int r = raw.unpack();
+    if (r != LIBRAW_SUCCESS)
+    {
+        error = libraw_strerror(r);
+        return false;
+    }
+    r = raw.dcraw_process();
+    if (r != LIBRAW_SUCCESS)
+    {
+        error = libraw_strerror(r);
+        return false;
+    }
+    // LibRaw's image as it exports it (its curve and brightening are made
+    // there), but not turned: the camera's orientation is applied as ours.
+    const int flip = raw.imgdata.sizes.flip;
+    raw.imgdata.sizes.flip = 0;
+    libraw_processed_image_t* img = raw.dcraw_make_mem_image(&r);
+    raw.imgdata.sizes.flip = flip;
+    if (!img)
+    {
+        error = libraw_strerror(r);
+        return false;
+    }
+    const bool usable = img->type == LIBRAW_IMAGE_BITMAP && (img->colors == 3 || img->colors == 1) && img->bits == 16 && img->width > 0 &&
+                        img->height > 0;
+    if (usable)
+    {
+        out.allocate(img->width, img->height);
+        const uint16_t* data = reinterpret_cast<const uint16_t*>(img->data);
+        std::vector<uint16_t> grey;  // a monochrome sensor's, as RGB
+        if (img->colors == 1)
+        {
+            grey.resize(size_t(img->width) * img->height * 3);
+            for (size_t i = 0; i < size_t(img->width) * img->height; ++i)
+                grey[i * 3] = grey[i * 3 + 1] = grey[i * 3 + 2] = data[i];
+            data = grey.data();
+        }
+        out.from_rgb16(data, img->width * 6);
+    }
+    LibRaw::dcraw_clear_mem(img);
+    if (!usable)
+    {
+        error = "unexpected LibRaw output";
+        return false;
+    }
+    out.reference = true;
+    out.apply_camera_orientation(flip_to_orientation(flip));
+    if (framed)
+    {
+        const auto& c = raw.imgdata.sizes.raw_inset_crops[0];
+        out.add(N_("Raw"), N_("Camera framing"),
+                std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " + std::to_string(c.ctop) + ")");
+    }
+    return true;
+}
+
 // A DNG's CalibrationIlluminant (an EXIF LightSource) as a temperature, as
 // the DNG SDK has them; 0: unknown. 1 daylight, 2 fluorescent, 3 tungsten,
 // 4 flash, 9 fine weather, 10 cloudy, 11 shade; 12..16 daylight, day white,
@@ -2268,6 +2373,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         error = libraw_strerror(r);
         return false;
     }
+    const LibRawColour libraw_colour(raw);  // for LibRaw's reference develop, before ours below
     if (!raw.fix_known_bad_matrix())
         raw.use_dng_colour(bytes, size);
 
@@ -2288,8 +2394,16 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     if (!ok)
     {
         const bool half = options.raw_mode != RawMode::Full;
-        ok = decode_full(raw, half, out, error);
-        mode = half ? "half size" : "full size";
+        if (options.libraw_reference)
+        {
+            ok = decode_reference(raw, libraw_colour, half, out, error);
+            mode = half ? "half size, LibRaw (dcraw's defaults)" : "full size, LibRaw (dcraw's defaults)";
+        }
+        else
+        {
+            ok = decode_full(raw, half, out, error);
+            mode = half ? "half size" : "full size";
+        }
     }
     if (!ok)
         return false;
@@ -2330,7 +2444,9 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     }
 
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
-    if (out.linear)
+    if (out.reference)
+        out.color_space = "sRGB, BT.709 curve (LibRaw's develop)";  // what LibRaw rendered to
+    else if (out.linear)
         out.color_space = "sRGB (developed)";  // the sensor has no colour space; this is what we rendered to
     else if (out.mosaic)
         out.color_space = "camera (developed on the GPU)";
