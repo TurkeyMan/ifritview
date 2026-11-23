@@ -75,10 +75,40 @@ float3 rgb709_from_ok(float3 o)
                   dot(float3(-0.0041960863f, -0.7034186147f, 1.7076147010f), lms));
 }
 
+// Whether the display can show `rgb`, to within kFitSlack of its range: a
+// hair over by float rounding (a colour the RGB -> XYZ -> RGB round trip
+// leaves at -1e-10) fits, and is clamped (clamp_display()) rather than
+// moved. kFitSlack, in linear light at SDR white 1: well under half an
+// output step at its finest (sRGB 10-bit next to black: 1 / 1023 / 12.92 / 2
+// = 3.8e-5) and far over float rounding (1e-7 of a channel).
+static const float kFitSlack = 1e-5f;
 bool fits_display(float3 rgb, float peak)
+{
+    return max(rgb.x, max(rgb.y, rgb.z)) <= peak + kFitSlack * max(peak, 1.0f) && min(rgb.x, min(rgb.y, rgb.z)) >= -kFitSlack;
+}
+// Exactly within the display's range: for the constant-hue fit's search,
+// whose result is clamped anyway, so it tends to the peak's white (no
+// chroma) as its luminance nears the peak's, not to a colour kFitSlack over.
+bool within_display(float3 rgb, float peak)
 {
     return max(rgb.x, max(rgb.y, rgb.z)) <= peak && min(rgb.x, min(rgb.y, rgb.z)) >= 0;
 }
+float3 clamp_display(float3 rgb, float peak)
+{
+    return float3(min(max(rgb.x, 0.0f), peak), min(max(rgb.y, 0.0f), peak), min(max(rgb.z, 0.0f), peak));
+}
+
+// How far `rgb` is past the display's range, in linear light: its most
+// negative channel, or its most over the peak.
+float display_excess(float3 rgb, float peak)
+{
+    return max(max(max(rgb.x, max(rgb.y, rgb.z)) - peak, -min(rgb.x, min(rgb.y, rgb.z))), 0.0f);
+}
+
+// The band past the display's range over which a colour goes from clamped
+// to moved at constant hue (toward_white()), in linear light at SDR white 1:
+// 1/50, about 1.5 sRGB 8-bit levels at mid grey.
+static const float kFitBand = 0.02f;
 
 // A colour the display can't show at luminance y (`rgb`, its hue's), towards
 // white at y until every channel fits in 0..peak (view.hlsli's
@@ -86,32 +116,61 @@ bool fits_display(float3 rgb, float peak)
 // white as a straight line in linear RGB does (the Abney effect: oranges
 // going yellow or pink, blues purple). Its Oklab chroma is scaled down at
 // its Oklab lightness, then the whole colour scaled to luminance y: scaling
-// linear RGB scales Oklab's L, a and b alike, so the hue is kept. The most
-// chroma that fits is halved for, 16 times.
+// linear RGB scales Oklab's L, a and b alike, so the hue is kept.
 float3 at_luminance(float3 rgb, float y)
 {
     const float has = dot(float3(0.2126729f, 0.7151522f, 0.0721750f), rgb);
     return has > 1e-12f ? rgb * (y / has) : float3(y, y, y);
 }
-float3 toward_white(float3 rgb, float y, float peak)
+// The constant-hue fit alone: at luminance y the most of the colour's
+// Oklab chroma that fits, searched down from the colour's own (the first of
+// 16 steps that fits, then halved within the step above it 16 times), so it
+// isn't one past a dip where the line leaves the display and comes back.
+// At or over the peak's luminance it's the peak's white, at or under none
+// black: the limits the search tends to as y nears them, so it's
+// continuous across them.
+float3 fit_hue(float3 rgb, float y, float peak)
 {
-    if (fits_display(rgb, peak))
-        return rgb;
     if (y >= peak)
         return float3(peak, peak, peak);
     if (y <= 0)
         return float3(0, 0, 0);
     const float3 o = ok_from_rgb709(rgb);
     float lo = 0, hi = 1;
+    for (int k = 15; k >= 0; --k)
+    {
+        const float t = k / 16.0f;
+        if (within_display(at_luminance(rgb709_from_ok(float3(o.x, o.y * t, o.z * t)), y), peak))
+        {
+            lo = t;
+            hi = t + 1 / 16.0f;
+            break;
+        }
+    }
     for (int i = 0; i < 16; ++i)
     {
         const float t = 0.5f * (lo + hi);
-        if (fits_display(at_luminance(rgb709_from_ok(float3(o.x, o.y * t, o.z * t)), y), peak))
+        if (within_display(at_luminance(rgb709_from_ok(float3(o.x, o.y * t, o.z * t)), y), peak))
             lo = t;
         else
             hi = t;
     }
-    return at_luminance(rgb709_from_ok(float3(o.x, o.y * lo, o.z * lo)), y);
+    return clamp_display(at_luminance(rgb709_from_ok(float3(o.x, o.y * lo, o.z * lo)), y), peak);
+}
+float3 toward_white(float3 rgb, float y, float peak)
+{
+    if (fits_display(rgb, peak))
+        return clamp_display(rgb, peak);
+    // Continuous at the display's edge: a constant-hue line can leave the
+    // display's volume on its way to white (from a blue on the red = 0 face,
+    // red goes negative for most of the way), so the nearest colour at that
+    // hue can be far from one a hair outside. Over the first kFitBand past
+    // the edge the result goes smoothly from the colour clamped (a hair
+    // outside: a hair inside) to the constant-hue fit, the same way at any
+    // luminance, the peak's and none included.
+    const float u = min(max((display_excess(rgb, peak) - kFitSlack) / (kFitBand - kFitSlack), 0.0f), 1.0f);
+    const float w = u * u * (3 - 2 * u);
+    return clamp_display(rgb, peak) * (1 - w) + fit_hue(rgb, y, peak) * w;
 }
 
 // Perceived brightness matched: `rgb`, the colour fit's choice, shown with
@@ -121,14 +180,20 @@ float3 toward_white(float3 rgb, float y, float peak)
 // chroma and hue (a, b) are kept and only its Oklab lightness is chosen:
 // halved for 20 times between black and the peak's white, each try shown
 // through toward_white() at its own luminance where it's past the display.
-// L** is continuous along that path, from 0 at black to the peak white's,
-// which no grey's output exceeds, so the halving always closes on target;
-// chroma the display can't show at that lightness goes towards white at
-// constant hue. kLightnessChromaWeight's choice of chroma is kept wherever
-// it fits at the matched lightness.
-float3 shown_at(float L, float a, float b, float peak)
+// Under kChromaWithLightness of the fit's own lightness the chroma goes
+// to none in proportion, so the path starts at black (a fixed chroma at no
+// lightness is a colour of some luminance, which left the darkest targets,
+// under about 1.5 L**, out of reach). L** is continuous along that path,
+// from 0 at black to the peak white's, which no grey's output exceeds, so
+// the halving always closes on target; chroma the display can't show at
+// that lightness goes towards white at constant hue.
+// kLightnessChromaWeight's choice of chroma is kept wherever it fits at the
+// matched lightness, from that fraction of the fit's lightness up.
+static const float kChromaWithLightness = 0.25f;
+float3 shown_at(float L, float a, float b, float from, float peak)
 {
-    const float3 c = rgb709_from_ok(float3(L, a, b));
+    const float k = min(L / from, 1.0f);
+    const float3 c = rgb709_from_ok(float3(L, a * k, b * k));
     return toward_white(c, dot(float3(0.2126729f, 0.7151522f, 0.0721750f), c), peak);
 }
 float3 match_perceived(float3 rgb, float target, float peak)
@@ -136,19 +201,21 @@ float3 match_perceived(float3 rgb, float target, float peak)
     if (!(target > 0))
         return float3(0, 0, 0);
     const float3 o = ok_from_rgb709(rgb);
-    // From black to a lightness whose colour is past the peak's luminance,
-    // so shown as the peak's white (the peak white's own, doubled while the
-    // chroma holds the luminance under it).
+    const float from = kChromaWithLightness * max(o.x, 1e-4f);
+    // From black to a lightness whose colour is shown as the peak's white:
+    // past the peak's luminance by more than kFitBand, so toward_white()
+    // takes it all the way to fit_hue()'s white (the peak white's own
+    // lightness, doubled while the chroma holds the luminance under that).
     float lo = 0, hi = exp2(log2(peak) / 3);
-    for (int k = 0; k < 8 && dot(float3(0.2126729f, 0.7151522f, 0.0721750f), rgb709_from_ok(float3(hi, o.y, o.z))) < peak; ++k)
+    for (int k = 0; k < 8 && dot(float3(0.2126729f, 0.7151522f, 0.0721750f), rgb709_from_ok(float3(hi, o.y, o.z))) < peak + kFitBand; ++k)
         hi *= 2;
     for (int i = 0; i < 20; ++i)
     {
         const float mid = 0.5f * (lo + hi);
-        if (perceived_lightness(xyz_of_rgb709(shown_at(mid, o.y, o.z, peak))) >= target)
+        if (perceived_lightness(xyz_of_rgb709(shown_at(mid, o.y, o.z, from, peak))) >= target)
             hi = mid;
         else
             lo = mid;
     }
-    return shown_at(hi, o.y, o.z, peak);
+    return shown_at(hi, o.y, o.z, from, peak);
 }

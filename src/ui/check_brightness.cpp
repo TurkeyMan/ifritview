@@ -12,6 +12,7 @@
 // And the way to white at constant hue: an orange-to-white ramp, its Oklab
 // hue as shown within 2 degrees of the orange's while it has any chroma.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <utility>
@@ -197,6 +198,164 @@ static int check_hue_ramp()
     return failures ? 1 : 0;
 }
 
+// The display stage on plain SDR colours (perceived.hlsli's toward_white(),
+// as view.hlsli's tone_map() gives it them: BT.709 -> XYZ -> BT.709 in
+// float). Every 8-bit level of the six primary and secondary ramps (R, G, B,
+// C, M, Y) and a sweep over the sRGB cube's faces come back within one
+// level: a round trip's -1e-10 is clamped, not moved (a blue ramp's 253 came
+// out with green 47). And continuity at the boundary: a colour on a face
+// pushed out by d (2e-5 to 1e-3, a few 8-bit levels near black) comes back
+// within 4 d of its clamp in every channel, so a colour a hair outside lands
+// a hair inside, never jumps.
+static int check_display()
+{
+    using namespace perceived;
+    const auto decode = [](int v) { const float c = v / 255.0f; return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+    const auto encode = [](float a) { return 255 * (a <= 0.0031308f ? 12.92f * a : 1.055f * std::pow(a, 1 / 2.4f) - 0.055f); };
+    const auto round_trip = [](float3 rgb) {
+        const float3 xyz = xyz_of_rgb709(rgb);
+        const float3 back(dot(float3(3.2404542f, -1.5371385f, -0.4985314f), xyz), dot(float3(-0.9692660f, 1.8760108f, 0.0415560f), xyz),
+                          dot(float3(0.0556434f, -0.2040259f, 1.0572252f), xyz));
+        return toward_white(back, xyz.y, 1);
+    };
+    int failures = 0, samples = 0;
+    float worst = 0, worst_ratio = 0;
+    const auto level = [&](int r, int g, int b) {
+        const float3 out = round_trip(float3(decode(r), decode(g), decode(b)));
+        const float off = std::max(std::abs(encode(out.x) - r), std::max(std::abs(encode(out.y) - g), std::abs(encode(out.z) - b)));
+        ++samples;
+        worst = std::max(worst, off);
+        if (!(off <= 1) && ++failures <= 5)
+            std::fprintf(stderr, "check-brightness: display (%d, %d, %d) came out (%.2f, %.2f, %.2f)\n", r, g, b, encode(out.x), encode(out.y), encode(out.z));
+    };
+    for (int v = 0; v < 256; ++v)
+    {
+        level(v, 0, 0), level(0, v, 0), level(0, 0, v);
+        level(0, v, v), level(v, 0, v), level(v, v, 0);
+    }
+    // The cube's faces: one channel at 0 or 255, the others over a grid.
+    for (int face = 0; face < 6; ++face)
+        for (int a = 0; a < 256; a += 3)
+            for (int b = 0; b < 256; b += 3)
+            {
+                const int e = face & 1 ? 255 : 0;
+                if (face < 2)
+                    level(e, a, b);
+                else if (face < 4)
+                    level(a, e, b);
+                else
+                    level(a, b, e);
+            }
+    // Continuity: off a face by d.
+    for (float d : {2e-5f, 1e-4f, 3e-4f, 1e-3f})
+        for (int face = 0; face < 6; ++face)
+            for (int a = 8; a < 256; a += 12)
+                for (int b = 8; b < 256; b += 12)
+                {
+                    const int ch = face / 2;
+                    const float edge = face & 1 ? 1 + d : -d;
+                    float c[3];
+                    c[ch] = edge, c[(ch + 1) % 3] = decode(a), c[(ch + 2) % 3] = decode(b);
+                    const float3 in(c[0], c[1], c[2]);
+                    const float3 clamped = clamp_display(in, 1);
+                    const float3 out = toward_white(in, dot(float3(0.2126729f, 0.7151522f, 0.0721750f), in), 1);
+                    const float moved = std::max(std::abs(out.x - clamped.x), std::max(std::abs(out.y - clamped.y), std::abs(out.z - clamped.z)));
+                    worst_ratio = std::max(worst_ratio, moved / d);
+                    if (!(moved <= 4 * d) && ++failures <= 10)
+                        std::fprintf(stderr, "check-brightness: display (%.5f, %.5f, %.5f), %g outside, moved %.5f\n", in.x, in.y, in.z, d, moved);
+                }
+    // Continuity sweeps: inputs walked in tiny steps across the peak's
+    // luminance, across none, and across the band's two edges (kFitSlack and
+    // kFitBand past the display), at peak 1 and 4; between neighbouring steps
+    // the output moves at most 100 x the input (the blend's steepest is
+    // 1.5 / kFitBand of the clamp-to-fit distance) plus 1e-4 x the peak (room
+    // for the fit's search resolution; at SDR under a twentieth of an 8-bit
+    // level near white). A colour at
+    // y = 0.999999106 the step before y = 1.00000012 went from (1, 1, 0.9356)
+    // to white, 7.4 levels in blue.
+    float worst_sweep = 0;
+    int sweeps = 0;
+    const auto sweep = [&](const char* what, float peak, float3 from, float3 to) {
+        const int n = 400;
+        float3 last = toward_white(from, dot(float3(0.2126729f, 0.7151522f, 0.0721750f), from), peak);
+        for (int i = 1; i <= n; ++i)
+        {
+            const float3 in = from + (to - from) * (float(i) / n);
+            const float3 out = toward_white(in, dot(float3(0.2126729f, 0.7151522f, 0.0721750f), in), peak);
+            const float3 din = (to - from) / float(n), dout = out - last;
+            const float step_in = std::max(std::abs(din.x), std::max(std::abs(din.y), std::abs(din.z)));
+            const float step_out = std::max(std::abs(dout.x), std::max(std::abs(dout.y), std::abs(dout.z)));
+            worst_sweep = std::max(worst_sweep, (step_out - 1e-4f * peak) / step_in);
+            ++sweeps;
+            if (!(step_out <= 100 * step_in + 1e-4f * peak) && ++failures <= 15)
+                std::fprintf(stderr, "check-brightness: display sweep %s (peak %g) at (%.7f, %.7f, %.7f): moved %.6f for %.2g\n", what, peak, in.x, in.y,
+                             in.z, step_out, step_in);
+            last = out;
+        }
+    };
+    for (float peak : {1.0f, 4.0f})
+        for (int hue = 0; hue < 24; ++hue)
+            for (float sat : {0.02f, 0.13f, 0.4f})
+            {
+                const float h = 6.2831853f * hue / 24;
+                const float3 base(1 + sat * std::cos(h), 1 + sat * std::cos(h - 2.0943951f), 1 + sat * std::cos(h + 2.0943951f));
+                const float yb = dot(float3(0.2126729f, 0.7151522f, 0.0721750f), base);
+                // Across y = peak: the colour scaled through it, 1e-4 either side.
+                const float3 at_peak = base * (peak / yb);
+                sweep("across the peak", peak, at_peak * (1 - 1e-4f), at_peak * (1 + 1e-4f));
+                // Across y = 0: a colour of no luminance (chroma only), a grey
+                // of 1e-5 either side added.
+                const float3 chroma = (base - float3(yb, yb, yb)) * 0.05f;
+                sweep("across none", peak, chroma - float3(1e-5f, 1e-5f, 1e-5f), chroma + float3(1e-5f, 1e-5f, 1e-5f));
+                // Across the band's edges: from a colour on the display's edge
+                // (its largest channel at the peak), out along its own
+                // direction past kFitSlack and past kFitBand.
+                const float top = std::max(base.x, std::max(base.y, base.z));
+                const float3 edge = base * (peak / top);
+                for (float e : {kFitSlack, kFitBand})
+                    sweep(e == kFitSlack ? "across the slack" : "across the band", peak, edge * (1 + (e - 1e-5f) / peak), edge * (1 + (e + 1e-5f) / peak));
+            }
+    // Codex's: (1.00999904, 1.00999904, 0.871446848), y 0.999999106, raised
+    // by 9.5e-7 a channel to y 1.00000012; and at peak 4 the same x 4.
+    for (float peak : {1.0f, 4.0f})
+    {
+        const float3 c = float3(1.00999904f, 1.00999904f, 0.871446848f) * peak;
+        sweep("Codex's", peak, c - float3(2e-6f, 2e-6f, 2e-6f) * peak, c + float3(2e-6f, 2e-6f, 2e-6f) * peak);
+    }
+    // match_perceived() reaches any target L** from black to the peak's
+    // white (a jump at the peak's luminance left 99.9 at (1.01, 1.01, 0.871)
+    // unreachable: it gave 100): Codex's colour and a hue grid, targets every
+    // 0.25 L** and just under the top.
+    float worst_match = 0;
+    int matches = 0;
+    for (float peak : {1.0f, 4.0f})
+    {
+        const float top_l = perceived_lightness(xyz_of_rgb709(float3(peak, peak, peak)));
+        for (int hue = -1; hue < 24; ++hue)
+        {
+            const float h = 6.2831853f * hue / 24;
+            const float3 c = hue < 0 ? float3(peak + 0.01f, peak + 0.01f, peak - 0.12855214f)
+                                     : float3(1 + 0.5f * std::cos(h), 1 + 0.5f * std::cos(h - 2.0943951f), 1 + 0.5f * std::cos(h + 2.0943951f)) * (0.7f * peak);
+            for (int k = 1;; ++k)
+            {
+                const float target = k <= int(top_l * 4) ? k * 0.25f : top_l - (std::array<float, 6>{0.5f, 0.2f, 0.1f, 0.05f, 0.01f, 0.001f})[k - int(top_l * 4) - 1];
+                const float got = perceived_lightness(xyz_of_rgb709(match_perceived(c, target, peak)));
+                worst_match = std::max(worst_match, std::abs(got - target));
+                ++matches;
+                if (!(std::abs(got - target) <= 0.01f) && ++failures <= 20)
+                    std::fprintf(stderr, "check-brightness: match (peak %g, hue %d): target L** %.4f, got %.4f\n", peak, hue, target, got);
+                if (k - int(top_l * 4) >= 6)
+                    break;
+            }
+        }
+    }
+    std::printf("display: %d perceived matches, within %.4f L** of the target\n", matches, worst_match);
+    std::printf("display: %s, %d SDR levels within %.3f of a level; off a face by d, moved at most %.2f d; %d sweep steps, moved at most %.1f x the step "
+                "(past 1e-4 x the peak)\n",
+                failures ? "FAILED" : "ok", samples, worst, worst_ratio, sweeps, std::max(worst_sweep, 0.0f));
+    return failures ? 1 : 0;
+}
+
 int check_brightness()
 {
     using namespace curve;
@@ -265,5 +424,5 @@ int check_brightness()
         std::printf("brightness: top %g x peak: knee %.3f x peak\n", std::exp2(above), std::exp2(knee));
     }
     std::printf("brightness: %s, least slope seen at 0.25: %.4f\n", failures ? "FAILED" : "ok", lowest);
-    return (failures ? 1 : 0) | check_perceived() | check_hue_ramp();
+    return (failures ? 1 : 0) | check_perceived() | check_hue_ramp() | check_display();
 }
