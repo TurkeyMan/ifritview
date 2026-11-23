@@ -13,10 +13,21 @@
 class ImageCache
 {
 public:
+    // What a raw's entry holds: the camera's embedded JPEG (shown instead of
+    // a develop), or a develop (or the stand-in waiting for one) by the GPU
+    // or on the CPU (LibRaw). Anything that isn't a raw is Other.
+    enum class Source : uint8_t
+    {
+        Other,
+        CameraJpeg,
+        GpuDevelop,
+        CpuDevelop
+    };
     struct Entry
     {
         std::shared_ptr<Image> image;
         FileStamp stamp;  // the file as read for it: a different size or time and it's out of date
+        Source source = Source::Other;
     };
 
     // Budget in bytes; 0 picks a share of the memory available right now.
@@ -29,6 +40,12 @@ public:
     bool contains(const std::string& path) const;
     bool peek(const std::string& path, Entry& entry) const;  // as get, but not counted as a use
     void erase(const std::string& path);
+    // Every entry not usable for `wanted` (the view's mode changed); how many went.
+    size_t erase_unusable(Source wanted);
+    // Whether `entry` shows a raw as it's wanted now: the camera's JPEG
+    // while that's chosen (or the develop of a raw with none), else the
+    // develop that's chosen or its stand-in. Anything else always does.
+    static bool usable(const Entry& entry, Source wanted);
     void clear();
     size_t bytes() const { return bytes_; }
     size_t budget() const { return budget_; }

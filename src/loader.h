@@ -38,8 +38,11 @@ private:
 
 // --check-loader: what's decoded of a file that then changes arrives stale,
 // though it changed only after the decode was done; a file's time is kept
-// finer than the second; and a file still coming in is taken as settled
-// only once it's changed and held still.
+// finer than the second; a file still coming in is taken as settled only
+// once it's changed and held still; and a decode says what it was for (the
+// camera's JPEG alone or a develop) as it was asked for, with no develop
+// following a stand-in once the camera's JPEG is chosen, and the cache
+// taking neither one for the other.
 int check_loader(const std::string& dir);
 
 // Decoding off the main thread, with the image being navigated to always
@@ -65,6 +68,11 @@ public:
         bool cached = false;                   // served from the cache: pixels already carry any edits
         bool incomplete = false;               // failed: the file isn't all there yet (still being copied)
         bool stale = false;                    // read before the file last changed (file_changed), up to its delivery: out of date
+        bool stand_ins_only = false;           // decoded for the camera's JPEG alone (set_stand_ins_only as it was asked for)
+        // Shown now, with the camera's JPEG chosen or not: whether its
+        // develop must be asked for (none follows a stand-in from the cache,
+        // or one decoded for the camera's JPEG alone).
+        bool needs_develop(bool camera_jpeg) const { return image && image->is_preview() && !camera_jpeg && (cached || stand_ins_only); }
         FileStamp stamp{};                     // the file as it was read for it
         gint64 picked_us = 0, decoded_us = 0;  // trace: loader timeline
     };
@@ -90,6 +98,10 @@ public:
     // A stand-in (a raw's embedded JPEG) need only cover this many pixels:
     // it's decoded smaller when it can be. 0: full size.
     void set_stand_in_fit(int width, int height);
+    // The camera's JPEG is shown instead of a develop: a raw's stand-in is
+    // all that's decoded of it (whole, not to fit), shown or prefetched, and
+    // no develop follows unless one is asked for (request_develop).
+    void set_stand_ins_only(bool on);
     unsigned workers() const { return workers_; }
 
 private:
@@ -111,6 +123,7 @@ private:
         std::string path;
         std::shared_ptr<const FileBlob> file;  // read, or null for the reader to read
         uint64_t changes = 0;                  // the file's changes_ as it began to be read
+        bool only = false;                     // its stand-in only (set_stand_ins_only, as it was asked for); a develop never
     };
     // The file read for `path` and waiting for a worker, if any, taken from
     // the queue into `job`. Under the lock.
@@ -134,6 +147,10 @@ private:
     std::unordered_map<std::string, uint64_t> changes_;  // file_changed() calls, by file
     unsigned workers_ = 1;
     int fit_w_ = 0, fit_h_ = 0;  // set_stand_in_fit
+    bool stand_ins_only_ = false;
+    // A file's stand-in: decode_preview, or check_loader's own.
+    std::function<bool(const std::string&, Image&)> preview_ = [](const std::string& path, Image& out) { return decode_preview(path, out); };
+    friend int check_loader(const std::string& dir);
     bool stop_ = false;
     std::thread foreground_, reader_;
     std::vector<std::thread> pool_;

@@ -334,6 +334,8 @@ struct Image
     };
     Stage stage = Stage::Final;
     bool is_preview() const { return stage == Stage::Preview; }
+    bool stand_in_full = false;  // a Preview decoded at its own size, not to fit the view: the camera's JPEG as it is
+    bool no_stand_in = false;    // a raw with no JPEG of its own to show instead: its develop is all there is
     bool is_raw = false;
     bool edited = false;  // cropped or turned since it was read: a stored thumbnail no longer matches
     // How the pixels relate to the file's: a turn or flip of the decoded

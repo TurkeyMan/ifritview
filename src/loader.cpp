@@ -1,4 +1,5 @@
 #include "loader.h"
+#include "cache.h"
 
 #include "platform.h"
 
@@ -82,6 +83,7 @@ void Loader::request(uint64_t generation, const std::string& path)
         std::lock_guard lock(mutex_);
         develop_.reset();  // a develop for an image we've left, not yet started, is dropped
         pending_ = Job{generation, path, nullptr};
+        pending_->only = stand_ins_only_;  // decoded as the view wanted it when asked
     }
     fg_wake_.notify_one();
 }
@@ -148,6 +150,12 @@ void Loader::set_stand_in_fit(int width, int height)
 // Results for the image on screen jump the main loop's queue; prefetches
 // wait until the main thread is otherwise idle. One whose file changed while
 // it waited in the queue arrives stale, as if it had changed while decoding.
+void Loader::set_stand_ins_only(bool on)
+{
+    std::lock_guard lock(mutex_);
+    stand_ins_only_ = on;
+}
+
 void Loader::post(Result* r, Lane lane, uint64_t changed)
 {
     if (lane == Lane::Foreground)
@@ -191,6 +199,7 @@ void Loader::run_foreground()
     for (;;)
     {
         Job job;
+        bool stand_ins_only = false;
         {
             std::unique_lock lock(mutex_);
             fg_wake_.wait(lock, [this] { return stop_ || pending_; });
@@ -200,7 +209,11 @@ void Loader::run_foreground()
             pending_.reset();
             if (!take_read(job.path, job))  // the reader got to it first
                 job.changes = changes(job.path);
-            set_preview_fit(fit_w_, fit_h_);
+            stand_ins_only = job.only;
+            if (stand_ins_only)
+                set_preview_fit(0, 0);  // what's shown: the camera's JPEG whole
+            else
+                set_preview_fit(fit_w_, fit_h_);
         }
         // Read here, not queued behind the reader: the image on screen always wins.
         const gint64 t0 = g_get_monotonic_time();
@@ -215,17 +228,24 @@ void Loader::run_foreground()
         // with the file already read.
         auto preview = std::make_shared<Image>();
         const bool first_image = key_part(job.path) == ImagePart{};  // only a file's first image has one
-        if (first_image && !decode_is_quick(job.path) && decode_preview(job.path, *preview))
+        // Showing the camera's JPEG instead: that, and no develop at all.
+        if (first_image && (stand_ins_only || !decode_is_quick(job.path)) && preview_(job.path, *preview))
         {
             preview->stamp = job.file->stamp;
             preview->build_mips();
             auto* r = new Result{job.generation, job.path, preview, {}, true};
             r->stamp = job.file->stamp;
+            r->stand_ins_only = stand_ins_only;
             const uint64_t changed = job.changes;
             {
                 std::lock_guard lock(mutex_);
                 r->stale = changes(job.path) != job.changes;
-                if (!r->stale && std::find(developing_.begin(), developing_.end(), job.path) == developing_.end())
+                // Its develop follows, unless the camera's JPEG is all that's
+                // wanted: when asked for, or since (chosen while this decoded).
+                if (stand_ins_only || stand_ins_only_)
+                    platform::trace("loader: foreground %s, the camera's JPEG (%dx%d), no develop", base_name(job.path).c_str(), preview->width,
+                                    preview->height);
+                else if (!r->stale && std::find(developing_.begin(), developing_.end(), job.path) == developing_.end())
                     develop_ = std::move(job);
             }
             post(r, Lane::Foreground, changed);
@@ -234,7 +254,10 @@ void Loader::run_foreground()
             continue;
         }
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false};
+        r->stand_ins_only = stand_ins_only;
         decode_into(*r, job);
+        if (stand_ins_only && r->image && first_image)
+            r->image->no_stand_in = true;  // no JPEG to show instead: its develop is all there is
         release_file_bytes();
         post(r, Lane::Foreground, job.changes);
     }
@@ -307,7 +330,7 @@ void Loader::run_worker(unsigned index)
     for (;;)
     {
         Job job;
-        bool is_develop = false, full = false;
+        bool is_develop = false, full = false, only = false;
         {
             std::unique_lock lock(mutex_);
             worker_wake_.wait(lock, [this] { return stop_ || (develop_ && develop_->file) || !read_.empty(); });
@@ -329,11 +352,14 @@ void Loader::run_worker(unsigned index)
                 read_.erase(it);
                 // As far as a visit would take it: the whole image when the
                 // GPU develops raws (only unpacked here), else its preview.
-                full = decode_options().gpu_develop;
+                // Showing the camera's JPEG: that's all a visit takes.
+                job.only = stand_ins_only_;
+                full = decode_options().gpu_develop && !job.only;
             }
             in_flight_.push_back(job.path);
             if (full)
                 developing_.push_back(job.path);
+            only = job.only;  // what this decode is for, whatever's chosen by the time it's done (a develop: never only)
         }
         reader_wake_.notify_one();  // room for another read
         const gint64 started = g_get_monotonic_time();
@@ -341,9 +367,10 @@ void Loader::run_worker(unsigned index)
                         is_develop ? "develop" : full ? "prefetch, in full" : "prefetch, preview");
         provide_file_bytes(key_file(job.path), job.file);
         auto* r = new Result{job.generation, job.path, std::make_shared<Image>(), {}, false, !is_develop};
+        r->stand_ins_only = only;
         if (full)
             decode_into(*r, job);
-        else if (key_part(job.path) == ImagePart{} && decode_preview(job.path, *r->image))
+        else if (key_part(job.path) == ImagePart{} && preview_(job.path, *r->image))
         {
             r->preview = true;
             r->stamp = r->image->stamp = job.file->stamp;
@@ -353,6 +380,8 @@ void Loader::run_worker(unsigned index)
         {
             provide_file_bytes(key_file(job.path), job.file);  // a failed preview may have let them go
             decode_into(*r, job);
+            if (only && r->image && key_part(job.path) == ImagePart{})
+                r->image->no_stand_in = true;  // no JPEG to show instead: its develop is all there is
         }
         release_file_bytes();
         job.file.reset();
@@ -476,6 +505,116 @@ int check_loader(const std::string& dir)
     deliver();
     if (got.size() != 1 || got[0].stale || !got[0].image)
         return fail("a decode of the file as it is arrived stale, or failed");
+
+    // The camera's JPEG chosen or not, as it changes under decodes in
+    // flight. A stand-in of its own here (the file has no embedded JPEG),
+    // held back on request to change the choice while it decodes.
+    std::mutex hold_m;
+    std::condition_variable hold_cv;
+    bool hold = false, held = false;
+    const std::function<bool(const std::string&, Image&)> stand_in = [&](const std::string&, Image& out)
+    {
+        {
+            std::unique_lock lock(hold_m);
+            held = true;
+            hold_cv.notify_all();
+            hold_cv.wait(lock, [&] { return !hold; });
+        }
+        out.allocate(2, 2);
+        out.stage = Image::Stage::Preview;
+        out.is_raw = out.stand_in_full = true;
+        return true;
+    };
+    {
+        std::lock_guard lock(loader.mutex_);
+        loader.preview_ = stand_in;
+    }
+    const auto queued_count = [&]
+    {
+        std::lock_guard lock(m);
+        return queued.size();
+    };
+    const auto develop_queued = [&]
+    {
+        std::lock_guard lock(loader.mutex_);
+        return loader.develop_.has_value();
+    };
+    // Asked for with the camera's JPEG chosen, arriving after it's unchosen:
+    // it says it was for the JPEG (no develop of its own follows), so it's
+    // developed as it's shown.
+    loader.set_stand_ins_only(true);
+    loader.request(3, file);
+    if (!posted())
+        return fail("nothing was decoded for the camera's JPEG");
+    loader.set_stand_ins_only(false);
+    deliver();
+    if (got.size() != 1 || !got[0].preview || !got[0].stand_ins_only || develop_queued())
+        return fail("the camera's JPEG wasn't all that was decoded when it was chosen");
+    if (!got[0].needs_develop(false) || got[0].needs_develop(true))
+        return fail("the camera's JPEG, no longer chosen, wasn't to be developed as it's shown");
+    // Asked for without, the camera's JPEG chosen while its stand-in
+    // decodes: no develop follows it.
+    {
+        std::lock_guard lock(hold_m);
+        hold = true;
+        held = false;
+    }
+    loader.request(4, file);
+    {
+        std::unique_lock lock(hold_m);
+        if (!hold_cv.wait_for(lock, 60s, [&] { return held; }))
+            return fail("the stand-in was never decoded");
+    }
+    loader.set_stand_ins_only(true);
+    loader.cancel_develop(file);
+    {
+        std::lock_guard lock(hold_m);
+        hold = false;
+    }
+    hold_cv.notify_all();
+    if (!posted())
+        return fail("the stand-in never arrived");
+    std::this_thread::sleep_for(500ms);  // time for a develop, were one to follow
+    if (queued_count() != 1 || develop_queued())
+        return fail("a develop followed a stand-in after the camera's JPEG was chosen");
+    deliver();
+    if (got.size() != 1 || got[0].stand_ins_only)
+        return fail("a stand-in asked for without the camera's JPEG said it was for it");
+    // A develop asked for says it's a develop, whatever's chosen as it runs.
+    loader.request_develop(5, file);
+    if (!posted())
+        return fail("the develop asked for never arrived");
+    deliver();
+    if (got.size() != 1 || got[0].preview || got[0].stand_ins_only)
+        return fail("a develop asked for said it was for the camera's JPEG");
+    loader.set_stand_ins_only(false);
+
+    // The cache: a raw's develop isn't shown or kept while the camera's
+    // JPEG is chosen (a develop left before its JPEG came), unless the raw
+    // has no JPEG; the JPEG isn't once a develop is.
+    {
+        using S = ImageCache::Source;
+        auto developed = std::make_shared<Image>();
+        developed->is_raw = true;
+        auto bare = std::make_shared<Image>(*developed);
+        bare->no_stand_in = true;
+        auto jpeg = std::make_shared<Image>(*developed);
+        jpeg->stage = Image::Stage::Preview;
+        const FileStamp at = FileStamp::of(file);
+        if (ImageCache::usable({developed, at, S::GpuDevelop}, S::CameraJpeg))
+            return fail("a raw's develop was taken for its camera JPEG");
+        if (!ImageCache::usable({bare, at, S::GpuDevelop}, S::CameraJpeg))
+            return fail("the develop of a raw with no JPEG wasn't taken in its place");
+        if (ImageCache::usable({jpeg, at, S::CameraJpeg}, S::GpuDevelop) || !ImageCache::usable({jpeg, at, S::CameraJpeg}, S::CameraJpeg))
+            return fail("a raw's camera JPEG was taken for its develop, or not for itself");
+        if (!ImageCache::usable({std::make_shared<Image>(), at, S::Other}, S::CameraJpeg))
+            return fail("an image that isn't a raw was turned away");
+        ImageCache cache(64 << 20);
+        cache.put(file, {developed, at, S::GpuDevelop});
+        cache.put(file + "#bare", {bare, at, S::GpuDevelop});
+        if (cache.erase_unusable(S::CameraJpeg) != 1 || cache.contains(file) || !cache.contains(file + "#bare"))
+            return fail("choosing the camera's JPEG didn't drop just the develops it replaces");
+    }
     std::printf("check-loader: ok\n");
     return 0;
 }
