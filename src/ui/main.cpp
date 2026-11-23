@@ -743,6 +743,14 @@ static int gpu_render(int argc, char** argv)
     f.height = std::max(1, int(std::ceil(image->height * f.zoom)));
     f.background = rap::color{38, 38, 38};
     GpuView::edit_of(*image, f);  // its develop: the look, every control at rest
+    // IFRIT_RENDER_NR=L,C: noise reduction and sharpening as the viewer
+    // opens the image (a raw's, Lightroom's defaults: detail.h), its
+    // Luminance and Color L and C; anything else, as it opens. To compare.
+    if (const char* nr = std::getenv("IFRIT_RENDER_NR"))
+    {
+        f.detail = image->opening_adjust(false).detail;
+        std::sscanf(nr, "%lf,%lf", &f.detail.luminance, &f.detail.colour);
+    }
     if (argc > 3)
     {
         static const char* const names[] = {"nearest", "area", "mitchell", "catmullrom", "lanczos3"};
@@ -941,6 +949,20 @@ int main(int argc, char** argv)
     }
     if (argc > 1 && std::strcmp(argv[1], "--check-highlight") == 0)
         return check_highlight();
+    if (argc > 1 && std::strcmp(argv[1], "--check-detail") == 0)
+    {
+        // The CPU's, then the GPU's part of it, where there's a GPU.
+        int failed = check_detail();
+        if (auto device = rap::gpu::device::headless())
+        {
+            GpuView view(device);
+            failed += view.check_shaping();
+            failed += view.check_negative_measures();
+        }
+        else
+            std::printf("no GPU device: the GPU's shaping not checked\n");
+        return failed ? 1 : 0;
+    }
     if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
         return check_loader(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-looks") == 0)

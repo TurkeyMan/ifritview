@@ -64,7 +64,7 @@ public:
         ScaleFilter shrink = ScaleFilter::Lanczos3, enlarge = ScaleFilter::Lanczos3;
         FrontBuffer front = FrontBuffer::Srgb8;
         float sdr_white_nits = 203;  // PQ and scRGB: what SDR white is
-        int volume_probe = 0;  // headless check: 1 returns pre-final volume RGB; 2 its signed gamut overshoot
+        int volume_probe = 0;  // headless check: 1 volume RGB, 2 signed gamut overshoot, 8 extent/lightness
         bool count_histogram = false;  // count what's shown, for the overlay or the docked panel
         bool histogram = false;        // draw it into the frame, at `panel` (device pixels: x, y, width, height)
         int histogram_channels = 15;   // which: bits 1 R, 2 G, 4 B, 8 luminance
@@ -94,6 +94,14 @@ public:
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
     // The filtered path's first pass's target (--gpu-render reads it back).
     const rap::gpu::texture_ptr& first_pass() const { return rows_[0]; }
+    // --check-detail's off-centre case (detail.h's shaping_case()) on the
+    // GPU: detail.hlsl's DETAIL_SHAPING and DETAIL_TABLE against the CPU's.
+    // The failures.
+    int check_shaping();
+    // --check-detail's: a raw's colour below 0 with some brightness (kept
+    // to the display) measured as tone_map() is given it (stats.hlsl's
+    // CURVE and TOP, volume.hlsl's top). The failures.
+    int check_negative_measures();
 
     // The histogram counted by the last render() (count_histogram), drawn
     // into a `width` x `height` texture for the docked panel's canvas. False
@@ -157,10 +165,23 @@ private:
         // inside.
         Detail detailed;
         rap::gpu::buffer_ptr noise;
-        rap::gpu::buffer_ptr clips;                 // a raw developed here: where its colours clip (clip.hlsl's)
+        rap::gpu::buffer_ptr clips;                 // a raw developed here: where its colours clip, its readout's noise (clip.hlsl's)
+        bool raw = false;                           // a raw (developed here or by LibRaw): its noise model fitted (detail.h)
+        float light[3] = {1, 1, 1}, readout[3] = {1, 1, 1};  // its develop's pixel noise against the fit's measure (develop_noise())
+        float green[2][3] = {{1, 1, 1}, {1, 1, 1}};      // each colour's measure against green's, the light's and the readout's
+        float measure[3][3] = {};                   // the masked border's photosite noise to the measure (a Bayer mosaic's)
+        float correlation[2][3] = {};               // the colours' noise correlations after the develop, the light's and the readout's
+        bool measured_law = true;                   // the law by the noise's measured correlation, not by the develop's factors (noise.hlsl's mode 6): LibRaw's, an sRAW's or mRAW's, a linear raw's
         rap::gpu::texture_ptr region;
         int region_at[4] = {};
         bool needs_mapping(bool adjusting) const { return tonable || measure_colour || adjusting || detailed.active(); }
+        // The decode's table (detail.hlsl's DETAIL_TABLE) and what the scales
+        // and the sharpening make of the noise it's from (DETAIL_SHAPING): per
+        // image, noise and setting, not per region; made for `table_for` of
+        // `table_noise`.
+        rap::gpu::texture_ptr detail_table, detail_shaping;
+        rap::gpu::buffer_ptr table_noise;
+        Detail table_for;
         size_t bytes() const;
     };
 

@@ -284,9 +284,9 @@ namespace
 
 // An image's linear RGB (white 1; `value(i)` of each of its pixels' three,
 // row by row) through noise reduction and sharpening (detail.h): what the
-// CPU's edits then read instead.
+// CPU's edits then read instead. A raw's (`raw`) by its noise model.
 template <class F>
-std::vector<float> detailed_rgb(const Detail& d, int width, int height, F value)
+std::vector<float> detailed_rgb(const Detail& d, int width, int height, F value, bool raw = false)
 {
     std::vector<float> in(size_t(width) * height * 3), out(in.size());
     parallel(size_t(height), [&](size_t y)
@@ -294,7 +294,9 @@ std::vector<float> detailed_rgb(const Detail& d, int width, int height, F value)
         for (size_t i = y * width * 3, end = i + size_t(width) * 3; i < end; ++i)
             in[i] = value(i);
     });
-    apply_detail(DetailFilter(d), in.data(), width, height, out.data());
+    DetailFilter filter(d);
+    filter.model = raw;
+    apply_detail(filter, in.data(), width, height, out.data());
     return out;
 }
 
@@ -508,7 +510,7 @@ PixelBuffer Image::retone_buffer(double ev, const AdjustTables* adjust, const De
     // The data (white 1, before the gain) through the noise reduction and
     // sharpening first, when they're on.
     const std::vector<float> detailed = detail && detail->active()
-                                            ? detailed_rgb(*detail, width, height, [&](size_t i) { return linear->rgb[i] / 65535.0f; })
+                                            ? detailed_rgb(*detail, width, height, [&](size_t i) { return linear->rgb[i] / 65535.0f; }, true)
                                             : std::vector<float>{};
     const auto at = [&](size_t i) { return detailed.empty() ? linear->rgb[i] / 65535.0f : detailed[i]; };
     if (linear->tone.empty() && (adjust || !detailed.empty()))

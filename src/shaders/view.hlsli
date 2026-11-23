@@ -455,6 +455,19 @@ float3 fit_volume(float3 o)
     return r;
 }
 
+// A colour of the image's data (not premultiplied: any positive multiple
+// alike) as the display mapping and every measure of it take it. A raw
+// developed here keeps a colour's values below 0 (its readout's noise around
+// black, which held at 0 tinted the shadows) wherever it has some
+// brightness; only what has none is black. Nonraws retain signed wide-gamut
+// data for the volume fit.
+// compose.hlsl, histogram.hlsl, stats.hlsl and volume.hlsl all take it
+// through this, so what's measured is what's shown.
+float3 tone_input(float3 c)
+{
+    return auto_exposure && dot(input_y.xyz, c) <= 0 ? float3(0, 0, 0) : c;
+}
+
 // A colour of the image's data as the display shows it (the edit, then the
 // display mapping), in the display's linear RGB (BT.709 until there's a
 // display description).
@@ -499,7 +512,7 @@ float3 tone_map(float3 c)
         if (volume)
         {
             const float3 o = oklab_from_rgb(mul(kXyzToRgb709, xyz));
-            if (g_measuring)
+            if (g_measuring || (hk_probe & 32))
             {
                 g_volume_outside = !fits_display(mul(kXyzToRgb709, xyz), display_peak) || g_volume_outside;
                 const float c = length(o.yz);
@@ -507,7 +520,9 @@ float3 tone_map(float3 c)
                 g_volume_x = c < 1e-5 ? 0 : edge_x(o.x, c, o.yz / c, from);
                 g_volume_hue = atan2(o.z, o.y);
                 g_volume_l = o.x;
-                return 0;
+                // --check-detail compares this per-pixel extent with the
+                // measurement pass, including signed nonraw inputs.
+                return (hk_probe & 32) ? float3(min(g_volume_x, 4.0), g_volume_l, 0) : 0;
             }
             // Brightness order across hues, in perceived brightness
             // (perceived.hlsli's L**): the fitted colour exactly as bright

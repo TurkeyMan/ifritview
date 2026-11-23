@@ -18,8 +18,7 @@ float4 main(float4 position : SV_Position) : SV_Target
     // A's pixel as Image keeps it: shown, sRGB-encoded, premultiplied.
     float4 c = source.Load(p);
     c.a = saturate(c.a);
-    if (auto_exposure)
-            c.rgb = max(c.rgb, 0);
+    c.rgb = tone_input(c.rgb);  // as compose.hlsl takes it
     const float3 shown = c.a > 0 ? saturate(tone_map(c.rgb / c.a)) : 0;
     const uint3 v = uint3(round(float3(srgb_encode(shown.r), srgb_encode(shown.g), srgb_encode(shown.b)) * c.a * 255));
     const uint grey = ((v.r * 54 + v.g * 183 + v.b * 19) >> 8) / 4;

@@ -23,7 +23,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         const float4 c = source.Load(int3(id.xy, 0));
         if (c.a > 0)
         {
-            const float3 shown = tone_map(auto_exposure ? max(c.rgb / c.a, 0) : c.rgb / c.a);
+            const float3 shown = tone_map(tone_input(c.rgb / c.a));  // as compose.hlsl takes it
             const float3 e = float3(srgb_encode(shown.r), srgb_encode(shown.g), srgb_encode(shown.b));
             const uint3 b = uint3(e * 255 + 0.5);
             const uint y = uint(dot(e, float3(0.2126, 0.7152, 0.0722)) * 255 + 0.5);

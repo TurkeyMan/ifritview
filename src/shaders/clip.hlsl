@@ -284,6 +284,30 @@ void main()
         found = largest;
     clips.Store3(kClipFound * 4, asuint(found));
     clips.Store(kClipWhite * 4, asuint(develop_white(found)));
+    // The readout's noise, from the masked border (a Bayer mosaic's, its
+    // black measured there): half the mean square difference of photosites
+    // of a colour two rows apart (the column's own offset cancels), as a
+    // variance in the develop's balanced units, where it clips 1 (clipped()).
+    float3 read = 0, counted = 0;
+    read_levels();
+    if (measured && cfa.w == 2 && !flags.y)
+    {
+        const float white = develop_white(found);
+        const float3 balance = to_balance();
+        [unroll] for (uint k = 0; k < 4; ++k)
+        {
+            const uint lo = levels.Load((kLevelsSquares + 2 * k) * 4), hi = levels.Load((kLevelsSquares + 2 * k + 1) * 4);
+            const uint n = levels.Load((kLevelsDifferences + k) * 4);
+            // Its colour as a mask (G2 is green), not an index: FXC can't
+            // write a vector's component by one.
+            const float3 colour = k == 0 ? float3(1, 0, 0) : k == 2 ? float3(0, 0, 1) : float3(0, 1, 0);
+            const float variance = n ? (float(hi) * 4294967296.0 + float(lo)) / float(n) / 2 : 0;
+            const float scale = dot(balance, colour) / (as_shot.w - float(measured_sum[k]) / float(max(measured_count[k], 1u))) / white;
+            read += colour * (variance * scale * scale);
+            counted += n ? colour : float3(0, 0, 0);
+        }
+    }
+    clips.Store3(kClipReadNoise * 4, asuint(all(counted > 0) ? read / max(counted, 1.0) : float3(0, 0, 0)));
 }
 #else
 #ifdef LINEAR

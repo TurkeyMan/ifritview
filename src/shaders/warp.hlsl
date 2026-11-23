@@ -96,5 +96,5 @@ float4 main(float4 position : SV_Position) : SV_Target
         rgb = cubic(source(at, corrections.Load(12 * 4) == 1 ? 1 : 0)).rgb;
     else
         rgb = float3(cubic(source(at, 0)).r, cubic(source(at, 1)).g, cubic(source(at, 2)).b);
-    return float4(max(rgb, 0), 1);
+    return float4(rgb, 1);  // below 0 kept, as the develop keeps it (clipped())
 }
