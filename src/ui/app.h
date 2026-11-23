@@ -276,6 +276,11 @@ private:
     };
     void show_instead(Instead what);  // and keeps showing it while browsing
     void show_instead();              // the image shown changed
+    // What `image` is to the cache, cached now: the camera's JPEG while
+    // that's shown instead, else the develop it is or is waiting for.
+    ImageCache::Source cache_source(const Image& image) const;
+    ImageCache::Source wanted_source() const;  // what a raw's entry must hold to be shown now
+    void cache_keep(const std::string& key, const std::shared_ptr<Image>& image, FileStamp stamp, bool soon = true);
     rap::check* camera_jpeg_check_ = nullptr;
     rap::check* libraw_check_ = nullptr;
     Instead instead_ = Instead::Nothing;

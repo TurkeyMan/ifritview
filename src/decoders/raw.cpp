@@ -2188,6 +2188,7 @@ bool preview(const std::string& path, Image& out)
                     (g_get_monotonic_time() - t1) / 1000.0);
     out.format = "RAW preview";
     out.is_raw = true;
+    out.stand_in_full = fit_w <= 0 || fit_h <= 0;
     out.info = camera_name(raw);
     out.exposure_bias = bias;
     picture_style(raw, style, out, false);

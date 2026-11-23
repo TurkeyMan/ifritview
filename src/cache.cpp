@@ -102,6 +102,31 @@ void ImageCache::erase(const std::string& path)
     slots_.erase(it);
 }
 
+size_t ImageCache::erase_unusable(Source wanted)
+{
+    size_t n = 0;
+    for (auto it = slots_.begin(); it != slots_.end();)
+    {
+        if (usable(it->second.entry, wanted))
+        {
+            ++it;
+            continue;
+        }
+        bytes_ -= it->second.bytes;
+        order_.erase(it->second.where);
+        it = slots_.erase(it);
+        ++n;
+    }
+    return n;
+}
+
+bool ImageCache::usable(const Entry& entry, Source wanted)
+{
+    if (entry.source == Source::Other || entry.source == wanted)
+        return true;
+    return wanted == Source::CameraJpeg && entry.image && entry.image->no_stand_in;
+}
+
 void ImageCache::clear()
 {
     slots_.clear();

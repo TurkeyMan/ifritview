@@ -1037,7 +1037,7 @@ void App::take_first_image(FirstImage& first, const std::string& file, uint64_t 
         return;  // something else was opened meanwhile
     Loader::Result r{generation, file, first.image(), first.error(), first.preview()};
     on_loaded(r);
-    if (first.preview())
+    if (first.preview() && instead_ != Instead::CameraJpeg)
         loader_.request_develop(generation, file);  // the stand-in's real decode
 }
 
@@ -1172,6 +1172,21 @@ void App::folder_changed(const rap::sys::watch_batch& batch)
         schedule_prefetch();  // what changed, read again
 }
 
+static const char* source_name(ImageCache::Source s)
+{
+    switch (s)
+    {
+    case ImageCache::Source::CameraJpeg:
+        return "camera JPEG";
+    case ImageCache::Source::GpuDevelop:
+        return "GPU develop";
+    case ImageCache::Source::CpuDevelop:
+        return "CPU develop";
+    default:
+        return "not a raw";
+    }
+}
+
 void App::load_current(const std::string& file)
 {
     if (diff_session_)
@@ -1198,8 +1213,14 @@ void App::load_current(const std::string& file)
     incomplete_tick_ = {};
     ++load_generation_;
     ImageCache::Entry hit;
-    if (cache_.get(key, hit))
+    if (cache_.get(key, hit) && !ImageCache::usable(hit, wanted_source()))
+    {  // made for the other choice (the camera's JPEG or a develop): decoded afresh
+        platform::trace("cache: %s holds the %s, not wanted now: read again", key_text(key).c_str(), source_name(hit.source));
+        cache_.erase(key);
+    }
+    else if (hit.image)
     {
+        platform::trace("cache: hit %s (%s)", key_text(key).c_str(), source_name(hit.source));
         Loader::Result r{load_generation_, key, hit.image, {}, hit.image->is_preview(), false, true};
         r.stamp = hit.stamp;
         on_loaded(r);
@@ -1543,6 +1564,14 @@ void App::on_loaded(Loader::Result& r)
     // it's read again when wanted.
     if (r.stale)
         return;
+    // A raw's develop asked for before the camera's JPEG was chosen (a
+    // neighbour's, or the stand-in's on screen): neither kept nor shown.
+    if (instead_ == Instead::CameraJpeg && r.image && r.image->is_raw && !r.preview && !r.cached && !r.stand_ins_only &&
+        (r.prefetch || (image_ && image_key_ == r.path && image_->is_preview())))
+    {
+        platform::trace("develop of %s dropped: the camera's JPEG is shown instead", key_text(r.path).c_str());
+        return;
+    }
     if (r.image)
         request_place(r.image);  // prefetched neighbours get their place name looked up ahead of time
     if (r.prefetch && r.image && !r.preview)
@@ -1551,7 +1580,7 @@ void App::on_loaded(Loader::Result& r)
         // into it, as its develop would be.
         if (image_ && image_key_ == r.path && image_->is_preview())
             r.prefetch = false;  // on screen: below
-        else if (ImageCache::Entry old; cache_.peek(r.path, old) && old.image->is_preview())
+        else if (ImageCache::Entry old; cache_.peek(r.path, old) && old.image->is_preview() && old.source != ImageCache::Source::CameraJpeg)
         {
             old.image->adopt(std::move(*r.image));
             return;
@@ -1568,7 +1597,7 @@ void App::on_loaded(Loader::Result& r)
     {
         // Never replace what is already cached: it may carry the user's edits.
         if (r.image && r.path != image_key_ && !cache_.contains(r.path))
-            cache_.put(r.path, {r.image, r.stamp});
+            cache_keep(r.path, r.image, r.stamp);
         if (r.image && r.path == current_key() && (!image_ || image_key_ != r.path) && !pasted_)
         {  // the user moved onto it while it was decoding: it's here before the stand-in
             r.generation = load_generation_;
@@ -1611,7 +1640,7 @@ void App::on_loaded(Loader::Result& r)
         if (r.image && !r.preview && !r.cached)
         {
             ImageCache::Entry old;
-            if (cache_.get(r.path, old) && old.image->is_preview())
+            if (cache_.get(r.path, old) && old.image->is_preview() && old.source != ImageCache::Source::CameraJpeg)
                 old.image->adopt(std::move(*r.image));
         }
         return;
@@ -1679,7 +1708,7 @@ void App::on_loaded(Loader::Result& r)
     file_size_ = std::filesystem::file_size(image_path_, ec);
     if (ec)
         file_size_ = 0;
-    status_message_ = busy_message_ = image_->is_preview() && image_->is_raw ? _("Developing…") : "";
+    status_message_ = busy_message_ = image_->is_preview() && image_->is_raw && instead_ != Instead::CameraJpeg ? _("Developing…") : "";
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
     else if (!from_cache)
@@ -1700,7 +1729,9 @@ void App::on_loaded(Loader::Result& r)
                 image_->retone(opened);
         }
     }
-    if (image_->is_preview() && from_cache)  // its develop never finished (or was skipped when the user moved on)
+    // Its develop never finished (or was skipped when the user moved on),
+    // or it was decoded for the camera's JPEG, no longer chosen.
+    if (r.needs_develop(instead_ == Instead::CameraJpeg))
         ensure_developed();
     present_image();
 }
@@ -1713,6 +1744,11 @@ void App::present_image()
     // one), then again as the window takes the new one.
     view_->hold_present(true);
     view_->set_image(image_);
+    if (image_->is_raw)
+        platform::trace("presented: %s, %s", key_text(image_key_).c_str(),
+                        !image_->is_preview()             ? "the develop"
+                        : instead_ == Instead::CameraJpeg ? "the camera's JPEG"
+                                                          : "its embedded JPEG, the develop to follow");
     instead_image_.reset();
     show_instead();  // the camera's JPEG or LibRaw's develop instead, while that's chosen
     if (nav_stamp_us_)
@@ -1798,20 +1834,56 @@ void App::show_instead(Instead what)
 {
     if (syncing_instead_)
         return;
+    const ImageCache::Source was = wanted_source();
     instead_ = what;
     syncing_instead_ = true;  // one at a time: the other check goes off
     camera_jpeg_check_->set_checked(what == Instead::CameraJpeg);
     libraw_check_->set_checked(what == Instead::LibRaw);
     syncing_instead_ = false;
     instead_image_.reset();
+    if (wanted_source() != was)
+    {
+        // The camera's JPEG on or off: raws are decoded for the new choice
+        // from here on, and what's cached for the old one goes.
+        loader_.set_stand_ins_only(what == Instead::CameraJpeg);
+        const size_t flushed = cache_.erase_unusable(wanted_source());
+        platform::trace("cache: %zu raws flushed, now caching the %s", flushed, source_name(wanted_source()));
+        if (what == Instead::CameraJpeg)
+            loader_.cancel_develop(current_key());
+        else
+            ensure_developed();  // the camera's JPEG on screen: develop it after all
+        schedule_prefetch();
+    }
     show_instead();
+}
+
+ImageCache::Source App::wanted_source() const
+{
+    if (instead_ == Instead::CameraJpeg)
+        return ImageCache::Source::CameraJpeg;
+    return decode_options().gpu_develop ? ImageCache::Source::GpuDevelop : ImageCache::Source::CpuDevelop;
+}
+
+ImageCache::Source App::cache_source(const Image& image) const
+{
+    if (!image.is_raw)
+        return ImageCache::Source::Other;
+    if (image.is_preview())  // the camera's JPEG whole, while that's shown, or the stand-in for the develop to come
+        return instead_ == Instead::CameraJpeg && image.stand_in_full ? ImageCache::Source::CameraJpeg
+                                                                      : decode_options().gpu_develop ? ImageCache::Source::GpuDevelop
+                                                                                                     : ImageCache::Source::CpuDevelop;
+    return image.mosaic ? ImageCache::Source::GpuDevelop : ImageCache::Source::CpuDevelop;
 }
 
 void App::show_instead()
 {
-    const bool wanted = instead_ != Instead::Nothing && image_ && image_->is_raw && !image_->is_preview();
-    if (!wanted)
+    // The camera's JPEG needs no develop first: the stand-in may be it.
+    const bool jpeg = instead_ == Instead::CameraJpeg;
+    const bool wanted = instead_ != Instead::Nothing && image_ && image_->is_raw && (!image_->is_preview() || jpeg);
+    if (!wanted || (jpeg && image_->is_preview() && image_->stand_in_full))
     {
+        if (wanted)
+            platform::trace("shown: %s, the camera's JPEG (%dx%d), no develop", key_text(image_key_).c_str(), image_->width, image_->height);
         instead_image_.reset();
         ++instead_request_;
         if (image_ && view_->image() != image_.get())
@@ -1857,8 +1929,12 @@ void App::show_instead()
                         status_message_ = what == Instead::CameraJpeg ? std::string(_("This raw has no embedded JPEG"))
                                                                       : rap::i18n::format(_("LibRaw couldn't develop it: {0}"), error);
                     update_status();
+                    if (!other && what == Instead::CameraJpeg)
+                        raw->no_stand_in = true;  // its develop is all there is: kept as that
                     if (!other)
                         return;
+                    platform::trace("shown: %s, %s instead (%dx%d)", key_text(image_key_).c_str(),
+                                    what == Instead::CameraJpeg ? "the camera's JPEG" : "LibRaw's develop", other->width, other->height);
                     instead_image_ = other;
                     view_->set_image(other);
                 });
@@ -1909,7 +1985,26 @@ void App::leave_image()
         // Dated as the file was read for it, not as it is now: a file that's
         // grown or changed since isn't served from it.
         const FileStamp stamp = image_->stamp.known() ? image_->stamp : FileStamp::of(image_path_);
-        cache_.put(image_key_, {image_, stamp}, !flicking());  // flicking on: what's behind goes first
+        // The camera's JPEG shown instead of what came first (a develop
+        // from before it was chosen, a stand-in decoded to fit): that's
+        // what's kept, for coming back to it.
+        const bool jpeg = instead_ == Instead::CameraJpeg && instead_image_ && view_->image() == instead_image_.get();
+        const std::shared_ptr<Image>& kept = jpeg ? instead_image_ : image_;
+        cache_keep(image_key_, kept, stamp, !flicking());  // flicking on: what's behind goes first
+    }
+}
+
+// Kept only as it's wanted now: a develop left before the camera's JPEG
+// came to stand in for it isn't (unless the raw has no JPEG).
+void App::cache_keep(const std::string& key, const std::shared_ptr<Image>& image, FileStamp stamp, bool soon)
+{
+    ImageCache::Entry e{image, stamp, cache_source(*image)};
+    if (ImageCache::usable(e, wanted_source()))
+        cache_.put(key, std::move(e), soon);
+    else
+    {
+        platform::trace("cache: %s not kept: it's the %s", key_text(key).c_str(), source_name(e.source));
+        cache_.erase(key);
     }
 }
 
@@ -1940,7 +2035,9 @@ bool App::cached_in_full(const std::string& key)
     ImageCache::Entry e;
     if (!cache_.contains(key))
         return false;
-    return !decode_options().gpu_develop || (cache_.peek(key, e) && !e.image->is_preview());
+    if (!cache_.peek(key, e) || !ImageCache::usable(e, wanted_source()))
+        return false;  // (what's not wanted now is read again on a visit)
+    return !decode_options().gpu_develop || !e.image->is_preview() || e.source == ImageCache::Source::CameraJpeg;
 }
 
 // Neighbours in the browsing direction first, then behind; skips what the
@@ -2062,7 +2159,7 @@ void App::await_complete(const std::string& key, FileStamp read)
 
 void App::ensure_developed()
 {
-    if (!image_ || !image_->is_preview())
+    if (!image_ || !image_->is_preview() || instead_ == Instead::CameraJpeg)  // the camera's JPEG wants none
         return;
     if (image_->is_raw)
     {
