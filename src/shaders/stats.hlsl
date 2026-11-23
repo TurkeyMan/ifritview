@@ -1,8 +1,8 @@
-// The image's measures, once it's on the device (raw and HDR images), from
-// a level of at most 2048 pixels: a histogram of log2 luminance (for the
-// peak, peak.hlsl) and how far from white it goes in each hue direction (1 =
-// the display's edge), into view.hlsli's `stats` words. Group-local first,
-// then one atomic per bin.
+// The image's luminance measures, once it is on the device: a histogram
+// of log2 luminance for peak.hlsl, into view.hlsli's stats words. A raw uses
+// a filtered level at most 2048 pixels wide; an ordinary image uses full
+// resolution so a single bright detail counts. Group-local first, then
+// one atomic per bin.
 //
 // A raw's brightness curve is made from its luminance as edited (exposure,
 // white balance, develop controls: view.hlsli's edit(), what brightness()
@@ -19,7 +19,7 @@
 // A pixel's luminance as edited, as tone_map() gives brightness() it.
 float edited_luminance(float4 c)
 {
-    return c.a > 0 ? edit(max(c.rgb / c.a, 0), exposure * auto_gain()).y : 0;
+    return c.a > 0 ? edit(auto_exposure ? max(c.rgb / c.a, 0) : c.rgb / c.a, exposure * auto_gain()).y : 0;
 }
 
 #if defined(CURVE)
@@ -94,7 +94,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
 }
 #else
 groupshared uint local_luminance[1024];
-groupshared uint local_extents[72];
 groupshared uint local_count, local_opaque;
 groupshared uint local_least, local_most;
 
@@ -103,8 +102,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
 {
     for (uint i = index; i < 1024; i += 256)
         local_luminance[i] = 0;
-    if (index < 72)
-        local_extents[index] = 0;
     if (index == 0)
         local_count = local_opaque = local_least = local_most = 0;
     GroupMemoryBarrierWithGroupSync();
@@ -126,15 +123,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
                 InterlockedAdd(local_count, 1u);
                 InterlockedMax(local_least, ~asuint(xyz.y));  // positive floats order as their bits
                 InterlockedMax(local_most, asuint(xyz.y));
-                const float2 v = uv_from_xyz(xyz) - kWhiteUv;
-                const float len = length(v);
-                if (xyz.y >= 1e-3 && len > 1e-6)  // too dark for its colour to count
-                {
-                    const float2 dir = v / len;
-                    const float extent = len / edge_distance(dir, display_r, display_g, display_b);
-                    const uint hue = uint((atan2(dir.y, dir.x) / kTwoPi + 1) * 72) % 72u;
-                    InterlockedMax(local_extents[hue], asuint(extent));  // positive floats order as their bits
-                }
+
             }
         }
     }
@@ -144,8 +133,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         if (local_luminance[j])
             stats.InterlockedAdd((kStatsLuminance + j) * 4, local_luminance[j]);
     }
-    if (index < 72 && local_extents[index])
-        stats.InterlockedMax((kStatsExtents + index) * 4, local_extents[index]);
     if (index == 0 && local_count)
     {
         stats.InterlockedAdd(kStatsCount * 4, local_count);

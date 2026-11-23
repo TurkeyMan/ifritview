@@ -9,8 +9,9 @@
 //  - stats.hlsl's CURVE and TOP: the luminance as edited;
 //  - CURVE (one thread): the brightness curve the measure takes the colours
 //    through;
-//  - the measure: per cell, the largest and second largest, the second the
-//    table's (one stray pixel can't set it);
+//  - the measure: per cell, the largest and second largest. A raw uses
+//    the second (one stray pixel cannot set it); an ordinary image uses
+//    its full-resolution largest, so even one saturated detail counts;
 //  - PREPARE (one group): each cell's spread to its neighbours (the largest
 //    of the 3 x 3 round it) and smoothed ([1 2 1] each way), round in hue,
 //    and never under the cell's own.
@@ -34,6 +35,7 @@ void main(uint index : SV_GroupIndex)
     {
         stats.Store(kStatsCurveMost * 4, 0u);
         stats.Store(kStatsTopMost * 4, 0u);
+        stats.Store(kStatsVolumeOutside * 4, 0u);
     }
 }
 #elif defined(CURVE)
@@ -124,7 +126,7 @@ uint cell(int hue, int slice)
 void main(uint index : SV_GroupIndex)
 {
     for (uint i = index; i < kCells; i += 256)
-        own[i] = asfloat(stats.Load((kStatsVolumeRaw + i * 2 + 1) * 4));
+        own[i] = asfloat(stats.Load((kStatsVolumeRaw + i * 2 + (auto_exposure ? 1 : 0)) * 4));
     GroupMemoryBarrierWithGroupSync();
     for (uint i = index; i < kCells; i += 256)
     {
@@ -180,7 +182,9 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     g_measuring = true;
     g_volume_x = 0;
-    tone_map(max(c.rgb / c.a, 0));
+    tone_map(auto_exposure ? max(c.rgb / c.a, 0) : c.rgb / c.a);
+    if (g_volume_outside)
+        stats.InterlockedMax(kStatsVolumeOutside * 4, 1u);
     if (g_volume_x <= 0)
         return;
     const uint2 at = volume_cell(g_volume_hue, g_volume_l);

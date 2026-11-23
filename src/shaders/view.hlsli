@@ -56,11 +56,11 @@ cbuffer Params : register(b0)
     float4 from_working_z;
     float lc_weight;    // 0: kLightnessChromaWeight; else that (a test hook: IFRIT_LC_WEIGHT)
     float min_slope;    // < 0: kMinBrightnessSlope; else that (a test hook: IFRIT_MIN_SLOPE; 0 turns the hold off)
-    int hk_probe;       // a test hook (IFRIT_HK_PROBE), for a raw's volume mapping: bit 0, show input L**, output L** and
-                        // output C* / 100 as R, G, B; bit 1, hold luminance exactly instead of perceived brightness
+    int hk_probe;       // a test hook (IFRIT_HK_PROBE), for volume mapping: bit 0, show input L**, output L** and
+                        // output C* / 100 as R, G, B; bit 1, hold luminance exactly instead of perceived brightness; bit 2, show the volume fit
     float white_luminance;  // auto_exposure: cd/m^2 at the raw's white, from how it was taken (exposure.hlsli); 0: unknown
     int treated;            // auto_exposure: a Lightroom develop (Adjustments::treated): the camera's exposure, no departure
-    int passthrough;    // 1: the image's data is the display's own linear BT.709, unedited, unmeasured: shown as it is where it fits
+    int passthrough;    // 1: unedited BT.709; exact identity when the image needs no brightness or colour mapping
 };
 
 Texture2D<float4> source : register(t0);
@@ -344,7 +344,7 @@ float edge_x(float L, float c, float2 dir, out float from)
 
 // The measure pass runs tone_map() only as far as each colour's place in the
 // table, into these.
-static bool g_measuring = false;
+static bool g_measuring = false, g_volume_outside = false;
 static float g_volume_x = 0, g_volume_hue = 0, g_volume_l = 0;
 
 // The table's cell for Oklab hue h and lightness L (L from 0 to the peak's).
@@ -426,7 +426,7 @@ float3 fit_volume(float3 o)
 {
     const float c = length(o.yz);
     if (c < 1e-5)
-        return o;
+        return fits_display(rgb_from_oklab(o), display_peak) ? o : float3(clamp(o.x, 0.0, white_l()), 0, 0);
     const float2 dir = o.yz / c;
     const float h = atan2(dir.y, dir.x), limit = volume_limit(h, o.x);
     float3 r = fit_with(o, limit);
@@ -441,6 +441,17 @@ float3 fit_volume(float3 o)
             r = float3(least, dir * (c * min(fit_x(x, limit) / x, 1.0)));
         }
     }
+    // The grey-axis intersection used by edge_x() is clamped to the
+    // display's neutral axis. That changes the projection line; its old
+    // boundary parameter need not still land inside. The brightness floor
+    // can also put a highlight above the volume's top. Finish on the exact
+    // boundary at the resulting lightness, keeping hue: at/above white
+    // there is no chroma, rather than a fixed-L ray with no valid endpoint.
+    if (!fits_display(rgb_from_oklab(r), display_peak))
+    {
+        r.x = clamp(r.x, 0.0, white_l());
+        r.yz = dir * min(length(r.yz), max_chroma(r.x, dir));
+    }
     return r;
 }
 
@@ -450,80 +461,47 @@ float3 fit_volume(float3 o)
 float3 tone_map(float3 c)
 {
     const float scale = exposure * auto_gain();
+    // The headless identity check's GPU baseline, with the same decode and storage.
+    if (!g_measuring && (hk_probe & 16))
+        return c * scale;
     // A plain image the display can show needs no mapping: shown as it is,
     // not through XYZ and back (whose float rounding would leave a channel
     // at -1e-10).
-    if (passthrough && fits_display(c * scale, display_peak))
-        return clamp_display(c * scale, display_peak);
+    if (!g_measuring && passthrough && (!measured || (asfloat(stats.Load(kStatsMaximum * 4)) * scale <= display_peak + kFitSlack * max(display_peak, 1.0)
+        && stats.Load(kStatsVolumeOutside * 4) == 0))
+        && fits_display(c * scale, display_peak))
+        return (hk_probe & 8) ? 0 : clamp_display(c * scale, display_peak);
     float3 xyz = edit(c, scale);
     const float3 scene = xyz;  // as edited, before the display mapping
     if (measured)
     {
         float y = xyz.y;
-        float2 uv = uv_from_xyz(xyz);
-        const float2 uv0 = uv;  // the chromaticity before it's taken towards white
-        // From the brightest it reaches (on the filtered level the measures
-        // come from, so a lone hot pixel is already smoothed away), as the
-        // edit's tone curve takes it: nothing is clipped, and the top keeps
-        // some gradation.
         float source_peak = asfloat(stats.Load(kStatsMaximum * 4)) * scale;
         if (adjusting & 1)
             source_peak = tone_lookup(source_peak, 0, to_working_x.w);
-        bool volume = false;   // a raw's: its colours fitted to the display's volume (fit_volume())
+        const bool rolloff = source_peak > display_peak + kFitSlack * max(display_peak, 1.0) && tone != 1;
+        // Display-referred images retain their EETF. Both the measure and
+        // the display use this very same colour before the Oklab fit.
         if (auto_exposure)
-        {
-            // A raw developed here: its brightness curve, its top onto the peak.
-            if (y > 0)
-            {
-                y = brightness(y);
-                volume = true;
-            }
-        }
-        else if (source_peak > display_peak && tone != 1)  // a raw's camera curve is display-referred already
-        {
-            const float mapped = eetf(y, source_peak, display_peak, white);
-            // Towards white as it nears the display's peak, as film does (only
-            // when there's something to compress: an image that fits is shown as it is).
-            const float knee = 0.75 * display_peak;
-            uv = lerp(uv, kWhiteUv, smoothstep(knee, display_peak, mapped) * 0.6);
-            y = mapped;
-        }
-        if (!volume)  // the rest: chromaticity compressed towards white per hue, to the image's extent
-        {
-            const float2 v = uv - kWhiteUv;
-            const float len = length(v);
-            if (len > 1e-6)
-            {
-                const float2 dir = v / len;
-                const float edge = edge_distance(dir, display_r, display_g, display_b);
-                const float hue = (atan2(dir.y, dir.x) / kTwoPi + 1) * 72;
-                const uint i0 = uint(floor(hue)) % 72u, i1 = (i0 + 1u) % 72u;
-                const float limit = lerp(asfloat(stats.Load((kStatsExtents + i0) * 4)),
-                                         asfloat(stats.Load((kStatsExtents + i1) * 4)), frac(hue));
-                // A short knee when the image barely leaves the gamut.
-                const float threshold = clamp(1 - 0.6 * (limit - 1), 0.8, 0.95);
-                uv = kWhiteUv + dir * compress(len / edge, threshold, max(limit, 1.0)) * edge;
-            }
-        }
-        if (!volume)
-        {
-            // How far that took it towards white, taken at constant Oklab hue
-            // (a straight line in chromaticity, as in linear RGB, drifts in
-            // hue: the Abney effect): its Oklab chroma scaled by as much, at
-            // luminance y.
-            const float was = length(uv0 - kWhiteUv), now = length(uv - kWhiteUv);
-            if (was > 1e-6 && now < was)
-            {
-                const float3 o = ok_from_rgb709(mul(kXyzToRgb709, xyz_from_yuv(y, uv0)));
-                return fit_display(at_luminance(rgb709_from_ok(float3(o.x, o.yz * (now / was))), y), y);
-            }
-        }
-        xyz = xyz_from_yuv(y, uv);
+            y = y > 0 ? brightness(y) : y;
+        else if (rolloff)
+            y = eetf(y, source_peak, display_peak, white);
+        // No colour or brightness change is needed for a nonraw image
+        // already inside the display. In particular, counting a histogram
+        // must not change an SDR image that previously passed through.
+        const float3 before = mul(kXyzToRgb709, xyz);
+        g_volume_outside = !fits_display(before, display_peak);
+        if (!g_measuring && !auto_exposure && !rolloff && stats.Load(kStatsVolumeOutside * 4) == 0
+            && fits_display(before, display_peak))
+            return (hk_probe & 8) ? 0 : clamp_display(before, display_peak);
+        xyz = auto_exposure ? xyz_from_yuv(y, uv_from_xyz(xyz)) : xyz * (xyz.y > 1e-9 ? y / xyz.y : 0);
+        const bool volume = y > 0;
         if (volume)
         {
             const float3 o = oklab_from_rgb(mul(kXyzToRgb709, xyz));
             if (g_measuring)
             {
+                g_volume_outside = !fits_display(mul(kXyzToRgb709, xyz), display_peak) || g_volume_outside;
                 const float c = length(o.yz);
                 float from;
                 g_volume_x = c < 1e-5 ? 0 : edge_x(o.x, c, o.yz / c, from);
@@ -535,6 +513,10 @@ float3 tone_map(float3 c)
             // (perceived.hlsli's L**): the fitted colour exactly as bright
             // as a grey of the same input L** comes out (match_perceived()).
             const float3 rgb = rgb_from_oklab(fit_volume(o));
+            if (hk_probe & 8)
+                return max(-rgb, rgb - display_peak);
+            if (hk_probe & 4)
+                return rgb;
             const float in_l = perceived_lightness(scene);
             float3 shown;
             if (hk_probe & 2)
@@ -544,7 +526,12 @@ float3 tone_map(float3 c)
                 shown = fit_display(fitted > 1e-9 ? rgb * (xyz.y / fitted) : xyz.y, xyz.y);
             }
             else
-                shown = match_perceived(rgb, lightness_of(brightness(cie_y(in_l))), display_peak);
+            {
+                const float grey = cie_y(in_l);
+                const float mapped = auto_exposure ? brightness(grey)
+                    : rolloff ? eetf(grey, source_peak, display_peak, white) : min(grey, display_peak);
+                shown = match_perceived(rgb, lightness_of(mapped), display_peak);
+            }
             if (hk_probe & 1)
             {
                 const float3 lab = cie_lab(xyz_of_rgb709(shown));

@@ -61,24 +61,7 @@ float3 xyz_from_yuv(float y, float2 uv)
     return float3(x, y, z);
 }
 
-// How far from white the triangle's edge is in direction `dir` (unit).
-float edge_distance(float2 dir, float2 r, float2 g, float2 b)
-{
-    float best = 1e9;
-    const float2 corners[3] = {r, g, b};
-    [unroll] for (int i = 0; i < 3; ++i)
-    {
-        const float2 a = corners[i] - kWhiteUv, e = corners[(i + 1) % 3] - corners[i];
-        const float den = dir.x * e.y - dir.y * e.x;
-        if (abs(den) < 1e-9)
-            continue;
-        const float t = (a.x * e.y - a.y * e.x) / den;  // along dir
-        const float s = (a.x * dir.y - a.y * dir.x) / den;  // along the edge
-        if (t > 0 && s >= -1e-6 && s <= 1 + 1e-6)
-            best = min(best, t);
-    }
-    return best;
-}
+
 
 // ACES's compression of distance `d` (1 = the display's edge): unchanged
 // below `threshold`, `limit` onto 1.

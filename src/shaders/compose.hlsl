@@ -70,7 +70,8 @@ float4 main(float4 position : SV_Position) : SV_Target
         // Negative lobes can overshoot: alpha into 0..1 and colour not below
         // nothing (it may go past alpha: highlights brighter than white).
         c.a = saturate(c.a);
-        c.rgb = max(c.rgb, 0);
+        if (auto_exposure)
+            c.rgb = max(c.rgb, 0);
         // Exposed and tone-mapped as a colour, then premultiplied again.
         if (c.a > 0)
             c.rgb = tone_map(c.rgb / c.a) * c.a;

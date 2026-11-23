@@ -3,6 +3,7 @@
 #include <glib.h>
 #include "../compare.h"
 #include "../decoders/decoder.h"
+#include "../decoders/icc.h"
 #include "../decoders/ljpeg.h"
 #include "../decoders/rawblocks.h"
 #include "../decoders/rawpacked.h"
@@ -978,6 +979,14 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     DecodeParams dp{1, 3, 0, 0};
     s.scene_gain = 1;
     s.tonable = image.tonable();
+    // Normalized BT.709 integer sources cannot leave the display without
+    // an edit. Floating/signed data and wide/unknown profiles can, even
+    // when their measured luminance is below white.
+    s.measure_colour = image.source && image.source->sample != SourceData::Sample::U16;
+    if (image.declared_space && !image.declared_space->with_transfer(ColorSpace::Transfer::SRGB).is_srgb())
+        s.measure_colour = true;
+    if (image.stored && !image.stored->icc.empty())
+        s.measure_colour = s.measure_colour || !icc_bt709_primaries(image.stored->icc.data(), image.stored->icc.size());
     s.auto_exposure = false;
     s.clips.reset();
     s.anchor = 0;
@@ -1592,6 +1601,8 @@ void GpuView::follow_detail(Source& s, const Detail& d)
     s.detailed = d;
     ++s.details;
     s.region.reset();
+    if (!s.auto_exposure)
+        s.measured = false;  // a nonraw's full-resolution luminance includes the detail filter
 }
 
 void GpuView::measure_noise(Source& s)
@@ -1730,6 +1741,14 @@ rap::gpu::texture_ptr GpuView::detail_region(Source& s, int x0, int y0, int x1, 
     }
     ox = r[0], oy = r[1];
     return s.region;
+}
+
+rap::gpu::texture_ptr GpuView::full_level(Source& s)
+{
+    if (!s.detailed.active())
+        return s.levels[0];
+    int ox, oy;
+    return detail_region(s, 0, 0, s.levels[0]->width(), s.levels[0]->height(), ox, oy);
 }
 
 rap::gpu::texture_ptr GpuView::counted_level(Source& s)
@@ -1895,12 +1914,13 @@ const rap::gpu::texture_ptr& GpuView::boundary(float peak)
 // Whether the image's measures map it to the display (view.hlsli's
 // measured), and with that whether it's a plain image that needs no
 // mapping (passthrough): its data the display's own linear BT.709, not a
-// raw, no camera curve, no edit, unmeasured. Set only here, from the
+// raw, no camera curve, no edit. The shader also checks that the image
+// needs no mapping when it has been measured. Set only here, from the
 // measured state the pass will run with, so neither can go stale.
 static void set_measured(ComposeParams& cp, bool measured)
 {
     cp.measured = measured ? 1 : 0;
-    bool plain = !measured && !cp.auto_exposure && !cp.tone && !cp.adjusting;
+    bool plain = !cp.auto_exposure && !cp.tone && !cp.adjusting;
     const float* rows[3] = {cp.input_x, cp.input_y, cp.input_z};
     for (int i = 0; i < 3 && plain; ++i)
         for (int j = 0; j < 3 && plain; ++j)
@@ -1974,7 +1994,7 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
         const char* v = std::getenv("IFRIT_HK_PROBE");
         return v ? std::atoi(v) : 0;
     }();
-    cp.hk_probe = hk_probe;
+    cp.hk_probe = hk_probe | (f.volume_probe * 4);
     if (f.histogram)
     {
         cp.show_histogram = 1;
@@ -1987,9 +2007,9 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
 std::vector<rap::gpu::texture_ptr> GpuView::view_inputs(const rap::gpu::texture_ptr& image, const Source& s, const Frame* f,
                                                        const rap::gpu::texture_ptr& extra)
 {
-    // The display's boundary only for a raw's volume mapping (view.hlsli's fit_volume()).
+    // The same display boundary for raw and ordinary image volume mapping.
     std::vector<rap::gpu::texture_ptr> in{image, s.tone ? s.tone : blank_, extra ? extra : blank_,
-                                          s.auto_exposure ? boundary(display_peak()) : blank_, blank_, blank_};
+                                          (s.auto_exposure || (s.measured && s.needs_mapping(f && f->adjust))) ? boundary(display_peak()) : blank_, blank_, blank_};
     const AdjustTables* t = f ? f->adjust.get() : nullptr;
     if (!t)
         return in;
@@ -2017,9 +2037,14 @@ std::vector<rap::gpu::texture_ptr> GpuView::view_inputs(const rap::gpu::texture_
 void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 {
     static const bool unmeasured = std::getenv("IFRIT_NO_MEASURE");  // to tell the measures' part in a fault
-    if (s.measured || !(s.tonable || always) || unmeasured)
+    ComposeParams cp{};
+    std::memcpy(&cp, params.data(), std::min(params.size(), sizeof cp));
+    const bool mapping = s.needs_mapping(cp.adjusting != 0);
+    if ((s.measured && (!mapping || s.mapping_measured)) || !(mapping || always) || unmeasured)
         return;
-    const rap::gpu::texture_ptr counted = counted_level(s);
+    const rap::gpu::texture_ptr counted = s.auto_exposure || !mapping ? counted_level(s) : full_level(s);
+    if (std::getenv("IFRIT_TRACE"))
+        std::fprintf(stderr, "gpu: measuring %dx%d (%s)\n", counted->width(), counted->height(), mapping ? "display mapping" : "histogram only");
     device_->clear(s.stats, 0);
     // The level's measures, then what peak.hlsl makes of them: taken once, at
     // the white balance it's first shown with, the reference a raw's
@@ -2037,6 +2062,7 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     }
     device_->run(std::span(d));
     s.measured = true;
+    s.mapping_measured = mapping;
     if (s.auto_exposure && std::getenv("IFRIT_TRACE"))
     {
         // (Read back once they're made: the exposure and what it came from.)
@@ -2070,33 +2096,43 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
 // resolution), then the volume through it.
 void GpuView::measure_volume(Source& s, const Frame& f, std::span<const std::byte> params)
 {
-    if (!s.auto_exposure || !s.measured)
+    if (!s.measured)
         return;
     ComposeParams cp{};
     std::memcpy(&cp, params.data(), std::min(params.size(), sizeof cp));
-    std::array<float, 15> key{cp.exposure, cp.display_peak};
+    // A histogram may have measured a plain SDR image, but it still needs
+    // no image-volume pass. Keep #42's exact passthrough, including after
+    // opening the histogram. Edits/detail can leave its original gamut.
+    if (!s.needs_mapping(cp.adjusting != 0))
+        return;
+    std::array<float, 16> key{cp.exposure, cp.display_peak};
     for (int j = 0; j < 4; ++j)
         key[2 + j] = cp.input_x[j], key[6 + j] = cp.input_y[j], key[10 + j] = cp.input_z[j];
+    key[15] = cp.white;
     key[14] = float(cp.treated);  // a treated raw's gain is the camera's (auto_gain())
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     if (s.volume_measures == s.measures && s.volume_adjust == adjusted && s.volume_key == key && s.volume_details == s.details)
         return;
-    const rap::gpu::texture_ptr counted = counted_level(s);
+    const rap::gpu::texture_ptr counted = s.auto_exposure ? counted_level(s) : full_level(s);
     set_measured(cp, true);
     const rap::gpu::program_ptr programs[6] = {volume_clear_, stats_curve_, stats_top_, volume_curve_, volume_, volume_prepare_};
     rap::gpu::dispatch d[6];
+    int passes = 0;
     for (int i = 0; i < 6; ++i)
     {
+        if (!s.auto_exposure && i >= 1 && i <= 3)
+            continue;
+        const int at = passes++;
         const rap::gpu::texture_ptr& from = i == 2 ? s.levels[0] : counted;
         const bool per_pixel = i == 1 || i == 2 || i == 4;
-        d[i].program = programs[i];
-        d[i].inputs = view_inputs(from, s, &f);
-        d[i].buffers = {histogram_, s.stats};
-        d[i].uniforms = bytes(cp);  // copied at run()
-        d[i].groups[0] = per_pixel ? (from->width() + 15) / 16 : 1;
-        d[i].groups[1] = per_pixel ? (from->height() + 15) / 16 : 1;
+        d[at].program = programs[i];
+        d[at].inputs = view_inputs(from, s, &f);
+        d[at].buffers = {histogram_, s.stats};
+        d[at].uniforms = bytes(cp);  // copied at run()
+        d[at].groups[0] = per_pixel ? (from->width() + 15) / 16 : 1;
+        d[at].groups[1] = per_pixel ? (from->height() + 15) / 16 : 1;
     }
-    device_->run(std::span(d));
+    device_->run(std::span(d, passes));
     s.volume_key = key;
     s.volume_adjust = adjusted;
     s.volume_measures = s.measures;
@@ -2122,7 +2158,7 @@ void GpuView::count(Source& s, const Frame& f)
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     measure_volume(s, f, bytes(cp));
-    set_measured(cp, true);
+    set_measured(cp, s.measured && s.needs_mapping(cp.adjusting != 0));
     // The histogram of what's shown: again when the image, its exposure,
     // white balance, develop settings or detail change.
     const std::shared_ptr<Image> image = s.image.lock();
@@ -2169,7 +2205,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
     measure_volume(s, f, bytes(cp));
-    set_measured(cp, s.measured);
+    set_measured(cp, s.measured && s.needs_mapping(cp.adjusting != 0));
     const double shown_w = width * f.zoom, shown_h = height * f.zoom;
     cp.image_rect[0] = float(f.pan_x), cp.image_rect[1] = float(f.pan_y);
     cp.image_rect[2] = float(f.pan_x + shown_w), cp.image_rect[3] = float(f.pan_y + shown_h);
@@ -2374,7 +2410,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
         measure_volume(s, f, bytes(cp));
-        set_measured(cp, s.measured);
+        set_measured(cp, s.measured && s.needs_mapping(cp.adjusting != 0));
         cp.gain = std::clamp(gain, 1, 255);
         auto top = device_->create({a->width, a->height, rap::gpu::format::rgba16f, 1, true});
         if (!top)
