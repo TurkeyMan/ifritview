@@ -248,8 +248,11 @@ float find_clip(const uint32_t* bin, uint64_t total)
 }
 
 // LibRaw's white (its maximum) lowered to where the first colour to clip
-// under the as-shot balance really does, as the GPU's develop clips
-// (develop.hlsl's clipped()), from a Bayer or X-Trans mosaic's own values.
+// under the as-shot balance really does, from a Bayer or X-Trans mosaic's
+// own values: what's past it neutral white (LibRaw's -H 0). The GPU's develop
+// keeps each colour to its own clip and rebuilds what clipped (develop.hlsl's
+// clipped()); LibRaw's output, 16-bit integers, has no room above white for
+// that.
 // LibRaw only lowers it to the data's overall largest value (and only when
 // that's within 75% of it): a 12-bit NEF whose greens stop at 3939 while its
 // reds reach 4095 kept its sky pink. Others (a Canon sRAW, a linear DNG)
@@ -2456,14 +2459,18 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
             out.mosaic = std::move(m);
         }
     }
-    // Without any of the lens (a Phase One's are its sensor's), how it was
-    // taken: the app finds the lens in lensfun's database.
-    if (out.mosaic && (!out.mosaic->corrections || phase_one))
+    // The camera, and without any of the lens (a Phase One's are its
+    // sensor's), how it was taken: the app finds the lens in lensfun's database.
+    if (out.mosaic)
     {
         auto shot = std::make_shared<lenses::Shot>(shot_of(raw));
-        std::copy(out.mosaic->crop, out.mosaic->crop + 4, shot->frame);
         auto m = std::make_shared<RawMosaic>(*out.mosaic);
-        m->shot = std::move(shot);
+        m->camera = shot->make + " " + shot->model;
+        if (!m->corrections || phase_one)
+        {
+            std::copy(m->crop, m->crop + 4, shot->frame);
+            m->shot = std::move(shot);
+        }
         out.mosaic = std::move(m);
     }
     // The scene's luminance at the stated white, from how it was taken

@@ -63,6 +63,75 @@ done
 # A raw's brightness curve: never flatter than its least slope nor steeper
 # than the scene, its top on the peak, however far over the peak it reaches.
 "$build/ifritview" --check-brightness
+# A raw's clipped colours estimated: two, one or no colours measured, the
+# clip's bound winning or not, and one mixed (estimate.hlsli, as the GPU
+# develop has it).
+"$build/ifritview" --check-highlight
+# The linearity store across processes: two remembering at once each keep
+# their camera (a read-modify-write under a lock, not one's save losing the
+# other's group).
+mkdir -p "$smoke"/linearity
+XDG_CONFIG_HOME="$smoke"/linearity "$build/ifritview" --remember-linearity camera-a 60 &
+XDG_CONFIG_HOME="$smoke"/linearity "$build/ifritview" --remember-linearity camera-b 60
+wait
+grep -q '^\[camera-a (test)\]' "$smoke"/linearity/ifritview/linearity.conf
+grep -q '^\[camera-b (test)\]' "$smoke"/linearity/ifritview/linearity.conf
+! [ -e "$smoke"/linearity/ifritview/linearity.conf.lock ]
+# Two arriving at an old lock file a crashed process left: neither takes it
+# from the other (once, both did, the second removing the first's new lock,
+# both loading and the first's group lost). Each holds the lock once it's
+# read the file (IFRIT_LINEARITY_HOLD) until let go: the second doesn't read
+# while the first holds, and both groups, and what was there, are kept.
+store="$smoke"/linearity/ifritview
+gate="$smoke"/linearity-gate
+mkdir -p "$gate"
+printf '[seed]\nred=0.9;\n' > "$store"/linearity.conf
+touch -d '1 minute ago' "$store"/linearity.conf.lock
+XDG_CONFIG_HOME="$smoke"/linearity IFRIT_LINEARITY_HOLD="$gate"/a "$build/ifritview" --remember-linearity camera-a 1 &
+a=$!
+XDG_CONFIG_HOME="$smoke"/linearity IFRIT_LINEARITY_HOLD="$gate"/b "$build/ifritview" --remember-linearity camera-b 1 &
+b=$!
+i=0
+until [ -e "$gate"/a.held ] || [ -e "$gate"/b.held ]; do
+  i=$((i + 1)); [ $i -lt 500 ] || { echo "neither took the linearity lock" >&2; exit 1; }
+  sleep 0.01
+done
+if [ -e "$gate"/a.held ]; then first=a second=b; else first=b second=a; fi
+sleep 1
+if [ -e "$gate"/$second.held ]; then
+  echo "both read the linearity store under its lock" >&2
+  exit 1
+fi
+touch "$gate"/$first
+i=0
+until [ -e "$gate"/$second.held ]; do
+  i=$((i + 1)); [ $i -lt 300 ] || { echo "the second never took the linearity lock" >&2; exit 1; }
+  sleep 0.01
+done
+touch "$gate"/$second
+wait $a
+wait $b
+grep -q '^\[seed\]' "$store"/linearity.conf
+grep -q '^\[camera-a (test)\]' "$store"/linearity.conf
+grep -q '^\[camera-b (test)\]' "$store"/linearity.conf
+! [ -e "$store"/linearity.conf.lock ]
+# One killed holding the lock lets go with it: the next goes ahead at once,
+# though the lock file it left is new.
+rm -f "$gate"/*
+XDG_CONFIG_HOME="$smoke"/linearity IFRIT_LINEARITY_HOLD="$gate"/c "$build/ifritview" --remember-linearity camera-c 1 &
+c=$!
+i=0
+until [ -e "$gate"/c.held ]; do
+  i=$((i + 1)); [ $i -lt 500 ] || { echo "the linearity lock wasn't taken" >&2; exit 1; }
+  sleep 0.01
+done
+kill -9 $c
+wait $c || true
+[ -e "$store"/linearity.conf.lock ]
+XDG_CONFIG_HOME="$smoke"/linearity "$build/ifritview" --remember-linearity camera-d 1
+grep -q '^\[camera-d (test)\]' "$store"/linearity.conf
+! grep -q '^\[camera-c (test)\]' "$store"/linearity.conf
+! [ -e "$store"/linearity.conf.lock ]
 # A decode of a file that changes before the viewer takes it arrives stale;
 # a file's time is kept finer than the second; and one still coming in is
 # read again once it's changed (or its watch said so) and held still.

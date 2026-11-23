@@ -247,6 +247,7 @@ private:
 
     std::shared_ptr<rap::gpu::device> device_;
     rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
+    std::vector<rap::gpu::texture_ptr> field_pool_;  // a raw's colour field's textures (upload()'s), made again only for another size
     // The display's boundary in Oklab (view.hlsli's display_boundary), made
     // for the peak it was made for.
     rap::gpu::texture_ptr boundary_;
@@ -289,6 +290,10 @@ private:
     rap::gpu::program_ptr develop_correct_;  // a raw's own corrections of its mosaic, before the develop
     rap::gpu::program_ptr develop_impulse_;  // its hot and cold photosites taken out, before the demosaic
     rap::gpu::program_ptr develop_green_;    // X-Trans's green, before the develop
+    rap::gpu::program_ptr develop_gather_, develop_gather_linear_, develop_gather_ycc_;  // the colour around what clips, before the develop
+    rap::gpu::program_ptr highlight_down_, highlight_up_, highlight_relax_, highlight_relax_ratios_;  // and spread across it (highlight.hlsl)
+    rap::gpu::program_ptr develop_pile_, develop_pile_linear_, develop_pile_ycc_, clip_limit_;  // where each colour stops being linear
+    rap::gpu::program_ptr develop_drift_, develop_drift_linear_, develop_drift_ycc_, clip_drift_, clip_combine_;  // and where it starts to drift
     rap::gpu::program_ptr clip_, clip_linear_, clip_ycc_, clip_find_;  // where a raw's colours clip, before its develop
     rap::gpu::program_ptr mosaic_, ljpeg_guess_, ljpeg_sync_, ljpeg_resolve_, ljpeg_decode_, ljpeg_columns_, ljpeg_rows_, ljpeg_black_, unpack_, raw_blocks_;
     rap::gpu::program_ptr mosaic_linear_;  // a linear DNG's readout: three colours a photosite

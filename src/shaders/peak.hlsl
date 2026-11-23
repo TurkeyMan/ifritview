@@ -29,6 +29,15 @@ void main()
     // A bin's top edge can be past the brightest pixel itself.
     stats.Store(kStatsPeak * 4, asuint(min(peak, asfloat(stats.Load(kStatsMaximum * 4)))));
 
+    // What a raw's develop estimated past its colours' limits goes past 1;
+    // the camera clipped it, and the display brings it down, so it doesn't
+    // pull the exposure down: its highlights count from 1 at most, as when
+    // it was clipped there.
+    float3 found = 0;
+    float censored = 0;
+    if (anchor > 0)
+        found = asfloat(clips.Load3(kClipFound * 4)), censored = asfloat(clips.Load(kClipCensored * 4));
+    const bool clipping = any(found > 0) || censored > 0;
     // A raw's exposure (auto_gain(); exposure.hlsli's model): anchored on
     // the camera's, a stop at most from it toward the key its scene's light
     // calls for, by the raw's white in cd/m^2 (`white_luminance`; 0 when its
@@ -48,7 +57,7 @@ void main()
         const float scale = asfloat(clips.Load(kClipWhite * 4));
         adapting = adapting_luminance(average, scale > 0 && scale <= 1 ? scale : 1.0f, white_luminance);
         key = display_key(adapting);
-        gain = exposure_gain(anchor, average, p99, key);
+        gain = exposure_gain(anchor, average, clipping ? min(p99, 1.0) : p99, key);
     }
     stats.Store(kStatsAverage * 4, asuint(average));
     stats.Store(kStatsAdapting * 4, asuint(adapting));

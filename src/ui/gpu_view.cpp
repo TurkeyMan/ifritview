@@ -8,11 +8,16 @@
 #include "../decoders/rawpacked.h"
 #include "../gpu.h"
 #include "../image.h"
+#include "../raw_linearity.h"
+#include "../shaders/drift.hlsli"
 #include "../shaders/clip_layout.hlsli"
 #include "../shaders/stats_layout.hlsli"
 #include "../white_balance.h"
 #include "shaders/clip.h"
 #include "shaders/clip_find.h"
+#include "shaders/clip_combine.h"
+#include "shaders/clip_drift.h"
+#include "shaders/clip_limit.h"
 #include "shaders/clip_linear.h"
 #include "shaders/clip_ycc.h"
 #include "shaders/compose.h"
@@ -22,9 +27,22 @@
 #include "shaders/develop_linear.h"
 #include "shaders/develop_correct.h"
 #include "shaders/develop_impulse.h"
+#include "shaders/develop_drift.h"
+#include "shaders/develop_drift_linear.h"
+#include "shaders/develop_drift_ycc.h"
+#include "shaders/develop_pile.h"
+#include "shaders/develop_pile_linear.h"
+#include "shaders/develop_pile_ycc.h"
+#include "shaders/develop_gather.h"
+#include "shaders/develop_gather_linear.h"
+#include "shaders/develop_gather_ycc.h"
 #include "shaders/develop_green.h"
 #include "shaders/develop_ycc.h"
 #include "shaders/difference.h"
+#include "shaders/highlight_down.h"
+#include "shaders/highlight_relax.h"
+#include "shaders/highlight_relax_ratios.h"
+#include "shaders/highlight_up.h"
 #include "shaders/histogram.h"
 #include "shaders/histogram_max.h"
 #include "shaders/histogram_view.h"
@@ -381,6 +399,11 @@ bool GpuView::programs(std::string& error)
                                  entry{&develop_, shaders::develop}, entry{&develop_correct_, shaders::develop_correct},
                                  entry{&develop_impulse_, shaders::develop_impulse},
                                  entry{&develop_green_, shaders::develop_green},
+                                 entry{&develop_gather_, shaders::develop_gather},
+                                 entry{&develop_gather_linear_, shaders::develop_gather_linear},
+                                 entry{&develop_gather_ycc_, shaders::develop_gather_ycc},
+                                 entry{&highlight_down_, shaders::highlight_down}, entry{&highlight_relax_, shaders::highlight_relax}, entry{&highlight_relax_ratios_, shaders::highlight_relax_ratios},
+                                 entry{&highlight_up_, shaders::highlight_up},
                                  entry{&develop_linear_, shaders::develop_linear},
                                  entry{&develop_ycc_, shaders::develop_ycc}, entry{&mosaic_, shaders::mosaic},
                                  entry{&mosaic_linear_, shaders::mosaic_linear},
@@ -402,7 +425,11 @@ bool GpuView::programs(std::string& error)
           entry{&ljpeg_columns_, shaders::ljpeg_columns}, entry{&ljpeg_rows_, shaders::ljpeg_rows}, entry{&ljpeg_black_, shaders::ljpeg_black},
           entry{&raw_blocks_, shaders::raw_blocks}, entry{&unpack_, shaders::unpack}, entry{&noise_, shaders::noise},
           entry{&clip_, shaders::clip}, entry{&clip_linear_, shaders::clip_linear}, entry{&clip_ycc_, shaders::clip_ycc},
-          entry{&clip_find_, shaders::clip_find}})
+          entry{&clip_find_, shaders::clip_find}, entry{&clip_limit_, shaders::clip_limit},
+          entry{&develop_pile_, shaders::develop_pile}, entry{&develop_pile_linear_, shaders::develop_pile_linear},
+          entry{&develop_pile_ycc_, shaders::develop_pile_ycc}, entry{&develop_drift_, shaders::develop_drift},
+          entry{&develop_drift_linear_, shaders::develop_drift_linear}, entry{&develop_drift_ycc_, shaders::develop_drift_ycc},
+          entry{&clip_drift_, shaders::clip_drift}, entry{&clip_combine_, shaders::clip_combine}})
     {
         auto r = device_->compute_program(make());
         if (!r.program)
@@ -1111,6 +1138,14 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             return false;
         }
         device_->clear(clips, 0);
+        // What's remembered of the camera's linearity (raw_linearity.h), for
+        // where the image doesn't show its own (clip.hlsl's COMBINE).
+        const std::string format = linearity::format_of(*m);
+        {
+            float stored[3];
+            linearity::recall(m->camera, format, stored);
+            device_->upload(clips, std::as_bytes(std::span(stored)), kClipStored * 4);
+        }
         {
             rap::gpu::dispatch d[2];
             d[0].program = m->ycc.block_h ? clip_ycc_ : m->channels == 3 ? clip_linear_ : clip_;
@@ -1145,8 +1180,160 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             p.map_x[0] = 1, p.map_x[1] = 0, p.map_x[2] = 0;
             p.map_y[0] = 0, p.map_y[1] = 1, p.map_y[2] = 0;
         }
+        // Where each colour's values pile up over the developed image, its
+        // linearity limit (develop.hlsl's PILE, clip.hlsl's LIMIT); then the
+        // colour field the develop estimates what's past those from
+        // (develop.hlsl's GATHER, a texel a 4 x 4 cell), measured twice (the
+        // second with the first's estimates, and the magnitude) and spread
+        // smoothly through a pyramid (highlight.hlsl), relaxed at each level:
+        // the ratios as a membrane, the magnitude as a thin plate (RELAX).
+        const rap::gpu::texture_ptr& out = warp ? whole : top;
+        p.map_x[3] = out->width(), p.map_y[3] = out->height();
+        {
+            rap::gpu::dispatch d[2];
+            d[0].program = m->ycc.block_h ? develop_pile_ycc_ : m->channels == 3 ? develop_pile_linear_ : develop_pile_;
+            d[0].inputs = {sites, green ? green : sites};
+            d[0].buffers = {clips, levels ? levels : histogram_, corrections ? corrections : histogram_};
+            d[0].uniforms = bytes(p);
+            d[0].groups[0] = (out->width() + 63) / 64;
+            d[0].groups[1] = (out->height() + 63) / 64;
+            d[1].program = clip_limit_;
+            d[1].buffers = {clips};
+            d[1].uniforms = bytes(p);
+            device_->run(std::span(d));
+        }
+        // Where each colour's ratio to the others starts to drift as the
+        // light on a surface rises (drift.hlsli: develop.hlsl's DRIFT a
+        // tile, clip.hlsl's DRIFT over runs of three), and the limits from
+        // that and the piles (COMBINE).
+        {
+            const int across = (out->width() + kDriftTile - 1) / kDriftTile, down = (out->height() + kDriftTile - 1) / kDriftTile;
+            auto tiles = device_->create_buffer(size_t(across) * size_t(down) * 32);  // develop.hlsl's DRIFT: two float4s a tile
+            if (!tiles)
+            {
+                error = "too big for the GPU";
+                return false;
+            }
+            rap::gpu::dispatch d[3];
+            d[0].program = m->ycc.block_h ? develop_drift_ycc_ : m->channels == 3 ? develop_drift_linear_ : develop_drift_;
+            d[0].inputs = {sites, green ? green : sites};
+            d[0].buffers = {clips, levels ? levels : histogram_, corrections ? corrections : histogram_, tiles};
+            d[0].uniforms = bytes(p);
+            d[0].groups[0] = (across + 7) / 8;
+            d[0].groups[1] = (down + 7) / 8;
+            d[1].program = clip_drift_;
+            d[1].buffers = {clips, histogram_, tiles};
+            d[1].uniforms = bytes(p);
+            d[1].groups[0] = (across + 15) / 16;
+            d[1].groups[1] = (down + 15) / 16;
+            d[2].program = clip_combine_;
+            d[2].buffers = {clips};
+            d[2].uniforms = bytes(p);
+            device_->run(std::span(d));
+        }
+        constexpr int kCell = 4;  // develop.hlsl's kRatioCell
+        const int fw = (out->width() + kCell - 1) / kCell, fh = (out->height() + kCell - 1) / kCell;
+        // The field's textures, the view's (made once for a size, and kept:
+        // the next raw of that size, and the four spreads here, reuse them;
+        // made again only for another size), by slot: each spread's
+        // result (0..3, stage 1's two then stage 2's, read after it), then
+        // what every spread uses in turn (run one after another, as passes
+        // are). Level 0, the largest, half floats: its log ratios and
+        // magnitude want no more, and its weights and confidences (a
+        // level-0 cell's measures, or a fill's confidence brought down from
+        // above, a quarter a level) stay small; the levels above sum their
+        // cells' weights, four a level, so they're full floats.
+        const auto pooled = [&](size_t slot, int w, int h) -> rap::gpu::texture_ptr
+        {
+            const rap::gpu::format f = w == fw && h == fh ? rap::gpu::format::rgba16f : rap::gpu::format::rgba32f;
+            if (field_pool_.size() <= slot)
+                field_pool_.resize(slot + 1);
+            auto& t = field_pool_[slot];
+            if (!t || t->width() != w || t->height() != h || t->format() != f)
+                t = device_->create({w, h, f, 1, true});
+            return t;
+        };
+        // GATHER's measures (stage 1 or 2, field 0 or 1), spread.
+        constexpr int kRelax = 8;  // RELAX's sweeps a level (even: they end where they began)
+        const auto spread = [&](int stage, int which, const rap::gpu::texture_ptr* before) -> rap::gpu::texture_ptr
+        {
+            // Slots: the result 0..3; level 0's gathered 4 and relaxed 5;
+            // above it, level k's (k >= 1) brought down, filled and relaxed.
+            const size_t result = size_t(stage - 1) * 2 + size_t(which);
+            const auto level_slot = [](size_t k, size_t part) { return 6 + (k - 1) * 3 + part; };
+            std::vector<rap::gpu::texture_ptr> pushed;
+            auto gathered = pooled(4, fw, fh);
+            if (!gathered)
+                return nullptr;
+            DevelopParams q = p;
+            q.flags[2] = stage, q.flags[3] = which;
+            std::vector<rap::gpu::pass> passes(1);
+            passes[0].program = m->ycc.block_h ? develop_gather_ycc_ : m->channels == 3 ? develop_gather_linear_ : develop_gather_;
+            passes[0].inputs = {sites, green ? green : sites, before ? before[0] : blank_, before ? before[1] : blank_};
+            passes[0].buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_, clips};
+            passes[0].uniforms = bytes(q);
+            passes[0].target = gathered;
+            pushed.push_back(gathered);
+            for (int w = fw, h = fh; w > 1 || h > 1;)
+            {
+                w = (w + 1) / 2, h = (h + 1) / 2;
+                auto next = pooled(level_slot(pushed.size(), 0), w, h);
+                if (!next)
+                    return nullptr;
+                rap::gpu::pass d;
+                d.program = highlight_down_;
+                d.buffers = {clips};
+                d.inputs = {pushed.back()};
+                d.target = next;
+                passes.push_back(d);
+                pushed.push_back(next);
+            }
+            rap::gpu::texture_ptr filled = pushed.back();
+            for (size_t k = pushed.size() - 1; k-- > 0;)
+            {
+                auto finer = k == 0 ? pooled(result, fw, fh) : pooled(level_slot(k, 1), pushed[k]->width(), pushed[k]->height());
+                if (!finer)
+                    return nullptr;
+                rap::gpu::pass u;
+                u.program = highlight_up_;
+                u.buffers = {clips};
+                u.inputs = {pushed[k], filled};
+                u.target = finer;
+                passes.push_back(u);
+                filled = finer;
+                if (stage == 2)
+                {
+                    auto other = k == 0 ? pooled(5, fw, fh) : pooled(level_slot(k, 2), finer->width(), finer->height());
+                    if (!other)
+                        return nullptr;
+                    for (int i = 0; i < kRelax; ++i)
+                    {
+                        rap::gpu::pass r;
+                        r.program = which == 1 ? highlight_relax_ : highlight_relax_ratios_;
+                        r.buffers = {clips};
+                        r.inputs = {filled};
+                        r.target = i % 2 ? finer : other;
+                        passes.push_back(r);
+                        filled = r.target;
+                    }
+                }
+            }
+            device_->run(std::span<const rap::gpu::pass>(passes));
+            return filled;
+        };
+        rap::gpu::texture_ptr first[2] = {spread(1, 0, nullptr), spread(1, 1, nullptr)};
+        rap::gpu::texture_ptr second[2];
+        if (first[0] && first[1])
+            second[0] = spread(2, 0, first), second[1] = spread(2, 1, first);
+        if (!second[0] || !second[1])
+        {
+            error = "too big for the GPU";
+            return false;
+        }
+        pass.inputs.push_back(second[0]);
+        pass.inputs.push_back(second[1]);
         pass.uniforms = bytes(p);
-        pass.target = warp ? whole : top;
+        pass.target = out;
         device_->run(std::span(&pass, 1));
         if (warp)
         {
@@ -1171,6 +1358,55 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
                                   float f[3];
                                   std::memcpy(f, found->data() + kClipFound * 4, sizeof f);
                                   std::fprintf(stderr, "gpu: colours clip at R %.4f G %.4f B %.4f of the stated white (0: none found)\n", f[0], f[1], f[2]);
+                                  std::memcpy(f, found->data() + kClipLimit * 4, sizeof f);
+                                  std::fprintf(stderr, "gpu: colours linear to R %.4f G %.4f B %.4f of their clips\n", f[0], f[1], f[2]);
+                                  float piled[3], drifted[3], sure[3], stored[3], censored;
+                                  std::memcpy(piled, found->data() + kClipPiled * 4, sizeof piled);
+                                  std::memcpy(drifted, found->data() + kClipDrifted * 4, sizeof drifted);
+                                  std::memcpy(sure, found->data() + kClipDriftSure * 4, sizeof sure);
+                                  std::memcpy(stored, found->data() + kClipStored * 4, sizeof stored);
+                                  std::memcpy(&censored, found->data() + kClipCensored * 4, sizeof censored);
+                                  uint32_t any = 0;
+                                  std::memcpy(&any, found->data() + kClipAny * 4, sizeof any);
+                                  std::fprintf(stderr,
+                                               "gpu: piles at R %.4f G %.4f B %.4f; drift R %.4f%s G %.4f%s B %.4f%s; remembered R %.4f G %.4f B %.4f "
+                                               "(0: none); %.0f sampled values censored under the clip; %s\n",
+                                               piled[0], piled[1], piled[2], drifted[0], sure[0] > 0 ? " sure" : "", drifted[1],
+                                               sure[1] > 0 ? " sure" : "", drifted[2], sure[2] > 0 ? " sure" : "", stored[0], stored[1], stored[2],
+                                               censored, any ? "photosites censored: estimated" : "none censored: nothing estimated");
+                                  for (int c = 0; c < 3; ++c)
+                                  {
+                                      std::fprintf(stderr, "gpu: drift %c:", "RGB"[c]);
+                                      for (unsigned b = 0; b < kDriftBins; ++b)
+                                      {
+                                          float s[kDriftSums] = {};  // the quadrants' together
+                                          for (unsigned g = 0; g < kDriftGroups; ++g)
+                                          {
+                                              float q[kDriftSums];
+                                              std::memcpy(q, found->data() + (kClipDrift + ((g * 3 + c) * kDriftBins + b) * kDriftSums) * 4, sizeof q);
+                                              for (unsigned k = 0; k < kDriftSums; ++k)
+                                                  s[k] += q[k];
+                                          }
+                                          if (s[3] > 0)
+                                              std::fprintf(stderr, " %.3f:%.3f/%.0f", kPileFrom + (b + 1) * (1 - kPileFrom) / kDriftBins,
+                                                           s[1] > s[4] ? (s[0] + s[4]) / (s[1] - s[4]) : 0.f, s[3]);  // drift_limit()'s slope
+                                      }
+                                      std::fprintf(stderr, "\n");
+                                  }
+                              });
+        }
+        // The image's drift, remembered for its camera where it's sure.
+        if (!m->camera.empty())
+        {
+            auto drift = std::make_shared<std::vector<std::byte>>(clips->size());
+            device_->readback(clips, *drift,
+                              [drift, camera = m->camera, format]
+                              {
+                                  float limit[3], sure[3];
+                                  std::memcpy(limit, drift->data() + kClipDrifted * 4, sizeof limit);
+                                  std::memcpy(sure, drift->data() + kClipDriftSure * 4, sizeof sure);
+                                  const bool kept[3] = {sure[0] > 0, sure[1] > 0, sure[2] > 0};
+                                  linearity::remember(camera, format, limit, kept);
                               });
         }
         s.levels.push_back(top);
