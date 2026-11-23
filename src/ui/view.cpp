@@ -1216,6 +1216,7 @@ bool View::draw_on_gpu(rap::color background)
     GpuView::Frame f;
     GpuView::edit_of(*image_, f);
     key.adjust = f.adjust ? f.adjust->serial : 0;
+    key.treated = f.treated;
     key.detail = f.detail;
     // Comparing, what's transparent in either shows over the checkerboard
     // whatever the setting, as the CPU draws it.
@@ -1237,6 +1238,7 @@ bool View::draw_on_gpu(rap::color background)
             key.b_wb_tint = b->wb_tint;
             const std::shared_ptr<const AdjustTables> t = b->adjust_tables();
             key.b_adjust = t ? t->serial : 0;
+            key.b_treated = b->adjust.treated;
             key.b_detail = b->adjust.detail;
         }
     }

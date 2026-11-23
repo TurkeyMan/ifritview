@@ -28,6 +28,23 @@ float3 to_balance()
     return flags.x ? 1 : as_shot.rgb;
 }
 
+// Each colour's clip under the balance, from clip.hlsl's (`found`; none
+// found: the stated white), 1 = the stated white; and the white the develop
+// scales its values by (clipped()), the least of them, the stated white at
+// most. A raw's exposure (peak.hlsl) takes it back off to put its
+// luminance on the stated white's scale, the scale its EXIF speaks of.
+float3 clip_stops(float3 found)
+{
+    if (flags.y)
+        found = found.g;  // grey: counted as green
+    return (found + (found <= 0) * (1 - found)) * to_balance();
+}
+float develop_white(float3 found)
+{
+    const float3 stops = clip_stops(found);
+    return min(min(stops.r, min(stops.g, stops.b)), 1.0);
+}
+
 // The pattern's site at photosite (x, y), x and y not negative (past the
 // right and bottom edges the pattern goes on). By 6, not the period: a
 // constant's remainder is a multiply, a uniform's a long division.

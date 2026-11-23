@@ -1,4 +1,5 @@
 #include "../bytes.h"
+#include "../exposure.h"
 #include "../i18n.h"
 #include "../impulse.h"
 #include "../lens_database.h"
@@ -1976,6 +1977,14 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
 
 // The embedded JPEG, used as the on-screen stand-in while the real decode
 // runs; not offered when the configured mode is the preview anyway.
+// What the EXIF parser picks out on the way (on_exif_tag): the exposure
+// compensation, and which rating the ISO is (exposure.h).
+struct ExifTags
+{
+    double bias = 0;            // ExposureBiasValue, EV
+    int sensitivity_type = -1;  // SensitivityType; -1: none
+    float iso_speed = 0;        // ISOSpeed (ISO 12232's), for the trace; 0: none
+};
 void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64);
 
 // The camera's picture style, from its MakerNotes as LibRaw reads them: the
@@ -1985,7 +1994,7 @@ struct StyleNote
 {
     const LibRaw* raw = nullptr;
     std::string style;
-    double* bias = nullptr;  // before LibRaw 0.22, on_exif_tag's, which the same handler calls
+    ExifTags* tags = nullptr;  // before LibRaw 0.22, on_exif_tag's, which the same handler calls
 };
 
 // The camera's make (as LibRaw has it, "Canon", "Nikon", "Sony"...) is
@@ -2100,21 +2109,21 @@ void canon_maker_note(StyleNote& note, unsigned order, LibRaw_abstract_datastrea
 void on_exif_tag_and_maker_note(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64 base)
 {
     auto* note = static_cast<StyleNote*>(context);
-    on_exif_tag(note->bias, tag, type, len, order, ifp, base);
+    on_exif_tag(note->tags, tag, type, len, order, ifp, base);
     if (tag == 0x927c && maker(note->raw->imgdata.idata.make, "canon"))
         canon_maker_note(*note, order, static_cast<LibRaw_abstract_datastream*>(ifp), base);
 }
 #endif
 
 // What LibRaw is to tell as it parses the raw: the exposure compensation
-// (on_exif_tag, into `bias`), and the picture style.
-void listen(RawAccess& raw, double& bias, StyleNote& style)
+// and the ISO's rating (on_exif_tag, into `tags`), and the picture style.
+void listen(RawAccess& raw, ExifTags& tags, StyleNote& style)
 {
 #if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
-    raw.set_exifparser_handler(on_exif_tag, &bias);
+    raw.set_exifparser_handler(on_exif_tag, &tags);
     raw.set_makernotes_handler(on_maker_note, &style);
 #else
-    style.bias = &bias;
+    style.tags = &tags;
     raw.set_exifparser_handler(on_exif_tag_and_maker_note, &style);
 #endif
 }
@@ -2168,9 +2177,9 @@ bool preview(const std::string& path, Image& out)
         return false;
     auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB
     RawAccess& raw = *raw_ptr;
-    double bias = 0;
+    ExifTags tags;
     StyleNote style{&raw, {}};
-    listen(raw, bias, style);  // the slider rests at the camera's compensation even on the preview
+    listen(raw, tags, style);  // the slider rests at the camera's compensation even on the preview
     const uint8_t* bytes = nullptr;
     size_t size = 0;
     const int64_t t0 = g_get_monotonic_time();
@@ -2190,7 +2199,7 @@ bool preview(const std::string& path, Image& out)
     out.is_raw = true;
     out.stand_in_full = fit_w <= 0 || fit_h <= 0;
     out.info = camera_name(raw);
-    out.exposure_bias = bias;
+    out.exposure_bias = tags.bias;
     picture_style(raw, style, out, false);
     // What the develop will produce, so the window can be sized for it now.
     raw.imgdata.params.half_size = decode_options().raw_mode == DecodeOptions::RawMode::Half ? 1 : 0;
@@ -2203,24 +2212,39 @@ bool preview(const std::string& path, Image& out)
     return true;
 }
 
-// LibRaw keeps no field for ExposureBiasValue (EXIF 0x9204); catch it as
-// the EXIF block is parsed.
+// LibRaw keeps no field for ExposureBiasValue (EXIF 0x9204), SensitivityType
+// (0x8830) or ISOSpeed (0x8833); catch them as the EXIF block is parsed.
 void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64)
 {
-    if (tag != 0x9204 || type != 10 || len < 1)
-        return;  // SRATIONAL
+    auto& tags = *static_cast<ExifTags*>(context);
     auto* stream = static_cast<LibRaw_abstract_datastream*>(ifp);
-    uint8_t buf[8];
-    if (stream->read(buf, 8, 1) != 1)
-        return;
     auto get32 = [&](const uint8_t* p) -> int32_t
     {
         return order == 0x4949 ? int32_t(p[0] | (p[1] << 8) | (p[2] << 16) | (uint32_t(p[3]) << 24))
                                : int32_t((uint32_t(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3]);
     };
-    const int32_t num = get32(buf), den = get32(buf + 4);
-    if (den != 0)
-        *static_cast<double*>(context) = double(num) / den;
+    auto get16 = [&](const uint8_t* p) { return order == 0x4949 ? p[0] | (p[1] << 8) : (p[0] << 8) | p[1]; };
+    uint8_t buf[8];
+    if (tag == 0x9204 && type == 10 && len >= 1)  // ExposureBiasValue, SRATIONAL
+    {
+        if (stream->read(buf, 8, 1) != 1)
+            return;
+        const int32_t num = get32(buf), den = get32(buf + 4);
+        if (den != 0)
+            tags.bias = double(num) / den;
+    }
+    else if (tag == 0x8830 && type == 3 && len >= 1)  // SensitivityType, SHORT
+    {
+        if (stream->read(buf, 2, 1) == 1)
+            tags.sensitivity_type = get16(buf);
+    }
+    else if (tag == 0x8833 && (type == 4 || type == 3) && len >= 1)  // ISOSpeed, LONG (or SHORT)
+    {
+        if (type == 4 && stream->read(buf, 4, 1) == 1)
+            tags.iso_speed = float(uint32_t(get32(buf)));
+        else if (type == 3 && stream->read(buf, 2, 1) == 1)
+            tags.iso_speed = float(get16(buf));
+    }
 }
 
 bool decode_raw(const std::string& path, Image& out, std::string& error)
@@ -2228,9 +2252,9 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     const DecodeOptions options = decode_options();
     auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB, and a Windows thread's stack is 1 MB
     RawAccess& raw = *raw_ptr;
-    double bias = 0;
+    ExifTags tags;
     StyleNote style{&raw, {}};
-    listen(raw, bias, style);
+    listen(raw, tags, style);
     raw.imgdata.params.use_camera_wb = 1;
     raw.imgdata.params.output_color = 1;  // sRGB
     const uint8_t* bytes = nullptr;
@@ -2328,6 +2352,20 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         m->shot = std::move(shot);
         out.mosaic = std::move(m);
     }
+    // The scene's luminance at the stated white, from how it was taken
+    // (exposure.h): its nominal ISO (and which rating it is), shutter and aperture.
+    if (out.mosaic)
+    {
+        const auto& other = raw.imgdata.other;
+        const auto& idata = raw.imgdata.idata;
+        const exposure::Sensitivity s = exposure::scene_sensitivity(tags.sensitivity_type, other.iso_speed);
+        auto m = std::make_shared<RawMosaic>(*out.mosaic);
+        m->white_luminance = exposure::raw_white_luminance(s, other.shutter, other.aperture, idata.normalized_make, idata.normalized_model);
+        if (std::getenv("IFRIT_TRACE"))
+            std::fprintf(stderr, "raw: %g cd/m2 at the stated white, from ISO %g (%s; SensitivityType %d, ISOSpeed %g), %g s, f/%g\n", m->white_luminance,
+                         s.iso, exposure::speed_name(s.speed), tags.sensitivity_type, tags.iso_speed, other.shutter, other.aperture);
+        out.mosaic = std::move(m);
+    }
 
     out.bits_per_sample = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
     if (out.linear)
@@ -2365,10 +2403,10 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         out.add(N_("Camera"), N_("Aperture"), "f/" + fmt(other.aperture, 1));
     if (other.focal_len > 0)
         out.add(N_("Camera"), N_("Focal length"), fmt(other.focal_len, 0) + " mm");
-    out.exposure_bias = bias;
+    out.exposure_bias = tags.bias;
     picture_style(raw, style, out, true);
-    if (bias != 0)
-        out.add(N_("Camera"), N_("Exposure compensation"), (bias > 0 ? "+" : "") + fmt(bias, 2) + " EV");
+    if (tags.bias != 0)
+        out.add(N_("Camera"), N_("Exposure compensation"), (tags.bias > 0 ? "+" : "") + fmt(tags.bias, 2) + " EV");
     if (other.timestamp)
     {
         char buf[64];
