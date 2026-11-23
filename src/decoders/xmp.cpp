@@ -252,17 +252,90 @@ std::string get_string(const Packet& p, std::string_view ns, std::string_view na
     return p.value(ns, name).value_or("");
 }
 
+// A struct's field (an attribute of it, or of an rdf:Description in it, or
+// an element), as a simple value; empty where it has none.
+std::string struct_field(const Packet& p, size_t element, std::string_view ns, std::string_view name)
+{
+    const xml::Element& e = p[element];
+    if (const xml::Attribute* a = e.attribute(ns, name))
+        return a->value;
+    for (const size_t c : e.children)
+        if (is_rdf(p[c], "Description"))
+        {
+            if (std::string v = struct_field(p, c, ns, name); !v.empty())
+                return v;
+        }
+        else if (p[c].uri == ns && p[c].name == name)
+            return p.value(c).value_or("");
+    return {};
+}
+
+// The name of the crs:Look a packet has, where that's one of Lightroom's
+// profiles: Lightroom records choosing Adobe Color, Vivid and the rest as a
+// look (a creative look's name isn't one, and is kept, not rendered).
+std::string profile_look(const Packet& p)
+{
+    const Packet::Property* look = p.find(kCrs, "Look");
+    if (!look || look->element == npos)
+        return {};
+    std::string name = struct_field(p, look->element, kCrs, "Name");
+    return known_profile(name) ? name : std::string();
+}
+
+// The profile a packet's settings are for: its crs:Look's where that's a
+// profile, else its crs:CameraProfile; empty where it names none.
+std::string profile_of(const Packet& p)
+{
+    if (std::string look = profile_look(p); !look.empty())
+        return look;
+    return p.value(kCrs, "CameraProfile").value_or("");
+}
+
+// It has develop settings: any of Camera Raw's but a HasSettings that says
+// it hasn't.
+bool treated(const Packet& p)
+{
+    for (const Packet::Property& property : p.properties)
+        if (p.uri(property) == kCrs)
+        {
+            const std::string& name = property.element == npos ? p.attribute(property)->name : p[property.element].name;
+            if (name != "HasSettings")
+                return true;
+            const std::string v = p.value(property).value_or("");
+            if (v != "False" && v != "false")
+                return true;
+        }
+    return false;
+}
+
 // Later sources (a sidecar) override earlier ones (the embedded packet).
 void collect_develop(const Packet& p, Image& out)
 {
     XmpDevelop& d = out.xmp;
+    if (treated(p))
+    {
+        d.treated = true;
+        d.present = true;
+    }
+    if (std::string profile = profile_of(p); !profile.empty())
+        d.adjust.profile = std::move(profile);
     double v = 0;
+    // What any source has set is `given`: saving writes it back, at rest
+    // too, so it overrides the source that set it (write_xmp_sidecar).
     if (get_double(p, kCrs, "Exposure2012", v) || get_double(p, kCrs, "Exposure", v))
     {
         d.exposure = v;
+        d.given.insert("Exposure");
         d.present = true;
     }
     const std::string wb = get_string(p, kCrs, "WhiteBalance");
+    if (!wb.empty() || p.find(kCrs, "Temperature"))
+        d.given.insert("WhiteBalance");
+    if (wb == "As Shot")  // over what an earlier source chose
+    {
+        d.temperature = d.tint = 0;
+        d.present = true;
+    }
     if (wb != "As Shot" && get_double(p, kCrs, "Temperature", v) && v > 0)
     {
         d.temperature = v;
@@ -303,15 +376,20 @@ void collect_develop(const Packet& p, Image& out)
         if (!points.empty())
         {
             *c.curve = std::move(points);
+            d.given.insert(c.name);
             d.present = true;
         }
     }
     if (std::string name = get_string(p, kCrs, crs_curve_name(a)); !name.empty())
+    {
         a.curve_name = std::move(name);
+        d.given.insert(crs_curve_name(a));
+    }
     // The rest of Camera Raw's simple settings, not applied (yet), kept for
     // writing them back.
     std::vector<std::string> owned = {"ProcessVersion", "Exposure",      "Exposure2012",      "WhiteBalance", "Temperature",
-                                      "Tint",           "ToneCurveName", "ToneCurveName2012", "HasSettings"};
+                                      "Tint",           "ToneCurveName", "ToneCurveName2012", "HasSettings",
+                                      "CameraProfile"};
     for (const CrsField& f : crs_fields(a))
         owned.push_back(f.name);
     for (const Packet::Property& property : p.properties)
@@ -609,7 +687,7 @@ std::string with_crs_description(std::string_view text, const Packet& p)
 
 }  // namespace
 
-bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::string& error)
+bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, const Adjustments& rest, std::string& error)
 {
     const std::string sidecar = xmp_sidecar_path(path);
     // What's there already, all of it kept but what's set below; one that
@@ -637,33 +715,63 @@ bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::st
     Merge xmp(text, p, p.crs_description());
 
     Adjustments a = edits.adjust;
+    // The profile: the one it was read with, or the Adobe one the look
+    // chosen here maps to. One other than the sidecar's replaces it, and
+    // what went with the old one goes: its digest, and the crs:Look that
+    // recorded it where that's how Lightroom had it (a creative look stays).
+    const std::string profile = !a.profile.empty() ? a.profile : adobe_profile(a.look);
+    const bool new_profile = profile != profile_of(p);
+    if (new_profile)
+    {
+        xmp.set("CameraProfile", profile);
+        xmp.remove("CameraProfileDigest");
+        if (!profile_look(p).empty())
+            xmp.remove("Look");
+    }
     // Settings it read and doesn't apply yet go back where they're missing.
     for (const auto& [name, value] : a.kept)
-        if (!xmp.has(name))
+        if (!xmp.has(name) && !(new_profile && name == "CameraProfileDigest"))
             xmp.set(name, value);
     std::string process = edits.process_version;
     if (process.empty() || (g_ascii_strtod(process.c_str(), nullptr) < 6) != a.legacy)
         process = a.legacy ? "5.7" : "11.0";
     xmp.set("ProcessVersion", process);
-    xmp.set(a.legacy ? "Exposure" : "Exposure2012", crs_number(edits.exposure, "%+.2f"));
+    // The controls: those moved from where they rest (`rest`: as an
+    // untreated image opens), and those any source of its settings has set
+    // (this sidecar, or another the image was read with: its embedded XMP,
+    // photo.CR2.xmp), which follow them, at rest too, so a reset overrides
+    // what the other source says; one at rest that none has set is left
+    // out, as at rest it's Lightroom's default too.
+    const auto set_before = [&](const std::string& name) { return xmp.has(name) || edits.given.count(name) > 0; };
+    const char* exposure = a.legacy ? "Exposure" : "Exposure2012";
+    if (edits.exposure != 0 || set_before(exposure) || edits.given.count("Exposure"))
+        xmp.set(exposure, crs_number(edits.exposure, "%+.2f"));
     if (edits.temperature > 0)
     {
         xmp.set("WhiteBalance", "Custom");
         xmp.set("Temperature", crs_number(edits.temperature, "%.0f"));
         xmp.set("Tint", crs_number(edits.tint));
     }
-    else
+    else if (set_before("WhiteBalance") || xmp.has("Temperature"))
     {
         // As shot: the camera's, which Lightroom reads from the raw.
         xmp.set("WhiteBalance", "As Shot");
         xmp.remove("Temperature");
         xmp.remove("Tint");
     }
-    for (const CrsField& f : crs_fields(a))
-        if (!f.process || f.process == (a.legacy ? 2010 : 2012))
+    Adjustments at_rest = rest;
+    const std::vector<CrsField> fields = crs_fields(a), rests = crs_fields(at_rest);
+    for (size_t i = 0; i < fields.size(); ++i)
+    {
+        const CrsField& f = fields[i];
+        if ((!f.process || f.process == (a.legacy ? 2010 : 2012)) && (*f.value != *rests[i].value || set_before(f.name)))
             xmp.set(f.name, crs_number(*f.value, !f.sign ? "%.0f" : f.decimals ? "%+.1f" : "%+.0f"));
+    }
+    const auto linear = [](const Adjustments::Curve& c) { return c.size() < 2 || c == Adjustments::Curve{{0, 0}, {255, 255}}; };
     for (const CrsCurve& c : crs_curves(a))
     {
+        if (linear(*c.curve) && !set_before(c.name))
+            continue;
         Adjustments::Curve points = *c.curve;
         if (points.size() < 2)
             points = {{0, 0}, {255, 255}};
@@ -672,8 +780,9 @@ bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::st
             items.push_back(std::to_string(x) + ", " + std::to_string(y));
         xmp.set(c.name, items);
     }
-    const bool linear = a.curve.size() < 2 || a.curve == Adjustments::Curve{{0, 0}, {255, 255}};
-    xmp.set(crs_curve_name(a), !a.curve_name.empty() ? a.curve_name : linear ? "Linear" : "Custom");
+    const bool named = !a.curve_name.empty() && a.curve_name != "Linear";
+    if (!linear(a.curve) || named || set_before(crs_curve_name(a)))
+        xmp.set(crs_curve_name(a), !a.curve_name.empty() ? a.curve_name : linear(a.curve) ? "Linear" : "Custom");
     xmp.set("HasSettings", "True");
 
     const std::string bytes = xmp.result();

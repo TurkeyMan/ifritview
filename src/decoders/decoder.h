@@ -205,7 +205,11 @@ std::string xmp_sidecar_path(const std::string& path);
 // that's there, everything else in it kept (other schemas, the crs settings
 // not applied here); written whole or not at all. The image file itself is
 // never touched (Lightroom keeps a DNG's or a JPEG's settings inside it).
-bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, std::string& error);
+// Its profile (crs:CameraProfile) is the one the settings were read with,
+// or the Adobe one their look maps to (look.h). Of the controls, only those
+// moved from `rest` (where they are as the image opens untreated) are
+// written, and those the sidecar has already.
+bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, const Adjustments& rest, std::string& error);
 
 #ifdef HAVE_EXIF
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF

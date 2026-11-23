@@ -6,11 +6,12 @@
 
 struct Config;
 
-// The settings dialog: General, Viewing, Controls and File Types tabs.
+// The settings dialog: General, Viewing, Controls, File Types and Raw
+// develop tabs.
 // Non-modal in code (rapport dialogs are callback-driven): `done(true)` runs
 // after `cfg` has been updated from an OK; `done(false)` on Cancel.
 // `page`: the tab to open on (0 General, 1 Viewing, 2 Controls, 3 File Types,
-// 4 About).
+// 4 Raw develop, 5 About).
 // `forget_locations`: the Maps group's button, run at once rather than on
 // OK; it calls back on the UI thread, told whether all was forgotten.
 // Returns a function that ends the dialog as OK (true) or Cancel would; it

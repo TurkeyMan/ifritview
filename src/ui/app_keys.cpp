@@ -89,7 +89,7 @@ bool App::on_key(const rap::key_event& e)
     switch (e.key)
     {
         case rap::key::f1:
-            open_settings_page(4);  // About
+            open_settings_page(5);  // About
             return true;
         case rap::key::page_up:
         case rap::key::page_down:

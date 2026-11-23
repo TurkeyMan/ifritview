@@ -42,6 +42,8 @@ const struct
 };
 
 const char* const kRawModes[] = {"full", "half", "preview"};
+// Config::raw_look's choices, as offered.
+const char* const kRawLooks[] = {"neutral", "camera", "enhanced", "picture-style"};
 
 // The scaling filters as offered, sharpest first; enlarging can also show
 // the pixels themselves.
@@ -178,6 +180,8 @@ struct State
     std::vector<std::string> language_tags;  // the language choice's, "" for the system's
     rap::entry *map_url = nullptr, *geo_url = nullptr;
 
+    rap::drop_down* raw_look = nullptr;
+
     rap::drop_down *enlarge_filter = nullptr, *shrink_filter = nullptr;
     rap::check* levels_in_nits = nullptr;
     rap::check *fullscreen_upscale = nullptr, *checkerboard = nullptr, *animate = nullptr;
@@ -213,6 +217,9 @@ struct State
             apply_controls();
         if (extensions)
             cfg.extensions = parse_extensions(extensions->text());
+        if (raw_look)
+            if (const int i = raw_look->current(); i >= 0 && size_t(i) < std::size(kRawLooks))
+                cfg.raw_look = kRawLooks[i];
     }
 
     void apply_general()
@@ -479,6 +486,34 @@ rap::node general_page(const Config& cfg, State& st)
                               .bind(st.forget_locations_button)},
                  }},
     }};
+}
+
+// Raw develop: how a raw is developed where its own settings don't say.
+rap::node raw_develop_page(const Config& cfg, State& st)
+{
+    std::vector<std::string> looks;
+    for (const char* id : kRawLooks)
+        looks.push_back(std::string(id) == "picture-style" ? _("Follow the camera's picture style") : _(look_label(*look_named(id))));
+    int look = 0;
+    for (size_t i = 0; i < std::size(kRawLooks); ++i)
+        if (cfg.raw_look == kRawLooks[i])
+            look = int(i);
+    return L::vbox{
+        L::group{_("Look"),
+                 L::form{
+                     {_("Raws without develop settings"),
+                      L::drop_down{looks, look}
+                          .bind(st.raw_look)
+                          .tooltip(_("The look a raw opens with when its XMP has no develop settings of Lightroom's (or none is there). "
+                                     "The camera's picture style (Canon's Picture Style, Nikon's Picture Control, Fujifilm's film "
+                                     "simulation, Sony's Creative Style) maps to the look nearest it; one it doesn't record is Camera-like"))},
+                     {"", L::label{_("A raw developed in Lightroom opens with its own profile's look, its settings on top, whatever this says. "
+                                     "The G panel's Look changes the image shown, as a develop setting.")}},
+                 }},
+        // TODO: the page's later preferences: bright colours film-like to
+        // vivid, night scenes' depth, the white balance's source, a default
+        // noise reduction, lens corrections, HDR headroom (config.h).
+    };
 }
 
 rap::node viewing_page(const Config& cfg, State& st)
@@ -810,6 +845,7 @@ std::function<void(bool)> open_settings_dialog(rap::ui& ui, rap::window* parent,
                                              {_("Viewing"), L::lazy{[&cfg, s] { return viewing_page(cfg, *s); }}},
                                              {_("Controls"), L::lazy{[&cfg, s] { return controls_page(cfg, *s); }}},
                                              {_("File Types"), L::lazy{[&cfg, s] { return file_types_page(cfg, *s); }}},
+                                             {_("Raw develop"), L::lazy{[&cfg, s] { return raw_develop_page(cfg, *s); }}},
                                              {_("About"), L::lazy{[&ui] { return about_page(ui); }}},
                                          }
                                              .sidebar()

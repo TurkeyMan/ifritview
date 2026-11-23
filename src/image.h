@@ -201,6 +201,12 @@ void orient_rect(int orientation, int W, int H, int& x, int& y, int& w, int& h);
 struct XmpDevelop
 {
     bool present = false;
+    // It has develop settings (crs:ProcessVersion, crs:HasSettings, or any
+    // other of Camera Raw's): the image has been developed in Lightroom (or
+    // here, and saved), not just rated, labelled or tagged. A treated raw
+    // renders as its profile has it (adjust.look, adjust.profile) with its
+    // settings on top; none of the defaults for an untreated one apply.
+    bool treated = false;
     double exposure = 0;     // crs:Exposure2012, EV on top of as-shot
     double temperature = 0;  // crs:Temperature in Kelvin, 0 = as shot
     double tint = 0;         // crs:Tint, with it
@@ -378,8 +384,20 @@ struct Image
     Adjustments adjust;                 // Lightroom's develop controls, by the user or XMP (adjust.h)
     // What it opens with: its XMP's settings (`with_xmp`) or every control
     // at rest; a raw's Detail at Lightroom's defaults (detail.h) where its
-    // settings don't say.
-    Adjustments opening_adjust(bool with_xmp) const;
+    // settings don't say. A raw's look: its XMP's profile's where that's
+    // treated (XmpDevelop::treated), else `untreated` (the settings'
+    // default, which may follow the camera's picture style).
+    Adjustments opening_adjust(bool with_xmp, Look untreated = Look::Neutral) const;
+    // Its settings `d` were written to its sidecar: it's treated now, both
+    // as its XMP is and as it's being developed, under the profile written
+    // (the Adobe one its look maps to, where it had none), so a later change
+    // of the default look leaves it be.
+    void develop_saved(const XmpDevelop& d);
+    // The camera's picture style as its MakerNotes name it ("Landscape";
+    // Canon's, Nikon's, Fujifilm's, Sony's), empty where it isn't known; and
+    // the look that maps to (look_of_picture_style).
+    std::string picture_style;
+    std::optional<Look> camera_look;
     // Its tables, made again when `adjust` has changed since; null when
     // it's neutral. The UI thread's.
     std::shared_ptr<const AdjustTables> adjust_tables() const;
