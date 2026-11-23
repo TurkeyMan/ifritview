@@ -207,6 +207,7 @@ endif()
 add_subdirectory(${IFRIT_RAPPORT_DIR} rapport EXCLUDE_FROM_ALL)
 add_executable(ifritview
   src/ui/main.cpp
+  src/ui/check_brightness.cpp
   src/ui/app.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp
@@ -445,7 +446,7 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
-      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli)
+      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli)
   foreach(shader decode develop resample compose difference histogram_view mosaic detail)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
@@ -457,9 +458,14 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifritview NAME mosaic_linear SOURCE src/shaders/mosaic.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME warp SOURCE src/shaders/warp.hlsl)
   foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
-          ljpeg_black unpack raw_blocks noise)
+          ljpeg_black unpack raw_blocks noise volume)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl STAGE compute DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
+  rapport_add_shader(ifritview NAME stats_top SOURCE src/shaders/stats.hlsl STAGE compute DEFINES TOP DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME stats_curve SOURCE src/shaders/stats.hlsl STAGE compute DEFINES CURVE DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME volume_clear SOURCE src/shaders/volume.hlsl STAGE compute DEFINES CLEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME volume_curve SOURCE src/shaders/volume.hlsl STAGE compute DEFINES CURVE DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME volume_prepare SOURCE src/shaders/volume.hlsl STAGE compute DEFINES PREPARE DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME clip SOURCE src/shaders/clip.hlsl STAGE compute DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME clip_linear SOURCE src/shaders/clip.hlsl STAGE compute DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME clip_ycc SOURCE src/shaders/clip.hlsl STAGE compute DEFINES YCC DEPENDS ${IFRIT_SHADER_INCLUDES})

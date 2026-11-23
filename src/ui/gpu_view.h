@@ -20,7 +20,9 @@
 #include <rapport/gpu.h>
 #include <rapport/widgets.h>
 
+#include <array>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -136,6 +138,13 @@ private:
         float anchor = 0;                           // and the camera's own scale they're anchored on (peak.hlsl)
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's
+        uint64_t measures = 0;                      // how many times it's been measured
+        // A raw's brightness curve and measure against the display's volume
+        // (stats.hlsl's CURVE and TOP, volume.hlsl): what they were taken
+        // with, taken again when any of it changes. `details` counts the
+        // changes of `detailed` (the measured level is made with it).
+        std::array<float, 14> volume_key{};
+        uint64_t volume_adjust = 0, volume_measures = 0, volume_details = 0, details = 0;
         // Noise reduction and sharpening (detail.h): what the levels below
         // level 0 were made with (filtered on the way to level 1); level 0's
         // noise, measured once; and level 0 filtered over the region last
@@ -226,6 +235,7 @@ private:
     // hue), on the device: the mapping reads them there. Any image when
     // the histogram counts it (`always`).
     void measure(Source& s, std::span<const std::byte> params, bool always);
+    void measure_volume(Source& s, const Frame& f, std::span<const std::byte> params);
     // The histogram of `s` as `f` shows it: counted again when that changed.
     void count(Source& s, const Frame& f);
     // `s` (a `width` x `height` image) resampled and composed into the
@@ -235,7 +245,14 @@ private:
 
     std::shared_ptr<rap::gpu::device> device_;
     rap::gpu::texture_ptr blank_;  // for inputs a pass doesn't use
-    rap::gpu::program_ptr decode_, resample_, compose_, difference_program_, stats_program_, peak_, histogram_program_,
+    // The display's boundary in Oklab (view.hlsli's display_boundary), made
+    // for the peak it was made for.
+    rap::gpu::texture_ptr boundary_;
+    float boundary_peak_ = 0;
+    std::future<std::vector<float>> boundary_ahead_;  // the display's own peak's, begun with the first raw
+    float boundary_ahead_peak_ = 0;
+    const rap::gpu::texture_ptr& boundary(float peak);
+    rap::gpu::program_ptr decode_, resample_, compose_, difference_program_, stats_program_, stats_curve_, stats_top_, peak_, volume_, volume_clear_, volume_curve_, volume_prepare_, histogram_program_,
         histogram_max_, histogram_view_;
     rap::gpu::texture_ptr panels_[2];  // the docked histogram, drawn
     int next_panel_ = 0;

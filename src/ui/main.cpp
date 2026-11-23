@@ -208,6 +208,8 @@ void run_step(App& app, const std::string& step)
 
 }  // namespace
 
+int check_brightness();  // check_brightness.cpp
+
 int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first,
             std::shared_future<Config> settings);
 
@@ -260,6 +262,13 @@ static int gpu_render(int argc, char** argv)
             if (!std::strcmp(argv[3], names[i]))
                 f.shrink = f.enlarge = ScaleFilter(i);
     }
+    // A test hook: OUT ending .pfm is written linear (scRGB, 1 = SDR white),
+    // little-endian float, so what's over SDR white (IFRIT_DISPLAY_PEAK)
+    // survives.
+    const std::string out_name = argv[1];
+    const bool pfm = out_name.size() > 4 && out_name.compare(out_name.size() - 4, 4, ".pfm") == 0;
+    if (pfm)
+        f.front = FrontBuffer::ScRgb16;
     rap::gpu::texture_ptr out;
     rap::gpu::ticket ready;
     rap::frame_color colour;
@@ -267,6 +276,59 @@ static int gpu_render(int argc, char** argv)
     {
         std::fprintf(stderr, "render: %s\n", error.c_str());
         return 1;
+    }
+    // A test hook: IFRIT_REDRAW drawn again with a change, what's written the
+    // second: "wb:R,G,B" (a raw's white balance multipliers) or "detail" (a
+    // raw's default noise reduction and sharpening). With IFRIT_CURVE_LOG,
+    // whether the brightness curve follows it.
+    if (const char* redraw = std::getenv("IFRIT_REDRAW"))
+    {
+        const std::string change = redraw;
+        if (change.rfind("wb:", 0) == 0)
+        {
+            float wb[3] = {};
+            if (std::sscanf(change.c_str() + 3, "%f,%f,%f", &wb[0], &wb[1], &wb[2]) == 3)
+                std::copy(wb, wb + 3, f.white_balance);
+        }
+        else if (change == "detail")
+            f.detail = Detail::raw_defaults();
+        ready = {};
+        if (!view.render(image, 1, f, out, ready, colour, error))
+        {
+            std::fprintf(stderr, "render: %s\n", error.c_str());
+            return 1;
+        }
+    }
+    if (pfm)
+    {
+        const int pw = out->width();
+        std::vector<uint16_t> half(size_t(pw) * out->height() * 4);
+        device->readback(out, std::as_writable_bytes(std::span(half)), size_t(pw) * 8).wait();
+        if (device->lost())  // before the output's opened: a failed readback leaves `half` empty
+        {
+            std::fprintf(stderr, "readback: the GPU was lost\n");
+            return 1;
+        }
+        const auto to_float = [](uint16_t h)
+        {
+            const int e = h >> 10 & 31, m = h & 1023;
+            const float v = e == 0 ? std::ldexp(float(m), -24) : e == 31 ? INFINITY : std::ldexp(float(m | 1024), e - 25);
+            return h >> 15 ? -v : v;
+        };
+        std::FILE* file = std::fopen(argv[1], "wb");
+        if (!file)
+            return 1;
+        std::fprintf(file, "PF\n%d %d\n-1.0\n", f.width, f.height);
+        for (int y = f.height - 1; y >= 0; --y)  // PFM: bottom row first
+            for (int x = 0; x < f.width; ++x)
+                for (int c = 0; c < 3; ++c)
+                {
+                    const float v = to_float(half[(size_t(y) * pw + x) * 4 + c]);
+                    std::fwrite(&v, 4, 1, file);
+                }
+        std::fclose(file);
+        std::printf("%s: %dx%d linear, peak %s\n", argv[1], f.width, f.height, std::getenv("IFRIT_DISPLAY_PEAK") ? std::getenv("IFRIT_DISPLAY_PEAK") : "1");
+        return 0;
     }
     const int tw = out->width(), th = out->height();
     std::vector<std::byte> px(size_t(tw) * th * 4);
@@ -373,6 +435,8 @@ int main(int argc, char** argv)
         return formats_report();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
         return gpu_render(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--check-brightness") == 0)
+        return check_brightness();
     if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
         return check_loader(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-looks") == 0)

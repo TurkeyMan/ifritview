@@ -42,7 +42,13 @@
 #include "shaders/raw_blocks.h"
 #include "shaders/resample.h"
 #include "shaders/stats.h"
+#include "shaders/stats_top.h"
+#include "shaders/stats_curve.h"
+#include "shaders/volume_curve.h"
 #include "shaders/unpack.h"
+#include "shaders/volume.h"
+#include "shaders/volume_clear.h"
+#include "shaders/volume_prepare.h"
 #include "shaders/warp.h"
 
 #include <algorithm>
@@ -50,6 +56,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 // ljpeg.hlsli's block.
 struct LjpegParams
@@ -118,8 +125,12 @@ struct ComposeParams
     int32_t auto_exposure, gain, adjusting;
     float anchor;
     float to_working[3][4], from_working[3][4];
+    float lc_weight;
+    float min_slope;
+    int32_t hk_probe;
+    int32_t pad;
 };
-static_assert(sizeof(ComposeParams) == 336, "as view.hlsli's cbuffer packs");
+static_assert(sizeof(ComposeParams) == 352, "as view.hlsli's cbuffer packs");
 
 struct DevelopParams
 {
@@ -191,6 +202,9 @@ double reach(ScaleFilter f, double inv)
 }
 
 }  // namespace
+
+static float display_peak();
+static std::vector<float> boundary_table(float peak);
 
 GpuView::GpuView(std::shared_ptr<rap::gpu::device> device) : device_(std::move(device))
 {
@@ -374,7 +388,8 @@ bool GpuView::programs(std::string& error)
         *program = r.program;
     }
     for (auto [program, make] :
-         {entry{&stats_program_, shaders::stats}, entry{&peak_, shaders::peak}, entry{&histogram_program_, shaders::histogram},
+         {entry{&stats_program_, shaders::stats}, entry{&stats_curve_, shaders::stats_curve}, entry{&stats_top_, shaders::stats_top}, entry{&peak_, shaders::peak}, entry{&volume_, shaders::volume},
+          entry{&volume_clear_, shaders::volume_clear}, entry{&volume_curve_, shaders::volume_curve}, entry{&volume_prepare_, shaders::volume_prepare}, entry{&histogram_program_, shaders::histogram},
           entry{&histogram_max_, shaders::histogram_max}, entry{&ljpeg_guess_, shaders::ljpeg_guess}, entry{&ljpeg_sync_, shaders::ljpeg_sync},
           entry{&ljpeg_resolve_, shaders::ljpeg_resolve}, entry{&ljpeg_decode_, shaders::ljpeg_decode},
           entry{&ljpeg_columns_, shaders::ljpeg_columns}, entry{&ljpeg_rows_, shaders::ljpeg_rows}, entry{&ljpeg_black_, shaders::ljpeg_black},
@@ -937,8 +952,15 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     if (const RawMosaic* m = image.mosaic.get())
     {
         // A raw, developed here: the mosaic up as it is, then demosaiced into
-        // level 0 (camera RGB, unbalanced).
+        // level 0 (camera RGB, unbalanced). The display's boundary, which its
+        // view needs (boundary()), is made meanwhile on another thread, from
+        // the first raw on.
         const gint64 t_start = g_get_monotonic_time();
+        if (const float peak = display_peak(); !(boundary_ && boundary_peak_ == peak) && !(boundary_ahead_.valid() && boundary_ahead_peak_ == peak))
+        {
+            boundary_ahead_peak_ = peak;
+            boundary_ahead_ = std::async(std::launch::async, boundary_table, peak);
+        }
         rap::gpu::texture_ptr sites;
         rap::gpu::buffer_ptr levels;
         if (m->stream)
@@ -1321,6 +1343,7 @@ void GpuView::follow_detail(Source& s, const Detail& d)
         return;
     s.levels.resize(1);
     s.detailed = d;
+    ++s.details;
     s.region.reset();
 }
 
@@ -1536,6 +1559,92 @@ bool GpuView::begin_frame(const Frame& f, rap::gpu::texture_ptr& out, rap::frame
     return true;
 }
 
+// The display's peak, in SDR whites: SDR white until rapport describes the
+// display. A test hook: IFRIT_DISPLAY_PEAK for a display brighter than SDR
+// white, with --gpu-render's .pfm output to keep what's over it.
+static float display_peak()
+{
+    static const float peak = [] {
+        const char* v = std::getenv("IFRIT_DISPLAY_PEAK");
+        return v ? std::max(1.0f, float(std::atof(v))) : 1.0f;
+    }();
+    return peak;
+}
+
+// The display's boundary in Oklab, for view.hlsli's display_boundary: its
+// most chroma at each of 720 hues and 256 lightnesses from black to its
+// white, BT.709 primaries, at `peak`. Exact at each point: along a chroma ray
+// each channel is a cubic in chroma, and the first to leave 0..peak is
+// found by halving (24 times: to 0.6 / 2^24 of the white's lightness, under
+// 4e-8), the cubes multiplied out (std::pow took 0.7 s), the hues split over
+// the cores. Made once per peak, only for a raw (view_inputs()), and for the
+// display's own peak begun as the view is made (GpuView::GpuView), off the
+// drawing thread.
+static constexpr int kBoundaryHues = 720, kBoundaryLevels = 256;
+
+static std::vector<float> boundary_table(float peak)
+{
+    std::vector<float> table(size_t(kBoundaryHues) * kBoundaryLevels);
+    const double top = std::cbrt(double(peak));
+    const auto hues = [&](int from, int to)
+    {
+        for (int j = from; j < to; ++j)
+        {
+            const double h = 2 * 3.14159265358979323846 * j / kBoundaryHues, a = std::cos(h), b = std::sin(h);
+            const double k[3] = {0.3963377774 * a + 0.2158037573 * b, -0.1055613458 * a - 0.0638541728 * b,
+                                 -0.0894841775 * a - 1.2914855480 * b};
+            for (int i = 0; i < kBoundaryLevels; ++i)
+            {
+                const double L = top * i / (kBoundaryLevels - 1);
+                double lo = 0, hi = i == 0 || i == kBoundaryLevels - 1 ? 0 : 0.6 * top;
+                for (int n = 0; n < 24 && hi > 0; ++n)
+                {
+                    const double mid = 0.5 * (lo + hi);
+                    double lms[3];
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        const double v = L + mid * k[c];
+                        lms[c] = v * v * v;
+                    }
+                    const double rgb[3] = {4.0767416621 * lms[0] - 3.3077115913 * lms[1] + 0.2309699292 * lms[2],
+                                           -1.2684380046 * lms[0] + 2.6097574011 * lms[1] - 0.3413193965 * lms[2],
+                                           -0.0041960863 * lms[0] - 0.7034186147 * lms[1] + 1.7076147010 * lms[2]};
+                    bool inside = true;
+                    for (double v : rgb)
+                        inside = inside && v >= 0 && v <= peak;
+                    (inside ? lo : hi) = mid;
+                }
+                table[size_t(i) * kBoundaryHues + j] = float(lo);
+            }
+        }
+    };
+    const int threads = std::clamp(int(std::thread::hardware_concurrency()), 1, 16);
+    std::vector<std::thread> pool;
+    for (int t = 1; t < threads; ++t)
+        pool.emplace_back(hues, kBoundaryHues * t / threads, kBoundaryHues * (t + 1) / threads);
+    hues(0, kBoundaryHues / threads);
+    for (std::thread& t : pool)
+        t.join();
+    return table;
+}
+
+const rap::gpu::texture_ptr& GpuView::boundary(float peak)
+{
+    if (boundary_ && boundary_peak_ == peak)
+        return boundary_;
+    std::vector<float> table;
+    if (boundary_ahead_.valid() && boundary_ahead_peak_ == peak)
+        table = boundary_ahead_.get();
+    else
+        table = boundary_table(peak);
+    boundary_ahead_ = {};
+    boundary_ = device_->create({kBoundaryHues, kBoundaryLevels, rap::gpu::format::r32f});
+    if (boundary_)
+        device_->upload(boundary_, std::as_bytes(std::span(table)), {1, rap::gpu::sample_type::f32});
+    boundary_peak_ = peak;
+    return boundary_ ? boundary_ : blank_;
+}
+
 // The compose pass's parameters for showing `s` as `f` has it, but for
 // the image's place and the resampling.
 static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure, float anchor,
@@ -1581,7 +1690,26 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
     std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
     std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
     std::memcpy(cp.display_b, kSrgbB, sizeof cp.display_b);
-    cp.display_peak = 1;
+    cp.display_peak = display_peak();
+    // A test hook: IFRIT_LC_WEIGHT in place of view.hlsli's kLightnessChromaWeight.
+    static const float lc_weight = [] {
+        const char* v = std::getenv("IFRIT_LC_WEIGHT");
+        return v ? std::max(0.0f, float(std::atof(v))) : 0.0f;
+    }();
+    cp.lc_weight = lc_weight;
+    // A test hook: IFRIT_MIN_SLOPE in place of view.hlsli's
+    // kMinBrightnessSlope (0: the projection not held to one).
+    static const float min_slope = [] {
+        const char* v = std::getenv("IFRIT_MIN_SLOPE");
+        return v ? std::max(0.0f, float(std::atof(v))) : -1.0f;
+    }();
+    cp.min_slope = min_slope;
+    // A test hook: IFRIT_HK_PROBE (view.hlsli's hk_probe).
+    static const int hk_probe = [] {
+        const char* v = std::getenv("IFRIT_HK_PROBE");
+        return v ? std::atoi(v) : 0;
+    }();
+    cp.hk_probe = hk_probe;
     if (f.histogram)
     {
         cp.show_histogram = 1;
@@ -1594,7 +1722,9 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
 std::vector<rap::gpu::texture_ptr> GpuView::view_inputs(const rap::gpu::texture_ptr& image, const Source& s, const Frame* f,
                                                        const rap::gpu::texture_ptr& extra)
 {
-    std::vector<rap::gpu::texture_ptr> in{image, s.tone ? s.tone : blank_, extra ? extra : blank_, blank_, blank_, blank_};
+    // The display's boundary only for a raw's volume mapping (view.hlsli's fit_volume()).
+    std::vector<rap::gpu::texture_ptr> in{image, s.tone ? s.tone : blank_, extra ? extra : blank_,
+                                          s.auto_exposure ? boundary(display_peak()) : blank_, blank_, blank_};
     const AdjustTables* t = f ? f->adjust.get() : nullptr;
     if (!t)
         return in;
@@ -1626,18 +1756,74 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(s.stats, 0);
+    // The level's measures, then what peak.hlsl makes of them: taken once, at
+    // the white balance it's first shown with, the reference a raw's
+    // automatic exposure is set by (a change of white balance or edit
+    // doesn't move it). Its brightness curve's are measure_volume()'s.
     rap::gpu::dispatch d[2];
     for (int i = 0; i < 2; ++i)
     {
-        d[i].program = i ? peak_ : stats_program_;
+        d[i].program = i == 0 ? stats_program_ : peak_;
         d[i].inputs = view_inputs(counted, s, nullptr);
         d[i].buffers = {histogram_, s.stats, s.clips ? s.clips : histogram_};
         d[i].uniforms = params;  // copied at run()
-        d[i].groups[0] = i ? 1 : (counted->width() + 15) / 16;
-        d[i].groups[1] = i ? 1 : (counted->height() + 15) / 16;
+        d[i].groups[0] = i == 1 ? 1 : (counted->width() + 15) / 16;
+        d[i].groups[1] = i == 1 ? 1 : (counted->height() + 15) / 16;
     }
     device_->run(std::span(d));
     s.measured = true;
+    ++s.measures;
+}
+
+// A raw's brightness curve and measure against the display's volume
+// (volume.hlsl): after the image's measures, and again whenever what they're
+// measured through changes (the exposure, white balance, develop edits,
+// noise reduction and sharpening, the display's peak). The curve from the
+// luminance as edited (stats.hlsl's CURVE on the measured level, TOP at full
+// resolution), then the volume through it.
+void GpuView::measure_volume(Source& s, const Frame& f, std::span<const std::byte> params)
+{
+    if (!s.auto_exposure || !s.measured)
+        return;
+    ComposeParams cp{};
+    std::memcpy(&cp, params.data(), std::min(params.size(), sizeof cp));
+    std::array<float, 14> key{cp.exposure, cp.display_peak};
+    for (int j = 0; j < 4; ++j)
+        key[2 + j] = cp.input_x[j], key[6 + j] = cp.input_y[j], key[10 + j] = cp.input_z[j];
+    const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
+    if (s.volume_measures == s.measures && s.volume_adjust == adjusted && s.volume_key == key && s.volume_details == s.details)
+        return;
+    const rap::gpu::texture_ptr counted = counted_level(s);
+    cp.measured = 1;
+    const rap::gpu::program_ptr programs[6] = {volume_clear_, stats_curve_, stats_top_, volume_curve_, volume_, volume_prepare_};
+    rap::gpu::dispatch d[6];
+    for (int i = 0; i < 6; ++i)
+    {
+        const rap::gpu::texture_ptr& from = i == 2 ? s.levels[0] : counted;
+        const bool per_pixel = i == 1 || i == 2 || i == 4;
+        d[i].program = programs[i];
+        d[i].inputs = view_inputs(from, s, &f);
+        d[i].buffers = {histogram_, s.stats};
+        d[i].uniforms = bytes(cp);  // copied at run()
+        d[i].groups[0] = per_pixel ? (from->width() + 15) / 16 : 1;
+        d[i].groups[1] = per_pixel ? (from->height() + 15) / 16 : 1;
+    }
+    device_->run(std::span(d));
+    s.volume_key = key;
+    s.volume_adjust = adjusted;
+    s.volume_measures = s.measures;
+    s.volume_details = s.details;
+    // A test hook: IFRIT_CURVE_LOG prints each curve made (log2 knee and
+    // top, the automatic exposure, the middle edge) to stderr.
+    static const bool log_curve = std::getenv("IFRIT_CURVE_LOG");
+    if (log_curve)
+    {
+        std::vector<uint32_t> words(kStatsWords);
+        device_->readback(s.stats, std::as_writable_bytes(std::span(words))).wait();
+        const auto at = [&](uint32_t i) { float v; std::memcpy(&v, &words[i], 4); return v; };
+        std::fprintf(stderr, "curve: knee %.4f top %.4f gain %.5f mid %.4f details %llu\n", at(kStatsCurve), at(kStatsCurve + 1),
+                     at(kStatsAutoGain), at(kStatsCurve + 2 + 64), (unsigned long long)s.details);
+    }
 }
 
 void GpuView::count(Source& s, const Frame& f)
@@ -1647,6 +1833,7 @@ void GpuView::count(Source& s, const Frame& f)
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
+    measure_volume(s, f, bytes(cp));
     cp.measured = 1;
     // The histogram of what's shown: again when the image, its exposure,
     // white balance, develop settings or detail change.
@@ -1691,6 +1878,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     ComposeParams cp{};
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
+    measure_volume(s, f, bytes(cp));
     cp.measured = s.measured ? 1 : 0;
     const double shown_w = width * f.zoom, shown_h = height * f.zoom;
     cp.image_rect[0] = float(f.pan_x), cp.image_rect[1] = float(f.pan_y);
@@ -1895,6 +2083,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         ComposeParams cp{};
         show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
+        measure_volume(s, f, bytes(cp));
         cp.measured = s.measured ? 1 : 0;
         cp.gain = std::clamp(gain, 1, 255);
         auto top = device_->create({a->width, a->height, rap::gpu::format::rgba16f, 1, true});

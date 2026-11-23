@@ -3,10 +3,97 @@
 // peak, peak.hlsl) and how far from white it goes in each hue direction (1 =
 // the display's edge), into view.hlsli's `stats` words. Group-local first,
 // then one atomic per bin.
+//
+// A raw's brightness curve is made from its luminance as edited (exposure,
+// white balance, develop controls: view.hlsli's edit(), what brightness()
+// is given), measured again whenever those change (GpuView::measure_volume),
+// after volume.hlsl's CLEAR:
+//  - CURVE: a histogram of it, and its greatest, on the measured level;
+//  - TOP: its true maximum, at full resolution (the develop's own output,
+//    impulses already removed): each pixel from an eighth of CURVE's greatest
+//    counted at 128 bins a stop, for volume.hlsl's CURVE to take the top past
+//    its few brightest pixels.
 #define COMPUTE
 #include "view.hlsli"
 
-groupshared uint local_luminance[1024], local_brightest[1024];
+// A pixel's luminance as edited, as tone_map() gives brightness() it.
+float edited_luminance(float4 c)
+{
+    return c.a > 0 ? edit(max(c.rgb / c.a, 0), exposure * auto_gain()).y : 0;
+}
+
+#if defined(CURVE)
+groupshared uint local_curve[1024];
+groupshared uint local_curve_most;
+
+[numthreads(16, 16, 1)]
+void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
+{
+    for (uint i = index; i < 1024; i += 256)
+        local_curve[i] = 0;
+    if (index == 0)
+        local_curve_most = 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint w, h;
+    source.GetDimensions(w, h);
+    if (id.x < w && id.y < h)
+    {
+        const float y = edited_luminance(source.Load(int3(id.xy, 0)));
+        if (y > 0)
+        {
+            InterlockedAdd(local_curve[uint(clamp((log2(y) + 20) * 1024 / 32, 0.0, 1023.0))], 1u);
+            InterlockedMax(local_curve_most, asuint(y));  // positive floats order as their bits
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint j = index; j < 1024; j += 256)
+    {
+        if (local_curve[j])
+            stats.InterlockedAdd((kStatsCurveLuminance + j) * 4, local_curve[j]);
+    }
+    if (index == 0 && local_curve_most)
+        stats.InterlockedMax(kStatsCurveMost * 4, local_curve_most);
+}
+#elif defined(TOP)
+groupshared uint local_top[1024];
+groupshared uint local_top_most, local_top_any;
+
+[numthreads(16, 16, 1)]
+void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
+{
+    for (uint i = index; i < 1024; i += 256)
+        local_top[i] = 0;
+    if (index == 0)
+        local_top_most = local_top_any = 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint w, h;
+    source.GetDimensions(w, h);
+    const float from = asfloat(stats.Load(kStatsCurveMost * 4)) / 8;
+    if (id.x < w && id.y < h && from > 0)
+    {
+        const float y = edited_luminance(source.Load(int3(id.xy, 0)));
+        if (y > from)
+        {
+            InterlockedAdd(local_top[uint(min(log2(y / from) * 128, 1023.0))], 1u);
+            InterlockedMax(local_top_most, asuint(y));  // positive floats order as their bits
+            local_top_any = 1;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (!local_top_any)
+        return;
+    for (uint j = index; j < 1024; j += 256)
+    {
+        if (local_top[j])
+            stats.InterlockedAdd((kStatsTopCounts + j) * 4, local_top[j]);
+    }
+    if (index == 0)
+        stats.InterlockedMax(kStatsTopMost * 4, local_top_most);
+}
+#else
+groupshared uint local_luminance[1024];
 groupshared uint local_extents[72];
 groupshared uint local_count, local_opaque;
 groupshared uint local_least, local_most;
@@ -15,7 +102,7 @@ groupshared uint local_least, local_most;
 void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
 {
     for (uint i = index; i < 1024; i += 256)
-        local_luminance[i] = local_brightest[i] = 0;
+        local_luminance[i] = 0;
     if (index < 72)
         local_extents[index] = 0;
     if (index == 0)
@@ -36,9 +123,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
             {
                 const uint bin = uint(clamp((log2(xyz.y) + 20) * 1024 / 32, 0.0, 1023.0));
                 InterlockedAdd(local_luminance[bin], 1u);
-                const float3 rgb = mul(kXyzToRgb709, xyz);
-                const float most = max(max(rgb.r, max(rgb.g, rgb.b)), 1e-9);
-                InterlockedAdd(local_brightest[uint(clamp((log2(most) + 20) * 1024 / 32, 0.0, 1023.0))], 1u);
                 InterlockedAdd(local_count, 1u);
                 InterlockedMax(local_least, ~asuint(xyz.y));  // positive floats order as their bits
                 InterlockedMax(local_most, asuint(xyz.y));
@@ -59,8 +143,6 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     {
         if (local_luminance[j])
             stats.InterlockedAdd((kStatsLuminance + j) * 4, local_luminance[j]);
-        if (local_brightest[j])
-            stats.InterlockedAdd((kStatsBrightest + j) * 4, local_brightest[j]);
     }
     if (index < 72 && local_extents[index])
         stats.InterlockedMax((kStatsExtents + index) * 4, local_extents[index]);
@@ -73,3 +155,4 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
     if (index == 0 && local_opaque)
         stats.InterlockedAdd(kStatsOpaque * 4, local_opaque);
 }
+#endif
