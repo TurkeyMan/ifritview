@@ -1911,7 +1911,7 @@ void App::show_instead()
                 ok = decode_preview(path, *other);
             else
             {
-                develop_raws_on_cpu(true);
+                develop_raws_as_reference(true);
                 ok = decode_image(path, *other, error);
             }
             if (ok)

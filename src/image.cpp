@@ -249,6 +249,8 @@ void Image::develop_saved(const XmpDevelop& d)
 
 Adjustments Image::opening_adjust(bool with_xmp, Look untreated) const
 {
+    if (reference)
+        return {};
     Adjustments a = with_xmp && xmp.present ? xmp.adjust : Adjustments{};
     // The look: a treated raw's profile's (Adobe's default where it names
     // none); an untreated one's the default asked for; Neutral for the rest,
@@ -685,6 +687,7 @@ Image Image::crop(int x, int y, int w, int h) const
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
     out.is_raw = is_raw;
+    out.reference = reference;
     out.xmp = xmp;
     out.stage = stage;
     out.exposure_edit = exposure_edit;
@@ -844,6 +847,16 @@ void Image::adopt(Image&& f)
             metadata.push_back(std::move(g));
     }
     is_raw = is_raw || f.is_raw;
+    // LibRaw's reference takes none of the edits made while its preview
+    // stood in (nor a raw's Detail at rest, which the preview opened with).
+    reference = f.reference;
+    if (reference)
+    {
+        Adjustments rested;
+        rested.kept = std::move(adjust.kept);
+        adjust = std::move(rested);
+        exposure_edit = 0;
+    }
     is_video = is_video || f.is_video;
     has_audio = has_audio || f.has_audio;
     final_width = final_height = 0;
