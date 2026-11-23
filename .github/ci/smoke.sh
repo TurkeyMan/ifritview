@@ -60,6 +60,9 @@ printf 'II*\000\020\000\000\000CR\002\000\000\000\000\000\003\000\000\001\003\00
 for raw in cut empty; do
   "$build/ifritview" --probe "$smoke"/$raw.cr2 | grep -q "still being copied"
 done
+# A raw's brightness curve: never flatter than its least slope nor steeper
+# than the scene, its top on the peak, however far over the peak it reaches.
+"$build/ifritview" --check-brightness
 # A decode of a file that changes before the viewer takes it arrives stale;
 # a file's time is kept finer than the second; and one still coming in is
 # read again once it's changed (or its watch said so) and held still.

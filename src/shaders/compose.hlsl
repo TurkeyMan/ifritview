@@ -1,8 +1,8 @@
 // The view's frame: the image (filtered vertically from the first pass's
 // rows, or nearest from the image itself), exposed and tone-mapped, over
 // the transparency checkerboard or the background, all in linear light,
-// then encoded for the front buffer: sRGB (8-bit dithered, or 10-bit), PQ,
-// or linear scRGB.
+// then encoded for the front buffer: sRGB (8-bit or 10-bit) or PQ (10-bit),
+// dithered, or linear scRGB.
 #include "resample.hlsli"
 #include "view.hlsli"
 
@@ -23,12 +23,16 @@ float3 srgb_decode3(float3 c)
     return float3(srgb_decode(c.r), srgb_decode(c.g), srgb_decode(c.b));
 }
 
-// A pixel's own noise in -1..1, triangular: what 8-bit output adds to hide banding.
+// Quantisation, part of the display model: what's encoded for an 8- or
+// 10-bit front buffer gets, just before it's rounded, a pixel's own noise of
+// up to one level either way, so a smooth gradient doesn't band. The noise
+// is blue (interleaved gradient noise: no low frequencies to show as
+// blotches) and triangular in -1..1 (its error independent of the signal),
+// and fixed per pixel, so a still image doesn't shimmer. None for float.
 float dither(int2 p)
 {
-    const float a = frac(sin(dot(float2(p), float2(12.9898, 78.233))) * 43758.5453);
-    const float b = frac(sin(dot(float2(p), float2(39.3468, 11.135))) * 24634.6345);
-    return a + b - 1;
+    const float n = frac(52.9829189 * frac(dot(float2(p), float2(0.06711056, 0.00583715)))) * 2 - 1;
+    return sign(n) * (1 - sqrt(1 - abs(n)));
 }
 
 float4 main(float4 position : SV_Position) : SV_Target
@@ -88,10 +92,9 @@ float4 main(float4 position : SV_Position) : SV_Target
     }
     if (output == 3)
         return float4(rgb, 1);
-    if (output == 2)
-        return float4(pq_encode(rgb.r * white), pq_encode(rgb.g * white), pq_encode(rgb.b * white), 1);
-    float3 e = float3(srgb_encode(rgb.r), srgb_encode(rgb.g), srgb_encode(rgb.b));
-    if (output == 0)
-        e += dither(p) / 255;
+    const float levels = output == 0 ? 255 : 1023;  // 8-bit sRGB; 10-bit sRGB or PQ
+    float3 e = output == 2 ? float3(pq_encode(rgb.r * white), pq_encode(rgb.g * white), pq_encode(rgb.b * white))
+                           : float3(srgb_encode(rgb.r), srgb_encode(rgb.g), srgb_encode(rgb.b));
+    e += dither(p) / levels;
     return float4(e, 1);
 }

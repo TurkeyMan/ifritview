@@ -35,6 +35,16 @@ pinned Rapport tree under `core/src/gpu_vulkan.cpp` and
 - `ifritview --gpu-render IN OUT.ppm ZOOM [FILTER]` creates a headless
   Rapport device and exercises the window's GPU renderer. Use it to
   investigate the view's resampling and composition without a window.
+  An OUT ending `.pfm` is written as linear float (1 = SDR white), and
+  `IFRIT_DISPLAY_PEAK=4` renders for a display four times SDR white, so
+  the HDR mapping can be checked headless.
+  `IFRIT_REDRAW=wb:R,G,B` (or `detail`) draws it a second time with that
+  white balance (or the raw defaults' noise reduction and sharpening), and
+  `IFRIT_CURVE_LOG=1` prints each brightness curve made, so it can be seen
+  to follow the edit.
+- `ifritview --check-brightness` runs the brightness curve's shaping code
+  (`src/shaders/brightness_curve.hlsli`, `brightness_shape.hlsli`) on the
+  CPU over made-up histograms and checks its slopes, knee and top.
 - `ifritview --process IN [exposure:EV] gpu diff:REFERENCE` runs the
   separate headless sample renderer in `src/gpu.cpp`. Use a CPU-rendered
   reference for the same input and exposure when comparing the conversion
