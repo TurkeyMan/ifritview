@@ -209,6 +209,7 @@ add_subdirectory(${IFRIT_RAPPORT_DIR} rapport EXCLUDE_FROM_ALL)
 add_executable(ifritview
   src/ui/main.cpp
   src/ui/check_brightness.cpp
+  src/ui/check_volume.cpp
   src/ui/app.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp

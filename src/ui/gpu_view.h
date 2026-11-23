@@ -64,6 +64,7 @@ public:
         ScaleFilter shrink = ScaleFilter::Lanczos3, enlarge = ScaleFilter::Lanczos3;
         FrontBuffer front = FrontBuffer::Srgb8;
         float sdr_white_nits = 203;  // PQ and scRGB: what SDR white is
+        int volume_probe = 0;  // headless check: 1 returns pre-final volume RGB; 2 its signed gamut overshoot
         bool count_histogram = false;  // count what's shown, for the overlay or the docked panel
         bool histogram = false;        // draw it into the frame, at `panel` (device pixels: x, y, width, height)
         int histogram_channels = 15;   // which: bits 1 R, 2 G, 4 B, 8 luminance
@@ -138,14 +139,16 @@ private:
         bool auto_exposure = false;                 // a raw developed here: scaled by its own measures (view.hlsli's auto_gain)
         float anchor = 0;                           // and the camera's own scale they're anchored on (peak.hlsl)
         float white_luminance = 0;                  // cd/m^2 at the raw's white, from its EXIF (exposure.hlsli); 0: unknown
+        bool measure_colour = false;                // signed/float or wide-gamut source may leave the display below white
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's
+        bool mapping_measured = false;               // nonraw stats were taken at full resolution, not histogram-only
         uint64_t measures = 0;                      // how many times it's been measured
-        // A raw's brightness curve and measure against the display's volume
+        // The image's measure against the display's volume and a raw's brightness curve
         // (stats.hlsl's CURVE and TOP, volume.hlsl): what they were taken
         // with, taken again when any of it changes. `details` counts the
         // changes of `detailed` (the measured level is made with it).
-        std::array<float, 15> volume_key{};
+        std::array<float, 16> volume_key{};
         uint64_t volume_adjust = 0, volume_measures = 0, volume_details = 0, details = 0;
         // Noise reduction and sharpening (detail.h): what the levels below
         // level 0 were made with (filtered on the way to level 1); level 0's
@@ -157,6 +160,7 @@ private:
         rap::gpu::buffer_ptr clips;                 // a raw developed here: where its colours clip (clip.hlsl's)
         rap::gpu::texture_ptr region;
         int region_at[4] = {};
+        bool needs_mapping(bool adjusting) const { return tonable || measure_colour || adjusting || detailed.active(); }
         size_t bytes() const;
     };
 
@@ -204,6 +208,7 @@ private:
     // Level `n` (0 the image itself), made from the one above if it isn't yet.
     rap::gpu::texture_ptr level(Source& s, int n);
     // The level the measures and the histogram count: at most 2048 pixels.
+    rap::gpu::texture_ptr full_level(Source& s);
     rap::gpu::texture_ptr counted_level(Source& s);
     // Noise reduction and sharpening (detail.h, shaders/detail.hlsl). The
     // levels below level 0 made again when the settings change; level 0's
