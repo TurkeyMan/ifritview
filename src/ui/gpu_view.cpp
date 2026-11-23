@@ -128,9 +128,11 @@ struct ComposeParams
     float lc_weight;
     float min_slope;
     int32_t hk_probe;
-    int32_t pad;
+    float white_luminance;  // (the row's fourth: view.hlsli packs it there)
+    int32_t treated;
+    float pad_[3];
 };
-static_assert(sizeof(ComposeParams) == 352, "as view.hlsli's cbuffer packs");
+static_assert(sizeof(ComposeParams) == 368, "as view.hlsli's cbuffer packs");
 
 struct DevelopParams
 {
@@ -236,9 +238,10 @@ void GpuView::read_details(std::function<void(const Details&)> done)
     const bool scene = histogram_scene_;
     const float exposure = histogram_scale_;
     const bool automatic = histogram_auto_;
+    const float fixed = histogram_fixed_;
     device_->readback(histogram_stats_, read->stats);
     device_->readback(histogram_, read->histogram,
-                      [read, device = device_, scene, exposure, automatic, done = std::move(done)]
+                      [read, device = device_, scene, exposure, automatic, fixed, done = std::move(done)]
                       {
                           if (device->lost())  // a failed readback leaves them as they were: nothing measured
                           {
@@ -265,7 +268,9 @@ void GpuView::read_details(std::function<void(const Details&)> done)
                           if (count)
                           {
                               float scale = exposure;
-                              if (automatic && as_float(word(read->stats, kStatsAutoGain)) > 0)
+                              if (fixed > 0)
+                                  scale *= fixed;  // a treated raw: the camera's, as auto_gain() has it
+                              else if (automatic && as_float(word(read->stats, kStatsAutoGain)) > 0)
                                   scale *= as_float(word(read->stats, kStatsAutoGain));  // as auto_gain() has it
                               d.minimum = as_float(~word(read->stats, kStatsMinimum)) * scale;
                               d.maximum = as_float(word(read->stats, kStatsMaximum)) * scale;
@@ -297,6 +302,7 @@ void GpuView::edit_of(const Image& image, Frame& f)
     if (image.mosaic && image.wb_kelvin > 0)
         wb_multipliers(*image.mosaic, image.wb_kelvin, image.wb_tint, f.white_balance);
     f.adjust = image.adjust_tables();
+    f.treated = image.adjust.treated;
     f.detail = image.adjust.detail;
 }
 
@@ -947,6 +953,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     s.auto_exposure = false;
     s.clips.reset();
     s.anchor = 0;
+    s.white_luminance = 0;
     s.dng.reset();
     std::memcpy(s.input_to_xyz, kXyzFrom709, sizeof s.input_to_xyz);
     if (const RawMosaic* m = image.mosaic.get())
@@ -1184,6 +1191,9 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         // have it, a stop over the raw's (about where cameras put it), and a
         // DNG's BaselineExposure on top.
         s.anchor = float(2 * std::exp2(m->dng ? m->dng->exposure : 0.0));
+        // And the scene's light, absolute: the luminance at its white, from
+        // how it was taken (exposure.hlsli); 0 without its ISO, shutter or aperture.
+        s.white_luminance = m->white_luminance;
         s.measured = false;
         return true;
     }
@@ -1648,7 +1658,7 @@ const rap::gpu::texture_ptr& GpuView::boundary(float peak)
 // The compose pass's parameters for showing `s` as `f` has it, but for
 // the image's place and the resampling.
 static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure, float anchor,
-                        const float input_to_xyz[3][3], const float as_shot[3], const DngColour* dng, bool measured, ComposeParams& cp)
+                        float white_luminance, const float input_to_xyz[3][3], const float as_shot[3], const DngColour* dng, bool measured, ComposeParams& cp)
 {
     set_linear(cp.background, f.background);
     set_linear(cp.checker_a, rap::color{102, 102, 102});
@@ -1677,6 +1687,8 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
         }
     cp.auto_exposure = auto_exposure ? 1 : 0;
     cp.anchor = auto_exposure ? anchor : 0;
+    cp.white_luminance = auto_exposure ? white_luminance : 0;
+    cp.treated = auto_exposure && f.treated ? 1 : 0;
     cp.measured = measured ? 1 : 0;
     if (const AdjustTables* t = f.adjust.get())
     {
@@ -1772,6 +1784,28 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     }
     device_->run(std::span(d));
     s.measured = true;
+    if (s.auto_exposure && std::getenv("IFRIT_TRACE"))
+    {
+        // (Read back once they're made: the exposure and what it came from.)
+        auto read = std::make_shared<std::vector<std::byte>>(kStatsWords * 4);
+        const float anchor = s.anchor, white = s.white_luminance;
+        device_->readback(s.stats, *read,
+                          [read, anchor, white]
+                          {
+                              const auto at = [&](uint32_t i)
+                              {
+                                  float f;
+                                  std::memcpy(&f, read->data() + i * 4, 4);
+                                  return f;
+                              };
+                              const float average = at(kStatsAverage), adapting = at(kStatsAdapting), key = at(kStatsKey), gain = at(kStatsAutoGain);
+                              std::fprintf(stderr,
+                                           "gpu: exposure %+.2f EV from the camera's (gain %.4g, anchor %.4g): white %.4g cd/m2, L_A %.4g cd/m2 "
+                                           "(log average %.4g of the develop's white, itself %.4g of the stated), key %.4g, p99 %.4g\n",
+                                           std::log2(gain / anchor), gain, anchor, white, adapting, average, white > 0 ? adapting / (average * white) : 1.0f, key,
+                                           at(kStatsP99));
+                          });
+    }
     ++s.measures;
 }
 
@@ -1787,9 +1821,10 @@ void GpuView::measure_volume(Source& s, const Frame& f, std::span<const std::byt
         return;
     ComposeParams cp{};
     std::memcpy(&cp, params.data(), std::min(params.size(), sizeof cp));
-    std::array<float, 14> key{cp.exposure, cp.display_peak};
+    std::array<float, 15> key{cp.exposure, cp.display_peak};
     for (int j = 0; j < 4; ++j)
         key[2 + j] = cp.input_x[j], key[6 + j] = cp.input_y[j], key[10 + j] = cp.input_z[j];
+    key[14] = float(cp.treated);  // a treated raw's gain is the camera's (auto_gain())
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     if (s.volume_measures == s.measures && s.volume_adjust == adjusted && s.volume_key == key && s.volume_details == s.details)
         return;
@@ -1830,7 +1865,7 @@ void GpuView::count(Source& s, const Frame& f)
 {
     follow_detail(s, f.detail);  // the levels it counts are made with it
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     measure_volume(s, f, bytes(cp));
@@ -1841,7 +1876,7 @@ void GpuView::count(Source& s, const Frame& f)
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     const bool same_wb = std::equal(std::begin(histogram_wb_), std::end(histogram_wb_), std::begin(f.white_balance));
     if (histogram_image_.lock() == image && histogram_generation_ == s.generation && histogram_exposure_ == f.exposure &&
-        histogram_adjust_ == adjusted && same_wb && histogram_detail_ == f.detail && !fresh)
+        histogram_adjust_ == adjusted && same_wb && histogram_detail_ == f.detail && histogram_treated_ == f.treated && !fresh)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
     device_->clear(histogram_, 0);
@@ -1861,10 +1896,12 @@ void GpuView::count(Source& s, const Frame& f)
     histogram_exposure_ = f.exposure;
     histogram_adjust_ = adjusted;
     histogram_detail_ = f.detail;
+    histogram_treated_ = f.treated;
     std::copy(std::begin(f.white_balance), std::end(f.white_balance), std::begin(histogram_wb_));
     histogram_scale_ = cp.exposure;
     histogram_scene_ = s.tonable;
     histogram_auto_ = s.auto_exposure;
+    histogram_fixed_ = s.auto_exposure && f.treated ? s.anchor : 0;
     histogram_stats_ = s.stats;
 }
 
@@ -1876,7 +1913,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
         return true;  // `ready` left as it was
     follow_detail(s, f.detail);
     ComposeParams cp{};
-    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+    show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
     measure_volume(s, f, bytes(cp));
     cp.measured = s.measured ? 1 : 0;
@@ -2078,10 +2115,10 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
     const bool same_wb = std::equal(std::begin(difference_wb_), std::end(difference_wb_), std::begin(f.white_balance));
     const uint64_t adjusted = f.adjust ? f.adjust->serial : 0;
     if (difference_.levels.empty() || difference_.image.lock() != a || difference_.generation != a_generation || difference_gain_ != gain ||
-        difference_adjust_ != adjusted || (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
+        difference_adjust_ != adjusted || difference_treated_ != f.treated || (s.tonable && (difference_exposure_ != f.exposure || !same_wb)))
     {
         ComposeParams cp{};
-        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
+        show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
         measure_volume(s, f, bytes(cp));
         cp.measured = s.measured ? 1 : 0;
@@ -2108,6 +2145,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         difference_gain_ = gain;
         difference_exposure_ = f.exposure;
         difference_adjust_ = adjusted;
+        difference_treated_ = f.treated;  // a treated raw's exposure is the camera's (auto_gain())
         std::copy(std::begin(f.white_balance), std::end(f.white_balance), difference_wb_);
     }
     // Edited already, as A's colours went into it.

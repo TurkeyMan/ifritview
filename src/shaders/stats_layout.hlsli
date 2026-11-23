@@ -17,4 +17,7 @@
 #define kStatsCurve 11345u     // a raw's brightness curve (volume.hlsl's CLEAR): log2 of its knee and of its top, then 129 log2 outputs at its bins' edges
 #define kStatsCurveLuminance 11476u // 1024 counts: log2 luminance as edited (exposure, white balance, develop), 2^-20 .. 2^12 (stats.hlsl's CURVE)
 #define kStatsCurveMost 12500u // float bits of the greatest of those (stats.hlsl's CURVE)
-#define kStatsWords 12501u
+#define kStatsAverage 12501u // float: a raw's log average luminance, black at 2^-14 (peak.hlsl), 1 = the white its develop scales to
+#define kStatsKey 12502u     // float: the display key it calls for (exposure.hlsli)
+#define kStatsAdapting 12503u // float: its adapting luminance, cd/m^2 (0: unknown)
+#define kStatsWords 12504u

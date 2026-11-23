@@ -28,11 +28,9 @@ ByteAddressBuffer clips : register(t10);  // clip.hlsl's
 // colour under the white (a blue sky) keeps its own.
 float3 clipped(float3 balanced)
 {
-    float3 found = asfloat(clips.Load3(kClipFound * 4));
-    if (flags.y)
-        found = found.g;  // grey: counted as green
-    const float3 stops = (found + (found <= 0) * (1 - found)) * to_balance();  // none found: the stated white
-    const float white = min(min(stops.r, min(stops.g, stops.b)), 1.0);
+    const float3 found = asfloat(clips.Load3(kClipFound * 4));
+    const float3 stops = clip_stops(found);  // none found: the stated white
+    const float white = develop_white(found);
     const float3 c = clamp(balanced, 0, white);
     const float3 near = balanced / stops;
     const float own = smoothstep(0.8, 1.0, max(near.r, max(near.g, near.b)));

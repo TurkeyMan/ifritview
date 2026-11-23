@@ -80,3 +80,7 @@ printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff
 # written back (an unknown one kept), what counts as developed, and Save
 # writing only the controls changed.
 "$build/ifritview" --check-looks "$smoke"/looks
+# A raw's automatic exposure: the scene's luminance from ISO, shutter and
+# aperture, the display key it calls for across the mesopic range, and the
+# camera's exposure kept, a stop each way at most, with and without them.
+"$build/ifritview" --check-exposure

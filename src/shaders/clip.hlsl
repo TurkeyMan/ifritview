@@ -91,6 +91,7 @@ void main()
     if (all(found <= 0) && largest > 0 && largest < 1)
         found = largest;
     clips.Store3(kClipFound * 4, asuint(found));
+    clips.Store(kClipWhite * 4, asuint(develop_white(found)));
 }
 #else
 #ifdef LINEAR

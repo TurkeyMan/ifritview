@@ -6,6 +6,7 @@
 #include "pin_thumbs.h"
 #include "gpu_view.h"
 #include "decoders/decoder.h"
+#include "exposure.h"
 #include "i18n.h"
 #include "lens_store.h"
 #include "pipeline.h"
@@ -212,6 +213,92 @@ int check_brightness();  // check_brightness.cpp
 
 int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_point t_start, FirstImage* first,
             std::shared_future<Config> settings);
+
+// --check-exposure: a raw's automatic exposure (shaders/exposure.hlsli,
+// the shader's own code): the luminance at white from ISO, shutter and
+// aperture; the display key at and past the mesopic limits and between; the
+// gain from it, and without the EXIF to say how light the scene was.
+static int check_exposure()
+{
+    using namespace exposure;
+    int failed = 0;
+    const auto expect = [&](const char* what, double got, double want)
+    {
+        const bool ok = std::abs(got - want) <= 1e-4 * std::max(1.0, std::abs(want));
+        std::printf("%s %s: %.6g (want %.6g)\n", ok ? "ok  " : "FAIL", what, got, want);
+        failed += !ok;
+    };
+    // ISO 12800, 1/40 s, f/4: 78 x 16 x 40 / (0.65 x 12800) = 6 cd/m^2.
+    expect("white at ISO 12800, 1/40 s, f/4", saturation_luminance(12800, 1.0f / 40, 4), 6);
+    expect("white without an ISO", saturation_luminance(0, 1.0f / 40, 4), 0);
+    expect("white without a shutter", saturation_luminance(12800, 0, 4), 0);
+    expect("white without an aperture", saturation_luminance(12800, 1.0f / 40, 0), 0);
+    // Which rating the ISO is (SensitivityType, 0x8830), for the trace:
+    // every one is the nominal ISO, an approximation of S_sat.
+    const auto speed = [&](const char* what, Sensitivity s, Speed kind)
+    {
+        expect(what, s.iso, 12800);
+        const bool ok = s.speed == kind;
+        std::printf("%s %s: %s\n", ok ? "ok  " : "FAIL", what, speed_name(s.speed));
+        failed += !ok;
+    };
+    speed("speed, ISO speed (type 3)", scene_sensitivity(3, 12800), Speed::IsoSpeed);
+    speed("speed, ISO speed with SOS and REI (type 7)", scene_sensitivity(7, 12800), Speed::IsoSpeed);
+    speed("speed, SOS (type 1)", scene_sensitivity(1, 12800), Speed::Sos);
+    speed("speed, REI (type 2)", scene_sensitivity(2, 12800), Speed::Rei);
+    speed("speed, SOS and REI (type 4)", scene_sensitivity(4, 12800), Speed::SosRei);
+    speed("speed, not stated", scene_sensitivity(-1, 12800), Speed::Unstated);
+    // No camera has a cited correction yet, whatever its rating: the nominal ISO stands.
+    expect("white, REI, no correction", raw_white_luminance(scene_sensitivity(2, 12800), 1.0f / 40, 4, "Canon", "EOS 5D Mark III"), 6);
+    expect("white, ISO speed, no correction", raw_white_luminance(scene_sensitivity(3, 12800), 1.0f / 40, 4, "Canon", "EOS 5D Mark III"), 6);
+    // L_A on the stated white's scale (the develop scales its values by the
+    // white it clips at): a raw whose only clue is its largest value at 0.8
+    // of the stated white, log average 0.04 of that, 100 cd/m2 at the stated
+    // white, is at 3.2 cd/m2, not 4: its gain 2.51, not 3.36.
+    const float sparse = adapting_luminance(0.04f, 0.8f, 100);
+    expect("L_A, develop white 0.8", sparse, 3.2);
+    expect("gain, develop white 0.8", exposure_gain(2, 0.04f, 0.2f, display_key(sparse)), display_key(3.2f) / 0.04f);
+    expect("gain, develop white 0.8, not its own", exposure_gain(2, 0.04f, 0.2f, display_key(adapting_luminance(0.04f, 1, 100))) > 3.3f, 1);
+    // A treated raw (a Lightroom develop): the camera's exposure, with no
+    // lift toward its key, nor any fitting of its highlights; untreated, the model.
+    const float lifted = exposure_gain(2, 0.02f, 0.1f, display_key(adapting_luminance(0.02f, 1, 600)));
+    const float fitted = exposure_gain(2, 0.07f, 0.8f, display_key(adapting_luminance(0.07f, 1, 600)));
+    expect("treated: no lift toward the key", shown_gain(true, 2, lifted), 2);
+    expect("treated: no fitting of the highlights", shown_gain(true, 2, fitted), 2);
+    expect("treated: no departure without EXIF either", shown_gain(true, 2, exposure_gain(2, 0.0013f, 0.02f, display_key(0))), 2);
+    expect("untreated: the model's lift", shown_gain(false, 2, lifted), 4);
+    expect("untreated: the model's fitting", shown_gain(false, 2, fitted), 1.25);
+    const double night = kMiddleGrey * std::exp2(-kNightDepth);
+    expect("key, photopic limit (5 cd/m2)", display_key(kPhotopic), kMiddleGrey);
+    expect("key, daylight (5000 cd/m2)", display_key(5000), kMiddleGrey);
+    expect("key, scotopic limit (0.005 cd/m2)", display_key(kScotopic), night);
+    expect("key, starlight (0.00001 cd/m2)", display_key(1e-5f), night);
+    expect("key, unknown light", display_key(0), kMiddleGrey);
+    const float middle = std::sqrt(kPhotopic * kScotopic);  // halfway down the range in log luminance
+    expect("key, mesopic middle (0.158 cd/m2)", display_key(middle), kMiddleGrey * std::exp2(-kNightDepth / 2));
+    // Smooth: no step at either limit, and darker all the way down.
+    expect("key, just under the photopic limit", std::log2(display_key(kPhotopic * 0.999999f) / kMiddleGrey), 0);
+    expect("key, just over the scotopic limit", std::log2(display_key(kScotopic * 1.000001f) / night), 0);
+    bool falling = true;
+    for (float l = 10; l > 0.001f; l *= 0.9f)
+        falling &= display_key(l * 0.9f) <= display_key(l);
+    expect("key falls with the light", falling, 1);
+    // The gain (anchor 2): a dark scene (log average 0.13% of white, its 99th
+    // percentile 2%) whose light is known to be night stays at the camera's
+    // exposure; the same without the EXIF is lifted the stop the rule allows.
+    const float anchor = 2, average = 0.0013f, p99 = 0.02f;
+    expect("gain, night by its light (white 6 cd/m2)", exposure_gain(anchor, average, p99, display_key(adapting_luminance(average, 1, 6))), anchor);
+    expect("gain, no EXIF: the camera's, a stop up", exposure_gain(anchor, average, p99, display_key(adapting_luminance(average, 1, 0))), 2 * anchor);
+    // Daylight: lifted toward middle grey, a stop at most; held down to fit
+    // its 99th percentile, a stop at most; never lowered for its key alone.
+    expect("gain, daylight lifted to middle grey", exposure_gain(anchor, 0.07f, 0.3f, display_key(0.07f * 600)), kMiddleGrey / 0.07f);
+    expect("gain, daylight lifted a stop at most", exposure_gain(anchor, 0.02f, 0.1f, display_key(0.02f * 600)), 2 * anchor);
+    expect("gain, highlights fitted", exposure_gain(anchor, 0.07f, 0.8f, display_key(0.07f * 600)), 1 / 0.8f);
+    expect("gain, highlights fitted a stop at most", exposure_gain(anchor, 0.07f, 4, display_key(0.07f * 600)), anchor / 2);
+    expect("gain, a bright scene kept at the camera's", exposure_gain(anchor, 0.3f, 0.45f, display_key(0.3f * 600)), anchor);
+    std::printf("%s\n", failed ? "exposure check FAILED" : "exposure check passed");
+    return failed ? 1 : 0;
+}
 
 // --gpu-render IN OUT.ppm ZOOM [nearest|area|mitchell|catmullrom|lanczos3]:
 // IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
@@ -437,6 +524,8 @@ int main(int argc, char** argv)
         return gpu_render(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--check-brightness") == 0)
         return check_brightness();
+    if (argc > 1 && std::strcmp(argv[1], "--check-exposure") == 0)
+        return check_exposure();
     if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
         return check_loader(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-looks") == 0)

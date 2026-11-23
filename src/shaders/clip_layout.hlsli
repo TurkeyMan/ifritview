@@ -9,4 +9,5 @@
 #define kClipSpan 0.3f
 #define kClipTotal (3u * kClipBins)
 #define kClipFound (kClipTotal + 3u)
-#define kClipWords (kClipFound + 3u)
+#define kClipWhite (kClipFound + 3u)  // float: the white the develop scales by (develop.hlsli's develop_white()), 1 = the stated white
+#define kClipWords (kClipWhite + 1u)

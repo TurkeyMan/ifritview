@@ -127,6 +127,10 @@ struct RawMosaic
     int site(int x, int y) const { return (y % period) * period + x % period; }
     bool grey = false;           // no filter (a monochrome sensor): each photosite grey, no demosaic
     float white = 65535;         // saturation, in data units
+    // The scene luminance (cd/m^2) at that white, from the ISO, shutter and
+    // aperture it was taken at (exposure.hlsli's ISO 12232 relation); 0
+    // when any of them is unknown.
+    float white_luminance = 0;
     float as_shot[3] = {1, 1, 1};  // the camera's white balance: R, G, B multipliers, the least 1
     bool balanced = false;       // the data has it already (LibRaw's as_shot_wb_applied: Sony's YCbCr raws, Pentax multi-exposure)
     float rgb_cam[3][3] = {};    // white-balanced camera RGB to linear BT.709 (LibRaw's rgb_cam)

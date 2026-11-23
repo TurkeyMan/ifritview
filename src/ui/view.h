@@ -290,6 +290,7 @@ private:
         int channels = 0;
         double wb_kelvin = 0, wb_tint = 0;
         uint64_t adjust = 0;  // the develop tables' serial
+        bool treated = false;  // a Lightroom develop: the camera's exposure
         Detail detail = {};   // noise reduction and sharpening
         // Comparing: how, and B (its own exposure and white balance).
         int compare = -1;
@@ -297,6 +298,7 @@ private:
         uint64_t b_generation = 0;
         double b_exposure = 0, b_wb_kelvin = 0, b_wb_tint = 0;
         uint64_t b_adjust = 0;
+        bool b_treated = false;
         Detail b_detail = {};
         int split = 0, gain = 0;
         const ImageDifference* difference = nullptr;

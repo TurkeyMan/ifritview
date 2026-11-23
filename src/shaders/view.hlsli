@@ -58,6 +58,8 @@ cbuffer Params : register(b0)
     float min_slope;    // < 0: kMinBrightnessSlope; else that (a test hook: IFRIT_MIN_SLOPE; 0 turns the hold off)
     int hk_probe;       // a test hook (IFRIT_HK_PROBE), for a raw's volume mapping: bit 0, show input L**, output L** and
                         // output C* / 100 as R, G, B; bit 1, hold luminance exactly instead of perceived brightness
+    float white_luminance;  // auto_exposure: cd/m^2 at the raw's white, from how it was taken (exposure.hlsli); 0: unknown
+    int treated;            // auto_exposure: a Lightroom develop (Adjustments::treated): the camera's exposure, no departure
 };
 
 Texture2D<float4> source : register(t0);
@@ -70,14 +72,17 @@ RWByteAddressBuffer stats : register(u1);
 ByteAddressBuffer stats : register(t8);
 #endif
 #include "stats_layout.hlsli"
+#include "exposure.hlsli"
 
 // The scene's luminance scale for a raw developed on the GPU: the camera's
-// own, moved by the scene a stop at most (peak.hlsl). 1 for the rest.
+// own, moved by the scene a stop at most (peak.hlsl); for a treated raw,
+// whose settings are Adobe's on the camera's exposure, the camera's own
+// (`anchor`, with BaselineExposure) and no departure. 1 for the rest.
 float auto_gain()
 {
-    if (!auto_exposure || !measured)
+    if (!auto_exposure)
         return 1;
-    const float gain = asfloat(stats.Load(kStatsAutoGain * 4));
+    const float gain = shown_gain(treated != 0, anchor, measured ? asfloat(stats.Load(kStatsAutoGain * 4)) : 0);
     return gain > 0 ? gain : 1;
 }
 

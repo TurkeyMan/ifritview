@@ -56,6 +56,7 @@ public:
         double exposure = 0;                    // EV, for images with more than the display shows
         float white_balance[3] = {};            // a raw's R, G, B multipliers (the least 1); 0: as shot
         std::shared_ptr<const AdjustTables> adjust;  // the develop controls (adjust.h); null: none
+        bool treated = false;                   // a raw's a Lightroom develop (Adjustments::treated): the camera's exposure, no automatic departure
         Detail detail;                          // noise reduction and sharpening, at the image's own resolution
         rap::color background;
         bool checkerboard = false;  // under transparency
@@ -136,6 +137,7 @@ private:
         std::shared_ptr<const DngColour> dng;       // a DNG's colour: its data -> XYZ by white balance, in place of input_to_xyz
         bool auto_exposure = false;                 // a raw developed here: scaled by its own measures (view.hlsli's auto_gain)
         float anchor = 0;                           // and the camera's own scale they're anchored on (peak.hlsl)
+        float white_luminance = 0;                  // cd/m^2 at the raw's white, from its EXIF (exposure.hlsli); 0: unknown
         bool tonable = false;                       // exposure applies
         bool measured = false;                      // `stats` is this image's
         uint64_t measures = 0;                      // how many times it's been measured
@@ -143,7 +145,7 @@ private:
         // (stats.hlsl's CURVE and TOP, volume.hlsl): what they were taken
         // with, taken again when any of it changes. `details` counts the
         // changes of `detailed` (the measured level is made with it).
-        std::array<float, 14> volume_key{};
+        std::array<float, 15> volume_key{};
         uint64_t volume_adjust = 0, volume_measures = 0, volume_details = 0, details = 0;
         // Noise reduction and sharpening (detail.h): what the levels below
         // level 0 were made with (filtered on the way to level 1); level 0's
@@ -266,7 +268,8 @@ private:
     float histogram_wb_[3] = {};     // the white balance counted with
     Detail histogram_detail_;        // and the noise reduction and sharpening
     float histogram_scale_ = 1;  // the scene's scale it was counted at
-    bool histogram_scene_ = false, histogram_auto_ = false;
+    bool histogram_scene_ = false, histogram_auto_ = false, histogram_treated_ = false;
+    float histogram_fixed_ = 0;  // a treated raw's gain, the camera's (0: the measured one, or none)
     rap::gpu::buffer_ptr histogram_stats_;
 
     // The difference (render_difference) as an image of its own, made again
@@ -277,6 +280,7 @@ private:
     int difference_gain_ = 0;
     double difference_exposure_ = 0;
     uint64_t difference_adjust_ = 0;
+    bool difference_treated_ = false;
     float difference_wb_[3] = {};
 
     rap::gpu::program_ptr develop_, develop_linear_, develop_ycc_, warp_;

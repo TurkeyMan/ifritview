@@ -1,6 +1,6 @@
 // The 99.9th percentile of stats.hlsl's luminance histogram: the peak the
 // display mapping works to (a few hot pixels don't count); the 99th; and
-// from those and the log average, a raw's automatic exposure.
+// from those and the log average, a raw's automatic exposure (exposure.hlsli).
 #define COMPUTE
 #include "view.hlsli"
 
@@ -29,18 +29,11 @@ void main()
     // A bin's top edge can be past the brightest pixel itself.
     stats.Store(kStatsPeak * 4, asuint(min(peak, asfloat(stats.Load(kStatsMaximum * 4)))));
 
-    // A raw's exposure (auto_gain()), anchored on the camera's: its metering
-    // chose how the raw was exposed, so its middle grey is put where a
-    // camera's JPEG puts it (`anchor`, a stop up: and a DNG's
-    // BaselineExposure), and the scene moves that a stop at most. Down, to
-    // fit its highlights: its 99th percentile at white (the roll-off takes
-    // the 1% above). Up, as far as its highlights allow but no further than
-    // puts its log average at middle grey, and only for a scene of normal
-    // key the camera held down for its highlights: none for one exposed dark
-    // (its log average under 1% at the camera's exposure: night, a room by
-    // candlelight), a stop by 2%. A night scene's few lights would otherwise
-    // lift its dark to grey and its noise with it.
-    float gain = 1;
+    // A raw's exposure (auto_gain(); exposure.hlsli's model): anchored on
+    // the camera's, a stop at most from it toward the key its scene's light
+    // calls for, by the raw's white in cd/m^2 (`white_luminance`; 0 when its
+    // ISO, shutter or aperture is unknown, and the key middle grey).
+    float gain = 1, average = 0, adapting = 0, key = kMiddleGrey;
     if (anchor > 0 && total)
     {
         // Over every pixel of the image, black ones at the floor too: a
@@ -49,10 +42,16 @@ void main()
         float sum = float(opaque - total) * -14;
         for (int b = 0; b < 1024; ++b)
             sum += stats.Load((kStatsLuminance + b) * 4) * (max(float(b) + 0.5, 192.0) * 32 / 1024 - 20);  // log2, from 2^-14
-        const float average = exp2(sum / opaque);
-        const float bright = p99 > 0 ? 1 / p99 : 1, key = 0.18 / average;
-        const float up = clamp(log2(average * anchor / 0.01), 0.0, 1.0);
-        gain = anchor * exp2(clamp(log2(min(bright, max(key, anchor)) / anchor), -1.0, up));
+        average = exp2(sum / opaque);
+        // The develop scaled its values by the white it clips at; the
+        // light's measured at the stated white.
+        const float scale = asfloat(clips.Load(kClipWhite * 4));
+        adapting = adapting_luminance(average, scale > 0 && scale <= 1 ? scale : 1.0f, white_luminance);
+        key = display_key(adapting);
+        gain = exposure_gain(anchor, average, p99, key);
     }
+    stats.Store(kStatsAverage * 4, asuint(average));
+    stats.Store(kStatsAdapting * 4, asuint(adapting));
+    stats.Store(kStatsKey * 4, asuint(key));
     stats.Store(kStatsAutoGain * 4, asuint(gain));
 }
