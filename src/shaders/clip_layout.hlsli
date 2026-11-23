@@ -18,6 +18,9 @@
 // under its clip (COMBINE's: a float, for the trace); last, whether any
 // photosite at all is past its colour's limit (COMBINE's, from the counts
 // over the mosaic: 1 or 0; 0, and the develop has nothing to estimate).
+// Then the readout's noise, each colour's variance as the masked border
+// has it (levels' differences), in the develop's balanced units (1 = where
+// it clips), 0 where it wasn't measured.
 #define kClipBins 2048u
 #define kClipFrom 0.75f
 #define kClipSpan 0.3f
@@ -38,4 +41,13 @@
 #define kClipStored (kClipDriftSure + 3u)
 #define kClipCensored (kClipStored + 3u)
 #define kClipAny (kClipCensored + 1u)
-#define kClipWords (kClipAny + 1u)
+#define kClipReadNoise (kClipAny + 1u)
+#define kClipWords (kClipReadNoise + 3u)
+
+// The black level's and the readout noise's measure where the sensor is
+// masked (ljpeg_black's levels): sum R G B G2, count R G B G2, zeros; then
+// the squared differences of photosites of a colour two rows apart, R G B
+// G2 each in 64 bits (low word first), and how many of those.
+#define kLevelsSquares 9u
+#define kLevelsDifferences 17u
+#define kLevelsWords 21u

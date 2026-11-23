@@ -66,8 +66,8 @@ int colour_at(int x, int y)
     return f == 3 ? 1 : int(f);
 }
 
-// ljpeg_black's: sum R G B G2, count R G B G2, zeros. A compute pass reads
-// it among its buffers.
+// ljpeg_black's (clip_layout.hlsli lays it out). A compute pass reads it
+// among its buffers.
 #ifdef COMPUTE
 RWByteAddressBuffer levels : register(u1);
 #else

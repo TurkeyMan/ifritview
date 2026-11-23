@@ -8,6 +8,7 @@
 #include "../decoders/rawblocks.h"
 #include "../decoders/rawpacked.h"
 #include "../gpu.h"
+#include "../half.h"
 #include "../image.h"
 #include "../raw_linearity.h"
 #include "../shaders/drift.hlsli"
@@ -114,14 +115,156 @@ struct DetailParams
 {
     int32_t mode, axis, step, sharpening;
     int32_t origin[2], size[2], out_origin[2], image_size[2];
-    float as_shot[4], luminance[4], colour[4], coarsest[4], sharpen[4], mask[4], support[4];
+    float as_shot[4], luminance[4], colour[4], coarsest[4], sharpen[4], mask[4], support[4], model[4];
 };
 
 struct NoiseParams
 {
-    int32_t mode, size[2], unused;
+    int32_t mode, size[2], fitting;
     float as_shot[4];
+    int32_t read[4];
+    float light[4], readout[4];  // develop_noise()'s: a pixel's noise against the fit's measure, the light's and the readout's
+    float green_light[4], green_readout[4];  // and each colour's measure against green's (a colour with no fit of its own)
+    float measure[3][4];         // and V, the masked border's photosite noise to the measure (a Bayer mosaic's)
+    float correlation_light[4], correlation_readout[4];  // develop_noise()'s: the colours' noise correlations, R-G R-B G-B
 };
+
+// The noise fit measures each colour after the develop by what's left
+// after the four neighbours' mean (noise.hlsl); a pixel's own variance is
+// more, as the develop's interpolation made neighbours alike. Both are sums
+// over the photosites that went into the pixel, each colour's in proportion
+// to its own variance s_k: pixel P_c = sum_k W_ck s_k, measured M_c = sum_k
+// V_ck s_k (tools/noise_paths.py derives them). The model of s: one sensor
+// under every colour (one photodiode and readout, a and b the same for
+// each), so the photosites' variances differ by colour only as the white
+// balance, applied before the interpolation, scales them: the light's (a) by
+// mul_k, the readout's (b) by mul_k squared. Each colour's fitted a and b
+// (in M's measure) go to a pixel's by P_c / M_c at those s_k, the light's
+// and the readout's apart; a colour too sparse to fit takes green's, by
+// M_c / M_g at those s_k (develop_noise()). Not s = V^-1 M from the three
+// fits: R's and B's rows of V are near mirror images, so W V^-1 leans on
+// the fits' differences (its rows' absolute sums 8.2, 5.4, 8.2), and a few
+// percent of fitting error in one colour becomes several times that in
+// another's law.
+//  - A Bayer mosaic's Malvar-He-Cutler is linear: W and V exactly, from its
+//    weights (rows R G B out, columns R G B in); and X, the output colours'
+//    covariances from each input colour's photosites, so their
+//    correlations at those s_k.
+//  - X-Trans's weights follow the data, so no fixed W and V are a model of
+//    it (each colour's photosites alone through it, then summed, put a
+//    pixel's red 55% over the whole's): P_c / M_c and M_c / M_g simulated
+//    through its own interpolation with every colour's noise there, over a
+//    grid of red's and blue's photosite noise against green's (0.5 to 3, R
+//    by B), between them bilinearly; its correlations at equal noise (at
+//    twice red's, 0.56 0.45 0.71: within 0.14).
+//  - Canon's sRAW and mRAW: luma a pixel, colour filled from 25 blocks
+//    around. Our fill alone would leave luma's noise as it is (these
+//    factors, near 1, and the colours almost wholly correlated); but the
+//    camera's own scaling to an mRAW made neighbours' luma alike (0.55 a
+//    pixel apart in a Canon's at ISO 12800), which hides 3.5 times over
+//    the pixel's variance from the measure. Not ours to know: measured
+//    instead, from the noise's spatial correlation (measured_law, noise.hlsl's
+//    mode 6), the colours' correlation with it.
+//  - A linear raw, a monochrome sensor's: none (no interpolation); measured
+//    too, as LibRaw's develop is.
+constexpr float kBayerW[3][3] = {{0.5625f, 0.2461f, 0.1758f}, {0.0781f, 0.6250f, 0.0781f}, {0.1758f, 0.2461f, 0.5625f}};
+constexpr float kBayerV[3][3] = {{0.0812f, 0.2172f, 0.1617f}, {0.0719f, 0.2563f, 0.0719f}, {0.1617f, 0.2172f, 0.0813f}};
+constexpr float kXtransGrid[6] = {0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f};
+constexpr float kXtransRatio[36][3] = {{1.229f, 1.356f, 1.231f}, {1.221f, 1.340f, 1.414f}, {1.216f, 1.326f, 1.620f}, {1.209f, 1.305f, 2.006f}, {1.204f, 1.291f, 2.296f}, {1.202f, 1.273f, 2.637f}, {1.405f, 1.341f, 1.224f}, {1.392f, 1.324f, 1.400f}, {1.383f, 1.310f, 1.601f}, {1.369f, 1.289f, 1.975f}, {1.358f, 1.274f, 2.256f}, {1.347f, 1.257f, 2.583f}, {1.602f, 1.328f, 1.219f}, {1.583f, 1.310f, 1.391f}, {1.569f, 1.296f, 1.586f}, {1.547f, 1.275f, 1.949f}, {1.531f, 1.260f, 2.219f}, {1.510f, 1.243f, 2.537f}, {1.967f, 1.308f, 1.213f}, {1.934f, 1.291f, 1.377f}, {1.908f, 1.276f, 1.563f}, {1.871f, 1.255f, 1.907f}, {1.845f, 1.239f, 2.165f}, {1.810f, 1.222f, 2.468f}, {2.243f, 1.295f, 1.210f}, {2.201f, 1.277f, 1.368f}, {2.167f, 1.263f, 1.547f}, {2.117f, 1.241f, 1.877f}, {2.081f, 1.225f, 2.124f}, {2.032f, 1.208f, 2.420f}, {2.566f, 1.279f, 1.210f}, {2.513f, 1.262f, 1.359f}, {2.469f, 1.247f, 1.527f}, {2.404f, 1.225f, 1.838f}, {2.358f, 1.210f, 2.070f}, {2.294f, 1.193f, 2.350f}};
+constexpr float kXtransGreen[36][2] = {{0.895f, 0.896f}, {0.896f, 0.986f}, {0.896f, 1.111f}, {0.894f, 1.461f}, {0.890f, 1.951f}, {0.884f, 3.320f}, {0.984f, 0.898f}, {0.986f, 0.989f}, {0.987f, 1.113f}, {0.984f, 1.467f}, {0.981f, 1.959f}, {0.974f, 3.336f}, {1.108f, 0.898f}, {1.112f, 0.989f}, {1.113f, 1.114f}, {1.111f, 1.470f}, {1.107f, 1.966f}, {1.099f, 3.348f}, {1.465f, 0.897f}, {1.471f, 0.988f}, {1.474f, 1.115f}, {1.473f, 1.474f}, {1.466f, 1.973f}, {1.454f, 3.360f}, {1.955f, 0.895f}, {1.963f, 0.986f}, {1.968f, 1.114f}, {1.968f, 1.476f}, {1.961f, 1.976f}, {1.945f, 3.358f}, {3.337f, 0.890f}, {3.353f, 0.982f}, {3.361f, 1.110f}, {3.362f, 1.472f}, {3.351f, 1.969f}, {3.323f, 3.345f}};
+constexpr float kYccRatio[3] = {1.035f, 1.008f, 1.037f};
+constexpr float kBayerX[3][3][3] = {{{0.5625f, 0.2461f, 0.1758f}, {0.1250f, 0.3125f, 0.1172f}, {0.1875f, 0.2109f, 0.1875f}},
+                                    {{0.1250f, 0.3125f, 0.1172f}, {0.0781f, 0.6250f, 0.0781f}, {0.1172f, 0.3125f, 0.1250f}},
+                                    {{0.1875f, 0.2109f, 0.1875f}, {0.1172f, 0.3125f, 0.1250f}, {0.1758f, 0.2461f, 0.5625f}}};
+constexpr float kXtransCorrelation[3] = {0.697f, 0.547f, 0.695f};
+constexpr float kYccCorrelation[3] = {0.953f, 0.960f, 0.967f};
+
+// A raw's develop's pixel noise against the fit's measure, each colour's,
+// for its a (`light`) and its b (`readout`); each colour's measure against
+// green's (`green`, the light's and the readout's: what a colour too sparse
+// to fit takes green's by); the colours' correlations after it, the
+// light's and the readout's (R-G, R-B, G-B); and (a Bayer mosaic's) V,
+// which takes the masked border's photosite noise to the measure.
+void develop_noise(const RawMosaic& m, float light[3], float readout[3], float green[2][3], float correlation[2][3], float measure[3][3])
+{
+    std::memset(measure, 0, sizeof(float) * 9);
+    std::memset(correlation, 0, sizeof(float) * 6);
+    for (int c = 0; c < 3; ++c)
+        light[c] = readout[c] = green[0][c] = green[1][c] = 1;
+    if (m.ycc.block_h)
+    {
+        for (int c = 0; c < 3; ++c)
+            light[c] = readout[c] = kYccRatio[c], correlation[0][c] = correlation[1][c] = kYccCorrelation[c];
+        return;
+    }
+    if (m.channels == 3 || m.grey)
+        return;
+    const float g = m.as_shot[1] > 0 ? m.as_shot[1] : 1;
+    const float mul[3] = {m.as_shot[0] / g, 1, m.as_shot[2] / g};
+    if (m.period == 6)
+    {
+        for (int c = 0; c < 3; ++c)
+            correlation[0][c] = correlation[1][c] = kXtransCorrelation[c];
+        // The grid's bilinear lookup at red's and blue's noise against green's.
+        const auto at = [](float v, int& i, float& t)
+        {
+            v = std::clamp(v, kXtransGrid[0], kXtransGrid[5]);
+            i = 0;
+            while (i < 4 && v > kXtransGrid[i + 1])
+                ++i;
+            t = (v - kXtransGrid[i]) / (kXtransGrid[i + 1] - kXtransGrid[i]);
+        };
+        for (int part = 0; part < 2; ++part)
+        {
+            const float r = part ? mul[0] : std::sqrt(mul[0]), b = part ? mul[2] : std::sqrt(mul[2]);  // standard deviations
+            int i, j;
+            float t, u;
+            at(r, i, t), at(b, j, u);
+            float* out = part ? readout : light;
+            for (int c = 0; c < 3; ++c)
+            {
+                const auto q = [&](int ri, int bi) { return kXtransRatio[ri * 6 + bi][c]; };
+                out[c] = (1 - t) * ((1 - u) * q(i, j) + u * q(i, j + 1)) + t * ((1 - u) * q(i + 1, j) + u * q(i + 1, j + 1));
+            }
+            for (int k = 0; k < 2; ++k)
+            {
+                const auto q = [&](int ri, int bi) { return kXtransGreen[ri * 6 + bi][k]; };
+                green[part][k * 2] = (1 - t) * ((1 - u) * q(i, j) + u * q(i, j + 1)) + t * ((1 - u) * q(i + 1, j) + u * q(i + 1, j + 1));
+            }
+        }
+        return;
+    }
+    for (int part = 0; part < 2; ++part)
+    {
+        float* out = part ? readout : light;
+        float v[3] = {};
+        for (int c = 0; c < 3; ++c)
+        {
+            float p = 0;
+            for (int k = 0; k < 3; ++k)
+            {
+                const float s = part ? mul[k] * mul[k] : mul[k];
+                p += kBayerW[c][k] * s, v[c] += kBayerV[c][k] * s;
+            }
+            out[c] = p / v[c];
+        }
+        for (int c = 0; c < 3; ++c)
+            green[part][c] = v[c] / v[1];
+        static constexpr int pairs[3][2] = {{0, 1}, {0, 2}, {1, 2}};
+        for (int q = 0; q < 3; ++q)
+        {
+            const int c = pairs[q][0], d = pairs[q][1];
+            float cd = 0, cc = 0, dd = 0;
+            for (int k = 0; k < 3; ++k)
+            {
+                const float s = part ? mul[k] * mul[k] : mul[k];
+                cd += kBayerX[c][d][k] * s, cc += kBayerX[c][c][k] * s, dd += kBayerX[d][d][k] * s;
+            }
+            correlation[part][q] = cd / std::sqrt(cc * dd);
+        }
+    }
+    std::memcpy(measure, kBayerV, sizeof kBayerV);
+}
 
 struct ComposeParams
 {
@@ -484,9 +627,15 @@ bool upload_decoded(rap::gpu::device& device, const RawMosaic& m, const std::vec
         for (int x = 0; x < m.width; ++x)
             for (unsigned c = 0; c < n; ++c)
                 area[(size_t(y) * m.width + x) * n + c] = sample_at(st, samples, unsigned(x + st.left), unsigned(y + st.top), n, c);
-    uint32_t sums[9] = {};  // sum R G B G2, count R G B G2, zeros
+    // Sum R G B G2, count R G B G2, zeros; then the squared differences two
+    // rows apart, R G B G2 each in 64 bits (low word first), and how many
+    // (develop.hlsli's levels).
+    uint32_t sums[kLevelsWords] = {};
+    uint64_t squares[4] = {};
     for (const auto& r : st.mask)
-        for (int y = std::max(r[0], 0); y < std::min(r[2], st.readout_h); ++y)
+    {
+        const int bottom = std::min(r[2], st.readout_h);
+        for (int y = std::max(r[0], 0); y < bottom; ++y)
             for (int x = std::max(r[1], 0); x < std::min(r[3], st.readout_w); ++x)
             {
                 const unsigned c = (st.filters >> ((((y << 1) & 14) | (x & 1)) << 1)) & 3;
@@ -494,7 +643,19 @@ bool upload_decoded(rap::gpu::device& device, const RawMosaic& m, const std::vec
                 sums[c] += v;
                 sums[4 + c] += 1;
                 sums[8] += v == 0;
+                if (y + 2 < bottom)
+                {
+                    const int d = std::clamp(int(v) - int(sample(unsigned(x), unsigned(y + 2))), -2047, 2047);
+                    squares[c] += uint64_t(d * d);
+                    sums[kLevelsDifferences + c] += 1;
+                }
             }
+    }
+    for (int c = 0; c < 4; ++c)
+    {
+        sums[kLevelsSquares + 2 * c] = uint32_t(squares[c]);
+        sums[kLevelsSquares + 2 * c + 1] = uint32_t(squares[c] >> 32);
+    }
     sites = device.create({m.width, m.height, n == 1 ? rap::gpu::format::r16 : rap::gpu::format::rgba16});
     levels = device.create_buffer(sizeof sums);
     if (!sites || !levels)
@@ -556,7 +717,7 @@ bool GpuView::readout_buffers(const RawMosaic& m, uint64_t samples, rap::gpu::bu
                               std::string& error)
 {
     values = device_->create_buffer((samples * 2 + 3) & ~uint64_t(3));
-    levels = device_->create_buffer(36);
+    levels = device_->create_buffer(kLevelsWords * 4);
     sites = device_->create({m.width, m.height, m.channels == 1 ? rap::gpu::format::r16 : rap::gpu::format::rgba16, 1, true});
     if (!values || !levels || !sites)
         return error = "too big for the GPU", false;
@@ -989,6 +1150,14 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         s.measure_colour = s.measure_colour || !icc_bt709_primaries(image.stored->icc.data(), image.stored->icc.size());
     s.auto_exposure = false;
     s.clips.reset();
+    s.raw = false;
+    for (int c = 0; c < 3; ++c)
+    {
+        s.light[c] = s.readout[c] = s.green[0][c] = s.green[1][c] = 1;
+        s.correlation[0][c] = s.correlation[1][c] = 0;
+        for (int k = 0; k < 3; ++k)
+            s.measure[c][k] = 0;
+    }
     s.anchor = 0;
     s.white_luminance = 0;
     s.dng.reset();
@@ -1164,7 +1333,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             d[0].groups[0] = (m->width + 63) / 64;
             d[0].groups[1] = (m->height + 63) / 64;
             d[1].program = clip_find_;
-            d[1].buffers = {clips};
+            d[1].buffers = {clips, levels ? levels : histogram_};
             d[1].uniforms = bytes(p);
             device_->run(std::span(d));
         }
@@ -1417,6 +1586,26 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
                                   const bool kept[3] = {sure[0] > 0, sure[1] > 0, sure[2] > 0};
                                   linearity::remember(camera, format, limit, kept);
                               });
+            if (levels)
+            {
+                // The masked border's black and readout noise, data units.
+                auto sums = std::make_shared<std::vector<std::byte>>(levels->size());
+                device_->readback(levels, *sums,
+                                  [sums]
+                                  {
+                                      uint32_t w[kLevelsWords];
+                                      std::memcpy(w, sums->data(), sizeof w);
+                                      double black[4] = {}, sigma[4] = {};
+                                      for (int c = 0; c < 4; ++c)
+                                      {
+                                          const uint64_t sq = w[kLevelsSquares + 2 * c] | uint64_t(w[kLevelsSquares + 2 * c + 1]) << 32;
+                                          black[c] = w[4 + c] ? double(w[c]) / w[4 + c] : 0;
+                                          sigma[c] = w[kLevelsDifferences + c] ? std::sqrt(double(sq) / w[kLevelsDifferences + c] / 2) : 0;
+                                      }
+                                      std::fprintf(stderr, "gpu: masked border: black R %.1f G %.1f B %.1f G2 %.1f, readout noise R %.2f G %.2f B %.2f G2 %.2f\n",
+                                                   black[0], black[1], black[2], black[3], sigma[0], sigma[1], sigma[2], sigma[3]);
+                                  });
+            }
         }
         s.levels.push_back(top);
         // Shown through its colour matrix, XYZ <- 709 . rgb_cam; each frame
@@ -1433,6 +1622,9 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
         s.dng = m->dng;
         s.auto_exposure = true;
         s.clips = clips;
+        s.raw = true;
+        develop_noise(*m, s.light, s.readout, s.green, s.correlation, s.measure);
+        s.measured_law = m->ycc.block_h || m->channels == 3 || m->grey;  // the others' interpolation is ours, its factors exact
         // The camera's own exposure: its middle grey where its JPEG would
         // have it, a stop over the raw's (about where cameras put it), and a
         // DNG's BaselineExposure on top.
@@ -1445,6 +1637,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
     }
     if (const LinearData* raw = image.linear.get(); raw && raw->rgb.size() == size_t(w) * h * 3)
     {
+        s.raw = true;  // a raw LibRaw developed
         // Linear RGB, 16 bits; its scale (and curve) applied as it's shown.
         data = device_->create({w, h, rap::gpu::format::rgba16});
         if (data)
@@ -1609,29 +1802,72 @@ void GpuView::measure_noise(Source& s)
 {
     if (s.noise)
         return;
-    s.noise = device_->create_buffer((2 * 1024 + 2) * 4);  // noise.hlsl's: two histograms, then the two deviations
+    s.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);  // noise.hlsl's: two histograms, the two deviations, the model, its fit's counts
     if (!s.noise)
         return;
     device_->clear(s.noise, 0);
     const int w = s.levels[0]->width(), h = s.levels[0]->height();
-    const NoiseParams params[2] = {{0, {w, h}, 0, {s.as_shot[0], s.as_shot[1], s.as_shot[2], 1}},
-                                   {1, {w, h}, 0, {s.as_shot[0], s.as_shot[1], s.as_shot[2], 1}}};
-    rap::gpu::dispatch d[2];
-    for (int i = 0; i < 2; ++i)
+    // The model fitted (a raw's), then the noise measured in its encoding.
+    // The readout's noise from the masked border, where clip.hlsl had it.
+    static const bool masked = !std::getenv("IFRIT_NO_MASKED_NOISE");  // to compare
+    // Then (modes 4 to 6) the noise's spatial correlation, and from it the
+    // law where the develop's factors aren't known (s.measured_law).
+    constexpr int kModes = 7;
+    NoiseParams params[kModes];
+    for (int i = 0; i < kModes; ++i)
+    {
+        params[i] = {i, {w, h}, s.raw ? 1 : 0, {s.as_shot[0], s.as_shot[1], s.as_shot[2], 1}, {s.clips && masked ? 1 : 0, s.measured_law ? 1 : 0, 0, 0},
+                     {s.light[0], s.light[1], s.light[2], 0}, {s.readout[0], s.readout[1], s.readout[2], 0},
+                     {s.green[0][0], s.green[0][1], s.green[0][2], 0}, {s.green[1][0], s.green[1][1], s.green[1][2], 0}, {},
+                     {s.correlation[0][0], s.correlation[0][1], s.correlation[0][2], 0}, {s.correlation[1][0], s.correlation[1][1], s.correlation[1][2], 0}};
+        for (int c = 0; c < 3; ++c)
+            for (int k = 0; k < 3; ++k)
+                params[i].measure[c][k] = s.measure[c][k];
+    }
+    rap::gpu::dispatch d[kModes];
+    for (int i = 0; i < kModes; ++i)
     {
         d[i].program = noise_;
         d[i].inputs = {s.levels[0]};
-        d[i].buffers = {s.noise};
+        d[i].buffers = {s.noise, s.clips ? s.clips : histogram_};
         d[i].uniforms = bytes(params[i]);
     }
-    const int lattice = 4;  // noise.hlsl's kNoiseStride
-    d[0].groups[0] = ((w + lattice - 1) / lattice + 15) / 16;
-    d[0].groups[1] = ((h + lattice - 1) / lattice + 15) / 16;
+    const int blocks = 16, lattice = 4;  // noise.hlsl's kFitLattice, kNoiseStride
+    d[0].groups[0] = ((w + blocks - 1) / blocks + 15) / 16;
+    d[0].groups[1] = ((h + blocks - 1) / blocks + 15) / 16;
+    d[2].groups[0] = ((w + lattice - 1) / lattice + 15) / 16;
+    d[2].groups[1] = ((h + lattice - 1) / lattice + 15) / 16;
+    const int step = 32;  // noise.hlsl's kSpatialStep: a thread a block (4), a group a block (5)
+    d[4].groups[0] = ((w + step - 1) / step + 15) / 16;
+    d[4].groups[1] = ((h + step - 1) / step + 15) / 16;
+    d[5].groups[0] = (w + step - 1) / step;
+    d[5].groups[1] = (h + step - 1) / step;
     device_->run(std::span(d));
+    if (std::getenv("IFRIT_TRACE"))
+    {
+        // (Read back once it's done, not waited for: the filter's timing is its own.)
+        auto words = std::make_shared<std::vector<std::byte>>(s.noise->size());
+        device_->readback(s.noise, *words,
+                          [words, raw = s.raw]
+                          {
+                              float f[11], pixel[3];
+                              uint32_t flags[2];
+                              std::memcpy(f, words->data() + (2 * 1024) * 4, sizeof f);
+                              std::memcpy(flags, words->data() + (2 * 1024 + 2 + 9) * 4, sizeof flags);
+                              std::memcpy(pixel, words->data() + words->size() - 4 * 4, sizeof pixel);  // noise.hlsl's kNoisePixel: last but its flag
+                              std::fprintf(stderr,
+                                           "gpu: noise %s%s: a R %.3g G %.3g B %.3g, b R %.3g G %.3g B %.3g (colours fitted %u); offset %.3g; "
+                                           "luminance %.4g colour %.4g; pixel over measure %.3g %.3g %.3g\n",
+                                           !raw ? "of a non-raw (no model)" : flags[0] & 2 ? "fitted" : "not fitted (too few flat areas)",
+                                           flags[1] ? ", b from the masked border" : "", f[5], f[6], f[7], f[8], f[9], f[10], flags[0], f[2], f[0], f[1],
+                                           pixel[0], pixel[1], pixel[2]);
+                          });
+    }
 }
 
 bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap::gpu::texture_ptr& target, int tx, int ty)
 {
+    const int64_t t0 = g_get_monotonic_time();  // the noise's measure, the first time, counted in
     const DetailFilter filter(s.detailed);
     if (filter.denoise)
         measure_noise(s);
@@ -1647,6 +1883,12 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
         if (!t || t->width() < tw || t->height() < th)
             if (!(t = device_->create({tw, th, rap::gpu::format::rgba32f, 1, true})))
                 return false;
+    if (filter.denoise && !s.detail_table && !(s.detail_table = device_->create({NoiseModel::kInverse, 1, rap::gpu::format::rgba32f, 1, true})))
+        return false;
+    if (filter.denoise && !s.detail_shaping && !(s.detail_shaping = device_->create({7, 6, rap::gpu::format::rgba32f, 1, true})))
+        return false;
+    // The table again only for another image's noise or another setting.
+    bool tabulate = filter.denoise && !(s.table_noise == s.noise && s.table_for == s.detailed);
     DetailParams base{};
     base.image_size[0] = width, base.image_size[1] = height;
     for (int c = 0; c < 3; ++c)
@@ -1658,8 +1900,8 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
     base.sharpen[0] = filter.amount, base.sharpen[1] = filter.sigma, base.sharpen[2] = filter.halo;
     base.mask[0] = filter.mask_low, base.mask[1] = filter.mask_high;
     base.sharpening = filter.sharpen ? 1 : 0;
+    base.model[0] = filter.denoise ? 1.f : 0.f;  // the noise buffer's encoding (the model's, or as without one)
     base.out_origin[0] = x0 - tx, base.out_origin[1] = y0 - ty;
-    const int64_t t0 = g_get_monotonic_time();
     rap::gpu::ticket done;
     for (int oy = y0; oy < y1; oy += kTile)
         for (int ox = x0; ox < x1; ox += kTile)
@@ -1686,9 +1928,19 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
                 pass.region = to == target ? rap::gpu::rect{ox - x0 + tx, oy - y0 + ty, ow, oh} : rap::gpu::rect{0, 0, iw, ih};
             };
             // detail.hlsl's modes.
-            enum { kEncode, kSmooth, kShrink, kCombine, kBlur, kDecode };
+            enum { kEncode, kSmooth, kShrink, kCombine, kBlur, kDecode, kTable, kShaping };
             const auto& t = detail_temps_;
             rap::gpu::texture_ptr cur = t[0], next = t[1], sum = t[3], other = t[4];
+            if (tabulate)
+            {
+                // The decode's table, once: per image, noise and setting, not
+                // per pixel or region.
+                add(kShaping, {blank_}, s.detail_shaping);
+                passes.back().region = rap::gpu::rect{0, 0, 7, 6};
+                add(kTable, {s.detail_shaping}, s.detail_table);
+                passes.back().region = rap::gpu::rect{0, 0, NoiseModel::kInverse, 1};
+                s.table_noise = s.noise, s.table_for = s.detailed, tabulate = false;
+            }
             add(kEncode, {image}, cur);
             if (filter.denoise)
             {
@@ -1710,7 +1962,7 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
                 add(kBlur, {cur}, sum, 0);
                 add(kBlur, {sum}, other, 1);
             }
-            add(kDecode, {cur, filter.sharpen ? other : blank_, image}, target);
+            add(kDecode, {cur, filter.sharpen ? other : blank_, image, filter.denoise ? s.detail_table : blank_}, target);
             done = device_->run(passes);
         }
     if (std::getenv("IFRIT_TRACE"))
@@ -1719,6 +1971,252 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
         std::fprintf(stderr, "gpu: detail filtered %dx%d in %.1f ms\n", x1 - x0, y1 - y0, (g_get_monotonic_time() - t0) / 1000.0);
     }
     return true;
+}
+
+int GpuView::check_shaping()
+{
+    // noise.hlsl's layout (detail.hlsli's kNoise*).
+    constexpr int kSigma = 2 * 1024, kModel = kSigma + 2, kLaw = kModel + 17, kInverse = kModel + 32 + 3 * 64 * 128;
+    constexpr int kRho = kInverse + 3 * NoiseModel::kInverse + 256 + 1 + NoiseModel::kSpatialSeries * NoiseModel::kSpatialLags;
+    constexpr int kPixel = kRho + NoiseModel::kSpatialSeries * NoiseModel::kSpatialLags;
+    static_assert(kPixel + 4 == DetailFilter::kNoiseWords);
+    constexpr float kNoiseL = 0.01f, kNoiseC = 0.02f;
+    std::string error;
+    if (!programs(error))
+    {
+        std::fprintf(stderr, "gpu shaping: %s\n", error.c_str());
+        return 1;
+    }
+    int failed = 0;
+    for (int fixture = 0; fixture < 3; ++fixture)
+    {
+        const bool shifted = fixture == 1, quiet = fixture == 2;
+        const NoiseModel m = quiet ? quiet_axis_case() : shaping_case(shifted);
+        Detail d;
+        d.luminance = quiet ? 1 : 20, d.colour = quiet ? 1 : 25, d.sharpness = quiet ? 0 : 40;
+        const DetailFilter filter(d);
+        std::vector<float> words(DetailFilter::kNoiseWords, 0.0f);
+        words[kSigma] = kNoiseL, words[kSigma + 1] = kNoiseC;
+        for (int c = 0; c < 3; ++c)
+        {
+            words[size_t(kModel + c)] = m.offset[c];
+            words[size_t(kModel + 11 + c)] = m.from[c], words[size_t(kModel + 14 + c)] = m.to[c];
+            words[size_t(kLaw + c)] = m.law_a[c], words[size_t(kLaw + 3 + c)] = m.law_b[c];
+            words[size_t(kPixel + c)] = m.pixel[c];
+            for (int i = 0; i < NoiseModel::kInverse; ++i)
+                words[size_t(kInverse + c * NoiseModel::kInverse + i)] = m.inverse[c][i];
+        }
+        const uint32_t fitted = 7, measured = 1;
+        std::memcpy(&words[size_t(kModel + 9)], &fitted, 4);
+        std::memcpy(&words[size_t(kPixel + 3)], &measured, 4);
+        for (int k = 0; k < NoiseModel::kSpatialSeries; ++k)
+            for (int i = 0; i < NoiseModel::kSpatialLags; ++i)
+                words[size_t(kRho + k * NoiseModel::kSpatialLags + i)] = m.rho[k][i];
+        Source s;
+        s.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
+        s.detail_table = device_->create({NoiseModel::kInverse, 1, rap::gpu::format::rgba32f, 1, true});
+        s.detail_shaping = device_->create({7, 6, rap::gpu::format::rgba32f, 1, true});
+        if (!s.noise || !s.detail_table || !s.detail_shaping)
+            return 1;
+        device_->upload(s.noise, std::as_bytes(std::span(words)));
+        DetailParams p{};
+        for (int j = 0; j < 4; ++j)
+            p.luminance[j] = filter.luminance[j], p.colour[j] = filter.colour[j];
+        p.coarsest[0] = filter.luminance[4], p.coarsest[1] = filter.colour[4];
+        p.sharpen[0] = filter.amount, p.sharpen[1] = filter.sigma, p.sharpen[2] = filter.halo;
+        p.sharpening = filter.sharpen ? 1 : 0, p.model[0] = 1;
+        DetailParams params[2] = {p, p};
+        params[0].mode = 7, params[1].mode = 6;  // detail.hlsl's DETAIL_SHAPING, DETAIL_TABLE
+        rap::gpu::pass passes[2];
+        for (int i = 0; i < 2; ++i)
+        {
+            passes[i].program = detail_;
+            passes[i].buffers = {s.noise};
+            passes[i].uniforms = bytes(params[i]);
+        }
+        passes[0].inputs = {blank_}, passes[0].target = s.detail_shaping, passes[0].region = {0, 0, 7, 6};
+        passes[1].inputs = {s.detail_shaping}, passes[1].target = s.detail_table, passes[1].region = {0, 0, NoiseModel::kInverse, 1};
+        device_->run(std::span(passes)).wait();
+        std::vector<float> shaping(7 * 6 * 4), table(NoiseModel::kInverse * 4);
+        device_->readback(s.detail_shaping, std::as_writable_bytes(std::span(shaping)), 7 * 16).wait();
+        device_->readback(s.detail_table, std::as_writable_bytes(std::span(table)), NoiseModel::kInverse * 16).wait();
+        if (device_->lost())
+            return 1;
+        // Against the CPU's.
+        const NoiseShaping cpu = noise_shaping(&m, &filter);
+        static constexpr int pairs[6][2] = {{0, 0}, {1, 1}, {2, 2}, {0, 1}, {0, 2}, {1, 2}};
+        double worst = 0;
+        for (int q = 0; q < 6; ++q)
+        {
+            const int a = pairs[q][0], b = pairs[q][1];
+            for (int j = 0; j < 7; ++j)
+            {
+                const float* v = &shaping[size_t((q * 7 + j) * 4)];
+                const float want[3] = {j < 6 ? cpu.k[j][a][b] : cpu.D[a][b], j < 6 ? cpu.d[j][a][b] : cpu.X[a][b], j < 6 ? cpu.x[j][a][b] : 0};
+                for (int i = 0; i < 3; ++i)
+                    worst = std::max(worst, double(std::fabs(v[i] - want[i])));
+            }
+        }
+        float tl[5], tc[5];
+        for (int j = 0; j < 5; ++j)
+            tl[j] = filter.luminance[j] * kNoiseL, tc[j] = filter.colour[j] * kNoiseC;
+        static float shift[3][NoiseModel::kInverse];
+        noise_decode_table(m, tl, tc, cpu, shift);
+        double table_worst = 0, largest = 0;
+        int worst_i = 0, worst_c = 0;
+        for (int i = 0; i < NoiseModel::kInverse; ++i)
+            for (int c = 0; c < 3; ++c)
+            {
+                if (double(std::fabs(table[size_t(i * 4 + c)] - shift[c][i])) > table_worst)
+                    table_worst = double(std::fabs(table[size_t(i * 4 + c)] - shift[c][i])), worst_i = i, worst_c = c;
+                largest = std::max(largest, double(std::fabs(shift[c][i])));
+            }
+        double endpoint = 0;
+        if (quiet)
+            std::printf("quiet table worst entry %d channel %d: gpu %.9g cpu %.9g range %.9g..%.9g\n", worst_i, worst_c, table[size_t(worst_i * 4 + worst_c)], shift[worst_c][worst_i], m.from[worst_c], m.to[worst_c]);
+        if (quiet)
+        {
+            float gpu_shift[3][NoiseModel::kInverse];
+            for (int c = 0; c < 3; ++c)
+                for (int i = 0; i < NoiseModel::kInverse; ++i)
+                    gpu_shift[c][i] = table[size_t(i * 4 + c)];
+            const float d0 = std::sqrt(.0003f + m.offset[2]);
+            const double sigma = std::sqrt(double(m.law_a[2]) * .0003 + m.law_b[2]);
+            endpoint = std::fabs(noise_decode_by(m, gpu_shift, d0, 2) - .000299325009109) / sigma;
+            std::printf("%s gpu quiet blue active endpoint against double transport: %.7g sigma\n", endpoint < .005 ? "ok    " : "FAILED", endpoint);
+        }
+        const bool ok = worst < 1e-4 && table_worst <= 2e-3 * largest + 1e-9 && endpoint < .005;
+        failed += !ok;
+        std::printf("%s gpu shaping, %s: against the CPU's, %.2g; the decode's table, %.2g of its largest shift %.3g\n", ok ? "ok    " : "FAILED",
+                    quiet ? "quiet blue" : shifted ? "green red's a pixel on" : "independent", worst, largest > 0 ? table_worst / largest : 0.0, largest);
+    }
+    return failed;
+}
+
+int GpuView::check_negative_measures()
+{
+    // A raw developed here, every pixel (-0.1, 0.8, 0.2) in BT.709 (some
+    // brightness, red below 0), exposure +2 on a treated raw's anchor of 2
+    // (scale 8): its luminance as edited, measured (stats.hlsl's CURVE and
+    // TOP, volume.hlsl's top), against what tone_map() is given, the colour as
+    // compose.hlsl takes it (view.hlsli's tone_input()). Held at 0, red would
+    // make it 3.8% more.
+    constexpr int kSize = 16;
+    constexpr float kRgb[3] = {-0.1f, 0.8f, 0.2f};
+    static constexpr float kToXyz[3][3] = {{0.4124564f, 0.3575761f, 0.1804375f}, {0.2126729f, 0.7151522f, 0.0721750f}, {0.0193339f, 0.1191920f, 0.9503041f}};
+    auto image = std::make_shared<Image>();
+    image->allocate(kSize, kSize);
+    image->is_raw = true;
+    Source s;
+    s.image = image;
+    s.generation = 1;
+    s.raw = s.tonable = s.auto_exposure = s.measured = true;
+    s.anchor = 2;
+    s.measures = 1;
+    s.stats = device_->create_buffer(kStatsWords * 4);
+    auto texture = device_->create({kSize, kSize, rap::gpu::format::rgba32f});
+    if (!s.stats || !texture)
+        return 1;
+    device_->clear(s.stats, 0);
+    std::memcpy(s.input_to_xyz, kToXyz, sizeof kToXyz);
+    std::vector<float> pixels(size_t(kSize) * kSize * 4);
+    for (size_t i = 0; i < size_t(kSize) * kSize; ++i)
+        pixels[i * 4] = kRgb[0], pixels[i * 4 + 1] = kRgb[1], pixels[i * 4 + 2] = kRgb[2], pixels[i * 4 + 3] = 1;
+    device_->upload(texture, std::as_bytes(std::span(pixels)), {4, rap::gpu::sample_type::f32});
+    s.levels = {texture};
+    shown_[0] = std::move(s);
+    Frame f;
+    f.width = f.height = kSize;
+    f.zoom = 1;
+    f.exposure = 2;
+    f.treated = true;
+    rap::gpu::texture_ptr out;
+    rap::gpu::ticket ready;
+    rap::frame_color colour;
+    std::string error;
+    if (!render(image, 1, f, out, ready, colour, error))
+    {
+        std::fprintf(stderr, "negative measures: %s\n", error.c_str());
+        return 1;
+    }
+    ready.wait();
+    std::vector<uint32_t> words(kStatsWords);
+    device_->readback(shown_[0].stats, std::as_writable_bytes(std::span(words))).wait();
+    shown_[0] = Source{};
+    if (device_->lost())
+        return 1;
+    const auto at = [&](uint32_t i)
+    {
+        float v;
+        std::memcpy(&v, &words[i], 4);
+        return v;
+    };
+    // edit()'s toe on a raw's luminance, y^2 / (y + 0.005).
+    const auto edited = [](float y) { return y * y / (y + 0.005f); };
+    float y = 0, clamped = 0;
+    for (int c = 0; c < 3; ++c)
+        y += kToXyz[1][c] * kRgb[c], clamped += kToXyz[1][c] * std::max(kRgb[c], 0.0f);
+    const float want = edited(y * 8), held = edited(clamped * 8);
+    int failed = 0;
+    for (const auto& [name, index] : {std::pair{"CURVE's greatest", kStatsCurveMost}, {"TOP's greatest", kStatsTopMost}, {"the top", kStatsTop}})
+    {
+        const float got = at(index), off = got / want - 1;
+        const bool ok = std::fabs(off) < 1e-4f;
+        failed += !ok;
+        std::printf("%s negative measures: %s %.6f, tone_map()'s input luminance %.6f (%+.4f%%; held at 0: %.6f)\n", ok ? "ok    " : "FAILED", name, got,
+                    want, 100 * off, held);
+    }
+    // A signed BT.2020 green in BT.709 coordinates. Its negative red/blue
+    // are colour data, not raw readout noise. Both full-resolution stats
+    // and tone_map() must receive the same unchanged colour via tone_input.
+    {
+        constexpr float rgb[3] = {-.587641f, 1.132900f, -.100579f};
+        Source nonraw;
+        nonraw.image = image;
+        nonraw.generation = 2;
+        nonraw.tonable = nonraw.measure_colour = true;
+        nonraw.stats = device_->create_buffer(kStatsWords * 4);
+        if (!nonraw.stats)
+            return 1;
+        std::memcpy(nonraw.input_to_xyz, kToXyz, sizeof kToXyz);
+        for (size_t i = 0; i < size_t(kSize) * kSize; ++i)
+            std::copy(rgb, rgb + 3, pixels.data() + i * 4);
+        device_->upload(texture, std::as_bytes(std::span(pixels)), {4, rap::gpu::sample_type::f32});
+        nonraw.levels = {texture};
+        shown_[0] = std::move(nonraw);
+        image->is_raw = false;
+        Frame nf;
+        nf.width = nf.height = kSize;
+        nf.front = FrontBuffer::ScRgb16;
+        nf.volume_probe = 8;  // tone_map's extent/lightness, before any fitting
+        if (!render(image, 2, nf, out, ready, colour, error))
+        {
+            std::fprintf(stderr, "signed nonraw measures: %s\n", error.c_str());
+            return 1;
+        }
+        ready.wait();
+        device_->readback(shown_[0].stats, std::as_writable_bytes(std::span(words))).wait();
+        std::vector<uint16_t> measured_pixels(size_t(kSize) * kSize * 4);
+        device_->readback(out, std::as_writable_bytes(std::span(measured_pixels)), kSize * 8).wait();
+        shown_[0] = Source{};
+        if (device_->lost())
+            return 1;
+        float expected = 0;
+        for (int c = 0; c < 3; ++c)
+            expected += kToXyz[1][c] * rgb[c];
+        const float top = at(kStatsMaximum);
+        const bool top_ok = std::fabs(top - expected) < 1e-5f;
+        failed += !top_ok;
+        std::printf("%s signed nonraw measures: top %.7g, tone_input luminance %.7g\n", top_ok ? "ok    " : "FAILED", top, expected);
+        float extent = 0;
+        for (uint32_t i = 0; i < 72 * 32; ++i)
+            extent = std::max(extent, at(kStatsVolumeRaw + i * 2));
+        const float composed = half_to_float(measured_pixels[0]);
+        const bool extent_ok = extent > 1 && std::fabs(composed - extent) < 2e-3f * extent;
+        failed += !extent_ok;
+        std::printf("%s signed nonraw measures: extent %.7g, tone_map extent %.7g\n", extent_ok ? "ok    " : "FAILED", extent, composed);
+    }
+    return failed;
 }
 
 rap::gpu::texture_ptr GpuView::detail_region(Source& s, int x0, int y0, int x1, int y1, int& ox, int& oy)

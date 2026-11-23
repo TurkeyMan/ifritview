@@ -168,7 +168,10 @@ float3 clipped(float3 balanced, float3 share, float3 bound, int2 o)
 {
     const float3 stops = clip_stops();
     const float white = develop_white(asfloat(clips.Load3(kClipFound * 4)));
-    const float3 c = clamp(balanced, 0, stops);
+    // Nothing clipped below: with the black taken off, the readout's noise
+    // lies either side of 0, and held at 0 it lifted the shadows and tinted
+    // them (each colour by its own noise); the display shows below 0 as black.
+    const float3 c = min(balanced, stops);
     if (!any(share > 0))
         return c / white;
     float continuation;

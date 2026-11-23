@@ -136,6 +136,11 @@ grep -q '^\[camera-d (test)\]' "$store"/linearity.conf
 # a file's time is kept finer than the second; and one still coming in is
 # read again once it's changed (or its watch said so) and held still.
 "$build/ifritview" --check-loader "$smoke"
+# Noise reduction's decode against its noise model: each end of the
+# shrinkage, each colour's own law, the pure-Poisson limit, a fit of linear
+# RGB, continuous in the sliders, the shrinkage's model against the
+# shrinkers, and flat grey under unequal noise at strengths between.
+"$build/ifritview" --check-detail
 # A format plugin: the farbfeld example, built into build-ci/plugins (it isn't
 # packaged), reading a 1x1 image.
 printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff

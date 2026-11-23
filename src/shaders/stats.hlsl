@@ -16,10 +16,11 @@
 #define COMPUTE
 #include "view.hlsli"
 
-// A pixel's luminance as edited, as tone_map() gives brightness() it.
+// A pixel's luminance as edited, as tone_map() gives brightness() it: the
+// colour as compose.hlsl takes it (view.hlsli's tone_input()).
 float edited_luminance(float4 c)
 {
-    return c.a > 0 ? edit(auto_exposure ? max(c.rgb / c.a, 0) : c.rgb / c.a, exposure * auto_gain()).y : 0;
+    return c.a > 0 ? edit(tone_input(c.rgb / c.a), exposure * auto_gain()).y : 0;
 }
 
 #if defined(CURVE)
@@ -114,7 +115,7 @@ void main(uint3 id : SV_DispatchThreadID, uint index : SV_GroupIndex)
         if (c.a > 0)
         {
             InterlockedAdd(local_opaque, 1u);
-            const float3 rgb = c.rgb / c.a;
+            const float3 rgb = tone_input(c.rgb / c.a);  // as compose.hlsl takes it
             const float3 xyz = mul(float3x3(input_x.xyz, input_y.xyz, input_z.xyz), rgb);
             if (xyz.y > 0)
             {

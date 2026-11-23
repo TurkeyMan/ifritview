@@ -67,11 +67,13 @@ float4 main(float4 position : SV_Position) : SV_Target
             }
             c = total != 0 ? c / total : 0;
         }
-        // Negative lobes can overshoot: alpha into 0..1 and colour not below
-        // nothing (it may go past alpha: highlights brighter than white).
+        // Negative lobes can overshoot: alpha into 0..1, and the colour as
+        // the display mapping takes it (view.hlsli's tone_input(): a raw
+        // developed here keeps its values below 0 where it has some
+        // brightness; nonraws keep signed wide-gamut values). It may go past alpha:
+        // highlights brighter than white.
         c.a = saturate(c.a);
-        if (auto_exposure)
-            c.rgb = max(c.rgb, 0);
+        c.rgb = tone_input(c.rgb);
         // Exposed and tone-mapped as a colour, then premultiplied again.
         if (c.a > 0)
             c.rgb = tone_map(c.rgb / c.a) * c.a;

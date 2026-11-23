@@ -182,7 +182,7 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     g_measuring = true;
     g_volume_x = 0;
-    tone_map(auto_exposure ? max(c.rgb / c.a, 0) : c.rgb / c.a);
+    tone_map(tone_input(c.rgb / c.a));  // as compose.hlsl takes it
     if (g_volume_outside)
         stats.InterlockedMax(kStatsVolumeOutside * 4, 1u);
     if (g_volume_x <= 0)
