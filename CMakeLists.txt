@@ -50,6 +50,7 @@ add_library(ifrit_core STATIC
   src/adjust.cpp
   src/color_space.cpp
   src/config.cpp
+  src/raw_linearity.cpp
   src/detail.cpp
   src/i18n.cpp
   src/folder.cpp
@@ -446,7 +447,8 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
-      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli src/shaders/exposure.hlsli)
+      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli src/shaders/exposure.hlsli src/shaders/estimate.hlsli
+      src/shaders/drift.hlsli)
   foreach(shader decode develop resample compose difference histogram_view mosaic detail)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
@@ -455,6 +457,13 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifritview NAME develop_correct SOURCE src/shaders/develop.hlsl DEFINES CORRECT DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME develop_impulse SOURCE src/shaders/develop.hlsl DEFINES IMPULSE DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME develop_green SOURCE src/shaders/develop.hlsl DEFINES GREEN DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_gather SOURCE src/shaders/develop.hlsl DEFINES GATHER DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_gather_linear SOURCE src/shaders/develop.hlsl DEFINES GATHER LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_gather_ycc SOURCE src/shaders/develop.hlsl DEFINES GATHER YCC DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME highlight_down SOURCE src/shaders/highlight.hlsl DEFINES DOWN DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME highlight_up SOURCE src/shaders/highlight.hlsl DEFINES UP DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME highlight_relax SOURCE src/shaders/highlight.hlsl DEFINES RELAX DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME highlight_relax_ratios SOURCE src/shaders/highlight.hlsl DEFINES RELAX RATIOS DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME mosaic_linear SOURCE src/shaders/mosaic.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME warp SOURCE src/shaders/warp.hlsl)
   foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
@@ -470,6 +479,15 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifritview NAME clip_linear SOURCE src/shaders/clip.hlsl STAGE compute DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME clip_ycc SOURCE src/shaders/clip.hlsl STAGE compute DEFINES YCC DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME clip_find SOURCE src/shaders/clip.hlsl STAGE compute DEFINES FIND DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME clip_limit SOURCE src/shaders/clip.hlsl STAGE compute DEFINES LIMIT DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_pile SOURCE src/shaders/develop.hlsl STAGE compute DEFINES PILE DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_pile_linear SOURCE src/shaders/develop.hlsl STAGE compute DEFINES PILE LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_pile_ycc SOURCE src/shaders/develop.hlsl STAGE compute DEFINES PILE YCC DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_drift SOURCE src/shaders/develop.hlsl STAGE compute DEFINES DRIFT DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_drift_linear SOURCE src/shaders/develop.hlsl STAGE compute DEFINES DRIFT LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME develop_drift_ycc SOURCE src/shaders/develop.hlsl STAGE compute DEFINES DRIFT YCC DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME clip_drift SOURCE src/shaders/clip.hlsl STAGE compute DEFINES DRIFT DEPENDS ${IFRIT_SHADER_INCLUDES})
+  rapport_add_shader(ifritview NAME clip_combine SOURCE src/shaders/clip.hlsl STAGE compute DEFINES COMBINE DEPENDS ${IFRIT_SHADER_INCLUDES})
   message(STATUS "gpu: enabled (shaders with ${RAPPORT_SHADER_COMPILER})")
 else()
   message(STATUS "gpu: no shader compiler (fxc; dxc or glslang), skipping")

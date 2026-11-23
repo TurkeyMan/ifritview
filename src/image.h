@@ -148,6 +148,9 @@ struct RawMosaic
     // How it was taken, for lensfun's corrections where it has none of its
     // own for the lens (lens_database.h: the app puts them in `corrections`).
     std::shared_ptr<const lenses::Shot> shot;
+    // The camera's make and model (LibRaw's normalised ones), for what's
+    // remembered of it (raw_linearity.h); empty: unknown.
+    std::string camera;
 };
 
 // Linear scene data kept alongside a developed raw image so exposure can be

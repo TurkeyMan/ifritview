@@ -13,6 +13,10 @@
 #include "plugins.h"
 #include "look.h"
 #include "probe.h"
+#include "raw_linearity.h"
+#include "shaders/clip_layout.hlsli"
+#include "shaders/drift.hlsli"
+#include "shaders/estimate.hlsli"
 
 #include <rapport/rapport.h>
 #include <rapport/sys.h>
@@ -28,11 +32,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -300,6 +306,399 @@ static int check_exposure()
     return failed ? 1 : 0;
 }
 
+// A synthetic image's linearity limits, as the GPU's drift finds them
+// (drift.hlsli): colour(x, y, v) its balanced colours, each clipping at 1.
+template <class Colour>
+static void synthetic_drift(int w, int h, Colour colour, float limit[3], int sure[3])
+{
+    const int across = w / kDriftTile, down = h / kDriftTile;
+    std::vector<float> tiles(size_t(across) * down * 8);  // as develop.hlsl's DRIFT: mean, kept, noise
+    for (int ty = 0; ty < down; ++ty)
+        for (int tx = 0; tx < across; ++tx)
+        {
+            float t[kDriftTileSums], v[3], mean[3], noise[3];
+            drift_start(t);
+            for (int j = 1; j < kDriftTile; j += 2)
+                for (int i = 1; i < kDriftTile; i += 2)
+                {
+                    colour(tx * kDriftTile + i, ty * kDriftTile + j, v);
+                    drift_sample(t, v[0], v[1], v[2], v[0] < 1 && v[1] < 1 && v[2] < 1);
+                }
+            float* out = &tiles[(size_t(ty) * across + tx) * 8];
+            out[3] = drift_tile(t, mean, noise) ? 1.f : 0.f;
+            std::copy(mean, mean + 3, out);
+            std::copy(noise, noise + 3, out + 4);
+        }
+    std::vector<float> sums(kDriftGroups * 3 * kDriftBins * kDriftSums);  // a colour's in each quadrant, as clip.hlsl's
+    const float stops[3] = {1, 1, 1};
+    for (int y = 0; y < down; ++y)
+        for (int x = 0; x < across; ++x)
+            for (int axis = 0; axis < 2; ++axis)
+            {
+                const int ax = x - (axis == 0), ay = y - (axis == 1), bx = x + (axis == 0), by = y + (axis == 1);
+                if (ax < 0 || ay < 0 || bx >= across || by >= down)
+                    continue;
+                const float* lo = &tiles[(size_t(ay) * across + ax) * 8];
+                const float* mid = &tiles[(size_t(y) * across + x) * 8];
+                const float* hi = &tiles[(size_t(by) * across + bx) * 8];
+                if (lo[3] <= 0 || mid[3] <= 0 || hi[3] <= 0)
+                    continue;
+                const unsigned group = unsigned(x * 2 >= across) + 2 * unsigned(y * 2 >= down);
+                for (int c = 0; c < 3; ++c)
+                {
+                    int bin;
+                    float s[kDriftSums];
+                    if (drift_run(c, lo, mid, hi, lo + 4, hi + 4, stops, bin, s))
+                        for (unsigned k = 0; k < kDriftSums; ++k)
+                            sums[((group * 3 + c) * kDriftBins + bin) * kDriftSums + k] += s[k];
+                }
+            }
+    for (int c = 0; c < 3; ++c)
+    {
+        std::vector<float> s(kDriftGroups * kDriftBins * kDriftSums);
+        for (unsigned g = 0; g < kDriftGroups; ++g)
+            std::copy_n(&sums[(g * 3 + c) * kDriftBins * kDriftSums], kDriftBins * kDriftSums, &s[g * kDriftBins * kDriftSums]);
+        limit[c] = drift_limit(s.data(), sure[c]);
+    }
+}
+
+// --check-highlight: a raw's censored colours estimated (estimate.hlsli, as
+// the develop has it on the GPU) in each case: two, one or no colours
+// measured, with the bound winning and without, a mixed one, a reading
+// rolled off past its limit, an sRAW pixel at the camera's white, and a
+// censored dome inside a rising ring; and its linearity limits found by their drift
+// (drift.hlsli) on a smooth ramp that rolls off and an edge that doesn't.
+// Chromaticity (2, 1, 1/2) at brightness 1.
+static int check_highlight()
+{
+    const float k = 1 / 1.125f, q[3] = {2 * k, k, 0.5f * k}, sure[3] = {1, 1, 1};
+    struct Case
+    {
+        const char* name;
+        float v[3], share[3], bound[3], continuation, expect[3];
+    };
+    static const Case cases[] = {
+        {"two measured", {1.6f, 0.8f, 0.3f}, {0, 0, 1}, {9, 9, 0.3f}, 0, {1.6f, 0.8f, 0.4f}},
+        {"two measured, the bound wins", {1.6f, 0.8f, 0.6f}, {0, 0, 1}, {9, 9, 0.6f}, 0, {1.6f, 0.8f, 0.6f}},
+        {"one measured", {1, 0.8f, 0.3f}, {1, 0, 1}, {1, 9, 0.3f}, 0, {1.6f, 0.8f, 0.4f}},
+        {"one measured, the bound wins", {2, 0.8f, 0.3f}, {1, 0, 1}, {2, 9, 0.3f}, 0, {2, 0.8f, 0.4f}},
+        {"none measured", {1, 0.5f, 0.2f}, {1, 1, 1}, {1, 0.5f, 0.2f}, 2, {4 * k, 2 * k, k}},
+        {"none measured, the bound wins", {1, 0.5f, 0.2f}, {1, 1, 1}, {1, 0.5f, 0.2f}, 0.3f, {1, 0.5f, 0.25f}},
+        {"mixed", {1.6f, 0.8f, 0.2f}, {0, 0, 0.5f}, {9, 9, 9}, 0, {1.6f, 0.8f, 0.3f}},
+        {"mixed, never under its reading", {1.6f, 0.8f, 0.5f}, {0, 0, 0.5f}, {9, 9, 9}, 0, {1.6f, 0.8f, 0.5f}},
+        {"untouched", {1.6f, 0.8f, 0.2f}, {0, 0, 0}, {9, 9, 9}, 0, {1.6f, 0.8f, 0.2f}},
+    };
+    int failed = 0;
+    for (const Case& c : cases)
+    {
+        float r[3];
+        estimate_colours(c.v, c.share, c.bound, q, sure, c.continuation, r);
+        bool ok = true;
+        for (int i = 0; i < 3; ++i)
+            ok = ok && std::fabs(r[i] - c.expect[i]) <= 1e-4f * std::max(1.f, c.expect[i]);
+        std::printf("%s: %s (%g %g %g)\n", c.name, ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+        failed += !ok;
+    }
+    // A reading past its colour's linearity limit but under its clip (rolled
+    // off): censored, the reading its bound (estimate_censor()), so the
+    // colour is at least what was read, not the limit; under the limit, a
+    // measurement.
+    struct Read
+    {
+        const char* name;
+        float v[3], limit[3], expect[3];
+    };
+    static const Read reads[] = {
+        {"rolled off, its reading the bound", {1.6f, 0.95f, 0.4f}, {9, 0.85f, 9}, {1.6f, 0.95f, 0.4f}},
+        {"rolled off, the chromaticity over its reading", {2.4f, 0.9f, 0.6f}, {9, 0.85f, 9}, {2.4f, 1.2f, 0.6f}},
+        {"under its limit, measured", {1.6f, 0.8f, 0.3f}, {9, 0.85f, 9}, {1.6f, 0.8f, 0.3f}},
+    };
+    for (const Read& c : reads)
+    {
+        float share[3], bound[3], r[3];
+        for (int i = 0; i < 3; ++i)
+            estimate_censor(c.v[i], c.limit[i], share[i], bound[i]);
+        estimate_colours(c.v, share, bound, q, sure, 0, r);
+        bool ok = true;
+        for (int i = 0; i < 3; ++i)
+            ok = ok && std::fabs(r[i] - c.expect[i]) <= 1e-4f * std::max(1.f, c.expect[i]);
+        std::printf("%s: %s (%g %g %g)\n", c.name, ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+        failed += !ok;
+    }
+    // A Bayer pixel's shares by what its demosaic reads: a red photosite of
+    // 0.5 among eight reds clipped at 1 (greens 0.65, blues 0.575 under
+    // theirs): red its own photosite, measured; green and blue mixed by the
+    // part of their kernels on the clipped reds (4 of 16, and 6 of 20).
+    {
+        float cen[25];
+        for (int j = -2; j <= 2; ++j)
+            for (int i = -2; i <= 2; ++i)
+            {
+                const bool red = (i & 1) == 0 && (j & 1) == 0;  // the centre's a red
+                cen[(j + 2) * 5 + i + 2] = red && (i || j) ? 1.f : 0.f;
+            }
+        float s[3];
+        estimate_bayer_shares(cen, 0, true, s);
+        const bool ok = s[0] == 0 && std::fabs(s[1] - 0.25f) < 1e-6f && std::fabs(s[2] - 0.3f) < 1e-6f;
+        std::printf("Bayer shares by what the demosaic reads: %s (R %g G %g B %g)\n", ok ? "ok" : "FAILED", s[0], s[1], s[2]);
+        failed += !ok;
+    }
+    // A censored Bayer centre is its own reading, even when the 5 x 5
+    // neighbourhood's least censored red is lower: centre R 1, far R 0.8,
+    // cross G 0.4, diagonal B 0.2, red's limit 0.75. The MHC values are
+    // (1, 0.5, 0.35); its own bound replaces the neighbourhood's 0.8.
+    {
+        float cen[25] = {};
+        cen[12] = cen[2] = cen[10] = cen[14] = cen[22] = 1;
+        float share[3], bound[3] = {0.8f, 1e30f, 1e30f}, r[3];
+        estimate_bayer_shares(cen, 0, false, share);
+        const float v[3] = {1, 0.5f, 0.35f}, grey[3] = {1, 1, 1}, confidence[3] = {1, 0.5f, 0.35f};
+        float own_share;
+        estimate_censor(v[0], 0.75f, own_share, bound[0]);
+        share[0] = own_share;
+        estimate_colours(v, share, bound, grey, confidence, 0.4f, r);
+        const bool ok = r[0] >= v[0] && std::fabs(r[0] - 1) < 1e-6f &&
+                        std::fabs(r[1] - 0.75f) < 1e-6f && std::fabs(r[2] - 0.74f) < 1e-6f;
+        std::printf("Bayer censored centre keeps its own reading: %s (%g %g %g)\n", ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+        failed += !ok;
+    }
+    // None measured, a mixed colour among the censored ones: the mixed one is
+    // no evidence of the magnitude, which is the continuation (over the
+    // bounds); the censored colours are m q, the mixed one its reading
+    // blended towards m q by its censored share.
+    {
+        const float grey[3] = {1, 1, 1}, v[3] = {0.9f, 0.8f, 0.8f}, share[3] = {0.5f, 1, 1}, bound[3] = {9, 0.8f, 0.8f},
+                    expect[3] = {1.45f, 2, 2};
+        float r[3];
+        estimate_colours(v, share, bound, grey, sure, 2, r);
+        bool ok = true;
+        for (int i = 0; i < 3; ++i)
+            ok = ok && std::fabs(r[i] - expect[i]) <= 1e-4f * std::max(1.f, expect[i]);
+        std::printf("none measured, a mixed one no evidence: %s (%g %g %g)\n", ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+        failed += !ok;
+    }
+    // None measured, all three mixed, the continuation low (0.5): each mixed
+    // colour is a bound (at least its reading), so the magnitude is the
+    // highest of them over its chromaticity (1.2), not the continuation; a
+    // mostly censored green rises towards it, never below its reading.
+    {
+        const float grey[3] = {1, 1, 1}, v[3] = {1.2f, 1, 1}, share[3] = {0.04f, 0.9f, 0.04f}, bound[3] = {9, 9, 9},
+                    expect[3] = {1.2f, 1.18f, 1.008f};
+        float r[3];
+        estimate_colours(v, share, bound, grey, sure, 0.5f, r);
+        bool ok = true;
+        for (int i = 0; i < 3; ++i)
+            ok = ok && std::fabs(r[i] - expect[i]) <= 1e-4f * std::max(1.f, expect[i]);
+        std::printf("none measured, mixed ones as bounds: %s (%g %g %g)\n", ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+        failed += !ok;
+    }
+    // The field's chromaticity where only R/G was ever measured (R/G 2; B/G
+    // and R/B nowhere): R/G 2, not pulled towards grey as when every ratio
+    // counted alike (2^(2/3), 1.587).
+    {
+        float c[3];
+        estimate_chromaticity(1, 0.7f, 0, 0, 0, 0, c);
+        const bool ok = std::fabs(c[0] / c[1] - 2) <= 0.01f;
+        std::printf("chromaticity, only R/G measured: %s (R/G %g)\n", ok ? "ok" : "FAILED", c[0] / c[1]);
+        failed += !ok;
+    }
+    // A flame's glow around (R/G 1.6, B/G 0.58) and its whiter core's R/B
+    // (1.22) here: the glow's hue, whitened to fit (R/G and B/G scaled
+    // together: their logs within a tenth of the glow's proportion; split
+    // by the plain fit, a fifth off it), not one shifted
+    // towards magenta as when R/B's difference was split between them.
+    {
+        float c[3];
+        estimate_chromaticity(std::log2(1.6f), 0.3f, std::log2(0.58f), 0.3f, std::log2(1.22f), 0.4f, c);
+        const float x = std::log2(c[0] / c[1]), y = std::log2(c[2] / c[1]);
+        const bool ok = std::fabs(x / y / (std::log2(1.6f) / std::log2(0.58f)) - 1) <= 0.1f && x > 0 && x < std::log2(1.6f);
+        std::printf("chromaticity, the hue held as it whitens: %s (R/G %g B/G %g)\n", ok ? "ok" : "FAILED", c[0] / c[1], c[2] / c[1]);
+        failed += !ok;
+    }
+    // An sRAW pixel made from blocks at the camera's white (estimate_whole()):
+    // its readings, that white's own colour, only bounds, as a whole; it's
+    // the field's colour, at least each reading, or the continuation if
+    // that's more.
+    {
+        const float v[3] = {1.12f, 1.04f, 0.99f}, share[3] = {0.5f, 1, 0.5f};
+        const float conts[2] = {0.5f, 3}, expect[2][3] = {{0.99f * 4, 0.99f * 2, 0.99f}, {6 * k, 3 * k, 1.5f * k}};
+        for (int c = 0; c < 2; ++c)
+        {
+            float r[3];
+            estimate_whole(v, share, q, conts[c], r);
+            bool ok = true;
+            for (int i = 0; i < 3; ++i)
+                ok = ok && std::fabs(r[i] - expect[c][i]) <= 1e-4f * std::max(1.f, expect[c][i]) && r[i] >= v[i] - 1e-4f;
+            std::printf("sRAW at the camera's white, %s: %s (%g %g %g)\n", c ? "the continuation wins" : "its readings win",
+                        ok ? "ok" : "FAILED", r[0], r[1], r[2]);
+            failed += !ok;
+        }
+    }
+    // A censored dome inside a ring that rises towards it (a lantern's flame
+    // in its glow): the magnitude continued as highlight.hlsl's RELAX has it
+    // (plate_step()), then each pixel estimated, raised to what its censored
+    // values read. Along a ray in from the ring, the magnitude never falls,
+    // every censored colour is at its bound or over, and a mixed pixel at the
+    // dome's edge is nearer the field's colour than its reading (part the
+    // camera's white) is.
+    {
+        const int n = 64, c0 = 32;
+        const float white[3] = {1, 1, 1};
+        std::vector<float> z(n * n);
+        std::vector<int> kind(n * n);  // 0 measured, 1 mixed, 2 censored
+        const auto radius = [&](int x, int y) { return std::hypot(float(x - c0), float(y - c0)); };
+        const auto ring = [](float r) { return 0.25f * std::exp2((30 - r) / 10); };
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x)
+            {
+                const float r = radius(x, y);
+                const int i = y * n + x;
+                kind[i] = r < 8 ? 2 : r < 10 ? 1 : 0;
+                z[i] = std::log2(ring(std::max(r, 10.f)));
+            }
+        for (int sweep = 0; sweep < 4000; ++sweep)
+        {
+            std::vector<float> next = z;
+            const auto at = [&](int x, int y) { return z[std::clamp(y, 0, n - 1) * n + std::clamp(x, 0, n - 1)]; };
+            for (int y = 0; y < n; ++y)
+                for (int x = 0; x < n; ++x)
+                    if (kind[y * n + x])
+                    {
+                        const float nearest = at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1);
+                        const float corners = at(x - 1, y - 1) + at(x + 1, y - 1) + at(x - 1, y + 1) + at(x + 1, y + 1);
+                        const float two_away = at(x - 2, y) + at(x + 2, y) + at(x, y - 2) + at(x, y + 2);
+                        next[y * n + x] = plate_step(z[y * n + x], nearest, corners, two_away);
+                    }
+            z = next;
+        }
+        bool ok = true;
+        float last = 0, mixed_off = 0, mixed_read = 0;
+        for (int x = 0; x <= c0; ++x)
+        {
+            const int i = c0 * n + x;
+            const float m = ring(std::max(radius(x, c0), 10.f));
+            float v[3], share[3], bound[3], r[3];
+            for (int k = 0; k < 3; ++k)
+            {
+                const float s = kind[i] == 2 ? 1 : kind[i] == 1 ? 0.5f : 0;
+                v[k] = (1 - s) * m * q[k] + s * white[k];  // a censored share reads the camera's white
+                share[k] = s;
+                bound[k] = s > 0 ? white[k] : 9;
+            }
+            estimate_colours(v, share, bound, q, sure, std::exp2(z[i]), r);
+            const float luma = 0.25f * r[0] + 0.5f * r[1] + 0.25f * r[2];
+            ok = ok && luma >= last - 1e-4f;
+            last = luma;
+            for (int k = 0; k < 3; ++k)
+                ok = ok && (share[k] <= 0 || r[k] >= (share[k] >= 1 ? bound[k] : 0) - 1e-4f);
+            if (kind[i] == 1)
+            {
+                const float field = std::log2(q[0] / q[2]);
+                mixed_off = std::max(mixed_off, std::fabs(std::log2(r[0] / r[2]) - field));
+                mixed_read = std::max(mixed_read, std::fabs(std::log2(v[0] / v[2]) - field));
+            }
+        }
+        ok = ok && mixed_off < mixed_read;
+        std::printf("a censored dome in a rising ring: %s (core %g; edge's colour %g stops off the field's, its reading %g)\n",
+                    ok ? "ok" : "FAILED", last, mixed_off, mixed_read);
+        failed += !ok;
+    }
+    // Drift (drift.hlsli as the GPU has it): a smooth ramp whose green rolls
+    // off from 0.85 of its clip finds its limit there, and red's and blue's
+    // none; two linear objects side by side, the brighter of another colour,
+    // find none.
+    {
+        float limit[3];
+        int sure[3];
+        const int w = 240 * kDriftTile, h = 16 * kDriftTile;
+        synthetic_drift(w, h,
+                        [&](int x, int, float v[3])
+                        {
+                            const float g = 0.3f * std::exp2(2.f * x / w);
+                            v[0] = 0.6f * g, v[2] = 0.7f * g;
+                            v[1] = g < 0.85f ? g : 0.85f + 0.15f * std::tanh((g - 0.85f) / 0.15f);
+                        },
+                        limit, sure);
+        bool ok = limit[1] >= 0.8f && limit[1] <= 0.875f && sure[1] && limit[0] == 1 && limit[2] == 1;
+        std::printf("drift, a ramp rolling off: %s (R %g G %g%s B %g)\n", ok ? "ok" : "FAILED", limit[0], limit[1], sure[1] ? " sure" : "",
+                    limit[2]);
+        failed += !ok;
+        synthetic_drift(w, h,
+                        [&](int x, int, float v[3])
+                        {
+                            const float g = 0.45f * std::exp2(0.8f * x / w);
+                            const float f = std::clamp((x - w / 2 + 2) / 4.f, 0.f, 1.f);  // the edge, 4 pixels' blur
+                            const float a[3] = {0.5f * g, g, 0.6f * g}, b[3] = {0.55f * 1.1f * g, 1.1f * g, 0.66f * 1.1f * g};
+                            for (int i = 0; i < 3; ++i)
+                                v[i] = a[i] + f * (b[i] - a[i]);
+                        },
+                        limit, sure);
+        ok = limit[0] == 1 && limit[1] == 1 && limit[2] == 1;
+        std::printf("drift, two objects' edge: %s (R %g G %g B %g)\n", ok ? "ok" : "FAILED", limit[0], limit[1], limit[2]);
+        failed += !ok;
+        // A linear sensor of one colour under shot noise (variance sigma^2
+        // times the value): the noise alone mustn't seem a roll-off (the
+        // slope's errors in both variables); and a real one under the same
+        // noise still found.
+        for (const float sigma : {0.005f, 0.008f})
+        {
+            std::mt19937 rng(827);
+            std::normal_distribution<float> unit(0, 1);
+            const auto noisy = [&](float c) { return c + sigma * std::sqrt(c) * unit(rng); };
+            synthetic_drift(1920, 512,
+                            [&](int x, int, float v[3])
+                            {
+                                const float g = 0.3f + 0.68f * (1 - std::exp(-4.f * x / 1920));
+                                v[0] = noisy(0.6f * g), v[1] = noisy(g), v[2] = noisy(0.7f * g);
+                            },
+                            limit, sure);
+            ok = limit[0] == 1 && limit[1] == 1 && limit[2] == 1;
+            std::printf("drift, linear under noise %g: %s (R %g G %g B %g)\n", sigma, ok ? "ok" : "FAILED", limit[0], limit[1], limit[2]);
+            failed += !ok;
+        }
+        {
+            std::mt19937 rng(827);
+            std::normal_distribution<float> unit(0, 1);
+            synthetic_drift(w, h,
+                            [&](int x, int, float v[3])
+                            {
+                                const float g = 0.3f * std::exp2(2.f * x / w);
+                                const float rolled = g < 0.85f ? g : 0.85f + 0.15f * std::tanh((g - 0.85f) / 0.15f);
+                                v[0] = 0.6f * g, v[2] = 0.7f * g, v[1] = rolled;
+                                for (int k = 0; k < 3; ++k)
+                                    v[k] += 0.005f * std::sqrt(v[k]) * unit(rng);
+                            },
+                            limit, sure);
+            ok = limit[1] >= 0.8f && limit[1] <= 0.875f && sure[1] && limit[0] == 1 && limit[2] == 1;
+            std::printf("drift, a ramp rolling off under noise: %s (R %g G %g%s B %g)\n", ok ? "ok" : "FAILED", limit[0], limit[1],
+                        sure[1] ? " sure" : "", limit[2]);
+            failed += !ok;
+        }
+        // The light rising from the middle out both ways, so each level is in
+        // both halves. Green falling behind as the light rises on the right
+        // only, there by where it is (a colour gradient in the scene, not the
+        // sensor's): the left, at the same levels, holds, so it's no limit.
+        // Falling behind on both sides, as the sensor's roll-off does: found.
+        for (const bool both : {false, true})
+        {
+            synthetic_drift(w, h,
+                            [&](int x, int, float v[3])
+                            {
+                                const float g = 0.3f * std::exp2(2.f * std::fabs(2.f * x / w - 1));
+                                const float rolled = g < 0.85f ? g : 0.85f + 0.15f * std::tanh((g - 0.85f) / 0.15f);
+                                v[0] = 0.6f * g, v[2] = 0.7f * g, v[1] = both || 2 * x >= w ? rolled : g;
+                            },
+                            limit, sure);
+            ok = both ? limit[1] >= 0.8f && limit[1] <= 0.875f && sure[1] && limit[0] == 1 && limit[2] == 1
+                      : limit[0] == 1 && limit[1] == 1 && limit[2] == 1;
+            std::printf("drift, %s: %s (R %g G %g%s B %g)\n", both ? "rolling off on both sides of the light" : "a colour gradient on one side",
+                        ok ? "ok" : "FAILED", limit[0], limit[1], sure[1] ? " sure" : "", limit[2]);
+            failed += !ok;
+        }
+    }
+    return failed ? 1 : 0;
+}
+
 // --gpu-render IN OUT.ppm ZOOM [nearest|area|mitchell|catmullrom|lanczos3]:
 // IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
 // (lavapipe will do), into OUT; with how much of it isn't the background.
@@ -526,6 +925,18 @@ int main(int argc, char** argv)
         return check_brightness();
     if (argc > 1 && std::strcmp(argv[1], "--check-exposure") == 0)
         return check_exposure();
+    // A test hook (the CI smoke's): COUNT remembers of a green limit for
+    // CAMERA in the linearity store, as two processes race to.
+    if (argc > 3 && std::strcmp(argv[1], "--remember-linearity") == 0)
+    {
+        const float limit[3] = {1, 0.84375f, 1};
+        const bool sure[3] = {false, true, false};
+        for (int i = 0, n = std::atoi(argv[3]); i < n; ++i)
+            linearity::remember(argv[2], "test", limit, sure);
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--check-highlight") == 0)
+        return check_highlight();
     if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
         return check_loader(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-looks") == 0)
