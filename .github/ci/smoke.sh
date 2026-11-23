@@ -73,3 +73,7 @@ printf 'farbfeld\0\0\0\1\0\0\0\1\377\377\0\0\0\0\377\377' > "$smoke"/red.ff
 # reads the old records (they'd stay in the journal), finished once it lets
 # go and on closing; nothing written back by what was under way.
 "$build/ifritview" --check-forget "$smoke"
+# A raw's look and its XMP: Lightroom's profile names mapped to looks and
+# written back (an unknown one kept), what counts as developed, and Save
+# writing only the controls changed.
+"$build/ifritview" --check-looks "$smoke"/looks

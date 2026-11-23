@@ -233,6 +233,20 @@ private:
     std::vector<Knob> knobs_;
     rap::widget *develop_box_ = nullptr, *basic2012_ = nullptr, *basic2010_ = nullptr;  // the process's own basic controls
     rap::drop_down* curve_preset_ = nullptr;
+    // The Look drop-down (a raw's only): the looks, then the profile the
+    // image's XMP named where that's one shown by its own name.
+    rap::drop_down* look_ = nullptr;
+    rap::widget* look_box_ = nullptr;
+    std::vector<std::string> look_items_;
+    std::string look_named_;  // that profile; empty: no such item
+    void sync_look();
+    void look_chosen(int item);
+    // The look a raw opens with when its XMP has no develop settings: the
+    // setting's (Config::raw_look, or `setting`), following the camera's
+    // picture style where it says so.
+    Look untreated_look(const Image& image) const { return untreated_look(image, cfg_.raw_look); }
+    static Look untreated_look(const Image& image, const std::string& setting);
+    void default_look_changed(const std::string& old_setting);
     bool syncing_knobs_ = false;
     void sync_knobs();  // the sliders to the image's
     void knob_changed(const std::string& crs, double value);

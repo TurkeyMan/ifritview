@@ -37,6 +37,14 @@ struct Config
     bool lens_correction = true;    // a raw without its own lens corrections takes lensfun's (the G panel's check)
     bool lens_downloads = true;     // lensfun's database may be fetched (and refreshed) from its site
 
+    // Raw develop: the look (look.h) a raw without develop settings in its
+    // XMP opens with: a look's id ("neutral", "camera", "enhanced"), or
+    // "picture-style", the one the camera's picture style maps to.
+    // TODO, the page's later preferences: bright colours film-like to vivid
+    // (lightness_chroma_weight), night scenes' depth, the white balance's
+    // source, a default noise reduction, lens corrections, HDR headroom.
+    std::string raw_look = "neutral";
+
     // Window
     bool fit_window_to_image = true;
     int min_window_width = 640;  // logical pixels; the window never shrinks below this

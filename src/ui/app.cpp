@@ -1683,14 +1683,14 @@ void App::on_loaded(Loader::Result& r)
     if (!from_cache && cfg_.apply_xmp_edits && image_->xmp.present)
         apply_xmp(true);
     else if (!from_cache)
-        image_->adjust = image_->opening_adjust(false);  // a raw's Detail at Lightroom's defaults
+        image_->adjust = image_->opening_adjust(false, untreated_look(*image_));  // a raw's Detail at Lightroom's defaults
     // Come back to, it's as it was opened: an exposure set before leaving
     // goes back to as shot (or its sidecar's).
     if (from_cache)
     {
         const bool xmp = cfg_.apply_xmp_edits && image_->xmp.present;
         const double opened = xmp ? image_->xmp.exposure : 0.0;
-        Adjustments adjust = image_->opening_adjust(xmp);
+        Adjustments adjust = image_->opening_adjust(xmp, untreated_look(*image_));
         adjust.kept = image_->adjust.kept;
         if (image_->exposure_edit != opened || !(image_->adjust == adjust))
         {
@@ -1874,8 +1874,12 @@ void App::white_balance_as_shot()
         return;
     image_->wb_kelvin = image_->wb_tint = 0;
     sync_white_balance();
+    // The look isn't a control: it stays.
     Adjustments rested = image_->opening_adjust(false);
     rested.kept = image_->adjust.kept;
+    rested.look = image_->adjust.look;
+    rested.profile = image_->adjust.profile;
+    rested.treated = image_->adjust.treated;
     image_->adjust = std::move(rested);
     sync_knobs();
     if (exposure_applies())
@@ -2168,7 +2172,7 @@ void App::apply_xmp(bool fresh)
     if (fresh)
         apply_xmp_geometry(*image_);
     image_->exposure_edit = image_->xmp.exposure;
-    image_->adjust = image_->opening_adjust(true);
+    image_->adjust = image_->opening_adjust(true, untreated_look(*image_));
     if (image_->tonable() || image_->source)
         image_->retone(image_->exposure_edit);
     // Its white balance, where it isn't the camera's (a raw's develop takes
@@ -2325,13 +2329,17 @@ void App::open_settings_page(int page)
     const std::string old_raw_mode = cfg_.raw_mode;
     const bool old_apply_xmp = cfg_.apply_xmp_edits;
     const bool old_raw_crop = cfg_.raw_camera_crop;
+    const std::string old_raw_look = cfg_.raw_look;
     end_settings_ = open_settings_dialog(
         ui_, window_.get(), cfg_,
-        [this, old_raw_mode, old_apply_xmp, old_raw_crop](bool ok)
+        [this, old_raw_mode, old_apply_xmp, old_raw_crop, old_raw_look](bool ok)
         {
             end_settings_ = nullptr;
             if (ok)
+            {
                 apply_settings(old_raw_mode, old_apply_xmp, old_raw_crop);
+                default_look_changed(old_raw_look);
+            }
         },
         [this](std::function<void(bool)> done) { forget_locations(std::move(done)); }, page);
 }

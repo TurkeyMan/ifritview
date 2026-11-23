@@ -1978,6 +1978,190 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
 // runs; not offered when the configured mode is the preview anyway.
 void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64);
 
+// The camera's picture style, from its MakerNotes as LibRaw reads them: the
+// tags LibRaw keeps nothing of (Canon's Picture Style, Sony's Creative
+// Style) caught as they go by.
+struct StyleNote
+{
+    const LibRaw* raw = nullptr;
+    std::string style;
+    double* bias = nullptr;  // before LibRaw 0.22, on_exif_tag's, which the same handler calls
+};
+
+// The camera's make (as LibRaw has it, "Canon", "Nikon", "Sony"...) is
+// `name` (lower case), whatever the case.
+bool maker(std::string_view make, std::string_view name)
+{
+    return make.size() >= name.size() &&
+           std::equal(name.begin(), name.end(), make.begin(), [](char n, char m) { return n == std::tolower(static_cast<unsigned char>(m)); });
+}
+
+std::string_view canon_picture_style(unsigned v)
+{
+    switch (v)
+    {
+        case 0x01: case 0x81: return "Standard";
+        case 0x02: case 0x82: return "Portrait";
+        case 0x03: return "High Saturation";
+        case 0x04: return "Adobe RGB";
+        case 0x05: return "Low Saturation";
+        case 0x06: return "CM Set 1";
+        case 0x07: return "CM Set 2";
+        case 0x21: return "User Def. 1";
+        case 0x22: return "User Def. 2";
+        case 0x23: return "User Def. 3";
+        case 0x41: return "PC 1";
+        case 0x42: return "PC 2";
+        case 0x43: return "PC 3";
+        case 0x83: return "Landscape";
+        case 0x84: return "Neutral";
+        case 0x85: return "Faithful";
+        case 0x86: return "Monochrome";
+        case 0x87: return "Auto";
+        case 0x88: return "Fine Detail";
+    }
+    return {};
+}
+
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
+// Sony's Creative Look, by the codes it writes: as its Creative Styles are named.
+std::string sony_creative_style(std::string s)
+{
+    static const std::pair<const char*, const char*> kLooks[] = {{"ST", "Standard"}, {"PT", "Portrait"}, {"NT", "Neutral"}, {"VV", "Vivid"},
+                                                                 {"VV2", "Vivid 2"}, {"FL", "Film"},     {"IN", "Instant"}, {"SH", "Soft High-key"},
+                                                                 {"BW", "B&W"},      {"SE", "Sepia"}};
+    for (const auto& [code, name] : kLooks)
+        if (s == code)
+            return name;
+    return s;
+}
+
+void on_maker_note(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64)
+{
+    auto* note = static_cast<StyleNote*>(context);
+    const std::string_view make = note->raw->imgdata.idata.make;
+    auto* stream = static_cast<LibRaw_abstract_datastream*>(ifp);
+    const int id = tag & 0xffff;  // LibRaw marks a MakerNote's tags in the bits above
+    if (maker(make, "canon") && id == 0x00a0 && (type == 3 || type == 8) && len > 10)
+    {
+        // ProcessingInfo: int16s, the 11th its Picture Style.
+        uint8_t buf[22];
+        if (stream->read(buf, sizeof buf, 1) != 1)
+            return;
+        const unsigned v = order == 0x4949 ? buf[20] | (buf[21] << 8) : (buf[20] << 8) | buf[21];
+        note->style = canon_picture_style(v);
+    }
+    else if (maker(make, "sony") && id == 0xb020 && type == 2 && len > 1 && len < 64)
+    {
+        char buf[64] = {};
+        if (stream->read(buf, size_t(len), 1) != 1)
+            return;
+        std::string s(buf, strnlen(buf, size_t(len)));
+        while (!s.empty() && s.back() == ' ')
+            s.pop_back();
+        note->style = sony_creative_style(std::move(s));
+    }
+}
+#else
+// Before 0.22 LibRaw has no MakerNote handler: a Canon's MakerNote (an IFD,
+// its offsets from the TIFF's start, `base`) read from the EXIF tag that
+// holds it, for its ProcessingInfo (0x00a0). A CR2's; a CR3 keeps its
+// MakerNote outside EXIF, and a camera that isn't a Canon isn't read, so
+// following the picture style takes the default look there.
+void canon_maker_note(StyleNote& note, unsigned order, LibRaw_abstract_datastream* s, INT64 base)
+{
+    const INT64 start = s->tell();
+    const auto get = [&](int n)
+    {
+        uint8_t b[4] = {};
+        if (s->read(b, size_t(n), 1) != 1)
+            return 0u;
+        unsigned v = 0;
+        for (int i = 0; i < n; ++i)
+            v |= unsigned(b[order == 0x4949 ? i : n - 1 - i]) << (8 * i);
+        return v;
+    };
+    const unsigned count = get(2);
+    for (unsigned i = 0; i < count && i < 512; ++i)
+    {
+        s->seek(start + 2 + 12 * INT64(i), SEEK_SET);
+        const unsigned tag = get(2), type = get(2), n = get(4), offset = get(4);
+        if (tag == 0x00a0 && (type == 3 || type == 8) && n > 10)
+        {
+            s->seek(base + offset + 20, SEEK_SET);  // its 11th int16
+            note.style = canon_picture_style(get(2));
+            break;
+        }
+    }
+    s->seek(start, SEEK_SET);
+}
+
+// The EXIF handler (on_exif_tag's), and a Canon's MakerNote with it.
+void on_exif_tag_and_maker_note(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64 base)
+{
+    auto* note = static_cast<StyleNote*>(context);
+    on_exif_tag(note->bias, tag, type, len, order, ifp, base);
+    if (tag == 0x927c && maker(note->raw->imgdata.idata.make, "canon"))
+        canon_maker_note(*note, order, static_cast<LibRaw_abstract_datastream*>(ifp), base);
+}
+#endif
+
+// What LibRaw is to tell as it parses the raw: the exposure compensation
+// (on_exif_tag, into `bias`), and the picture style.
+void listen(RawAccess& raw, double& bias, StyleNote& style)
+{
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
+    raw.set_exifparser_handler(on_exif_tag, &bias);
+    raw.set_makernotes_handler(on_maker_note, &style);
+#else
+    style.bias = &bias;
+    raw.set_exifparser_handler(on_exif_tag_and_maker_note, &style);
+#endif
+}
+
+// The picture style the camera was set to, and the look it maps to (look.h):
+// what the MakerNotes said (StyleNote), or what LibRaw keeps of Nikon's
+// Picture Control and Fujifilm's film simulation.
+void picture_style(const RawAccess& raw, const StyleNote& note, Image& out, bool listed)
+{
+    std::string style = note.style, base;
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 22)
+    const std::string_view make = raw.imgdata.idata.make;
+    if (style.empty() && maker(make, "nikon"))
+    {
+        const auto& n = raw.imgdata.makernotes.nikon;
+        style.assign(n.PictureControlName, strnlen(n.PictureControlName, sizeof n.PictureControlName));
+        base.assign(n.PictureControlBase, strnlen(n.PictureControlBase, sizeof n.PictureControlBase));
+    }
+    if (style.empty() && maker(make, "fujifilm"))
+        switch (raw.imgdata.makernotes.fuji.FilmMode)
+        {
+            case 0x100: case 0x110: case 0x130: case 0x300: style = "Studio Portrait"; break;
+            case 0x120: style = "Astia"; break;
+            case 0x200: case 0x400: style = "Velvia"; break;
+            case 0x500: style = "Pro Neg. Std"; break;
+            case 0x501: style = "Pro Neg. Hi"; break;
+            case 0x600: style = "Classic Chrome"; break;
+            case 0x700: style = "Eterna"; break;
+            case 0x800: style = "Classic Negative"; break;
+            case 0x900: style = "Bleach Bypass"; break;
+            case 0xa00: style = "Nostalgic Neg."; break;
+            case 0xb00: style = "Reala Ace"; break;
+        }
+#else
+    (void)raw;
+#endif
+    while (!style.empty() && style.back() == ' ')
+        style.pop_back();
+    if (style.empty())
+        return;
+    platform::trace("raw: picture style %s%s%s", style.c_str(), base.empty() ? "" : ", based on ", base.c_str());
+    out.picture_style = style;
+    out.camera_look = look_of_picture_style(base.empty() ? style : base);
+    if (listed)
+        out.add(N_("Camera"), N_("Picture style"), style);
+}
+
 bool preview(const std::string& path, Image& out)
 {
     if (decode_options().raw_mode == DecodeOptions::RawMode::Preview)
@@ -1985,7 +2169,8 @@ bool preview(const std::string& path, Image& out)
     auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB
     RawAccess& raw = *raw_ptr;
     double bias = 0;
-    raw.set_exifparser_handler(on_exif_tag, &bias);  // the slider rests at the camera's compensation even on the preview
+    StyleNote style{&raw, {}};
+    listen(raw, bias, style);  // the slider rests at the camera's compensation even on the preview
     const uint8_t* bytes = nullptr;
     size_t size = 0;
     const int64_t t0 = g_get_monotonic_time();
@@ -2005,6 +2190,7 @@ bool preview(const std::string& path, Image& out)
     out.is_raw = true;
     out.info = camera_name(raw);
     out.exposure_bias = bias;
+    picture_style(raw, style, out, false);
     // What the develop will produce, so the window can be sized for it now.
     raw.imgdata.params.half_size = decode_options().raw_mode == DecodeOptions::RawMode::Half ? 1 : 0;
     apply_camera_crop(raw);
@@ -2042,7 +2228,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     auto raw_ptr = std::make_unique<RawAccess>();  // on the heap: hundreds of KB, and a Windows thread's stack is 1 MB
     RawAccess& raw = *raw_ptr;
     double bias = 0;
-    raw.set_exifparser_handler(on_exif_tag, &bias);
+    StyleNote style{&raw, {}};
+    listen(raw, bias, style);
     raw.imgdata.params.use_camera_wb = 1;
     raw.imgdata.params.output_color = 1;  // sRGB
     const uint8_t* bytes = nullptr;
@@ -2178,6 +2365,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     if (other.focal_len > 0)
         out.add(N_("Camera"), N_("Focal length"), fmt(other.focal_len, 0) + " mm");
     out.exposure_bias = bias;
+    picture_style(raw, style, out, true);
     if (bias != 0)
         out.add(N_("Camera"), N_("Exposure compensation"), (bias > 0 ? "+" : "") + fmt(bias, 2) + " EV");
     if (other.timestamp)

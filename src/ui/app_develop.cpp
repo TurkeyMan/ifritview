@@ -139,8 +139,23 @@ rap::node App::develop_panel()
     std::vector<std::string> curves;
     for (const char* c : kCurveLabels)
         curves.push_back(_(c));
+    std::vector<std::string> looks;
+    for (int i = 0; i < kLookCount; ++i)
+        looks.push_back(_(look_label(Look(i))));
+    look_items_ = looks;
     using L::vbox;
     return vbox{
+        // The look the controls work on top of, as Lightroom's profile.
+        L::form{
+            {_("Look"), L::drop_down{looks, 0}
+                            .on_changed([this](int i) { look_chosen(i); })
+                            .bind(look_)
+                            .stretch()
+                            .tooltip(_("How the raw is rendered with every control at rest, as Lightroom's profile: "
+                                       "Neutral, the scene as it is; Camera-like, as a camera's JPEG; Enhanced, more vivid; "
+                                       "Monochrome. The controls work on top of it, and keep their values when it changes"))},
+        }
+            .handle(look_box_),
         // White balance (raws the GPU develops), then exposure round the
         // camera's compensation (raw and HDR images), as Lightroom has them.
         vbox{
@@ -214,7 +229,8 @@ rap::node App::develop_panel()
                                  L::button{_("Save XMP")}
                                      .on_click([this] { save_xmp(false); })
                                      .tooltip(_("Write these settings to the image's XMP sidecar (photo.xmp beside photo.CR3), "
-                                                "as Lightroom reads them; what else is in it is kept"))}},
+                                                "as Lightroom reads them: its look as the profile, and the controls you changed; "
+                                                "what else is in it is kept"))}},
                     {"", L::check{_("Auto-save XMP"), cfg_.auto_save_xmp}
                              .on_toggled([this](bool on) { set_auto_save_xmp(on); })
                              .tooltip(_("Write the image's XMP sidecar a moment after each change"))}},
@@ -242,9 +258,13 @@ void App::sync_knobs()
     const bool shown = image_ && !image_->is_video && !view_->comparing();
     develop_box_->set_visible(shown);
     if (!shown)
+    {
+        look_box_->set_visible(false);
         return;
+    }
     Adjustments& a = image_->adjust;
     syncing_knobs_ = true;
+    sync_look();
     basic2012_->set_visible(!a.legacy);
     basic2010_->set_visible(a.legacy);
     for (Knob& k : knobs_)
@@ -269,6 +289,76 @@ void App::sync_knobs()
     }
     curve_preset_->set_current(curve);
     syncing_knobs_ = false;
+}
+
+// The Look drop-down to the image's: the looks, and the profile its XMP
+// named where that's one shown by its own name (one unknown here, kept as
+// it is, rendered as what it maps to). A raw's only.
+void App::sync_look()
+{
+    const bool raw = image_ && image_->is_raw;
+    look_box_->set_visible(raw);
+    if (!raw)
+        return;
+    const Adjustments& a = image_->adjust;
+    const std::string& opened = image_->xmp.treated ? image_->xmp.adjust.profile : std::string();
+    look_named_ = !a.profile.empty() && !known_profile(a.profile) ? a.profile : !opened.empty() && !known_profile(opened) ? opened : "";
+    std::vector<std::string> items;
+    for (int i = 0; i < kLookCount; ++i)
+        items.push_back(_(look_label(Look(i))));
+    if (!look_named_.empty())
+        items.push_back(rap::i18n::format(_("{0} (as {1})"), look_named_, _(look_label(look_of_profile(look_named_)))));
+    if (items != look_items_)
+    {
+        look_->set_items(items);
+        look_items_ = std::move(items);
+    }
+    look_->set_current(!look_named_.empty() && a.profile == look_named_ ? kLookCount : int(a.look));
+}
+
+// A look chosen: an edit of the image's settings like any other. The
+// controls keep their values. Its profile goes, so saving writes the Adobe
+// one the look maps to, unless it's back to the one the XMP named.
+void App::look_chosen(int item)
+{
+    if (syncing_knobs_ || !image_ || item < 0)
+        return;
+    Adjustments& a = image_->adjust;
+    const std::string& opened = image_->xmp.treated ? image_->xmp.adjust.profile : std::string();
+    if (item >= kLookCount)
+    {
+        if (look_named_.empty())
+            return;
+        a.profile = look_named_;
+        a.look = look_of_profile(look_named_);
+    }
+    else
+    {
+        a.look = Look(item);
+        a.profile = !opened.empty() && known_profile(opened) && look_of_profile(opened) == a.look ? opened : std::string();
+    }
+    adjustments_changed();
+}
+
+Look App::untreated_look(const Image& image, const std::string& setting)
+{
+    if (setting == "picture-style")
+        return image.camera_look.value_or(Look::CameraLike);  // a camera's own rendering, where its style isn't known
+    return look_named(setting).value_or(Look::Neutral);
+}
+
+// The settings' default look changed: an untreated raw showing the old
+// default shows the new one (one given a look of its own keeps it).
+void App::default_look_changed(const std::string& old_setting)
+{
+    if (!image_ || !image_->is_raw || image_->adjust.treated || old_setting == cfg_.raw_look)
+        return;
+    Adjustments& a = image_->adjust;
+    if (a.look != untreated_look(*image_, old_setting) || !a.profile.empty())
+        return;
+    a.look = untreated_look(*image_);
+    sync_knobs();
+    adjustments_changed();
 }
 
 void App::knob_changed(const std::string& crs, double value)
@@ -350,10 +440,9 @@ void App::save_xmp(bool quiet)
         return;
     const XmpDevelop d = develop_of(*image_);
     std::string error;
-    if (write_xmp_sidecar(image_path_, d, error))
+    if (write_xmp_sidecar(image_path_, d, image_->opening_adjust(false), error))
     {
-        image_->xmp = d;  // what coming back to it opens with
-        image_->xmp.present = true;
+        image_->develop_saved(d);  // what coming back to it opens with
         if (!quiet)
             status_message_ = rap::i18n::format(_("Saved the develop settings to {0}"), xmp_sidecar_path(image_path_));
     }
@@ -373,11 +462,8 @@ void App::flush_xmp()
         return;
     const XmpDevelop d = develop_of(*image);
     std::string error;
-    if (write_xmp_sidecar(xmp_pending_path_, d, error))
-    {
-        image->xmp = d;
-        image->xmp.present = true;
-    }
+    if (write_xmp_sidecar(xmp_pending_path_, d, image->opening_adjust(false), error))
+        image->develop_saved(d);
     else if (!error.empty())
     {
         status_message_ = rap::i18n::format(_("Couldn't save the develop settings: {0}"), error);

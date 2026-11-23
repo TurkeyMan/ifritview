@@ -28,6 +28,7 @@
 // mapping that keeps local contrast); here each is one curve for the image.
 
 #include "detail.h"
+#include "look.h"
 
 #include <cstdint>
 #include <map>
@@ -66,13 +67,30 @@ struct Adjustments
     // The Detail panel: noise reduction and sharpening.
     Detail detail;
 
+    // The rendering the controls apply on top of (look.h): a raw's, from
+    // its XMP's profile or the settings' default; Neutral for the rest.
+    Look look = Look::Neutral;
+    // crs:CameraProfile as it was read and is to be written: the name of a
+    // profile (Lightroom's own, or one unknown here, kept as it is) the look
+    // came from. Empty once the look is chosen here: written as the Adobe
+    // profile the look maps to (adobe_profile).
+    std::string profile;
+    // These are a Lightroom develop: the image's XMP has develop settings
+    // (XmpDevelop::treated). Adobe's Exposure is relative to the camera's
+    // exposure plus the raw's BaselineExposure, with no automatic departure
+    // from it, so an exposure stage that departs from the camera's for a
+    // scene (one that lifts a dull scene) reads this and doesn't, for a
+    // treated raw. Nothing the tables do depends on it.
+    bool treated = false;
+
     // Settings read but not applied yet (Clarity, Texture, Dehaze, colour
     // grading, calibration, detail, effects, the profile...): crs field
     // name to its value as written, kept so writing XMP loses nothing.
     std::map<std::string, std::string> kept;
 
-    // Nothing for the tables to apply (the kept settings and the detail
-    // aside).
+    // Nothing for the tables to apply (the kept settings, the profile's
+    // name and the detail aside): every control at rest, and a look that
+    // does nothing (Neutral).
     bool neutral() const;
     bool operator==(const Adjustments&) const = default;
 };

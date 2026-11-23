@@ -236,9 +236,36 @@ const Encoder& encoder()
 
 }  // namespace
 
-Adjustments Image::opening_adjust(bool with_xmp) const
+void Image::develop_saved(const XmpDevelop& d)
+{
+    xmp = d;
+    xmp.present = xmp.treated = true;
+    if (xmp.adjust.profile.empty())
+        xmp.adjust.profile = adobe_profile(d.adjust.look);
+    xmp.adjust.treated = true;
+    adjust.profile = xmp.adjust.profile;
+    adjust.treated = true;
+}
+
+Adjustments Image::opening_adjust(bool with_xmp, Look untreated) const
 {
     Adjustments a = with_xmp && xmp.present ? xmp.adjust : Adjustments{};
+    // The look: a treated raw's profile's (Adobe's default where it names
+    // none); an untreated one's the default asked for; Neutral for the rest,
+    // which have no profile.
+    a.treated = with_xmp && xmp.treated;
+    if (!is_raw)
+    {
+        a.look = Look::Neutral;
+        a.profile.clear();
+    }
+    else if (a.treated)
+        a.look = look_of_profile(a.profile);
+    else
+    {
+        a.look = untreated;
+        a.profile.clear();
+    }
     if (is_raw)
     {
         Detail rest = Detail::raw_defaults();
@@ -663,6 +690,8 @@ Image Image::crop(int x, int y, int w, int h) const
     out.exposure_edit = exposure_edit;
     out.wb_kelvin = wb_kelvin, out.wb_tint = wb_tint;
     out.adjust = adjust;
+    out.picture_style = picture_style;
+    out.camera_look = camera_look;
     out.pending_edits = pending_edits;
     if (is_preview() && width > 0 && height > 0)
         out.pending_edits.push_back({1, double(x) / width, double(y) / height, double(w) / width, double(h) / height});
@@ -789,6 +818,10 @@ void Image::adopt(Image&& f)
     animation = std::move(f.animation);
     if (f.exposure_bias != 0)
         exposure_bias = f.exposure_bias;
+    if (!f.picture_style.empty())
+        picture_style = std::move(f.picture_style);
+    if (f.camera_look)
+        camera_look = f.camera_look;
     if (f.has_location)
     {
         has_location = true;

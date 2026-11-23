@@ -94,8 +94,13 @@ bool Adjustments::neutral() const
     // settings, the curve's name, what's kept and the detail (not the
     // tables') don't count, and a curve of the two corners is linear, as no
     // curve is.
+    if (!look_params(look).identity())
+        return false;
     Adjustments mine = *this, none;
     none.legacy = legacy;
+    none.look = look;
+    none.profile = profile;
+    none.treated = treated;
     none.curve_name = curve_name;
     none.kept = kept;
     none.detail = detail;
@@ -323,14 +328,15 @@ std::optional<Spline> parametric_curve(const Adjustments& a)
     return Spline(std::move(p));
 }
 
-// The tone controls in order, on the axis: Process 2012's contrast first
-// (the look), then the regions brought into it (highlights, shadows), then
+// The tone controls in order, on the axis, on top of the look's curve
+// (look.h): Process 2012's contrast first (the controls' own look), then the regions brought into it (highlights, shadows), then
 // the ends set (whites, blacks); Process 2010's in its own order (recovery,
 // fill light, blacks, brightness, contrast). Then the parametric curve,
 // then the point curve.
 double master(const Adjustments& a, const std::optional<Spline>& parametric, const std::optional<Spline>& points, double g)
 {
     const auto unit = [](double v) { return std::clamp(v / 100, -1.0, 1.0); };
+    g = look_tone(look_params(a.look), g);
     if (a.legacy)
     {
         g = either_way(g, -unit(a.recovery), whites_stretch);
@@ -417,14 +423,17 @@ float working_hue(const Mat3& from_709, double r, double g, double b)
 // chroma; vibrance most the least saturated's, and skin's hue (an sRGB skin
 // tone's) half as much when raising. The table's saturation axis is HSV's
 // (how far from grey); the scale applies to the colour's distance from its
-// luminance (adjust()).
-void colour_table(const Adjustments& a, const Mat3& from_709, std::vector<float>& out)
+// luminance (adjust()). The look's chroma gain and hue turns (look.h) go in
+// with them, each cell's worked out for its colour (`to_709` takes it to
+// BT.709, where the look's Oklab is).
+void colour_table(const Adjustments& a, const Mat3& from_709, const Mat3& to_709, std::vector<float>& out)
 {
     static const double kNamed[8][3] = {{1, 0, 0}, {1, 0.5, 0}, {1, 1, 0}, {0, 1, 0}, {0, 1, 1}, {0, 0, 1}, {0.5, 0, 1}, {1, 0, 1}};
     double centre[8];
     for (int k = 0; k < 8; ++k)
         centre[k] = working_hue(from_709, kNamed[k][0], kNamed[k][1], kNamed[k][2]);
     const double skin = working_hue(from_709, 0.87, 0.67, 0.55);
+    const LookParams look = look_params(a.look);
     const auto gap = [&](int k, int to) { return std::fmod(centre[(to + 8) % 8] - centre[k] + 2.0, 1.0); };  // forwards, in turns
     out.assign(size_t(AdjustTables::kHues) * AdjustTables::kSats * 4, 0);
     for (int hi = 0; hi < AdjustTables::kHues; ++hi)
@@ -455,8 +464,26 @@ void colour_table(const Adjustments& a, const Mat3& from_709, std::vector<float>
         {
             const double s = double(si) / (AdjustTables::kSats - 1);
             float* e = &out[(size_t(si) * AdjustTables::kHues + hi) * 4];
-            e[0] = float(shift);
-            e[1] = float(sat * (1 + std::clamp(a.saturation / 100, -1.0, 1.0)) * (1 + vibrance * (1 - s) * protect));
+            // The look's, for this cell's colour at its reference brightness:
+            // its chroma's scale, and its turn as the working space's hue.
+            double look_scale = 1, look_turn = 0;
+            if (!look.identity())
+            {
+                float w3[3];
+                rgb(float(h), float(s), float(kLookReference), w3);
+                double c[3];
+                for (int i = 0; i < 3; ++i)
+                    c[i] = to_709[i][0] * w3[0] + to_709[i][1] * w3[1] + to_709[i][2] * w3[2];
+                look_scale = look_colour(look, c);
+                for (int i = 0; i < 3; ++i)
+                    w3[i] = float(from_709[i][0] * c[0] + from_709[i][1] * c[1] + from_709[i][2] * c[2]);
+                float h2, s2, v2;
+                hsv(w3, h2, s2, v2);
+                if (s > 0)
+                    look_turn = std::remainder(double(h2) - h, 1.0);
+            }
+            e[0] = float(shift + look_turn);
+            e[1] = float(look_scale * sat * (1 + std::clamp(a.saturation / 100, -1.0, 1.0)) * (1 + vibrance * (1 - s) * protect));
             e[2] = float(std::exp2(1.5 * lum * std::min(1.0, s / 0.3)));
             e[3] = 0;
         }
@@ -496,7 +523,7 @@ std::shared_ptr<const AdjustTables> build_tables(const Adjustments& a)
         for (int c = 0; c < 3; ++c)
             e[1 + c] = float(decode(channel[c] ? std::max(0.0, (*channel[c])(g)) : g));
     }
-    colour_table(a, working_from_709, t->colour);
+    colour_table(a, working_from_709, inverse(working_from_709), t->colour);
     return t;
 }
 

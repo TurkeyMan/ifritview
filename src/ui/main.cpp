@@ -10,6 +10,7 @@
 #include "lens_store.h"
 #include "pipeline.h"
 #include "plugins.h"
+#include "look.h"
 #include "probe.h"
 
 #include <rapport/rapport.h>
@@ -214,7 +215,9 @@ int run_app(rap::ui& ui, int argc, char** argv, std::chrono::steady_clock::time_
 // IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
 // (lavapipe will do), into OUT; with how much of it isn't the background.
 // The view's GPU path checked without a window: a raw decoded as the
-// window's default settings have it (full size, developed on the GPU).
+// window's default settings have it (full size, developed on the GPU),
+// in the look IFRIT_LOOK names (look.h: neutral, camera, enhanced,
+// monochrome), Neutral without.
 static int gpu_render(int argc, char** argv)
 {
     if (argc < 3)
@@ -230,6 +233,13 @@ static int gpu_render(int argc, char** argv)
         std::fprintf(stderr, "%s: %s\n", argv[0], error.c_str());
         return 1;
     }
+    if (const char* look = g_getenv("IFRIT_LOOK"))
+    {
+        if (const std::optional<Look> l = look_named(look); l && image->is_raw)
+            image->adjust.look = *l;
+        else
+            std::fprintf(stderr, "IFRIT_LOOK: %s isn't a look, or %s isn't a raw\n", look, argv[0]);
+    }
     auto device = rap::gpu::device::headless();
     if (!device)
     {
@@ -242,6 +252,7 @@ static int gpu_render(int argc, char** argv)
     f.width = std::max(1, int(std::ceil(image->width * f.zoom)));
     f.height = std::max(1, int(std::ceil(image->height * f.zoom)));
     f.background = rap::color{38, 38, 38};
+    GpuView::edit_of(*image, f);  // its develop: the look, every control at rest
     if (argc > 3)
     {
         static const char* const names[] = {"nearest", "area", "mitchell", "catmullrom", "lanczos3"};
@@ -364,6 +375,8 @@ int main(int argc, char** argv)
         return gpu_render(argc - 2, argv + 2);
     if (argc > 2 && std::strcmp(argv[1], "--check-loader") == 0)
         return check_loader(argv[2]);
+    if (argc > 2 && std::strcmp(argv[1], "--check-looks") == 0)
+        return check_looks(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--check-forget") == 0)
     {
         const int index = check_index_forget(argv[2]);
