@@ -130,7 +130,8 @@ struct ComposeParams
     int32_t hk_probe;
     float white_luminance;  // (the row's fourth: view.hlsli packs it there)
     int32_t treated;
-    float pad_[3];
+    int32_t passthrough;
+    float pad_[2];
 };
 static_assert(sizeof(ComposeParams) == 368, "as view.hlsli's cbuffer packs");
 
@@ -1655,6 +1656,22 @@ const rap::gpu::texture_ptr& GpuView::boundary(float peak)
     return boundary_ ? boundary_ : blank_;
 }
 
+// Whether the image's measures map it to the display (view.hlsli's
+// measured), and with that whether it's a plain image that needs no
+// mapping (passthrough): its data the display's own linear BT.709, not a
+// raw, no camera curve, no edit, unmeasured. Set only here, from the
+// measured state the pass will run with, so neither can go stale.
+static void set_measured(ComposeParams& cp, bool measured)
+{
+    cp.measured = measured ? 1 : 0;
+    bool plain = !measured && !cp.auto_exposure && !cp.tone && !cp.adjusting;
+    const float* rows[3] = {cp.input_x, cp.input_y, cp.input_z};
+    for (int i = 0; i < 3 && plain; ++i)
+        for (int j = 0; j < 3 && plain; ++j)
+            plain = std::abs(rows[i][j] - kXyzFrom709[i][j]) < 1e-6f;
+    cp.passthrough = plain ? 1 : 0;
+}
+
 // The compose pass's parameters for showing `s` as `f` has it, but for
 // the image's place and the resampling.
 static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable, bool tone, bool auto_exposure, float anchor,
@@ -1689,7 +1706,6 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
     cp.anchor = auto_exposure ? anchor : 0;
     cp.white_luminance = auto_exposure ? white_luminance : 0;
     cp.treated = auto_exposure && f.treated ? 1 : 0;
-    cp.measured = measured ? 1 : 0;
     if (const AdjustTables* t = f.adjust.get())
     {
         cp.adjusting = 1 | (t->channels ? 2 : 0);
@@ -1698,6 +1714,7 @@ static void show_params(const GpuView::Frame& f, float scene_gain, bool tonable,
                 cp.to_working[i][j] = t->to_working[i][j], cp.from_working[i][j] = t->from_working[i][j];
         cp.to_working[0][3] = t->tone_top;
     }
+    set_measured(cp, measured);  // (after the input matrix, tone and edits above: passthrough reads them)
     // The display: sRGB at SDR white until rapport describes the real one.
     std::memcpy(cp.display_r, kSrgbR, sizeof cp.display_r);
     std::memcpy(cp.display_g, kSrgbG, sizeof cp.display_g);
@@ -1829,7 +1846,7 @@ void GpuView::measure_volume(Source& s, const Frame& f, std::span<const std::byt
     if (s.volume_measures == s.measures && s.volume_adjust == adjusted && s.volume_key == key && s.volume_details == s.details)
         return;
     const rap::gpu::texture_ptr counted = counted_level(s);
-    cp.measured = 1;
+    set_measured(cp, true);
     const rap::gpu::program_ptr programs[6] = {volume_clear_, stats_curve_, stats_top_, volume_curve_, volume_, volume_prepare_};
     rap::gpu::dispatch d[6];
     for (int i = 0; i < 6; ++i)
@@ -1869,7 +1886,7 @@ void GpuView::count(Source& s, const Frame& f)
     const bool fresh = !s.measured;
     measure(s, bytes(cp), true);
     measure_volume(s, f, bytes(cp));
-    cp.measured = 1;
+    set_measured(cp, true);
     // The histogram of what's shown: again when the image, its exposure,
     // white balance, develop settings or detail change.
     const std::shared_ptr<Image> image = s.image.lock();
@@ -1916,7 +1933,7 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
     show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
     measure(s, bytes(cp), false);
     measure_volume(s, f, bytes(cp));
-    cp.measured = s.measured ? 1 : 0;
+    set_measured(cp, s.measured);
     const double shown_w = width * f.zoom, shown_h = height * f.zoom;
     cp.image_rect[0] = float(f.pan_x), cp.image_rect[1] = float(f.pan_y);
     cp.image_rect[2] = float(f.pan_x + shown_w), cp.image_rect[3] = float(f.pan_y + shown_h);
@@ -2121,7 +2138,7 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         show_params(f, s.scene_gain, s.tonable, bool(s.tone), s.auto_exposure, s.anchor, s.white_luminance, s.input_to_xyz, s.as_shot, s.dng.get(), s.measured, cp);
         measure(s, bytes(cp), false);
         measure_volume(s, f, bytes(cp));
-        cp.measured = s.measured ? 1 : 0;
+        set_measured(cp, s.measured);
         cp.gain = std::clamp(gain, 1, 255);
         auto top = device_->create({a->width, a->height, rap::gpu::format::rgba16f, 1, true});
         if (!top)

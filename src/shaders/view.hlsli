@@ -60,6 +60,7 @@ cbuffer Params : register(b0)
                         // output C* / 100 as R, G, B; bit 1, hold luminance exactly instead of perceived brightness
     float white_luminance;  // auto_exposure: cd/m^2 at the raw's white, from how it was taken (exposure.hlsli); 0: unknown
     int treated;            // auto_exposure: a Lightroom develop (Adjustments::treated): the camera's exposure, no departure
+    int passthrough;    // 1: the image's data is the display's own linear BT.709, unedited, unmeasured: shown as it is where it fits
 };
 
 Texture2D<float4> source : register(t0);
@@ -449,6 +450,11 @@ float3 fit_volume(float3 o)
 float3 tone_map(float3 c)
 {
     const float scale = exposure * auto_gain();
+    // A plain image the display can show needs no mapping: shown as it is,
+    // not through XYZ and back (whose float rounding would leave a channel
+    // at -1e-10).
+    if (passthrough && fits_display(c * scale, display_peak))
+        return clamp_display(c * scale, display_peak);
     float3 xyz = edit(c, scale);
     const float3 scene = xyz;  // as edited, before the display mapping
     if (measured)
