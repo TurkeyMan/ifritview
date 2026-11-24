@@ -451,7 +451,7 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifrit_core NAME render_raw SOURCE src/shaders/render.hlsl DEFINES RAW)
   rapport_add_shader(ifrit_core NAME render_raw_tone SOURCE src/shaders/render.hlsl DEFINES RAW TONE)
   # The view on the GPU.
-  target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
+  target_sources(ifritview PRIVATE src/ui/gpu_view.cpp src/ui/detail_table.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
       src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/detail_frame.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli src/shaders/exposure.hlsli src/shaders/estimate.hlsli
       src/shaders/drift.hlsli)

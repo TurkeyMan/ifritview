@@ -1,4 +1,6 @@
 #include "gpu_view.h"
+#include "detail_table.h"
+#include "../platform.h"
 
 #include <glib.h>
 #include "../compare.h"
@@ -77,6 +79,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <exception>
+#include <thread>
+#include <stdexcept>
+#include <stop_token>
 #include <thread>
 
 // ljpeg.hlsli's block.
@@ -1708,12 +1719,24 @@ size_t GpuView::Source::bytes() const
     size_t n = 0;
     for (const rap::gpu::texture_ptr& t : levels)
         n += size_t(t->width()) * t->height() * 8;  // half float RGBA
+    if (cpu_noise.valid())
+        n += sizeof(DetailNoise);
+    if (table_work.valid())
+        n += size_t(NoiseModel::kInverse) * 4 * sizeof(float);
     return n;
 }
 
 void GpuView::retain(Source& s, const std::shared_ptr<Image>& next, uint64_t next_generation)
 {
     std::shared_ptr<Image> image = s.image.lock();
+    if (s.table_work.valid() && s.table_work.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+        // A source that moved off screen keeps its immutable model, but does
+        // not queue obsolete settings ahead of the newly visible source.
+        s.table_owner.reset();
+        s.table_work = {};
+        s.table_work_noise = {};
+    }
     s.region.reset();  // made again if it's shown at 1:1 again
     if (image && !s.levels.empty() && !(image == next && next_generation != s.generation))
         retained_.insert(retained_.begin(), std::move(s));
@@ -1844,6 +1867,7 @@ void GpuView::measure_noise(Source& s)
     d[5].groups[0] = (w + step - 1) / step;
     d[5].groups[1] = (h + step - 1) / step;
     device_->run(std::span(d));
+    ++s.noise_revision;
     if (std::getenv("IFRIT_TRACE"))
     {
         // (Read back once it's done, not waited for: the filter's timing is its own.)
@@ -1866,13 +1890,257 @@ void GpuView::measure_noise(Source& s)
     }
 }
 
+namespace
+{
+// A bounded shared queue, joined at process shutdown rather than when a view
+// or source is discarded. Jobs own snapshots, never a GpuView or Source.
+class DetailWorkers
+{
+public:
+    DetailWorkers()
+    {
+        for (int i = 0; i < 2; ++i)
+            workers_.emplace_back([this](std::stop_token stop)
+            {
+                platform::lower_thread_priority();
+                for (;;)
+                {
+                    Job job;
+                    {
+                        std::unique_lock lock(mutex_);
+                        changed_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+                        if (stopping_ || jobs_.empty())
+                            return;
+                        job = std::move(jobs_.front());
+                        jobs_.pop_front();
+                    }
+                    if (!job.owner.expired())
+                        job.run(stop);
+                }
+            });
+    }
+    ~DetailWorkers()
+    {
+        for (auto& worker : workers_)
+            worker.request_stop();
+        {
+            std::lock_guard lock(mutex_);
+            stopping_ = true;
+            jobs_.clear();
+        }
+        changed_.notify_all();
+        for (auto& worker : workers_)
+            worker.join();
+    }
+    void submit(std::function<void(std::stop_token)> job, std::weak_ptr<int> owner)
+    {
+        {
+            std::lock_guard lock(mutex_);
+            // Expired sources/settings do not accumulate in a global file cache.
+            // Destroying their promises wakes any obsolete waiting job.
+            std::erase_if(jobs_, [](const Job& old) { return old.owner.expired(); });
+            jobs_.push_back({std::move(job), std::move(owner)});
+        }
+        changed_.notify_one();
+    }
+private:
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    struct Job
+    {
+        std::function<void(std::stop_token)> run;
+        std::weak_ptr<int> owner;
+    };
+    std::deque<Job> jobs_;
+    bool stopping_ = false;
+    std::vector<std::jthread> workers_;
+};
+
+DetailWorkers& detail_workers()
+{
+    static DetailWorkers workers;
+    return workers;
+}
+
+// Pending GPU callbacks and model dependencies never make shutdown or a
+// discarded source wait for device/UI progress. This wait is workers only.
+template<class T>
+const T& await_detail(const std::shared_future<T>& input, const std::weak_ptr<int>& owner, std::stop_token stop)
+{
+    for (;;)
+    {
+        if (stop.stop_requested())
+            throw std::runtime_error("detail workers stopped");
+        if (owner.expired())
+            throw std::runtime_error("superseded detail work");
+        if (input.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+            return input.get();
+    }
+}
+
+// A ticket signals the copy before Rapport invokes its callback, and a
+// failed allocation can return an already-done default ticket without any
+// callback. Only callback delivery establishes a usable snapshot.
+enum class SnapshotOutcome { Pending, Delivered, Failed };
+struct DetailSnapshot
+{
+    explicit DetailSnapshot(size_t bytes) : words(bytes), completion(result.get_future().share()) {}
+    std::vector<std::byte> words;
+    std::promise<SnapshotOutcome> result;
+    std::shared_future<SnapshotOutcome> completion;
+    std::atomic<SnapshotOutcome> outcome{SnapshotOutcome::Pending};
+    void finish(SnapshotOutcome value)
+    {
+        auto pending = SnapshotOutcome::Pending;
+        if (outcome.compare_exchange_strong(pending, value))
+            result.set_value(value);
+    }
+};
+struct SnapshotDelivery
+{
+    explicit SnapshotDelivery(std::shared_ptr<DetailSnapshot> value) : snapshot(std::move(value)) {}
+    ~SnapshotDelivery() { snapshot->finish(SnapshotOutcome::Failed); }
+    std::shared_ptr<DetailSnapshot> snapshot;
+};
+
+template<class Readback, class Lost>
+std::shared_future<std::shared_ptr<const DetailNoise>> detail_noise_snapshot(
+    size_t bytes, Readback readback, Lost lost, const std::shared_ptr<int>& owner, DetailWorkers& workers = detail_workers())
+{
+    auto promise = std::make_shared<std::promise<std::shared_ptr<const DetailNoise>>>();
+    auto future = promise->get_future().share();
+    auto snapshot = std::make_shared<DetailSnapshot>(bytes);
+    auto delivery = std::make_shared<SnapshotDelivery>(snapshot);
+    readback(std::span(snapshot->words), [delivery, lost]
+    {
+        delivery->snapshot->finish(lost() ? SnapshotOutcome::Failed : SnapshotOutcome::Delivered);
+    });
+    // If the backend discarded done on an early return, its last delivery
+    // token dies here and resolves Failed, rather than accepting zero bytes.
+    delivery.reset();
+    workers.submit([promise, snapshot, lost, owner = std::weak_ptr<int>(owner)](std::stop_token stop)
+    {
+        try
+        {
+            if (lost())
+                throw std::runtime_error("the GPU was lost reading its noise measure");
+            const auto outcome = await_detail(snapshot->completion, owner, stop);
+            if (lost())
+                throw std::runtime_error("the GPU was lost reading its noise measure");
+            if (outcome != SnapshotOutcome::Delivered)
+                throw std::runtime_error("the GPU noise measure was not delivered");
+            auto noise = read_detail_noise(snapshot->words);
+            if (!noise)
+                throw std::runtime_error("the GPU noise measure is invalid");
+            promise->set_value(std::make_shared<const DetailNoise>(std::move(*noise)));
+        }
+        catch (...)
+        {
+            snapshot->finish(SnapshotOutcome::Failed);
+            promise->set_exception(std::current_exception());
+        }
+    }, owner);
+    return future;
+}
+}  // namespace
+
+// Only immutable snapshots/results cross the worker boundary. A stale setting
+// can finish harmlessly: the source installs only its current keyed future.
+bool GpuView::prepare_detail_table(Source& s, const Detail& detail, std::function<void()> ready, std::string& error)
+{
+    follow_detail(s, detail);
+    if (!DetailFilter(detail).denoise)
+    {
+        s.table_owner.reset();
+        s.table_work = {};
+        s.table_work_noise = {};
+        return true;
+    }
+    measure_noise(s);
+    if (!s.noise)
+        return error = "no room for the noise measure", false;
+    const auto identity = s.noise_identity();
+    if (s.detail_table && s.table_noise == identity && s.table_for == detail)
+        return true;
+    if (!s.cpu_noise.valid() || s.cpu_noise_of != identity)
+    {
+        s.cpu_noise_of = identity;
+        ++s.noise_reads;
+        s.cpu_owner = std::make_shared<int>(0);
+        s.cpu_noise = detail_noise_snapshot(s.noise->size(),
+            [device = device_, buffer = s.noise](std::span<std::byte> words, std::function<void()> done)
+            { return device->readback(buffer, words, std::move(done)); },
+            [device = device_] { return device->lost(); }, s.cpu_owner);
+    }
+    if (!s.table_work.valid() || s.table_work_noise != identity || s.table_work_for != detail)
+    {
+        auto promise = std::make_shared<std::promise<std::vector<float>>>();
+        s.table_work = promise->get_future().share();
+        s.table_work_noise = identity;
+        s.table_work_for = detail;
+        ++s.table_builds;
+        s.table_owner = std::make_shared<int>(0);
+        detail_workers().submit([promise, input = s.cpu_noise, detail, wake = ready,
+                                 owner = std::weak_ptr<int>(s.table_owner)](std::stop_token stop)
+        {
+            try
+            {
+                const auto noise = await_detail(input, owner, stop);
+                if (owner.expired())
+                    throw std::runtime_error("superseded detail table");
+                const auto start = g_get_monotonic_time();
+                auto rgba = make_detail_table(*noise, detail);
+                if (std::getenv("IFRIT_TRACE"))
+                    std::fprintf(stderr, "gpu: detail table on CPU worker in %.1f ms\n", (g_get_monotonic_time() - start) / 1000.0);
+                promise->set_value(std::move(rgba));
+            }
+            catch (...)
+            {
+                promise->set_exception(std::current_exception());
+            }
+            if (wake && !stop.stop_requested() && !owner.expired())
+                wake();
+        }, s.table_owner);
+    }
+    if (ready && s.table_work.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+        pending_ = true;
+        return false;
+    }
+    try
+    {
+        const auto& rgba = s.table_work.get();  // only synchronous/headless callers wait here
+        if (!s.detail_table)
+            s.detail_table = device_->create({NoiseModel::kInverse, 1, rap::gpu::format::rgba32f});
+        if (!s.detail_table)
+            return error = "no room for the detail table", false;
+        device_->upload(s.detail_table, std::as_bytes(std::span(rgba)), {4, rap::gpu::sample_type::f32});
+        s.table_noise = identity;
+        s.table_for = detail;
+        s.table_work = {};
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        // A failed snapshot/table is not a cache entry. Retry with a fresh
+        // readback on the next develop, rather than retaining its exception.
+        s.cpu_owner.reset();
+        s.cpu_noise = {};
+        s.cpu_noise_of = {};
+        s.table_owner.reset();
+        s.table_work = {};
+        s.table_work_noise = {};
+        error = e.what();
+        return false;
+    }
+}
+
 bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap::gpu::texture_ptr& target, int tx, int ty)
 {
     const int64_t t0 = g_get_monotonic_time();  // the noise's measure, the first time, counted in
     const DetailFilter filter(s.detailed);
-    if (filter.denoise)
-        measure_noise(s);
-    if (filter.denoise && !s.noise)
+    std::string table_error;
+    if (filter.denoise && !prepare_detail_table(s, s.detailed, {}, table_error))
         return false;
     const rap::gpu::texture_ptr& image = s.levels[0];
     const int width = image->width(), height = image->height();
@@ -1884,12 +2152,6 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
         if (!t || t->width() < tw || t->height() < th)
             if (!(t = device_->create({tw, th, rap::gpu::format::rgba32f, 1, true})))
                 return false;
-    if (filter.denoise && !s.detail_table && !(s.detail_table = device_->create({NoiseModel::kInverse, 1, rap::gpu::format::rgba32f, 1, true})))
-        return false;
-    if (filter.denoise && !s.detail_shaping && !(s.detail_shaping = device_->create({7, 6, rap::gpu::format::rgba32f, 1, true})))
-        return false;
-    // The table again only for another image's noise or another setting.
-    bool tabulate = filter.denoise && !(s.table_noise == s.noise && s.table_for == s.detailed);
     DetailParams base{};
     base.image_size[0] = width, base.image_size[1] = height;
     for (int c = 0; c < 3; ++c)
@@ -1929,19 +2191,10 @@ bool GpuView::filter_detail(Source& s, int x0, int y0, int x1, int y1, const rap
                 pass.region = to == target ? rap::gpu::rect{ox - x0 + tx, oy - y0 + ty, ow, oh} : rap::gpu::rect{0, 0, iw, ih};
             };
             // detail.hlsl's modes.
-            enum { kEncode, kSmooth, kShrink, kCombine, kBlur, kDecode, kTable, kShaping };
+            enum { kEncode, kSmooth, kShrink, kCombine, kBlur, kDecode };
             const auto& t = detail_temps_;
             rap::gpu::texture_ptr cur = t[0], next = t[1], sum = t[3], other = t[4];
-            if (tabulate)
-            {
-                // The decode's table, once: per image, noise and setting, not
-                // per pixel or region.
-                add(kShaping, {blank_}, s.detail_shaping);
-                passes.back().region = rap::gpu::rect{0, 0, 7, 6};
-                add(kTable, {s.detail_shaping}, s.detail_table);
-                passes.back().region = rap::gpu::rect{0, 0, NoiseModel::kInverse, 1};
-                s.table_noise = s.noise, s.table_for = s.detailed, tabulate = false;
-            }
+
             add(kEncode, {image}, cur);
             if (filter.denoise)
             {
@@ -2015,34 +2268,82 @@ int GpuView::check_shaping()
                 words[size_t(kRho + k * NoiseModel::kSpatialLags + i)] = m.rho[k][i];
         Source s;
         s.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
-        s.detail_table = device_->create({NoiseModel::kInverse, 1, rap::gpu::format::rgba32f, 1, true});
-        s.detail_shaping = device_->create({7, 6, rap::gpu::format::rgba32f, 1, true});
-        if (!s.noise || !s.detail_table || !s.detail_shaping)
+        if (!s.noise)
             return 1;
         device_->upload(s.noise, std::as_bytes(std::span(words)));
-        DetailParams p{};
-        for (int j = 0; j < 4; ++j)
-            p.luminance[j] = filter.luminance[j], p.colour[j] = filter.colour[j];
-        p.coarsest[0] = filter.luminance[4], p.coarsest[1] = filter.colour[4];
-        p.sharpen[0] = filter.amount, p.sharpen[1] = filter.sigma, p.sharpen[2] = filter.halo;
-        p.sharpening = filter.sharpen ? 1 : 0, p.model[0] = 1;
-        DetailParams params[2] = {p, p};
-        params[0].mode = 7, params[1].mode = 6;  // detail.hlsl's DETAIL_SHAPING, DETAIL_TABLE
-        rap::gpu::pass passes[2];
-        for (int i = 0; i < 2; ++i)
+        if (!prepare_detail_table(s, d, {}, error))
         {
-            passes[i].program = detail_;
-            passes[i].buffers = {s.noise};
-            passes[i].uniforms = bytes(params[i]);
+            std::fprintf(stderr, "CPU detail table: %s\n", error.c_str());
+            return 1;
         }
-        passes[0].inputs = {blank_}, passes[0].target = s.detail_shaping, passes[0].region = {0, 0, 7, 6};
-        passes[1].inputs = {s.detail_shaping}, passes[1].target = s.detail_table, passes[1].region = {0, 0, NoiseModel::kInverse, 1};
-        device_->run(std::span(passes)).wait();
         std::vector<float> shaping(7 * 6 * 4), table(NoiseModel::kInverse * 4);
-        device_->readback(s.detail_shaping, std::as_writable_bytes(std::span(shaping)), 7 * 16).wait();
         device_->readback(s.detail_table, std::as_writable_bytes(std::span(table)), NoiseModel::kInverse * 16).wait();
         if (device_->lost())
             return 1;
+        // Reconstructed model/shaping against the original fixture, and the
+        // uploaded table against the CPU develop (including the quiet axis).
+        const auto reconstructed = noise_shaping(&s.cpu_noise.get()->model, &filter);
+        static constexpr int pairs_from[6][2] = {{0, 0}, {1, 1}, {2, 2}, {0, 1}, {0, 2}, {1, 2}};
+        for (int q = 0; q < 6; ++q)
+            for (int j = 0; j < 7; ++j)
+            {
+                const int a = pairs_from[q][0], b = pairs_from[q][1];
+                float* out = &shaping[size_t((q * 7 + j) * 4)];
+                out[0] = j < 6 ? reconstructed.k[j][a][b] : reconstructed.D[a][b];
+                out[1] = j < 6 ? reconstructed.d[j][a][b] : reconstructed.X[a][b];
+                out[2] = j < 6 ? reconstructed.x[j][a][b] : 0;
+            }
+        // Pan/zoom and source retention must not recompute a valid table.
+        const unsigned reads = s.noise_reads, builds = s.table_builds;
+        Source retained = std::move(s);
+        bool cached = prepare_detail_table(retained, d, {}, error) &&
+                      retained.noise_reads == reads && retained.table_builds == builds;
+        Detail changed = d;
+        changed.colour += 1;
+        cached = cached && prepare_detail_table(retained, changed, {}, error) &&
+                 retained.noise_reads == reads && retained.table_builds == builds + 1;
+        retained.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
+        if (!retained.noise)
+            return 1;
+        device_->upload(retained.noise, std::as_bytes(std::span(words)));
+        cached = cached && prepare_detail_table(retained, d, {}, error) &&
+                 retained.noise_reads == reads + 1 && retained.table_builds == builds + 2;
+        // The same buffer updated in place, and a new source generation,
+        // must not alias the old snapshot even if its address is unchanged.
+        const unsigned before_revision = retained.noise_reads, before_build = retained.table_builds;
+        const auto matches_fresh = [&]
+        {
+            const auto parsed = read_detail_noise(std::as_bytes(std::span(words)));
+            if (!parsed)
+                return false;
+            const auto fresh = make_detail_table(*parsed, d);
+            std::vector<float> found(fresh.size());
+            device_->readback(retained.detail_table, std::as_writable_bytes(std::span(found)), NoiseModel::kInverse * 16).wait();
+            return fresh == found;
+        };
+        words[kSigma + 1] *= 1.5f;
+        device_->upload(retained.noise, std::as_bytes(std::span(words)));
+        ++retained.noise_revision;
+        cached = cached && prepare_detail_table(retained, d, {}, error) && matches_fresh() &&
+                 retained.noise_reads == before_revision + 1 && retained.table_builds == before_build + 1;
+        words[kSigma] *= 1.25f;
+        device_->upload(retained.noise, std::as_bytes(std::span(words)));
+        ++retained.generation;
+        cached = cached && prepare_detail_table(retained, d, {}, error) && matches_fresh() &&
+                 retained.noise_reads == before_revision + 2 && retained.table_builds == before_build + 2;
+        double Detail::* const fields[] = {&Detail::sharpness, &Detail::sharpen_radius, &Detail::sharpen_detail,
+            &Detail::sharpen_masking, &Detail::luminance, &Detail::luminance_detail, &Detail::luminance_contrast,
+            &Detail::colour, &Detail::colour_detail, &Detail::colour_smoothness};
+        for (auto field : fields)
+        {
+            Detail setting = retained.table_for;
+            setting.*field += field == &Detail::sharpen_radius ? .25 : 1;
+            const unsigned builds_before = retained.table_builds, reads_before = retained.noise_reads;
+            cached = cached && prepare_detail_table(retained, setting, {}, error) &&
+                     retained.table_builds == builds_before + 1 && retained.noise_reads == reads_before;
+        }
+        std::printf("%s detail cache, retained/settings/new noise/revision/generation/all controls\n", cached ? "ok    " : "FAILED");
+        failed += !cached;
         // Against the CPU's.
         const NoiseShaping cpu = noise_shaping(&m, &filter);
         static constexpr int pairs[6][2] = {{0, 0}, {1, 1}, {2, 2}, {0, 1}, {0, 2}, {1, 2}};
@@ -2084,12 +2385,265 @@ int GpuView::check_shaping()
             const float d0 = std::sqrt(.0003f + m.offset[2]);
             const double sigma = std::sqrt(double(m.law_a[2]) * .0003 + m.law_b[2]);
             endpoint = std::fabs(noise_decode_by(m, gpu_shift, d0, 2) - .000299325009109) / sigma;
-            std::printf("%s gpu quiet blue active endpoint against double transport: %.7g sigma\n", endpoint < .005 ? "ok    " : "FAILED", endpoint);
+            std::printf("%s uploaded quiet blue active endpoint against double transport: %.7g sigma\n", endpoint < .005 ? "ok    " : "FAILED", endpoint);
         }
         const bool ok = worst < 1e-4 && table_worst <= 2e-3 * largest + 1e-9 && endpoint < .005;
         failed += !ok;
-        std::printf("%s gpu shaping, %s: against the CPU's, %.2g; the decode's table, %.2g of its largest shift %.3g\n", ok ? "ok    " : "FAILED",
+        std::printf("%s uploaded CPU table, %s: against the original model, %.2g; the decode's table, %.2g of its largest shift %.3g\n", ok ? "ok    " : "FAILED",
                     quiet ? "quiet blue" : shifted ? "green red's a pixel on" : "independent", worst, largest > 0 ? table_worst / largest : 0.0, largest);
+    }
+    {
+        const NoiseModel a = shaping_case(false), b = quiet_axis_case();
+        const auto inputs = [&](const NoiseModel& model)
+        {
+            auto result = std::make_shared<DetailNoise>();
+            result->model = model;
+            result->sigma_luminance = kNoiseL;
+            result->sigma_colour = kNoiseC;
+            return std::shared_ptr<const DetailNoise>(result);
+        };
+        auto first = std::make_shared<std::promise<std::shared_ptr<const DetailNoise>>>();
+        auto last = std::make_shared<std::promise<std::shared_ptr<const DetailNoise>>>();
+        auto woke = std::make_shared<std::promise<void>>();
+        auto notified = woke->get_future();
+        auto stale_wakes = std::make_shared<std::atomic<unsigned>>(0);
+        Source changing;
+        changing.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
+        changing.cpu_noise_of = changing.noise_identity();
+        changing.cpu_noise = first->get_future().share();
+        Detail old = Detail::raw_defaults(), next = old;
+        next.luminance = 60;
+        pending_ = false;
+        std::promise<void> entered;
+        auto began = entered.get_future();
+        std::promise<bool> returned;
+        auto result = returned.get_future();
+        std::thread caller([&]
+        {
+            entered.set_value();
+            returned.set_value(prepare_detail_table(changing, old, [stale_wakes] { ++*stale_wakes; }, error));
+        });
+        began.wait();
+        // This is a deadlock guard for the ordering assertion, not a frame
+        // performance limit: the input is deliberately withheld until return.
+        const bool nonblocking = result.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+        if (!nonblocking)
+        {
+            first->set_value(inputs(a));
+            caller.join();
+            std::printf("FAILED async detail, viewer waited for withheld worker input\n");
+            return failed + 1;
+        }
+        caller.join();
+        bool ok = !result.get() && pending_;
+        auto discarded = changing.table_work;
+        ok = !prepare_detail_table(changing, next, [stale_wakes] { ++*stale_wakes; }, error) && ok;
+        auto wrong_setting = changing.table_work;
+        changing.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
+        changing.cpu_noise_of = changing.noise_identity();
+        changing.cpu_noise = last->get_future().share();
+        ok = !prepare_detail_table(changing, next, [woke] { woke->set_value(); }, error) && ok;
+        first->set_value(inputs(a));
+        last->set_value(inputs(b));
+        notified.wait();
+        pending_ = false;
+        ok = prepare_detail_table(changing, next, {}, error) && ok;
+        std::vector<float> uploaded(size_t(NoiseModel::kInverse) * 4);
+        device_->readback(changing.detail_table, std::as_writable_bytes(std::span(uploaded)), NoiseModel::kInverse * 16).wait();
+        const auto fresh = make_detail_table(*inputs(b), next);
+        ok = ok && uploaded == fresh && changing.table_noise == changing.noise_identity() && changing.table_for == next && stale_wakes->load() == 0;
+        // Wait for both canceled jobs too, then confirm they never notified a view.
+        for (auto& work : {discarded, wrong_setting})
+            try { work.get(); } catch (const std::exception&) {}
+        ok = ok && stale_wakes->load() == 0;
+        std::printf("%s async detail, stale source/settings never installed: fresh reference exact\n", ok ? "ok    " : "FAILED");
+        failed += !ok;
+
+        auto blocked = std::make_shared<std::promise<std::shared_ptr<const DetailNoise>>>();
+        auto closed_wakes = std::make_shared<std::atomic<unsigned>>(0);
+        Source closed;
+        closed.noise = changing.noise;
+        closed.cpu_noise_of = closed.noise_identity();
+        closed.cpu_noise = blocked->get_future().share();
+        prepare_detail_table(closed, old, [closed_wakes] { ++*closed_wakes; }, error);
+        auto finished = closed.table_work;
+        closed = Source{};
+        blocked->set_value(inputs(a));
+        try { finished.get(); } catch (const std::exception&) {}
+        const bool canceled = closed_wakes->load() == 0;
+        std::printf("%s async detail, discarded source cancels notification\n", canceled ? "ok    " : "FAILED");
+        failed += !canceled;
+        auto broken = std::make_shared<std::promise<std::shared_ptr<const DetailNoise>>>();
+        Source refused;
+        refused.noise = changing.noise;
+        refused.cpu_noise_of = refused.noise_identity();
+        refused.cpu_noise = broken->get_future().share();
+        broken->set_exception(std::make_exception_ptr(std::runtime_error("fixture noise failure")));
+        error.clear();
+        const bool propagated = !prepare_detail_table(refused, old, {}, error) &&
+                                error == "fixture noise failure" && !refused.detail_table;
+        std::printf("%s async detail, worker exception propagated without upload\n", propagated ? "ok    " : "FAILED");
+        failed += !propagated;
+        {
+            auto owner = std::make_shared<int>(0);
+            const auto available = [] { return false; };
+            const auto absent = [](std::span<std::byte>, std::function<void()>) { return rap::gpu::ticket{}; };
+            const auto delivered = [](std::span<std::byte>, std::function<void()> done)
+            { done(); return rap::gpu::ticket{}; };
+            Source missing;
+            missing.noise = device_->create_buffer(DetailFilter::kNoiseWords * 4);
+            device_->clear(missing.noise, 0);
+            missing.cpu_noise_of = missing.noise_identity();
+            missing.cpu_owner = owner;
+            missing.cpu_noise = detail_noise_snapshot(missing.noise->size(), absent, available, owner);
+            error.clear();
+            const bool rejected = !prepare_detail_table(missing, old, {}, error) &&
+                error == "the GPU noise measure was not delivered" && !missing.detail_table &&
+                !missing.cpu_noise.valid() && !missing.table_work.valid() && !missing.cpu_noise_of.buffer && !missing.table_noise.buffer;
+            std::printf("%s snapshot delivery, done default ticket without callback fails without cache/upload\n", rejected ? "ok    " : "FAILED");
+            failed += !rejected;
+            error.clear();
+            bool retried = prepare_detail_table(missing, old, {}, error) && missing.noise_reads == 1 &&
+                missing.cpu_noise.valid() && missing.table_noise == missing.noise_identity();
+            std::vector<float> pixels(size_t(NoiseModel::kInverse) * 4, 1);
+            if (retried)
+            {
+                device_->readback(missing.detail_table, std::as_writable_bytes(std::span(pixels)), NoiseModel::kInverse * 16).wait();
+                retried = std::all_of(pixels.begin(), pixels.end(), [](float x) { return x == 0; });
+            }
+            std::printf("%s snapshot delivery, next develop retries and uploads legitimate delivered zeros\n", retried ? "ok    " : "FAILED");
+            failed += !retried;
+            const auto zero = detail_noise_snapshot(DetailFilter::kNoiseWords * 4, delivered, available, owner).get();
+            const auto shifts = make_detail_table(*zero, old);
+            const bool zero_ok = !zero->model.fitted && std::all_of(shifts.begin(), shifts.end(), [](float x) { return x == 0; });
+            std::printf("%s snapshot delivery, explicit callback with zero payload is valid\n", zero_ok ? "ok    " : "FAILED");
+            failed += !zero_ok;
+            std::function<void()> later, copied_callback;
+            auto delayed = detail_noise_snapshot(DetailFilter::kNoiseWords * 4,
+                [&later, &copied_callback](std::span<std::byte>, std::function<void()> done)
+                { copied_callback = done; later = std::move(done); return rap::gpu::ticket{}; }, available, owner);
+            copied_callback = {};  // an intermediate copy is not failed delivery
+            const bool pending = delayed.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+            later();
+            later = {};
+            const bool ordered = pending && !delayed.get()->model.fitted;
+            std::printf("%s snapshot delivery, copied/moved callback survives done ticket and intermediate destruction\n", ordered ? "ok    " : "FAILED");
+            failed += !ordered;
+            std::function<void()> dropped;
+            auto undelivered = detail_noise_snapshot(DetailFilter::kNoiseWords * 4,
+                [&dropped](std::span<std::byte>, std::function<void()> done)
+                { dropped = std::move(done); return rap::gpu::ticket{}; }, available, owner);
+            const bool waiting = undelivered.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+            dropped = {};  // the LAST retained callback was discarded, not invoked
+            bool dropped_failed = false;
+            try { undelivered.get(); }
+            catch (const std::exception& e) { dropped_failed = std::string(e.what()) == "the GPU noise measure was not delivered"; }
+            const bool drop_ok = waiting && dropped_failed;
+            std::printf("%s snapshot delivery, last uncalled callback release fails the request\n", drop_ok ? "ok    " : "FAILED");
+            failed += !drop_ok;
+            bool lost_failed = false;
+            try { detail_noise_snapshot(DetailFilter::kNoiseWords * 4, delivered, [] { return true; }, owner).get(); }
+            catch (const std::exception& e) { lost_failed = std::string(e.what()) == "the GPU was lost reading its noise measure"; }
+            std::printf("%s snapshot delivery, invoked callback with lost/map failure still fails\n", lost_failed ? "ok    " : "FAILED");
+            failed += !lost_failed;
+            {
+                DetailWorkers pool;
+                auto canceled_owner = std::make_shared<int>(0);
+                auto began = std::make_shared<std::promise<void>>();
+                auto entered = began->get_future();
+                auto announced = std::make_shared<std::atomic<bool>>(false);
+                std::function<void()> parked;
+                auto canceled = detail_noise_snapshot(DetailFilter::kNoiseWords * 4,
+                    [&parked](std::span<std::byte>, std::function<void()> done)
+                    { parked = std::move(done); return rap::gpu::ticket{}; },
+                    [began, announced] { if (!announced->exchange(true)) began->set_value(); return false; }, canceled_owner, pool);
+                entered.wait();
+                canceled_owner.reset();
+                const bool released = canceled.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+                if (!released) parked();  // deadlock guard; never part of a passing test
+                bool refused = false;
+                try { canceled.get(); } catch (const std::exception&) { refused = true; }
+                std::printf("%s snapshot delivery, source cancellation releases a worker with callback still held\n", released && refused ? "ok    " : "FAILED");
+                failed += !(released && refused);
+                parked = {};
+            }
+            {
+                auto pool = std::make_unique<DetailWorkers>();
+                auto retained_owner = std::make_shared<int>(0);
+                auto began = std::make_shared<std::promise<void>>();
+                auto entered = began->get_future();
+                auto announced = std::make_shared<std::atomic<bool>>(false);
+                std::function<void()> parked;
+                auto stopped = detail_noise_snapshot(DetailFilter::kNoiseWords * 4,
+                    [&parked](std::span<std::byte>, std::function<void()> done)
+                    { parked = std::move(done); return rap::gpu::ticket{}; },
+                    [began, announced] { if (!announced->exchange(true)) began->set_value(); return false; }, retained_owner, *pool);
+                entered.wait();
+                std::promise<void> joined;
+                auto shutdown = joined.get_future();
+                std::thread closing([&] { pool.reset(); joined.set_value(); });
+                const bool released = shutdown.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+                if (!released) parked();  // avoid hanging CI if shutdown regresses
+                closing.join();
+                bool refused = false;
+                try { stopped.get(); } catch (const std::exception&) { refused = true; }
+                std::printf("%s snapshot delivery, pool shutdown joins without callback release or GPU/UI pumping\n", released && refused ? "ok    " : "FAILED");
+                failed += !(released && refused);
+                parked = {};
+            }
+        }
+        pending_ = false;
+    }
+    {
+        // A pending asynchronous table must not hide a later hard failure
+        // from View's normal device/error fallback, in any rendering mode.
+        using namespace rap::gpu;
+        struct LostDevice final : device
+        {
+            std::string_view api() const override { return "pending-error fixture"; }
+            bool software() const override { return false; }
+            bool takes(shader_language) const override { return false; }
+            memory_budget memory() const override { return {}; }
+            int max_texture_size() const override { return 8192; }
+            texture_ptr create(const texture_desc&) override { return {}; }
+            ticket upload(const texture_ptr&, std::span<const std::byte>, const source_layout&, int, rect) override { return {}; }
+            ticket readback(const texture_ptr&, std::span<std::byte>, size_t, int, std::function<void()>) override { return {}; }
+            program_result program(const shader&) override { return {}; }
+            ticket run(std::span<const pass>) override { return {}; }
+            buffer_ptr create_buffer(size_t) override { return {}; }
+            ticket clear(const buffer_ptr&, uint32_t) override { return {}; }
+            ticket upload(const buffer_ptr&, std::span<const std::byte>, size_t) override { return {}; }
+            ticket readback(const buffer_ptr&, std::span<std::byte>, std::function<void()>) override { return {}; }
+            program_result compute_program(const shader&) override { return {}; }
+            ticket run(std::span<const dispatch>) override { return {}; }
+            bool lost() const override { return true; }
+        };
+        GpuView lost(std::make_shared<LostDevice>());
+        auto image = std::make_shared<Image>();
+        image->allocate(2, 2);
+        auto difference = std::make_shared<ImageDifference>();
+        difference->width = difference->height = 2;
+        difference->errors.assign(4, 0);
+        Frame frame;
+        frame.width = frame.height = 2;
+        texture_ptr out;
+        ticket ready;
+        rap::frame_color colour;
+        bool all = true;
+        for (bool invalid : {false, true})
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                lost.pending_ = true;
+                std::string error;
+                const std::shared_ptr<Image> input = invalid ? nullptr : image;
+                const bool ok = mode == 0 ? lost.render(input, 1, frame, out, ready, colour, error)
+                              : mode == 1 ? lost.render_swipe(input, 1, frame, image, 1, frame, 1, out, ready, colour, error)
+                              : lost.render_difference(input, 1, difference, 1, frame, out, ready, colour, error);
+                const char* want = invalid ? (mode == 2 ? "no difference to draw" : "nothing to draw") : "the GPU went away";
+                all = !ok && !lost.pending() && error == want && all;
+            }
+        std::printf("%s pending detail, lost/invalid errors clear pending in render/swipe/difference\n", all ? "ok    " : "FAILED");
+        failed += !all;
     }
     return failed;
 }
@@ -2952,6 +3506,8 @@ bool GpuView::draw(Source& s, int width, int height, bool alpha, const Frame& f,
 bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, const Frame& f, rap::gpu::texture_ptr& out,
                      rap::gpu::ticket& ready, rap::frame_color& colour, std::string& error)
 {
+    pending_ = false;  // every early error must leave the pending state
+
     if (!image || image->width <= 0 || image->height <= 0 || f.width <= 0 || f.height <= 0)
     {
         error = "nothing to draw";
@@ -2962,7 +3518,8 @@ bool GpuView::render(const std::shared_ptr<Image>& image, uint64_t generation, c
         error = "the GPU went away";
         return false;
     }
-    if (!programs(error) || !hold(0, image, generation, error))
+    if (!programs(error) || !hold(0, image, generation, error) ||
+        !prepare_detail_table(shown_[0], f.detail, f.detail_ready, error))
         return false;
     retain(shown_[1]);  // not comparing (or showing only one of them)
     if (!begin_frame(f, out, colour, error))
@@ -2976,6 +3533,8 @@ bool GpuView::render_swipe(const std::shared_ptr<Image>& a, uint64_t a_generatio
                            uint64_t b_generation, const Frame& fb, int split, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready,
                            rap::frame_color& colour, std::string& error)
 {
+    pending_ = false;  // every early error must leave the pending state
+
     if (!a || !b || a->width <= 0 || a->height <= 0 || b->width <= 0 || b->height <= 0 || fa.width <= 0 || fa.height <= 0)
     {
         error = "nothing to draw";
@@ -2986,7 +3545,9 @@ bool GpuView::render_swipe(const std::shared_ptr<Image>& a, uint64_t a_generatio
         error = "the GPU went away";
         return false;
     }
-    if (!programs(error) || !hold(0, a, a_generation, error) || !hold(1, b, b_generation, error) || !begin_frame(fa, out, colour, error))
+    if (!programs(error) || !hold(0, a, a_generation, error) || !hold(1, b, b_generation, error) ||
+        !prepare_detail_table(shown_[0], fa.detail, fa.detail_ready, error) ||
+        !prepare_detail_table(shown_[1], fb.detail, fb.detail_ready, error) || !begin_frame(fa, out, colour, error))
         return false;
     if (fa.count_histogram)
         count(shown_[0], fa);  // A's, as the view's own image
@@ -3000,6 +3561,8 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
                                 int gain, const Frame& f, rap::gpu::texture_ptr& out, rap::gpu::ticket& ready, rap::frame_color& colour,
                                 std::string& error)
 {
+    pending_ = false;  // every early error must leave the pending state
+
     if (!a || !d || d->width != a->width || d->height != a->height || d->errors.empty() || f.width <= 0 || f.height <= 0)
     {
         error = "no difference to draw";
@@ -3010,7 +3573,8 @@ bool GpuView::render_difference(const std::shared_ptr<Image>& a, uint64_t a_gene
         error = "the GPU went away";
         return false;
     }
-    if (!programs(error) || !hold(0, a, a_generation, error) || !begin_frame(f, out, colour, error))
+    if (!programs(error) || !hold(0, a, a_generation, error) ||
+        !prepare_detail_table(shown_[0], f.detail, f.detail_ready, error) || !begin_frame(f, out, colour, error))
         return false;
     Source& s = shown_[0];
     if (f.count_histogram)

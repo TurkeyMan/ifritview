@@ -26,6 +26,7 @@ class View
 public:
     View(rap::ui& ui, const Config& cfg);
     ~View();
+    static int check_lifetime();  // headless completion/cancellation regression
     View(const View&) = delete;
     View& operator=(const View&) = delete;
 
@@ -334,7 +335,20 @@ private:
         std::unique_ptr<rap::image> image;
     } native_;
     bool native_busy_ = false;  // one rendering at a time; the next paint asks again if it's stale
-    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);  // for work finishing after the view
+    struct Lifetime
+    {
+        std::shared_ptr<bool> token = std::make_shared<bool>(true);
+        ~Lifetime() { invalidate(); }
+        void invalidate() { *token = false; }
+        std::function<void()> guard(std::function<void()> done) const
+        {
+            return [alive = std::weak_ptr<bool>(token), done = std::move(done)]
+            {
+                if (const auto keep = alive.lock(); keep && *keep)
+                    done();
+            };
+        }
+    } alive_;  // invalidates queued UI completions even when other callbacks pin the token
     // The visible part of a vector image at this zoom; draws it if made,
     // else asks for it.
     void draw_native(rap::painter& p, float alpha);

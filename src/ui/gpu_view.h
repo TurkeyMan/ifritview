@@ -10,8 +10,9 @@
 // Raw and HDR images are measured on the device when they arrive (their
 // peak, and how far from white they go in each hue), so the display
 // mapping compresses only what's there; and a classic histogram of what's
-// shown is counted there and drawn into the frame. None of it comes back
-// to the CPU.
+// shown is counted there and drawn into the frame. A compact noise snapshot
+// is read back once per source; a CPU worker shares the develop's table math,
+// then uploads the cached decode table. Image pixels stay on the device.
 
 #include "../config.h"
 #include "../detail.h"
@@ -29,6 +30,7 @@
 
 struct AdjustTables;
 struct DngColour;
+struct DetailNoise;
 struct Image;
 struct ImageDifference;
 struct LjpegParams;  // ljpeg.hlsli's block (gpu_view.cpp)
@@ -58,6 +60,9 @@ public:
         std::shared_ptr<const AdjustTables> adjust;  // the develop controls (adjust.h); null: none
         bool treated = false;                   // a raw's a Lightroom develop (Adjustments::treated): the camera's exposure, no automatic departure
         Detail detail;                          // noise reduction and sharpening, at the image's own resolution
+        // A worker calls this to schedule a viewer repaint when its tables are ready.
+        // Synchronous/headless callers leave it empty.
+        std::function<void()> detail_ready;
         rap::color background;
         bool checkerboard = false;  // under transparency
         int checker_size = 8;       // device pixels
@@ -92,11 +97,11 @@ public:
                            std::string& error);
 
     const std::shared_ptr<rap::gpu::device>& device() const { return device_; }
+    bool pending() const { return pending_; }  // a detail worker, not a GPU failure
     // The filtered path's first pass's target (--gpu-render reads it back).
     const rap::gpu::texture_ptr& first_pass() const { return rows_[0]; }
-    // --check-detail's off-centre case (detail.h's shaping_case()) on the
-    // GPU: detail.hlsl's DETAIL_SHAPING and DETAIL_TABLE against the CPU's.
-    // The failures.
+    // --check-detail's off-centre/quiet-axis fixtures: shared CPU tables,
+    // their GPU upload, reconstructed model and cache invalidations.
     int check_shaping();
     // --check-detail's: a raw's colour below 0 with some brightness (kept
     // to the display) measured as tone_map() is given it (stats.hlsl's
@@ -136,6 +141,14 @@ public:
 private:
     // An image on the device: level 0 (its data in linear light), the levels
     // made below it as zooming out needs them, and what showing it takes.
+    // Pin the buffer object (not a recyclable native handle/address), and
+    // invalidate even an in-place rewrite or a new source generation.
+    struct NoiseIdentity
+    {
+        rap::gpu::buffer_ptr buffer;
+        uint64_t generation = 0, revision = 0;
+        bool operator==(const NoiseIdentity&) const = default;
+    };
     struct Source
     {
         std::weak_ptr<Image> image;
@@ -178,17 +191,23 @@ private:
         rap::gpu::texture_ptr region;
         int region_at[4] = {};
         bool needs_mapping(bool adjusting) const { return tonable || measure_colour || adjusting || detailed.active(); }
-        // The decode's table (detail.hlsl's DETAIL_TABLE) and what the scales
-        // and the sharpening make of the noise it's from (DETAIL_SHAPING): per
-        // image, noise and setting, not per region; made for `table_for` of
-        // `table_noise`.
-        rap::gpu::texture_ptr detail_table, detail_shaping;
-        rap::gpu::buffer_ptr table_noise;
-        Detail table_for;
+        // Shared CPU tables, cached by immutable noise snapshot and full settings.
+        // Promise futures do not join a worker when a source is discarded.
+        rap::gpu::texture_ptr detail_table;
+        NoiseIdentity table_noise, cpu_noise_of, table_work_noise;
+        uint64_t noise_revision = 0;  // increment at every write to the noise buffer
+        NoiseIdentity noise_identity() const { return {noise, generation, noise_revision}; }
+        std::shared_future<std::shared_ptr<const DetailNoise>> cpu_noise;
+        std::shared_future<std::vector<float>> table_work;
+        Detail table_for, table_work_for;
+        std::shared_ptr<int> cpu_owner, table_owner;  // dropping/replacing it cancels stale work
+        unsigned noise_reads = 0, table_builds = 0;  // --check-detail cache checks
         size_t bytes() const;
     };
 
     bool programs(std::string& error);
+    bool pending_ = false;
+    bool prepare_detail_table(Source& s, const Detail& detail, std::function<void()> ready, std::string& error);
     // What view.hlsli's passes read: `image` (t0), the source's curve (t1),
     // `extra` (t2), and the frame's develop tables (t4, t5), uploaded once
     // each (the last two kept: A's and B's); blank where there's none.

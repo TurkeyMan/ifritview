@@ -67,3 +67,14 @@ The regression is the compiled GPU `--check-detail` shaping and quiet-axis
 table comparison against the production CPU model, including the active
 endpoint's 0.005-sigma bound. It exercises actual non-diagonal covariance
 and all six scales rather than only a diagonal multiplication example.
+
+## After the CPU table migration
+
+The current pixel program no longer contains the per-image TABLE or
+SHAPING runtime modes. Workers use the shared CPU shaping and decode-table
+implementation instead. The audited helper definitions remain in
+`detail.hlsli`, with the explicit component products and coarsest-scale
+`if` preserved; removing their old callers does not revert their semantics.
+The current `--check-detail` table gate checks the CPU snapshot/worker path,
+uploaded texture and quiet-axis control. The earlier GPU-table comparison
+above records the shader-semantic regression that motivated this audit.

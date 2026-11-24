@@ -39,6 +39,7 @@ if ($Step -eq 'configure') {
 }
 
 Run cmake @('--build', $build, '--config', 'Release', '--target', 'ifritview', '--parallel')
+Run python @('tools/check-shader-budget.py', "$build/shaders")
 & "$build\Release\ifritview.exe" --version
 if ($LASTEXITCODE) { throw 'ifritview --version failed' }
 Run "$build\Release\ifritview.exe" @('--check-camera-jpeg')
