@@ -37,6 +37,8 @@ public:
     // The settings, read on a thread of their own, which also sets the
     // decoders' options from them: the first image waits for that, not the UI.
     static std::shared_future<Config> read_settings();
+    // The camera-JPEG choice across in-flight results and navigation, without a window.
+    static int check_camera_jpeg(rap::ui& ui);
     ~App();
     // The file (and its folder) or folder to show. `first`, when given, is
     // the file already being decoded (from main), to open the window with.
@@ -488,4 +490,7 @@ private:
     void refit_after_pane_toggle();
     float pane_extra_ = 0;         // what the info pane adds to the window's width (learnt)
     float pane_toggled_from_ = 0;  // the width before the last toggle
+    // The JPEG read, also replaceable by the held decode in check_camera_jpeg.
+    std::function<bool(const std::string&, Image&)> camera_preview_ = [](const std::string& path, Image& out)
+    { return decode_preview(path, out); };
 };

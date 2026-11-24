@@ -41,6 +41,7 @@ if ($Step -eq 'configure') {
 Run cmake @('--build', $build, '--config', 'Release', '--target', 'ifritview', '--parallel')
 & "$build\Release\ifritview.exe" --version
 if ($LASTEXITCODE) { throw 'ifritview --version failed' }
+Run "$build\Release\ifritview.exe" @('--check-camera-jpeg')
 
 # Nothing but Windows: no runtime or library DLL may be needed beside it.
 Run python @('third_party/rapport/ci/check-imports.py', "$build\Release\ifritview.exe")

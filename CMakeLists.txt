@@ -244,6 +244,11 @@ if(WIN32)
 endif()
 if(IFRIT_RAPPORT_PLUGINS)
   target_compile_definitions(ifritview PRIVATE IFRIT_PLUGIN_DIR="${IFRIT_PLUGIN_DIR}")
+  # The App-level camera-mode regression runs without a display. Build the
+  # null backend beside the other plugins for this check, without packaging it.
+  if(TARGET rapport_null)
+    add_dependencies(ifritview rapport_null)
+  endif()
   set_target_properties(ifritview PROPERTIES INSTALL_RPATH "$ORIGIN/../${IFRIT_PLUGIN_DIR}")
   install(TARGETS rapport LIBRARY DESTINATION ${IFRIT_PLUGIN_DIR})
   set(IFRIT_PLUGINS "")
