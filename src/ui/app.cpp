@@ -113,6 +113,7 @@ App::~App()
 {
     // However the loop ended (quit() or not): the window's torn down after.
     quitting_ = true;
+    copied_timer_.reset();
     if (map_split_)
         map_split_->on_moved(nullptr);
     s_app = nullptr;
@@ -479,7 +480,10 @@ void App::build_ui()
                 .stretch(),
             hbox{
                 // Long names and details give way, so they never hold the window wide.
-                L::label{""}.ellipsize().bind(status_left_).stretch(),
+                status_filename(),
+                status_copy_button([this](const std::string& path) { ui_.set_clipboard(path); }),
+                L::label{""}.bind(status_notice_),
+                L::label{""}.ellipsize().bind(status_message_label_).stretch(),
                 L::label{""}.ellipsize().bind(status_center_),
                 L::label{""}.link([this] { open_url(location_url_); }).bind(status_location_),
                 L::label{""}.bind(status_right_),
@@ -729,6 +733,42 @@ std::shared_ptr<Image> App::edited_image()
     if (image_->has_alpha || !view_->drawn_on_gpu() || !view_->edited_pixels(image_, edited->pixels))
         edited->pixels = image_->adjusted_pixels(tables.get(), image_->adjust.detail);
     return edited;
+}
+
+// Use the selected file, not the decoded preview/stand-in or a page cache key.
+// No path resolution here: in particular, a UNC path stays a UNC path.
+std::string App::status_file_path() const
+{
+    return pasted_ ? std::string() : folder_.current();
+}
+
+rap::node App::status_filename()
+{
+    // Keep the plain label's shrinking/ellipsis behavior. The filename-click
+    // shortcut awaits Rapport support for an ellipsized clickable label.
+    return rap::layout::label{""}.ellipsize().bind(status_left_);
+}
+
+rap::node App::status_copy_button(std::function<void(const std::string&)> write)
+{
+    return rap::layout::tool_button{rap::icon::named("edit-copy-symbolic"), _("Copy full path")}
+        .on_click([this, write = std::move(write)] { copy_file_path_to(write); }).bind(status_copy_);
+}
+
+void App::copy_file_path_to(const std::function<void(const std::string&)>& write)
+{
+    const std::string path = status_file_path();
+    if (path.empty())
+        return;
+    write(path);
+    copied_path_ = path;
+    copied_timer_ = ui_.timer(1800, false,
+        [this]
+        {
+            copied_path_.clear();
+            update_status();
+        });
+    update_status();
 }
 
 void App::copy_to_clipboard()
@@ -1090,6 +1130,7 @@ void App::quit()
     // The window's torn down after: nothing the divider does from here is
     // the user's choice of the map's height.
     quitting_ = true;
+    copied_timer_.reset();
     if (map_split_)
         map_split_->on_moved(nullptr);
     flush_xmp();
@@ -2603,8 +2644,17 @@ void App::update_status()
         left = shown_name();
     else if (!folder_.empty())
         left = folder_.current_name() + "  (" + std::to_string(folder_.index() + 1) + " / " + std::to_string(folder_.count()) + ")";
-    if (!status_message_.empty())
-        left = status_message_;
+    const std::string path = status_file_path();
+    if (path != copied_path_)
+    {
+        copied_timer_.reset();
+        copied_path_.clear();
+    }
+    status_left_->set_enabled(!path.empty());
+    status_left_->set_tooltip(path);
+    status_copy_->set_enabled(!path.empty());
+    status_notice_->set_text(copied_path_.empty() ? "" : _("Copied"));
+    status_message_label_->set_text(status_message_);
     if (image_)
     {
         center = std::to_string(image_->width) + " × " + std::to_string(image_->height) + " × " + (image_->has_alpha ? "32" : "24") + " bpp";

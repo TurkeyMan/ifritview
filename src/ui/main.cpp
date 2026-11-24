@@ -983,7 +983,8 @@ int main(int argc, char** argv)
 
     rap::load_options options;
     const bool check_camera_jpeg = argc > 1 && std::strcmp(argv[1], "--check-camera-jpeg") == 0;
-    if (check_camera_jpeg)
+    const bool check_copy_path = argc > 1 && std::strcmp(argv[1], "--check-copy-path") == 0;
+    if (check_camera_jpeg || check_copy_path)
         options.backend = "null";
 #ifdef IFRIT_PLUGIN_DIR
     // The toolkit plugins: beside the exe in a build tree, and in
@@ -1010,9 +1011,9 @@ int main(int argc, char** argv)
     // the toolkit's loop; with Win32 there is no GLib loop to carry them.
     rap::ui& toolkit = **ui;
     platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
-    if (check_camera_jpeg)
+    if (check_camera_jpeg || check_copy_path)
     {
-        const int rc = App::check_camera_jpeg(toolkit);
+        const int rc = check_copy_path ? App::check_copy_path(toolkit) : App::check_camera_jpeg(toolkit);
         platform::set_main_dispatch([](std::function<void()>) {});
         return rc;
     }
