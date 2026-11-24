@@ -952,6 +952,104 @@ void App::script_instead(const std::string& what)
     show_instead(what == "jpeg" ? Instead::CameraJpeg : what == "libraw" ? Instead::LibRaw : Instead::Nothing);
 }
 
+int App::check_camera_jpeg(rap::ui& ui)
+{
+    using namespace std::chrono_literals;
+    Config cfg;
+    cfg.lens_correction = cfg.lens_downloads = cfg.animate = false;
+    cfg.map_tile_url.clear();
+    cfg.map_satellite_url.clear();
+    cfg.geocoder_url.clear();
+    std::promise<Config> settings;
+    settings.set_value(cfg);
+    App app(ui, settings.get_future().share());
+    int failed = 0;
+    const auto expect = [&](bool ok, const char* what)
+    {
+        std::printf("camera-JPEG: %s: %s\n", what, ok ? "ok" : "FAILED");
+        failed += !ok;
+    };
+    const auto raw = [](bool preview)
+    {
+        auto image = std::make_shared<Image>();
+        image->allocate(2, 2);
+        image->is_raw = true;
+        image->stage = preview ? Image::Stage::Preview : Image::Stage::Final;
+        return image;
+    };
+    std::mutex mutex;
+    std::condition_variable wake;
+    bool held = false, release = false;
+    app.camera_preview_ = [&](const std::string&, Image& image)
+    {
+        {
+            std::unique_lock lock(mutex);
+            held = true;
+            wake.notify_all();
+            wake.wait(lock, [&] { return release; });
+        }
+        image = *raw(true);
+        image.stand_in_full = true;
+        return true;
+    };
+    const auto drain = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + 10s;
+        while (app.preview_->running && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(1ms);
+        ui.run();
+    };
+
+    app.folder_.set_single("camera-mode-first.raw");
+    Loader::Result first{++app.load_generation_, app.current_key(), raw(true), {}};
+    first.preview = true;
+    app.on_loaded(first);
+    app.show_instead(Instead::CameraJpeg);
+    {
+        std::unique_lock lock(mutex);
+        expect(wake.wait_for(lock, 10s, [&] { return held; }), "JPEG request started during develop");
+    }
+    Loader::Result develop{app.load_generation_, app.current_key(), raw(false), {}};
+    app.on_loaded(develop);
+    expect(app.image_ == first.image && app.image_->is_preview(), "late develop cannot replace current JPEG choice");
+    {
+        std::lock_guard lock(mutex);
+        release = true;
+    }
+    wake.notify_all();
+    drain();
+    expect(app.instead_ == Instead::CameraJpeg && app.view_->image() != first.image.get() && app.view_->image()->stand_in_full,
+           "JPEG choice is displayed after develop completes");
+
+    // A foreground decode of the next raw started before the choice changed.
+    // There is no preview of that raw on screen yet: it must not flash its
+    // develop, or replace the selected mode, as this result reaches the app.
+    app.leave_image();
+    app.folder_.set_single("camera-mode-next.raw");
+    Loader::Result next{++app.load_generation_, app.current_key(), raw(false), {}};
+    app.on_loaded(next);
+    expect(app.view_->image() != next.image.get(), "late foreground develop is not presented on navigation");
+    // The camera JPEG requested for the new choice arrives. These fake paths
+    // have no files; move the generation on so a real loader refusal cannot
+    // interfere with the explicitly delivered result.
+    auto jpeg = raw(true);
+    jpeg->stand_in_full = true;
+    Loader::Result camera{++app.load_generation_, app.current_key(), jpeg, {}, true};
+    camera.stand_ins_only = true;
+    app.on_loaded(camera);
+    expect(app.instead_ == Instead::CameraJpeg, "choice remains selected after navigation");
+    expect(app.view_->image() == jpeg.get(), "next raw presents its camera JPEG");
+    app.folder_.set_single(first.path);
+    app.load_current();
+    expect(app.view_->image()->stand_in_full && app.image_key_ == first.path, "previous raw keeps JPEG mode through the cache");
+    app.folder_.set_single(next.path);
+    app.load_current();
+    expect(app.view_->image() == jpeg.get(), "next raw keeps JPEG mode through the cache");
+    drain();
+    app.quit();
+    return failed ? 1 : 0;
+}
+
 void App::script_compare(const std::string& how)
 {
     if (how == "swap")
@@ -1564,12 +1662,16 @@ void App::on_loaded(Loader::Result& r)
     // it's read again when wanted.
     if (r.stale)
         return;
-    // A raw's develop asked for before the camera's JPEG was chosen (a
-    // neighbour's, or the stand-in's on screen): neither kept nor shown.
-    if (instead_ == Instead::CameraJpeg && r.image && r.image->is_raw && !r.preview && !r.cached && !r.stand_ins_only &&
-        (r.prefetch || (image_ && image_key_ == r.path && image_->is_preview())))
+    // A raw's develop asked for before the camera's JPEG was chosen:
+    // neither kept nor shown. This includes a foreground decode of the
+    // next image, before it has a preview on screen; it is not a preview
+    // completion and must not replace the selected representation.
+    if (instead_ == Instead::CameraJpeg && r.image && r.image->is_raw && !r.preview && !r.cached && !r.stand_ins_only)
     {
         platform::trace("develop of %s dropped: the camera's JPEG is shown instead", key_text(r.path).c_str());
+        if (!r.prefetch && r.generation == load_generation_ && r.path == current_key() &&
+            (!image_ || image_key_ != r.path || !image_->is_preview()))
+            loader_.request(load_generation_, r.path);  // the foreground was asked for before the choice changed
         return;
     }
     if (r.image)
@@ -1908,7 +2010,7 @@ void App::show_instead()
             std::string error;
             bool ok;
             if (what == Instead::CameraJpeg)
-                ok = decode_preview(path, *other);
+                ok = camera_preview_(path, *other);
             else
             {
                 develop_raws_as_reference(true);

@@ -979,6 +979,9 @@ int main(int argc, char** argv)
     platform::trace("translations loaded");
 
     rap::load_options options;
+    const bool check_camera_jpeg = argc > 1 && std::strcmp(argv[1], "--check-camera-jpeg") == 0;
+    if (check_camera_jpeg)
+        options.backend = "null";
 #ifdef IFRIT_PLUGIN_DIR
     // The toolkit plugins: beside the exe in a build tree, and in
     // ../lib/.../ifritview once installed.
@@ -1004,6 +1007,12 @@ int main(int argc, char** argv)
     // the toolkit's loop; with Win32 there is no GLib loop to carry them.
     rap::ui& toolkit = **ui;
     platform::set_main_dispatch([&toolkit](std::function<void()> fn) { toolkit.post(std::move(fn)); });
+    if (check_camera_jpeg)
+    {
+        const int rc = App::check_camera_jpeg(toolkit);
+        platform::set_main_dispatch([](std::function<void()>) {});
+        return rc;
+    }
     const int rc = run_app(**ui, argc, argv, t_start, first.get(), settings);
     platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
     return rc;

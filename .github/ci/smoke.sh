@@ -136,6 +136,7 @@ grep -q '^\[camera-d (test)\]' "$store"/linearity.conf
 # a file's time is kept finer than the second; and one still coming in is
 # read again once it's changed (or its watch said so) and held still.
 "$build/ifritview" --check-loader "$smoke"
+"$build/ifritview" --check-camera-jpeg
 # Noise reduction's decode against its noise model: each end of the
 # shrinkage, each colour's own law, the pure-Poisson limit, a fit of linear
 # RGB, continuous in the sliders, the shrinkage's model against the
