@@ -596,12 +596,23 @@ bool GpuView::programs(std::string& error)
         *program = r.program;
     }
     histogram_ = device_->create_buffer(1032 * 4);
+    // Optional metadata still has a valid descriptor on every backend. Each
+    // layout has its own resource: D3D11 rejects a whole UAV binding call
+    // when two writable slots alias, even if one slot is unused by a shader.
+    no_clips_ = device_->create_buffer(kClipWords * 4);
+    no_levels_ = device_->create_buffer(kLevelsWords * 4);
+    no_corrections_ = device_->create_buffer(48 * 4);  // dng_opcodes.h's empty correction header
     blank_ = device_->create({1, 1, rap::gpu::format::r32f});
-    if (!histogram_ || !blank_)
+    if (!histogram_ || !blank_ || !no_clips_ || !no_levels_ || !no_corrections_)
     {
         error = "no room for the measures";
         return false;
     }
+    // No found/censored colours, no measured black levels, no correction
+    // operations. peak.hlsl interprets a missing white scale (0) as 1.
+    device_->clear(no_clips_, 0);
+    device_->clear(no_levels_, 0);
+    device_->clear(no_corrections_, 0);
     const float zero = 0;
     device_->upload(blank_, std::as_bytes(std::span(&zero, 1)), {1, rap::gpu::sample_type::f32});
     return true;
@@ -1240,7 +1251,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::pass c;
             c.program = develop_correct_;
             c.inputs = {sites};
-            c.buffers = {levels ? levels : histogram_, corrections};
+            c.buffers = {levels ? levels : no_levels_, corrections};
             c.uniforms = bytes(p);
             c.target = device_->create({m->width, m->height, whole ? rap::gpu::format::r16 : rap::gpu::format::r16f, 1, true});
             if (!c.target)
@@ -1263,7 +1274,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::pass c;
             c.program = develop_impulse_;
             c.inputs = {sites};
-            c.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};
+            c.buffers = {levels ? levels : no_levels_, corrections ? corrections : no_corrections_};
             c.uniforms = bytes(p);
             c.target = device_->create({m->width, m->height, halves ? rap::gpu::format::r16f : rap::gpu::format::r16, 1, true});
             if (!c.target)
@@ -1309,7 +1320,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::pass g;
             g.program = develop_green_;
             g.inputs = {sites};
-            g.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_};
+            g.buffers = {levels ? levels : no_levels_, corrections ? corrections : no_corrections_};
             g.uniforms = bytes(p);
             g.target = green = device_->create({m->width, m->height, rap::gpu::format::r16f, 1, true});
             if (!green)
@@ -1340,18 +1351,18 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::dispatch d[2];
             d[0].program = m->ycc.block_h ? clip_ycc_ : m->channels == 3 ? clip_linear_ : clip_;
             d[0].inputs = {sites};
-            d[0].buffers = {clips, levels ? levels : histogram_};
+            d[0].buffers = {clips, levels ? levels : no_levels_};
             d[0].uniforms = bytes(p);
             d[0].groups[0] = (m->width + 63) / 64;
             d[0].groups[1] = (m->height + 63) / 64;
             d[1].program = clip_find_;
-            d[1].buffers = {clips, levels ? levels : histogram_};
+            d[1].buffers = {clips, levels ? levels : no_levels_};
             d[1].uniforms = bytes(p);
             device_->run(std::span(d));
         }
         pass.program = m->ycc.block_h ? develop_ycc_ : m->channels == 3 ? develop_linear_ : develop_;
         pass.inputs = {sites, green ? green : sites};  // the second read only for X-Trans
-        pass.buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_, clips};  // the first two read only when there
+        pass.buffers = {levels ? levels : no_levels_, corrections ? corrections : no_corrections_, clips};  // the first two read only when there
         // A DNG whose lens is corrected (WarpRectilinear): the whole active
         // area developed as it lies, then warped into the framing as shown.
         const bool warp = corrections && (*m->corrections)[16] != 0;
@@ -1383,7 +1394,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::dispatch d[2];
             d[0].program = m->ycc.block_h ? develop_pile_ycc_ : m->channels == 3 ? develop_pile_linear_ : develop_pile_;
             d[0].inputs = {sites, green ? green : sites};
-            d[0].buffers = {clips, levels ? levels : histogram_, corrections ? corrections : histogram_};
+            d[0].buffers = {clips, levels ? levels : no_levels_, corrections ? corrections : no_corrections_};
             d[0].uniforms = bytes(p);
             d[0].groups[0] = (out->width() + 63) / 64;
             d[0].groups[1] = (out->height() + 63) / 64;
@@ -1407,7 +1418,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             rap::gpu::dispatch d[3];
             d[0].program = m->ycc.block_h ? develop_drift_ycc_ : m->channels == 3 ? develop_drift_linear_ : develop_drift_;
             d[0].inputs = {sites, green ? green : sites};
-            d[0].buffers = {clips, levels ? levels : histogram_, corrections ? corrections : histogram_, tiles};
+            d[0].buffers = {clips, levels ? levels : no_levels_, corrections ? corrections : no_corrections_, tiles};
             d[0].uniforms = bytes(p);
             d[0].groups[0] = (across + 7) / 8;
             d[0].groups[1] = (down + 7) / 8;
@@ -1460,7 +1471,7 @@ bool GpuView::upload(const Image& image, Source& s, std::string& error)
             std::vector<rap::gpu::pass> passes(1);
             passes[0].program = m->ycc.block_h ? develop_gather_ycc_ : m->channels == 3 ? develop_gather_linear_ : develop_gather_;
             passes[0].inputs = {sites, green ? green : sites, before ? before[0] : blank_, before ? before[1] : blank_};
-            passes[0].buffers = {levels ? levels : histogram_, corrections ? corrections : histogram_, clips};
+            passes[0].buffers = {levels ? levels : no_levels_, corrections ? corrections : no_corrections_, clips};
             passes[0].uniforms = bytes(q);
             passes[0].target = gathered;
             pushed.push_back(gathered);
@@ -1853,7 +1864,7 @@ void GpuView::measure_noise(Source& s)
     {
         d[i].program = noise_;
         d[i].inputs = {s.levels[0]};
-        d[i].buffers = {s.noise, s.clips ? s.clips : histogram_};
+        d[i].buffers = {s.noise, s.clips ? s.clips : no_clips_};
         d[i].uniforms = bytes(params[i]);
     }
     const int blocks = 16, lattice = 4;  // noise.hlsl's kFitLattice, kNoiseStride
@@ -2774,6 +2785,183 @@ int GpuView::check_negative_measures()
     return failed;
 }
 
+int GpuView::check_measures(const std::vector<std::string>& files, bool detail)
+{
+    constexpr int size = 16;
+    static constexpr float xyz[3][3] = {{.4124564f, .3575761f, .1804375f}, {.2126729f, .7151522f, .0721750f}, {.0193339f, .1191920f, .9503041f}};
+    int failed = check_negative_measures();
+    for (int fixture = 0; fixture < 5; ++fixture)
+    {
+        const char* name = fixture == 0 ? "SDR" : fixture == 1 ? "HDR" : fixture == 2 ? "raw without clips" : fixture == 3 ? "raw with clips" : "Bayer without optional metadata";
+        auto image = std::make_shared<Image>();
+        image->allocate(size, size);
+        Source source;
+        source.image = image;
+        source.generation = fixture + 10;
+        source.raw = source.auto_exposure = image->is_raw = fixture >= 2;
+        source.anchor = fixture >= 2 ? 1 : 0;
+        source.tonable = source.measure_colour = fixture == 1 || fixture >= 2;
+        source.stats = device_->create_buffer(kStatsWords * 4);
+        std::memcpy(source.input_to_xyz, xyz, sizeof xyz);
+        const float value = fixture == 1 ? 4.f : .25f;
+        if (fixture == 4)
+        {
+            auto mosaic = std::make_shared<RawMosaic>();
+            mosaic->width = mosaic->height = size;
+            mosaic->period = 2;
+            mosaic->filter[0] = 0, mosaic->filter[1] = mosaic->filter[2] = 1, mosaic->filter[3] = 2;
+            mosaic->crop[2] = mosaic->crop[3] = size;
+            for (int c = 0; c < 3; ++c)
+                mosaic->rgb_cam[c][c] = 1;
+            mosaic->data = std::make_shared<std::vector<uint16_t>>(size * size, 16384);
+            image->mosaic = mosaic;
+        }
+        else
+        {
+            auto texture = device_->create({size, size, rap::gpu::format::rgba32f});
+            std::vector<float> pixels(size * size * 4, value);
+            for (int i = 0; i < size * size; ++i)
+                pixels[i * 4 + 3] = 1;
+            if (!texture || !source.stats)
+                return failed + 1;
+            device_->upload(texture, std::as_bytes(std::span(pixels)), {4, rap::gpu::sample_type::f32});
+            source.levels = {texture};
+            if (fixture == 3)
+            {
+                source.clips = device_->create_buffer(kClipWords * 4);
+                if (!source.clips)
+                    return failed + 1;
+                device_->clear(source.clips, 0);
+                const float white = 1;
+                device_->upload(source.clips, std::as_bytes(std::span(&white, 1)), kClipWhite * 4);
+            }
+            shown_[0] = std::move(source);
+        }
+        Frame frame;
+        frame.width = frame.height = size;
+        frame.count_histogram = true;  // SDR otherwise needs no measurement.
+        frame.front = FrontBuffer::ScRgb16;
+        frame.treated = true;
+        rap::gpu::texture_ptr out;
+        rap::gpu::ticket ready;
+        rap::frame_color colour;
+        std::string error;
+        if (!render(image, fixture + 10, frame, out, ready, colour, error))
+        {
+            std::fprintf(stderr, "check-measures: %s: %s\n", name, error.c_str());
+            return failed + 1;
+        }
+        ready.wait();
+        std::vector<uint32_t> words(kStatsWords);
+        device_->readback(shown_[0].stats, std::as_writable_bytes(std::span(words))).wait();
+        const auto at = [&](uint32_t index) { float f; std::memcpy(&f, &words[index], 4); return f; };
+        const float maximum = at(kStatsMaximum), peak = at(kStatsPeak);
+        const bool ok = !device_->lost() && words[kStatsCount] == size * size && words[kStatsOpaque] == size * size &&
+                        std::isfinite(maximum) && std::fabs(maximum - value) < .001f && std::isfinite(peak) && std::fabs(peak - maximum) < .001f;
+        std::printf("%s measures %s: count %u, opaque %u, maximum %.8g, peak %.8g\n", ok ? "ok    " : "FAILED", name,
+                    words[kStatsCount], words[kStatsOpaque], maximum, peak);
+        failed += !ok;
+        shown_[0] = Source{};
+    }
+    // Optional real decoded files exercise exactly the same upload/measurement
+    // path under the debug device too. Count the histogram so an SDR JPEG's
+    // deliberately optional measures are requested, without changing its edit.
+    for (const auto& file : files)
+    {
+        auto image = std::make_shared<Image>();
+        std::string error;
+        if (!decode_image(file, *image, error))
+        {
+            std::fprintf(stderr, "check-measures: %s: %s\n", file.c_str(), error.c_str());
+            return failed + 1;
+        }
+        Frame frame;
+        frame.zoom = .25;  // the normal six-image --gpu-render artifact gate geometry
+        frame.width = std::max(1, int(std::ceil(image->width * frame.zoom)));
+        frame.height = std::max(1, int(std::ceil(image->height * frame.zoom)));
+        frame.background = rap::color{38, 38, 38};  // match --gpu-render, including frame-edge pixels
+        frame.count_histogram = true;
+        frame.front = FrontBuffer::ScRgb16;
+        edit_of(*image, frame);
+        // Default numeric checks isolate upload/statistics. The explicit
+        // detail gate uses the same defaults/override as --gpu-render.
+        frame.detail = {};
+        auto signal = std::make_shared<std::promise<void>>();
+        const auto signalled = signal->get_future();
+        auto wakes = std::make_shared<std::atomic<unsigned>>(0);
+        if (detail)
+        {
+            frame.detail = image->opening_adjust(false).detail;
+            if (const char* nr = std::getenv("IFRIT_RENDER_NR"))
+                std::sscanf(nr, "%lf,%lf", &frame.detail.luminance, &frame.detail.colour);
+            // A real viewer-style completion callback, without a window.
+            frame.detail_ready = [signal, wakes]
+            {
+                if (wakes->fetch_add(1) == 0)
+                    signal->set_value();
+            };
+        }
+        std::printf("check-measures: %s detail L%g C%g sharpness%g\n", file.c_str(),
+                    frame.detail.luminance, frame.detail.colour, frame.detail.sharpness);
+        rap::gpu::texture_ptr out;
+        rap::gpu::ticket ready;
+        rap::frame_color colour;
+        bool rendered = render(image, 100, frame, out, ready, colour, error);
+        if (!rendered && pending_ && detail)
+        {
+            std::printf("check-measures: pending detail, waiting for completion callback: %s\n", file.c_str());
+            if (signalled.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+            {
+                std::fprintf(stderr, "check-measures: %s: detail completion callback timed out\n", file.c_str());
+                return failed + 1;
+            }
+            rendered = render(image, 100, frame, out, ready, colour, error);
+        }
+        if (!rendered)
+        {
+            std::fprintf(stderr, "check-measures: %s: %s\n", file.c_str(), error.c_str());
+            return failed + 1;
+        }
+        ready.wait();
+        std::vector<uint32_t> words(kStatsWords);
+        device_->readback(shown_[0].stats, std::as_writable_bytes(std::span(words))).wait();
+        float maximum, peak;
+        std::memcpy(&maximum, &words[kStatsMaximum], 4);
+        std::memcpy(&peak, &words[kStatsPeak], 4);
+        std::vector<uint16_t> pixels(size_t(out->width()) * out->height() * 4);
+        device_->readback(out, std::as_writable_bytes(std::span(pixels)), size_t(out->width()) * 8).wait();
+        unsigned nonfinite = 0;
+        for (const auto v : pixels)
+            nonfinite += !std::isfinite(half_to_float(v));
+        // Hash exactly the RGB half-floats --gpu-render writes to PFM:
+        // bottom row first, excluding alpha and any reusable target padding.
+        uint64_t hash = 14695981039346656037ull;
+        for (int y = frame.height - 1; y >= 0; --y)
+            for (int x = 0; x < frame.width; ++x)
+                for (int c = 0; c < 3; ++c)
+                {
+                    const uint16_t v = pixels[(size_t(y) * out->width() + x) * 4 + c];
+                    hash = (hash ^ (v & 255)) * 1099511628211ull;
+                    hash = (hash ^ (v >> 8)) * 1099511628211ull;
+                }
+        const Source& measured = shown_[0];
+        unsigned fitted = 0;
+        if (measured.cpu_noise.valid() && measured.cpu_noise.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            if (const auto noise = measured.cpu_noise.get())
+                fitted = unsigned(noise->model.fitted_colours);
+        std::printf("check-measures: source level0 %dx%d, output %dx%d zoom %.8g RGB16 FNV1a %016llx, completion wakes %u, fitted colours %u, noise reads %u, table builds %u\n",
+                    measured.levels[0]->width(), measured.levels[0]->height(), frame.width, frame.height, frame.zoom,
+                    static_cast<unsigned long long>(hash), wakes->load(), fitted, measured.noise_reads, measured.table_builds);
+        const bool ok = !device_->lost() && words[kStatsCount] > 0 && std::isfinite(maximum) && maximum > 0 &&
+                        std::isfinite(peak) && peak > 0 && peak <= maximum && nonfinite == 0;
+        std::printf("%s decoded %s (%s): count %u, maximum %.8g, peak %.8g, nonfinite %u\n", ok ? "ok    " : "FAILED", file.c_str(),
+                    image->format.c_str(), words[kStatsCount], maximum, peak, nonfinite);
+        failed += !ok;
+        shown_[0] = Source{};
+    }
+    return failed;
+}
+
 int GpuView::check_display_model()
 {
     constexpr int n = 256;
@@ -3237,7 +3425,10 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     {
         d[i].program = i == 0 ? stats_program_ : peak_;
         d[i].inputs = view_inputs(counted, s, nullptr);
-        d[i].buffers = {histogram_, s.stats, s.clips ? s.clips : histogram_};
+        // stats.hlsl uses only u1; peak.hlsl additionally reads clip metadata
+        // at u2. Leave unused u0 unbound instead of aliasing a writable slot.
+        d[i].buffers = i == 0 ? std::vector<rap::gpu::buffer_ptr>{nullptr, s.stats}
+                              : std::vector<rap::gpu::buffer_ptr>{nullptr, s.stats, s.clips ? s.clips : no_clips_};
         d[i].uniforms = params;  // copied at run()
         d[i].groups[0] = i == 1 ? 1 : (counted->width() + 15) / 16;
         d[i].groups[1] = i == 1 ? 1 : (counted->height() + 15) / 16;
@@ -3245,13 +3436,14 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
     device_->run(std::span(d));
     s.measured = true;
     s.mapping_measured = mapping;
-    if (s.auto_exposure && std::getenv("IFRIT_TRACE"))
+    if (std::getenv("IFRIT_TRACE"))
     {
         // (Read back once they're made: the exposure and what it came from.)
         auto read = std::make_shared<std::vector<std::byte>>(kStatsWords * 4);
         const float anchor = s.anchor, white = s.white_luminance;
+        const bool raw = s.auto_exposure;
         device_->readback(s.stats, *read,
-                          [read, anchor, white]
+                          [read, anchor, white, raw]
                           {
                               const auto at = [&](uint32_t i)
                               {
@@ -3259,6 +3451,11 @@ void GpuView::measure(Source& s, std::span<const std::byte> params, bool always)
                                   std::memcpy(&f, read->data() + i * 4, 4);
                                   return f;
                               };
+                              uint32_t count = 0;
+                              std::memcpy(&count, read->data() + kStatsCount * 4, 4);
+                              std::fprintf(stderr, "gpu: source measures: %u pixels, maximum %.8g, peak %.8g\n", count, at(kStatsMaximum), at(kStatsPeak));
+                              if (!raw)
+                                  return;
                               const float average = at(kStatsAverage), adapting = at(kStatsAdapting), key = at(kStatsKey), gain = at(kStatsAutoGain);
                               std::fprintf(stderr,
                                            "gpu: exposure %+.2f EV from the camera's (gain %.4g, anchor %.4g): white %.4g cd/m2, L_A %.4g cd/m2 "
