@@ -76,7 +76,27 @@ View::View(rap::ui& ui, const Config& cfg) : ui_(ui), cfg_(cfg) {}
 
 View::~View()
 {
+    alive_.invalidate();  // queued completions may still pin the lifetime token
     drop_outgoing();
+}
+
+int View::check_lifetime()
+{
+    // A different queued callback retains the token: weak expiration alone
+    // would therefore let the detail repaint access a destroyed view.
+    std::shared_ptr<bool> queued_pin;
+    std::function<void()> repaint;
+    unsigned paints = 0;
+    {
+        Lifetime view_lifetime;
+        queued_pin = view_lifetime.token;
+        repaint = view_lifetime.guard([&paints] { ++paints; });
+        repaint();
+    }  // the same lifetime member destroyed with a View
+    repaint();
+    const bool ok = queued_pin && !*queued_pin && paints == 1;
+    std::printf("%s view completion lifetime, pinned queued callback canceled\n", ok ? "ok    " : "FAILED");
+    return !ok;
 }
 
 rap::node View::node()
@@ -941,7 +961,7 @@ void View::draw_native(rap::painter& p, float alpha)
     native_busy_ = true;
     const double x = (dx0 - pan_x_) / zoom_, y = (dy0 - pan_y_) / zoom_, z = zoom_;
     const int w = dx1 - dx0, h = dy1 - dy0;
-    std::weak_ptr<bool> alive = alive_;
+    std::weak_ptr<bool> alive = alive_.token;
     std::thread(
         [this, alive, want, z, x, y, w, h]
         {
@@ -951,7 +971,7 @@ void View::draw_native(rap::painter& p, float alpha)
             platform::post_main(
                 [this, alive, want, z, x, y, w, h, px, ok]
                 {
-                    if (alive.expired())
+                    if (const auto keep = alive.lock(); !keep || !*keep)
                         return;
                     native_busy_ = false;
                     if (ok && image_ && image_->vector == want)
@@ -1270,6 +1290,16 @@ bool View::draw_on_gpu(rap::color background)
         f.panel[2] = w;
         f.panel[3] = h;
     }
+    f.detail_ready = [alive = std::weak_ptr<bool>(alive_.token),
+                      completion = alive_.guard([this]
+                      {
+                          gpu_drawn_ = {};
+                          invalidate();
+                      })]
+    {
+        if (!alive.expired())
+            platform::post_main(completion);
+    };
     rap::gpu::texture_ptr frame;
     rap::gpu::ticket ready;
     rap::frame_color colour;
@@ -1294,6 +1324,8 @@ bool View::draw_on_gpu(rap::color background)
         drawn = gpu_->render(image_, image_->generation, f, frame, ready, colour, error);
     if (!drawn)
     {
+        if (gpu_->pending())
+            return true;  // keep the last frame/preview until the worker repaints
         if (std::getenv("IFRIT_TRACE"))
             std::fprintf(stderr, "gpu view: %s\n", error.c_str());
         if (gpu_shown_)
@@ -1325,9 +1357,9 @@ bool View::draw_on_gpu(rap::color background)
         draw_histogram_panel();
         if (on_histogram_details)
             gpu_->read_details(
-                [this, alive = alive_](const GpuView::Details& d)
+                [this, alive = alive_.token](const GpuView::Details& d)
                 {
-                    ui_.post(
+                    platform::post_main(
                         [this, alive, d]
                         {
                             if (*alive && on_histogram_details)

@@ -952,7 +952,7 @@ int main(int argc, char** argv)
     if (argc > 1 && std::strcmp(argv[1], "--check-detail") == 0)
     {
         // The CPU's, then the GPU's part of it, where there's a GPU.
-        int failed = check_detail();
+        int failed = check_detail() + View::check_lifetime();
         if (auto device = rap::gpu::device::headless())
         {
             GpuView view(device);

@@ -250,6 +250,15 @@ float inverse(float e, float offset)
     return e >= r ? e * e - offset : offset - (2 * r - e) * (2 * r - e);
 }
 
+// The table ordinate and f's inverse are close in a quiet colour. Form
+// f's inverse in double before taking their difference; promoting an
+// already-rounded float inverse cannot recover that residual.
+double inverse_precise(double e, double offset)
+{
+    const double r = std::sqrt(offset);
+    return e >= r ? e * e - offset : offset - (2 * r - e) * (2 * r - e);
+}
+
 // shaders/detail.hlsli's encode: each channel stabilised, then luminance
 // and the colour differences.
 void encode(const NoiseModel& m, const float* rgb, float out[3])
@@ -345,17 +354,32 @@ void tabulate_noise(NoiseModel& m)
     }
 }
 
-// shaders/detail.hlsl's expectation_inverse(): colour c's, at stabilised d.
+namespace
+{
+// Residual of the existing tabulated expectation inverse from f's own
+// inverse. The stored float ordinates remain the model's data; only their
+// interpolation and the inverse operand are evaluated in double. Outside
+// the table, continue its endpoint residual directly, without adding and
+// subtracting the pixel's own level again.
+double expectation_shift(const NoiseModel& m, double d, int c)
+{
+    const double offset = m.offset[c], first = m.from[c], last = m.to[c];
+    const double t = (d - first) / (last - first) * (NoiseModel::kInverse - 1);
+    if (t <= 0)
+        return double(m.inverse[c][0]) - inverse_precise(first, offset);
+    if (t >= NoiseModel::kInverse - 1)
+        return double(m.inverse[c][NoiseModel::kInverse - 1]) - inverse_precise(last, offset);
+    const int i = int(t);
+    const double full = double(m.inverse[c][i]) + (double(m.inverse[c][i + 1]) - m.inverse[c][i]) * (t - i);
+    return full - inverse_precise(d, offset);
+}
+}
+
+// Same public float result, with no avoidable float subtraction of nearly
+// equal levels inside the shared CPU calculation.
 float noise_expectation_inverse(const NoiseModel& m, float d, int c)
 {
-    const float offset = m.offset[c];
-    const float t = (d - m.from[c]) / (m.to[c] - m.from[c]) * (NoiseModel::kInverse - 1);
-    if (t <= 0)
-        return inverse(d, offset) + m.inverse[c][0] - inverse(m.from[c], offset);
-    if (t >= NoiseModel::kInverse - 1)
-        return inverse(d, offset) + m.inverse[c][NoiseModel::kInverse - 1] - inverse(m.to[c], offset);
-    const int i = int(t);
-    return m.inverse[c][i] + (m.inverse[c][i + 1] - m.inverse[c][i]) * (t - i);
+    return float(inverse_precise(d, m.offset[c]) + expectation_shift(m, d, c));
 }
 
 namespace
@@ -1368,8 +1392,8 @@ void noise_kept(const NoiseModel& m, const float y[3], const float tl[5], const 
 // the sharpening can leave it, moves it the other way).
 float noise_decode(const NoiseModel& m, float d, int c, float kept)
 {
-    const float own = inverse(d, m.offset[c]);
-    return own + (1 - kept) * (noise_expectation_inverse(m, d, c) - own);
+    const double own = inverse_precise(d, m.offset[c]);
+    return float(own + (1.0 - double(kept)) * expectation_shift(m, d, c));
 }
 
 // shaders/detail.hlsl's DETAIL_TABLE: at each inverse table entry's
@@ -1380,13 +1404,18 @@ void noise_decode_table(const NoiseModel& m, const float tl[5], const float tc[5
     for (int i = 0; i < NoiseModel::kInverse; ++i)
     {
         float y[3], kept[3];
+        double own[3];
         for (int c = 0; c < 3; ++c)
-            y[c] = inverse(m.from[c] + (m.to[c] - m.from[c]) * float(i) / (NoiseModel::kInverse - 1), m.offset[c]);
+        {
+            const double d = double(m.from[c]) + (double(m.to[c]) - m.from[c]) * double(i) / (NoiseModel::kInverse - 1);
+            own[c] = inverse_precise(d, m.offset[c]);
+            y[c] = float(own[c]);  // the covariance/shrinker model remains float
+        }
         for (int c = 0; c < 3; ++c)
         {
             const float at[3] = {y[c], y[c], y[c]};
             noise_kept(m, at, tl, tc, shaping, kept);
-            shift[c][i] = (1 - kept[c]) * (m.inverse[c][i] - y[c]);
+            shift[c][i] = float((1.0 - double(kept[c])) * (double(m.inverse[c][i]) - own[c]));
         }
     }
 }
@@ -2310,6 +2339,73 @@ int check_detail()
             report(what, kept[c] - exact[c], 0, 2e-4);
         }
     }
+    // Quiet-table entries that expose subtracting two rounded float levels
+    // (RTX table993/1020), plus the active shadow and near-identity gains.
+    // Long-double control evaluates the *same stored table*, not a new
+    // asymptotic noise model. On MSVC long double has double precision;
+    // Linux also checks this against its wider long-double arithmetic.
+    for (bool quiet : {false, true})
+    {
+        const NoiseModel m = quiet ? quiet_axis_case() : shaping_case(false);
+        Detail d;
+        d.luminance = d.colour = 1;
+        const DetailFilter f(d);
+        const NoiseShaping shape = noise_shaping(&m, &f);
+        float tl[5], tc[5], table[3][NoiseModel::kInverse];
+        for (int j = 0; j < 5; ++j)
+            tl[j] = f.luminance[j] * .01f, tc[j] = f.colour[j] * .02f;
+        noise_decode_table(m, tl, tc, shape, table);
+        const auto own_of = [](long double e, long double offset)
+        {
+            const long double r = std::sqrt(offset);
+            return e >= r ? e * e - offset : offset - (2 * r - e) * (2 * r - e);
+        };
+        const auto full_of = [&](long double e, int c)
+        {
+            const long double first = m.from[c], last = m.to[c];
+            const long double t = (e - first) / (last - first) * (NoiseModel::kInverse - 1);
+            if (t <= 0)
+                return own_of(e, m.offset[c]) + static_cast<long double>(m.inverse[c][0]) - own_of(first, m.offset[c]);
+            if (t >= NoiseModel::kInverse - 1)
+                return own_of(e, m.offset[c]) + static_cast<long double>(m.inverse[c][NoiseModel::kInverse - 1]) - own_of(last, m.offset[c]);
+            const int i = int(t);
+            return static_cast<long double>(m.inverse[c][i])
+                + (static_cast<long double>(m.inverse[c][i + 1]) - m.inverse[c][i]) * (t - i);
+        };
+        long double table_error = 0, direct_error = 0;
+        for (int c = 0; c < 3; ++c)
+        {
+            const float active = forward(.0003f, m.offset[c]);
+            const int active_i = std::clamp(int((active - m.from[c]) / (m.to[c] - m.from[c]) * (NoiseModel::kInverse - 1)), 0, NoiseModel::kInverse - 1);
+            for (int i : {active_i, 993, 1020})
+            {
+                const long double grid = static_cast<long double>(m.from[c])
+                    + (static_cast<long double>(m.to[c]) - m.from[c]) * i / (NoiseModel::kInverse - 1);
+                const long double own = own_of(grid, m.offset[c]);
+                const float at[3] = {float(own), float(own), float(own)};
+                float kept[3];
+                noise_kept(m, at, tl, tc, shape, kept);
+                const long double sigma = std::sqrt(static_cast<long double>(m.law_a[c]) * std::max(own, 0.0L) + m.law_b[c]);
+                const long double expected = (1 - static_cast<long double>(kept[c])) * (static_cast<long double>(m.inverse[c][i]) - own);
+                table_error = std::max(table_error, std::fabs(static_cast<long double>(table[c][i]) - expected) / sigma);
+                const float e = i == active_i ? active : float(grid);
+                const long double direct_own = own_of(e, m.offset[c]);
+                const long double full = full_of(e, c);
+                for (float gain : {1.f - 1e-6f, 1.f, 1.f + 1e-6f, 42.f})
+                {
+                    const long double want = direct_own + (1 - static_cast<long double>(gain)) * (full - direct_own);
+                    const float got = noise_decode(m, e, c, gain);
+                    direct_error = std::max(direct_error, std::fabs(static_cast<long double>(got) - want) / sigma);
+                }
+            }
+        }
+        char what[128];
+        std::snprintf(what, sizeof what, "%s residual table: active/993/1020 against long-double model, sigma", quiet ? "quiet" : "ordinary");
+        report(what, double(table_error), 0, 1e-6);
+        std::snprintf(what, sizeof what, "%s direct residual: near identity/42 against long-double model, sigma", quiet ? "quiet" : "ordinary");
+        report(what, double(direct_error), 0, 1e-4);
+    }
+
     // The production active-endpoint case: blue has 1/10000 the shot
     // noise. Forming B^1/2 S B^1/2 in float lost that axis and decoded it
     // 0.28 sigma away from a double-precision transport control.
