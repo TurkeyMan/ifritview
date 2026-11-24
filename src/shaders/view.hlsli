@@ -283,9 +283,19 @@ float table_chroma(float L, float u)
     return lerp(lo, hi, fv);
 }
 
+// A chromatic colour's Oklab hue. A neutral has no hue and no chroma
+// extent, so any table column represents it; use column zero without
+// evaluating atan2(0,0). Nonzero chroma keeps its exact original hue.
+float volume_hue(float2 chroma)
+{
+    if (any(chroma != 0))
+        return atan2(chroma.y, chroma.x);
+    return 0;
+}
+
 float boundary_column(float2 dir)
 {
-    return frac(atan2(dir.y, dir.x) / kTwoPi + 1) * kBoundaryHues;
+    return frac(volume_hue(dir) / kTwoPi + 1) * kBoundaryHues;
 }
 
 // The display's white's Oklab lightness.
@@ -428,7 +438,7 @@ float3 fit_volume(float3 o)
     if (c < 1e-5)
         return fits_display(rgb_from_oklab(o), display_peak) ? o : float3(clamp(o.x, 0.0, white_l()), 0, 0);
     const float2 dir = o.yz / c;
-    const float h = atan2(dir.y, dir.x), limit = volume_limit(h, o.x);
+    const float h = volume_hue(dir), limit = volume_limit(h, o.x);
     float3 r = fit_with(o, limit);
     if (least_slope() > 0)
     {
@@ -518,7 +528,7 @@ float3 tone_map(float3 c)
                 const float c = length(o.yz);
                 float from;
                 g_volume_x = c < 1e-5 ? 0 : edge_x(o.x, c, o.yz / c, from);
-                g_volume_hue = atan2(o.z, o.y);
+                g_volume_hue = volume_hue(o.yz);
                 g_volume_l = o.x;
                 // --check-detail compares this per-pixel extent with the
                 // measurement pass, including signed nonraw inputs.

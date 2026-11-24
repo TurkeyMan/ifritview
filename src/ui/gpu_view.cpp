@@ -25,6 +25,7 @@
 #include "shaders/compose.h"
 #include "shaders/decode.h"
 #include "shaders/detail.h"
+#include "shaders/perceived_check.h"
 #include "shaders/develop.h"
 #include "shaders/develop_linear.h"
 #include "shaders/develop_correct.h"
@@ -2217,6 +2218,135 @@ int GpuView::check_negative_measures()
         std::printf("%s signed nonraw measures: extent %.7g, tone_map extent %.7g\n", extent_ok ? "ok    " : "FAILED", extent, composed);
     }
     return failed;
+}
+
+int GpuView::check_display_model()
+{
+    constexpr int n = 256;
+    auto probe = device_->compute_program(shaders::perceived_check());
+    auto input = device_->create({n, 1, rap::gpu::format::rgba32f});
+    auto result = device_->create_buffer(n * 48);
+    if (!probe.program || !input || !result)
+    {
+        std::fprintf(stderr, "check-volume: display-model probe: %s\n", probe.error.c_str());
+        return 1;
+    }
+    std::vector<float> values(n * 4, 1);
+    uint32_t state = 827;
+    for (int i = 0; i < n; ++i)
+        for (int c = 0; c < 3; ++c)
+        {
+            state = state * 1664525u + 1013904223u;
+            values[i * 4 + c] = float(state >> 8) / 16777216.f * .05f;
+        }
+    for (int c = 0; c < 3; ++c)
+    {
+        values[c] = 0;
+        values[4 + c] = .18f;
+        values[8 + c] = 1;
+    }
+    // Exact and near-neutral colours, including both signs of chroma.
+    for (int i = 3; i < 19; ++i)
+    {
+        const float d = (i - 11) * 1e-7f;
+        values[i * 4] = .25f + d, values[i * 4 + 1] = .25f, values[i * 4 + 2] = .25f - d;
+    }
+    device_->upload(input, std::as_bytes(std::span(values)), {4, rap::gpu::sample_type::f32});
+    rap::gpu::dispatch pass;
+    pass.program = probe.program;
+    pass.inputs = {input};
+    pass.buffers = {result};
+    pass.groups[0] = n / 64;
+    device_->run(std::span(&pass, 1));
+    std::vector<float> got(n * 12);
+    device_->readback(result, std::as_writable_bytes(std::span(got))).wait();
+    if (device_->lost())
+        return 1;
+    int failures = 0;
+    float worst = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        const float* at = got.data() + i * 12;
+        bool ok = std::isfinite(at[0]) && at[4] == 1 && at[5] == 1 && at[6] == 0;
+        for (int c = 8; c < 12; ++c) ok = ok && std::isfinite(at[c]);
+        ok = ok && at[8] == 0 && at[9] == 0 && std::fabs(at[10] - .7853981634f) < 1e-6f;
+        if (i == 0) ok = ok && std::fabs(at[0]) < 1e-4f;
+        if (i == 2) ok = ok && std::fabs(at[0] - 100) < 1e-4f;
+        for (int c = 0; c < 3; ++c)
+        {
+            const float v = at[1 + c], off = std::fabs(v - values[i * 4 + c]);
+            worst = std::max(worst, off);
+            ok = ok && std::isfinite(v) && off < 2e-4f;
+        }
+        if (!ok && ++failures <= 5)
+            std::fprintf(stderr, "check-volume: display model case %d L** %.8g, finite/bracket %.0f/%.0f, isotropic %.8g/%.8g/%.8g\n",
+                         i, at[0], at[4], at[5], at[8], at[9], at[10]);
+    }
+    std::printf("display model: %s, %d GPU neutral/near-neutral/colour cases, max identity error %.8g\n",
+                failures ? "FAILED" : "ok", n, worst);
+
+    // A developed dark raw: independent signed readout noise about a small
+    // positive signal, plus a bright reference. Exercise tone_input, raw
+    // exposure/curve/volume measurement and final composition together.
+    constexpr int size = 64;
+    auto image = std::make_shared<Image>();
+    image->allocate(size, size);
+    image->is_raw = true;
+    auto pixels = device_->create({size, size, rap::gpu::format::rgba32f});
+    Source dark;
+    dark.image = image;
+    dark.generation = 1;
+    dark.raw = dark.tonable = dark.auto_exposure = true;
+    dark.anchor = 2;
+    dark.stats = device_->create_buffer(kStatsWords * 4);
+    if (!pixels || !dark.stats)
+        return failures + 1;
+    static constexpr float xyz[3][3] = {{.4124564f, .3575761f, .1804375f}, {.2126729f, .7151522f, .0721750f}, {.0193339f, .1191920f, .9503041f}};
+    std::memcpy(dark.input_to_xyz, xyz, sizeof xyz);
+    std::vector<float> noisy(size * size * 4, 1);
+    for (int i = 0; i < size * size; ++i)
+        for (int c = 0; c < 3; ++c)
+        {
+            state = state * 1664525u + 1013904223u;
+            noisy[i * 4 + c] = .0003f + .0008f * (float(state >> 8) / 16777216.f - .5f);
+        }
+    noisy[0] = .8f, noisy[1] = .6f, noisy[2] = .3f;
+    device_->upload(pixels, std::as_bytes(std::span(noisy)), {4, rap::gpu::sample_type::f32});
+    dark.levels = {pixels};
+    shown_[0] = std::move(dark);
+    Frame frame;
+    frame.width = frame.height = size;
+    frame.treated = true;
+    frame.front = FrontBuffer::ScRgb16;
+    rap::gpu::texture_ptr output;
+    rap::gpu::ticket ready;
+    rap::frame_color colour;
+    std::string error;
+    if (!render(image, 1, frame, output, ready, colour, error))
+    {
+        std::fprintf(stderr, "check-volume: noisy dark raw: %s\n", error.c_str());
+        return failures + 1;
+    }
+    ready.wait();
+    std::vector<uint16_t> rendered(size * size * 4);
+    device_->readback(output, std::as_writable_bytes(std::span(rendered)), size * 8).wait();
+    shown_[0] = Source{};
+    if (device_->lost())
+        return failures + 1;
+    int nonfinite = 0, outliers = 0;
+    float maximum = 0;
+    for (int i = 1; i < size * size; ++i)
+        for (int c = 0; c < 3; ++c)
+        {
+            const float v = half_to_float(rendered[i * 4 + c]);
+            nonfinite += !std::isfinite(v);
+            outliers += std::fabs(v) > .05f;
+            maximum = std::max(maximum, std::fabs(v));
+        }
+    failures += nonfinite != 0 || outliers != 0;
+    std::printf("noisy dark raw display: %s, %d nonfinite, %d >0.05 channel outliers, max %.8g\n",
+                nonfinite || outliers ? "FAILED" : "ok", nonfinite, outliers, maximum);
+    return failures;
 }
 
 rap::gpu::texture_ptr GpuView::detail_region(Source& s, int x0, int y0, int x1, int y1, int& ox, int& oy)

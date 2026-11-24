@@ -554,6 +554,8 @@ float detail_tail(float t)
     return 0.5 * e;
 }
 
+#include "detail_frame.hlsli"
+
 // Of one scale's coefficients' covariance `s` (L, Cr, Cb), what the
 // shrinkage at thresholds `tl` (luminance) and `tc` (the colour pair's
 // length) keeps.
@@ -574,7 +576,7 @@ float3x3 detail_retained(float3x3 s, float tl, float tc, out float3x3 gain)
     const float l1 = half_ + root, l2 = max(half_ - root, 0.0);
     if (l1 > 0)
     {
-        const float angle = 0.5 * atan2(2 * s[1][2], s[1][1] - s[2][2]);
+        const float angle = detail_colour_angle(s[1][1], s[1][2], s[2][2]);
         const float2 v1 = float2(cos(angle), sin(angle)), v2 = float2(-v1.y, v1.x);
         const float4 m = detail_shrink_moments(tc / sqrt(l1), l2 / l1);
         const float2x2 kept = l1 * (m.x * float2x2(v1.x * v1, v1.y * v1) + m.y * float2x2(v2.x * v2, v2.y * v2));

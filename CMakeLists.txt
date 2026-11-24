@@ -453,7 +453,7 @@ if(RAPPORT_SHADER_COMPILER)
   # The view on the GPU.
   target_sources(ifritview PRIVATE src/ui/gpu_view.cpp)
   set(IFRIT_SHADER_INCLUDES src/shaders/resample.hlsli src/shaders/srgb.hlsli src/shaders/display.hlsli src/shaders/edit.hlsli src/shaders/view.hlsli src/shaders/histogram.hlsli
-      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli src/shaders/exposure.hlsli src/shaders/estimate.hlsli
+      src/shaders/ljpeg.hlsli src/shaders/detail.hlsli src/shaders/detail_frame.hlsli src/shaders/stats_layout.hlsli src/shaders/brightness_curve.hlsli src/shaders/brightness_shape.hlsli src/shaders/perceived.hlsli src/shaders/develop.hlsli src/shaders/clip_layout.hlsli src/shaders/exposure.hlsli src/shaders/estimate.hlsli
       src/shaders/drift.hlsli)
   foreach(shader decode develop resample compose difference histogram_view mosaic detail)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl DEPENDS ${IFRIT_SHADER_INCLUDES})
@@ -473,7 +473,7 @@ if(RAPPORT_SHADER_COMPILER)
   rapport_add_shader(ifritview NAME mosaic_linear SOURCE src/shaders/mosaic.hlsl DEFINES LINEAR DEPENDS ${IFRIT_SHADER_INCLUDES})
   rapport_add_shader(ifritview NAME warp SOURCE src/shaders/warp.hlsl)
   foreach(shader stats peak histogram histogram_max ljpeg_guess ljpeg_sync ljpeg_resolve ljpeg_decode ljpeg_columns ljpeg_rows
-          ljpeg_black unpack raw_blocks noise volume)
+          ljpeg_black unpack raw_blocks noise volume perceived_check)
     rapport_add_shader(ifritview NAME ${shader} SOURCE src/shaders/${shader}.hlsl STAGE compute DEPENDS ${IFRIT_SHADER_INCLUDES})
   endforeach()
   rapport_add_shader(ifritview NAME stats_top SOURCE src/shaders/stats.hlsl STAGE compute DEFINES TOP DEPENDS ${IFRIT_SHADER_INCLUDES})

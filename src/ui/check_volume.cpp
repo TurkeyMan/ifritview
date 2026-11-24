@@ -47,7 +47,8 @@ int check_volume()
         {1.224745f, -0.042058f, -0.019642f}, {-0.224904f, 1.042081f, -0.078655f}, {0, 0, 1.098537f},
         {1.660491f, -0.124550f, -0.018151f}, {-0.587641f, 1.132900f, -0.100579f}, {-0.072850f, -0.008349f, 1.118730f}
     };
-    int failures = 0, samples = 0;
+    GpuView model_view(device);
+    int failures = model_view.check_display_model(), samples = 0;
     float worst = 0;
     // The bypass is based on colorants, not a profile's untrusted label.
     for (const auto& space : {ColorSpace::srgb(), ColorSpace::display_p3(), ColorSpace::rec2020()})
