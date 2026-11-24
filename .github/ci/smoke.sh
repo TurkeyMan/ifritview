@@ -14,6 +14,14 @@ mkdir -p "$smoke"
 printf 'P6\n2 2\n255\n\377\0\0\0\377\0\0\0\377\377\377\377' > "$smoke"/rgb.ppm
 "$build/ifritview" --probe "$smoke"/rgb.ppm
 "$build/ifritview" --version
+if "$build/ifritview" --check-measures; then
+  :
+else
+  result=$?
+  # Some CI containers have no Vulkan device (including software). A
+  # prerequisite skip is explicit; any actual numerical failure is fatal.
+  [ "$result" = 77 ] || exit "$result"
+fi
 # The viewer's downscaler, which draws every zoomed-out image (GCC 16.2's
 # LTO once miscompiled it): a 64x48 image to 23x17.
 printf 'P6\n64 48\n255\n' > "$smoke"/big.ppm

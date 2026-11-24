@@ -210,6 +210,7 @@ add_executable(ifritview
   src/ui/main.cpp
   src/ui/check_brightness.cpp
   src/ui/check_volume.cpp
+  src/ui/check_measures.cpp
   src/ui/app.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp
@@ -229,6 +230,7 @@ target_compile_options(ifritview PRIVATE ${IFRIT_WARNINGS})
 target_include_directories(ifritview PRIVATE src/ui)
 target_link_libraries(ifritview PRIVATE ifrit_core rapport::rapport)
 if(WIN32)
+  target_link_libraries(ifritview PRIVATE d3d11)
   # comctl32 v6, per-monitor DPI v2, UTF-8: an application manifest.
   enable_language(RC)
   target_sources(ifritview PRIVATE data/windows/ifritview.rc src/ui/script_drag_win32.cpp)

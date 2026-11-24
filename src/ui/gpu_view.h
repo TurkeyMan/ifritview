@@ -107,6 +107,8 @@ public:
     // to the display) measured as tone_map() is given it (stats.hlsl's
     // CURVE and TOP, volume.hlsl's top). The failures.
     int check_negative_measures();
+    // --check-measures: real statistics dispatches, with and without raw metadata.
+    int check_measures(const std::vector<std::string>& files, bool detail);
     // --check-volume: exact neutral display-model limits on the GPU, and a
     // signed noisy-dark raw through the actual measured display pipeline.
     int check_display_model();
@@ -307,6 +309,7 @@ private:
         histogram_max_, histogram_view_;
     rap::gpu::texture_ptr panels_[2];  // the docked histogram, drawn
     int next_panel_ = 0;
+    rap::gpu::buffer_ptr no_clips_, no_levels_, no_corrections_;  // distinct, zero-filled metadata layouts when absent
     rap::gpu::buffer_ptr histogram_;  // R, G, B, Y counts of what's shown, and the tallest
     // What it was counted from (nothing while the generation is 0), and what
     // the docked panel's numbers need of that.

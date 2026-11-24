@@ -43,6 +43,7 @@ Run python @('tools/check-shader-budget.py', "$build/shaders")
 & "$build\Release\ifritview.exe" --version
 if ($LASTEXITCODE) { throw 'ifritview --version failed' }
 Run "$build\Release\ifritview.exe" @('--check-camera-jpeg')
+Run "$build\Release\ifritview.exe" @('--check-measures')
 
 # Nothing but Windows: no runtime or library DLL may be needed beside it.
 Run python @('third_party/rapport/ci/check-imports.py', "$build\Release\ifritview.exe")

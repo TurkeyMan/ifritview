@@ -61,6 +61,7 @@ RAPPORT_BUILTIN_BACKEND(null);
 #endif
 
 int check_volume();
+int check_measures(int argc, char** argv);
 
 namespace
 {
@@ -931,6 +932,8 @@ int main(int argc, char** argv)
         return formats_report();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
         return gpu_render(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--check-measures") == 0)
+        return check_measures(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--check-volume") == 0)
         return check_volume();
     if (argc > 1 && std::strcmp(argv[1], "--check-brightness") == 0)
