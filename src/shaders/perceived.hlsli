@@ -41,8 +41,16 @@ float lightness_of(float y)
 float perceived_lightness(float3 xyz)
 {
     const float3 lab = cie_lab(xyz);
-    const float c = sqrt(lab.y * lab.y + lab.z * lab.z), h = atan2(lab.z, lab.y);
-    return lab.x + max(2.5f - 0.025f * lab.x, 0.0f) * (0.116f * abs(sin((h - 1.5707963f) / 2)) + 0.085f) * c;
+    const float c = sqrt(lab.y * lab.y + lab.z * lab.z);
+    // At C*=0 the HK term is exactly zero, independently of hue. Hue is
+    // undefined there: HLSL atan2(0,0) need not be finite, and multiplying
+    // its result by zero would not implement that neutral limit.
+    if (c > 0)
+    {
+        const float h = atan2(lab.z, lab.y);
+        return lab.x + max(2.5f - 0.025f * lab.x, 0.0f) * (0.116f * abs(sin((h - 1.5707963f) / 2)) + 0.085f) * c;
+    }
+    return lab.x;
 }
 
 float3 xyz_of_rgb709(float3 rgb)
@@ -196,6 +204,12 @@ float3 shown_at(float L, float a, float b, float from, float peak)
     const float3 c = rgb709_from_ok(float3(L, a * k, b * k));
     return toward_white(c, dot(float3(0.2126729f, 0.7151522f, 0.0721750f), c), peak);
 }
+#ifdef PERCEIVED_CHECK
+// Diagnostic only: the GPU check observes the search's finite, ordered
+// bracket. These flags never replace a value or change the search.
+static bool g_match_finite = true, g_match_bracket = true;
+bool check_finite(float v) { return (asuint(v) & 0x7f800000u) != 0x7f800000u; }
+#endif
 float3 match_perceived(float3 rgb, float target, float peak)
 {
     if (!(target > 0))
@@ -209,10 +223,25 @@ float3 match_perceived(float3 rgb, float target, float peak)
     float lo = 0, hi = exp2(log2(peak) / 3);
     for (int k = 0; k < 8 && dot(float3(0.2126729f, 0.7151522f, 0.0721750f), rgb709_from_ok(float3(hi, o.y, o.z))) < peak + kFitBand; ++k)
         hi *= 2;
+#ifdef PERCEIVED_CHECK
+    float lo_light = 0, hi_light = perceived_lightness(xyz_of_rgb709(shown_at(hi, o.y, o.z, from, peak)));
+    g_match_finite = check_finite(target) && check_finite(hi_light);
+    g_match_bracket = lo_light <= target && target <= hi_light;
+#endif
+    // Invariant: both endpoint lightnesses are finite, and bracket target
+    // in order. Exact white is a neutral endpoint too; its undefined hue
+    // must not make the comparison undecidable and send lo towards white.
+    // The headless GPU check observes these intermediates as well as RGB.
     for (int i = 0; i < 20; ++i)
     {
         const float mid = 0.5f * (lo + hi);
-        if (perceived_lightness(xyz_of_rgb709(shown_at(mid, o.y, o.z, from, peak))) >= target)
+        const float light = perceived_lightness(xyz_of_rgb709(shown_at(mid, o.y, o.z, from, peak)));
+#ifdef PERCEIVED_CHECK
+        g_match_finite = g_match_finite && check_finite(light);
+        if (light >= target) hi_light = light; else lo_light = light;
+        g_match_bracket = g_match_bracket && lo_light <= target && target <= hi_light;
+#endif
+        if (light >= target)
             hi = mid;
         else
             lo = mid;

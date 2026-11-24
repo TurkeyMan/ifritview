@@ -102,6 +102,9 @@ public:
     // to the display) measured as tone_map() is given it (stats.hlsl's
     // CURVE and TOP, volume.hlsl's top). The failures.
     int check_negative_measures();
+    // --check-volume: exact neutral display-model limits on the GPU, and a
+    // signed noisy-dark raw through the actual measured display pipeline.
+    int check_display_model();
 
     // The histogram counted by the last render() (count_histogram), drawn
     // into a `width` x `height` texture for the docked panel's canvas. False
