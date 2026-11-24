@@ -212,6 +212,7 @@ add_executable(ifritview
   src/ui/check_volume.cpp
   src/ui/check_measures.cpp
   src/ui/app.cpp
+  src/ui/check_copy_path.cpp
   src/ui/app_compare.cpp
   src/ui/app_keys.cpp
   src/ui/app_develop.cpp
@@ -246,7 +247,7 @@ if(WIN32)
 endif()
 if(IFRIT_RAPPORT_PLUGINS)
   target_compile_definitions(ifritview PRIVATE IFRIT_PLUGIN_DIR="${IFRIT_PLUGIN_DIR}")
-  # The App-level camera-mode regression runs without a display. Build the
+  # The App-level camera-mode and clipboard checks run without a display. Build the
   # null backend beside the other plugins for this check, without packaging it.
   if(TARGET rapport_null)
     add_dependencies(ifritview rapport_null)

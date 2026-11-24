@@ -39,6 +39,7 @@ public:
     static std::shared_future<Config> read_settings();
     // The camera-JPEG choice across in-flight results and navigation, without a window.
     static int check_camera_jpeg(rap::ui& ui);
+    static int check_copy_path(rap::ui& ui);
     ~App();
     // The file (and its folder) or folder to show. `first`, when given, is
     // the file already being decoded (from main), to open the window with.
@@ -348,6 +349,16 @@ private:
     FileSettle incomplete_settle_;  // and whether it's done
     std::array<int, 2> video_shape_{};  // the video frame last fitted to
     rap::label* status_left_ = nullptr;
+    rap::tool_button* status_copy_ = nullptr;
+    rap::label* status_notice_ = nullptr;
+    rap::label* status_message_label_ = nullptr;
+    rap::subscription copied_timer_;
+    std::string copied_path_;
+    std::string status_file_path() const;
+    rap::node status_filename();
+    rap::node status_copy_button(std::function<void(const std::string&)> write);
+    // The action and the headless clipboard recorder share the same path.
+    void copy_file_path_to(const std::function<void(const std::string&)>& write);
     rap::label* status_center_ = nullptr;
     rap::label* status_right_ = nullptr;
     rap::label* status_location_ = nullptr;  // a link to the map
