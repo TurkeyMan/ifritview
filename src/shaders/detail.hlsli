@@ -743,6 +743,14 @@ float3x3 detail_pairs(float v[6])
     return float3x3(v[0], v[3], v[4], v[3], v[1], v[5], v[4], v[5], v[2]);
 }
 
+// Pairwise covariance weights multiply corresponding components, not
+// matrix rows by columns. Spell out the row-vector products so this intent
+// is independent of a compiler's lowering of matrix-typed operator*.
+float3x3 detail_component_product(float3x3 a, float3x3 b)
+{
+    return float3x3(a[0] * b[0], a[1] * b[1], a[2] * b[2]);
+}
+
 // Each colour's share kept, at level y: `law` its a (xyz) and b, the
 // correlations (light's, readout's: R-G, R-B, G-B; unless measured), `tl`
 // and `tc` each scale's thresholds (absolute, in the transformed domain),
@@ -789,10 +797,17 @@ float3 detail_kept(float3 y, float3 offset, float3 la, float3 lb, float3 ra, flo
         float kk[6], dd[6], xx[6];
         [unroll] for (uint p = 0; p < 6; ++p)
             kk[p] = w.k[j][p], dd[p] = w.d[j][p], xx[p] = w.x[j][p];
-        const float3x3 ej = unit * detail_pairs(kk), ed = unit * detail_pairs(dd), ex = unit * detail_pairs(xx);
+        const float3x3 ej = detail_component_product(unit, detail_pairs(kk)),
+                       ed = detail_component_product(unit, detail_pairs(dd)),
+                       ex = detail_component_product(unit, detail_pairs(xx));
         const float3x3 bj = mul(to, mul(ej, transpose(to)));
         float3x3 gj = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
-        const float3x3 rj = j < 5 ? detail_retained(bj, tl[min(j, 4)], tc[min(j, 4)], gj) : bj;
+        // The coarsest scale is not shrunk: its Jacobian remains identity.
+        // Legacy HLSL evaluates both operands of ?:, including an out
+        // parameter's writeback. Only call the shrinker on actual bands.
+        float3x3 rj = bj;
+        if (j < 5)
+            rj = detail_retained(bj, tl[j], tc[j], gj);
         scale_b[j] = bj;
         scale_g[j] = gj;
         scale_r[j] = rj;
@@ -821,7 +836,8 @@ float3 detail_kept(float3 y, float3 offset, float3 la, float3 lb, float3 ra, flo
         past = detail_power(past, 1);  // the moments' tables' rounding: not below nothing
         kept += mul(mul(scale_g[j4], share), transpose(scale_g[j4])) + mul(mul(m, past), transpose(m));
     }
-    const float3x3 whole_d = unit * detail_pairs(w.D), whole_x = unit * detail_pairs(w.X);
+    const float3x3 whole_d = detail_component_product(unit, detail_pairs(w.D)),
+                   whole_x = detail_component_product(unit, detail_pairs(w.X));
     const float var_d = dot(to[0], mul(whole_d, to[0])) * (d_all > 0 ? d_kept / d_all : 1);
     const float cov_ld = dot(to[0], mul(whole_x, to[0])) * (x_all > 0 ? x_kept / x_all : 1);
     const float scale_x = x_all > 0 ? dot(to[0], mul(whole_x, to[0])) / x_all : 1;
