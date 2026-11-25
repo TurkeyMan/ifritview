@@ -218,6 +218,15 @@ std::string xmp_sidecar_path(const std::string& path);
 // written, and those the sidecar has already.
 bool write_xmp_sidecar(const std::string& path, const XmpDevelop& edits, const Adjustments& rest, std::string& error);
 
+// An EXIF date ("2017:06:13 16:05:44") as the Image group shows a capture
+// time, the way the raw decoder writes it: "2017-06-13 16:05:44".
+inline std::string exif_date_text(std::string text)
+{
+    if (text.size() >= 10 && text[4] == ':' && text[7] == ':')
+        text[4] = text[7] = '-';
+    return text;
+}
+
 #ifdef HAVE_EXIF
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF
 // header) into the image's metadata groups. Returns the orientation, 1 when

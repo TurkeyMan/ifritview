@@ -174,7 +174,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
     {
         char* v = nullptr;
         if (TIFFGetField(tif, t.tag, &v) && v && *v)
-            out.add("TIFF", t.name, v);
+            out.add(t.tag == TIFFTAG_ARTIST || t.tag == TIFFTAG_IMAGEDESCRIPTION ? "Image" : "TIFF", t.name, v);
     }
     {
         using M = PixelFormat::Model;
@@ -280,7 +280,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
         char* sv = nullptr;
         float fv = 0;
         if (TIFFGetField(tif, EXIFTAG_DATETIMEORIGINAL, &sv) && sv)
-            out.add(N_("EXIF"), N_("Date/time original"), sv);
+            out.add(N_("Image"), N_("Taken"), exif_date_text(sv));
         if (TIFFGetField(tif, EXIFTAG_EXPOSURETIME, &fv))
             out.add(N_("EXIF"), N_("Exposure time"), fv >= 1 ? std::to_string(fv).substr(0, 4) + " s" : "1/" + std::to_string(int(1 / fv + 0.5)) + " s");
         if (TIFFGetField(tif, EXIFTAG_FNUMBER, &fv))

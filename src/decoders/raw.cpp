@@ -2575,14 +2575,14 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     {
         char buf[64];
         std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", std::localtime(&other.timestamp));
-        out.add(N_("Camera"), N_("Taken"), buf);
+        out.add(N_("Image"), N_("Taken"), buf);
     }
     if (other.shot_order)
         out.add(N_("Camera"), N_("Shot number"), std::to_string(other.shot_order));
     if (other.artist[0])
-        out.add(N_("Camera"), N_("Artist"), other.artist);
+        out.add(N_("Image"), N_("Artist"), other.artist);
     if (other.desc[0])
-        out.add(N_("Camera"), N_("Description"), other.desc);
+        out.add(N_("Image"), N_("Description"), other.desc);
     out.add(N_("Raw"), N_("Sensor size"), std::to_string(raw.imgdata.sizes.raw_width) + " × " + std::to_string(raw.imgdata.sizes.raw_height));
     out.add(N_("Raw"), N_("Output size"), std::to_string(out.width) + " × " + std::to_string(out.height) + " (" + mode + ")");
     if (raw.imgdata.color.raw_bps)

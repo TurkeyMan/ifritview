@@ -1,5 +1,6 @@
 // EXIF parsing shared by every format that carries an EXIF blob.
 #include "decoder.h"
+#include "../i18n.h"
 
 #include <libexif/exif-data.h>
 #include <libexif/exif-loader.h>
@@ -49,7 +50,16 @@ void visit_entry(ExifEntry* e, void* user)
     for (const auto& [from, to] : {std::pair{"Maximum ", "Max "}, std::pair{"Minimum ", "Min "}})
         for (auto pos = title.find(from); pos != std::string::npos; pos = title.find(from))
             title.replace(pos, std::strlen(from), to);
-    v->out->add(v->group, title, value);
+    // What the picture is, rather than how it was shot, goes to the Image
+    // group (and only there).
+    if (v->ifd == EXIF_IFD_EXIF && e->tag == EXIF_TAG_DATE_TIME_ORIGINAL)
+        v->out->add(N_("Image"), N_("Taken"), exif_date_text(value));
+    else if (v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_ARTIST)
+        v->out->add(N_("Image"), N_("Artist"), value);
+    else if (v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_IMAGE_DESCRIPTION)
+        v->out->add(N_("Image"), N_("Description"), value);
+    else
+        v->out->add(v->group, title, value);
 }
 
 ExifSummary read(ExifData* ed, Image& out)

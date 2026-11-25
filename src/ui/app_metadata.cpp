@@ -253,6 +253,21 @@ std::vector<MetadataGroup> App::collect_metadata() const
     img.items.push_back({N_("Dimensions"), std::to_string(image_->width) + " × " + std::to_string(image_->height)});
     if (!image_->format.empty())  // a pasted image has none
         img.items.push_back({N_("Format"), image_->format});
+    // What the picture is: when it was taken, who by, what it shows. The
+    // decoders file these under the metadata's own "Image" group; they show
+    // here, not a second time as a group of their own.
+    std::vector<MetadataItem> kept;  // the rest of that group (e.g. Brightest)
+    for (const MetadataGroup& g : image_->metadata)
+        if (g.name == "Image")
+        {
+            for (const char* key : {"Taken", "Artist", "Description"})
+                for (const MetadataItem& m : g.items)
+                    if (m.key == key)
+                        img.items.push_back(m);
+            for (const MetadataItem& m : g.items)
+                if (m.key != "Taken" && m.key != "Artist" && m.key != "Description")
+                    kept.push_back(m);
+        }
     if (!image_->pixel_format.empty())
         img.items.push_back({N_("Pixel format"), image_->pixel_format.describe(image_->width, image_->height)});
     if (!image_->color_space.empty())
@@ -263,7 +278,12 @@ std::vector<MetadataGroup> App::collect_metadata() const
         img.items.push_back({N_("Notes"), image_->info});
     groups.push_back(std::move(img));
     for (const MetadataGroup& g : image_->metadata)
-        groups.push_back(g);
+    {
+        if (g.name != "Image")
+            groups.push_back(g);
+        else if (!kept.empty())
+            groups.push_back({g.name, kept});
+    }
     if (image_->has_location)
     {
         MetadataGroup* gps = nullptr;
@@ -350,9 +370,7 @@ View::OverlaySections App::overlay_sections() const
             append(bias + (bias.find("EV") == std::string::npos ? " EV" : ""));
         if (!exp.empty())
             lines.push_back(exp);
-        std::string taken = find({"Camera", "EXIF"}, {"Taken", "Date and Time (Original)", "Date/time original"});
-        if (taken.size() >= 10 && taken[4] == ':' && taken[7] == ':')  // EXIF writes the date with colons
-            taken[4] = taken[7] = '-';
+        std::string taken = find({"Image"}, {"Taken"});
         if (!taken.empty())
             lines.push_back(taken);
     }
