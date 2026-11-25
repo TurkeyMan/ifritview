@@ -626,6 +626,22 @@ static int check_highlight()
         std::printf("drift, a ramp rolling off: %s (R %g G %g%s B %g)\n", ok ? "ok" : "FAILED", limit[0], limit[1], sure[1] ? " sure" : "",
                     limit[2]);
         failed += !ok;
+        // Red and green rolling off together from 0.85 of their clips, blue
+        // linear and furthest from its clip (an sRAW's flame edge, both clipped
+        // before encoding): each found, green's read against blue's rise
+        // alone, not against red's, which stalls with it.
+        synthetic_drift(w, h,
+                        [&](int x, int, float v[3])
+                        {
+                            const float g = 0.3f * std::exp2(2.f * x / w);
+                            const auto rolled = [](float c) { return c < 0.85f ? c : 0.85f + 0.15f * std::tanh((c - 0.85f) / 0.15f); };
+                            v[0] = rolled(1.05f * g), v[1] = rolled(g), v[2] = 0.5f * g;
+                        },
+                        limit, sure);
+        ok = limit[0] >= 0.8f && limit[0] <= 0.875f && sure[0] && limit[1] >= 0.8f && limit[1] <= 0.875f && sure[1] && limit[2] == 1;
+        std::printf("drift, two colours rolling off together: %s (R %g%s G %g%s B %g)\n", ok ? "ok" : "FAILED", limit[0],
+                    sure[0] ? " sure" : "", limit[1], sure[1] ? " sure" : "", limit[2]);
+        failed += !ok;
         synthetic_drift(w, h,
                         [&](int x, int, float v[3])
                         {
