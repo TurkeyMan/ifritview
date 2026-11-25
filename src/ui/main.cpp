@@ -2,6 +2,7 @@
 #include "app_util.h"
 #include "platform.h"
 #include "first_image.h"
+#include "folder_block.h"
 #include "folder_index.h"
 #include "pin_thumbs.h"
 #include "gpu_view.h"
@@ -702,21 +703,25 @@ static int check_highlight()
     return failed ? 1 : 0;
 }
 
-// --check-camera-rows FILE...: each file read as the viewer reads it, with
-// a raw's every mode (its embedded preview; half and full size, on the CPU,
-// adopted over the preview standing in for them), has one Camera group and
-// one Image group, neither with a row twice, and the same location (or
-// none) in every mode. A raw's preview is a JPEG with EXIF of its own: it
-// mustn't add to the raw's Camera rows, but its location is the raw's.
+// --check-camera-rows FILE...: each file read as the viewer reads it, on
+// every path it can be: a raw in each mode (its embedded preview; half and
+// full size on the CPU; full size unpacked for the GPU), both adopted over
+// its preview standing in and decoded alone, as a prefetch or the cache
+// has it. Its info is the file's, whichever: the same groups and rows on
+// every path (bar the Raw rows the develop itself writes), one Camera group
+// and one Image group with no row twice, nothing of them repeated in EXIF,
+// nothing of the embedded preview's (its JPEG coding, its container's
+// resolution and layout), and the same location, which is the file's own
+// GPS directory's where it's a TIFF and the folder index's (its map pin).
 static int check_camera_rows(int argc, char** argv)
 {
     using RawMode = DecodeOptions::RawMode;
     int failed = 0;
     for (int i = 0; i < argc; ++i)
     {
-        // A TIFF-based raw's own GPS directory: if it has a position, every
-        // mode must show one.
+        // A TIFF-based raw's own GPS directory, read straight from the file.
         bool located = false;
+        double latitude = 0, longitude = 0;
 #ifdef HAVE_EXIF
         gchar* bytes = nullptr;
         gsize size = 0;
@@ -728,73 +733,139 @@ static int check_camera_rows(int argc, char** argv)
                 Image probe;
                 read_exif_blob(d, size, probe);
                 located = probe.has_location;
+                latitude = probe.latitude, longitude = probe.longitude;
             }
             g_free(bytes);
         }
 #endif
-        std::string first_place;
-        for (const RawMode mode : {RawMode::Preview, RawMode::Half, RawMode::Full})
+        FileRecord record;
+        const bool indexed = read_file_record(argv[i], record);
+        // Rows of the Raw group that say how it was developed, not what the
+        // file is: on one develop path and not another.
+        const auto develop_row = [](const MetadataGroup& g, const MetadataItem& m)
         {
-            DecodeOptions o;
-            o.raw_mode = mode;
-            set_decode_options(o);
-            const char* name = mode == RawMode::Preview ? "preview" : mode == RawMode::Half ? "half" : "full";
-            Image image;
-            const bool stand_in = decode_preview(argv[i], image);
-            Image final;
-            std::string error;
-            if (!decode_image(argv[i], final, error))
+            return g.name == "Raw" &&
+                   (m.key == "Auto exposure gain" || m.key == "Camera framing" || m.key == "DNG corrections" || m.key == "Phase One corrections");
+        };
+        std::vector<std::string> first_rows;
+        std::string first_name, first_place;
+        struct Path
+        {
+            const char* name;
+            RawMode mode;
+            bool gpu;
+        };
+        for (const Path path : {Path{"full", RawMode::Full, false}, Path{"full, for the GPU", RawMode::Full, true}, Path{"half", RawMode::Half, false},
+                                Path{"preview", RawMode::Preview, false}})
+            for (const bool stand_in : {true, false})
             {
-                std::printf("FAIL %s (%s): %s\n", argv[i], name, error.c_str());
-                ++failed;
-                continue;
-            }
-            if (stand_in)
-                image.adopt(std::move(final));
-            else
-                image = std::move(final);
-            std::string problem;
-            for (const char* group : {"Camera", "Image"})
-            {
-                int groups = 0;
+                DecodeOptions o;
+                o.raw_mode = path.mode;
+                o.gpu_develop = path.gpu;
+                set_decode_options(o);
+                const std::string name = std::string(path.name) + (stand_in ? ", after its preview" : ", alone");
+                Image image;
+                const bool stood_in = stand_in && decode_preview(argv[i], image);
+                if (stand_in && !stood_in)
+                    continue;  // none: the same as alone
+                Image final;
+                std::string error;
+                if (!decode_image(argv[i], final, error))
+                {
+                    std::printf("FAIL %s (%s): %s\n", argv[i], name.c_str(), error.c_str());
+                    ++failed;
+                    continue;
+                }
+                if (stood_in)
+                    image.adopt(std::move(final));
+                else
+                    image = std::move(final);
+                std::string problem;
+                for (const char* group : {"Camera", "Image"})
+                {
+                    int groups = 0;
+                    for (const MetadataGroup& g : image.metadata)
+                        if (g.name == group)
+                        {
+                            ++groups;
+                            for (size_t a = 0; a < g.items.size(); ++a)
+                                for (size_t b = a + 1; b < g.items.size(); ++b)
+                                    if (g.items[a].key == g.items[b].key)
+                                        problem += std::string(" ") + group + ": " + g.items[a].key + " twice;";
+                        }
+                    if (groups > 1)
+                        problem += std::string(" ") + std::to_string(groups) + " " + group + " groups;";
+                    if (groups == 0 && std::string(group) == "Camera")
+                        problem += " no Camera group;";
+                }
+                // What the Camera group says isn't said again in EXIF's, and
+                // a raw's EXIF is the raw's: nothing of its preview's container.
                 for (const MetadataGroup& g : image.metadata)
-                    if (g.name == group)
-                    {
-                        ++groups;
-                        for (size_t a = 0; a < g.items.size(); ++a)
-                            for (size_t b = a + 1; b < g.items.size(); ++b)
-                                if (g.items[a].key == g.items[b].key)
-                                    problem += std::string(" ") + group + ": " + g.items[a].key + " twice;";
-                    }
-                if (groups > 1)
-                    problem += std::string(" ") + std::to_string(groups) + " " + group + " groups;";
-                if (groups == 0 && std::string(group) == "Camera")
-                    problem += " no Camera group;";
-            }
-            // What the Camera group says isn't said again in EXIF's.
-            for (const MetadataGroup& g : image.metadata)
-                if (g.name == "EXIF")
+                {
+                    if (image.is_raw && g.name == "JPEG")
+                        problem += " a JPEG group (the embedded preview's);";
+                    if (g.name == "EXIF")
+                        for (const MetadataItem& m : g.items)
+                        {
+                            for (const char* key : {"Manufacturer", "Model", "Software", "Exposure Time", "F-Number", "ISO Speed Ratings", "Focal Length",
+                                                    "Focal Length in 35mm Film", "Exposure Bias", "Lens Model", "Lens Make", "Date and Time (Original)"})
+                                if (m.key == key)
+                                    problem += std::string(" EXIF: ") + key + " repeats Camera or Image;";
+                            if (image.is_raw)
+                                for (const char* key : {"Orientation", "X-Resolution", "Y-Resolution", "Planar Configuration", "Resolution Unit"})
+                                    if (m.key == key)
+                                        problem += std::string(" EXIF: ") + key + " (the preview's);";
+                        }
+                }
+                std::vector<std::string> rows;
+                for (const MetadataGroup& g : image.metadata)
                     for (const MetadataItem& m : g.items)
-                        for (const char* key : {"Manufacturer", "Model", "Software", "Exposure Time", "F-Number", "ISO Speed Ratings", "Focal Length",
-                                                "Focal Length in 35mm Film", "Exposure Bias", "Lens Model", "Lens Make", "Date and Time (Original)"})
-                            if (m.key == key)
-                                problem += std::string(" EXIF: ") + key + " repeats Camera or Image;";
-            char place[64] = "no location";
-            if (image.has_location)
-                std::snprintf(place, sizeof place, "%.6f, %.6f", image.latitude, image.longitude);
-            if (located && !image.has_location)
-                problem += " the file's location lost;";
-            if (mode == RawMode::Preview)
-                first_place = place;
-            else if (first_place != place)
-                problem += " location " + std::string(place) + ", in preview " + first_place + ";";
-            size_t exif_rows = 0;
-            for (const MetadataGroup& g : image.metadata)
-                if (g.name == "EXIF")
-                    exif_rows += g.items.size();
-            std::printf("%s %s (%s, %s, %zu EXIF rows)%s\n", problem.empty() ? "ok  " : "FAIL", argv[i], name, place, exif_rows, problem.c_str());
-            failed += !problem.empty();
-        }
+                        if (!develop_row(g, m))
+                            rows.push_back(g.name + ": " + m.key);
+                char place[64] = "no location";
+                if (image.has_location)
+                    std::snprintf(place, sizeof place, "%.6f, %.6f", image.latitude, image.longitude);
+                if (located && !image.has_location)
+                    problem += " the file's location lost;";
+                if (located && image.has_location && (std::fabs(image.latitude - latitude) > 1e-6 || std::fabs(image.longitude - longitude) > 1e-6))
+                    problem += " location not the file's GPS directory's (" + std::to_string(latitude) + ", " + std::to_string(longitude) + ");";
+                if (indexed && (record.has_location != image.has_location || (record.has_location && (std::fabs(image.latitude - record.latitude) > 1e-6 ||
+                                                                                                      std::fabs(image.longitude - record.longitude) > 1e-6))))
+                    problem += record.has_location
+                                   ? " the folder index puts it at " + std::to_string(record.latitude) + ", " + std::to_string(record.longitude) + ";"
+                                   : std::string(" the folder index has no location;");
+                if (first_name.empty())
+                {
+                    first_name = name;
+                    first_rows = rows;
+                    first_place = place;
+                }
+                else
+                {
+                    if (first_place != place)
+                        problem += " location " + std::string(place) + ", " + first_name + " " + first_place + ";";
+                    for (const std::string& r : rows)
+                        if (std::find(first_rows.begin(), first_rows.end(), r) == first_rows.end())
+                            problem += " " + r + " not " + first_name + ";";
+                    for (const std::string& r : first_rows)
+                        if (std::find(rows.begin(), rows.end(), r) == rows.end())
+                            problem += " no " + r + ";";
+                    if (problem.empty() && rows != first_rows)
+                        for (size_t r = 0; r < rows.size(); ++r)
+                            if (rows[r] != first_rows[r])
+                            {
+                                problem += " " + rows[r] + " where " + first_name + " has " + first_rows[r] + ";";
+                                break;
+                            }
+                }
+                size_t exif_rows = 0;
+                for (const MetadataGroup& g : image.metadata)
+                    if (g.name == "EXIF")
+                        exif_rows += g.items.size();
+                std::printf("%s %s (%s: %s, %zu rows, %zu EXIF)%s\n", problem.empty() ? "ok  " : "FAIL", argv[i], name.c_str(), place, rows.size(), exif_rows,
+                            problem.c_str());
+                failed += !problem.empty();
+            }
     }
     return failed ? 1 : 0;
 }

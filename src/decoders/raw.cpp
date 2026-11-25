@@ -32,6 +32,7 @@
 #include <cstring>
 #include <memory>
 #include <ctime>
+#include <iterator>
 #include <thread>
 
 namespace
@@ -2120,12 +2121,16 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
 // The embedded JPEG, used as the on-screen stand-in while the real decode
 // runs; not offered when the configured mode is the preview anyway.
 // What the EXIF parser picks out on the way (on_exif_tag): the exposure
-// compensation, and which rating the ISO is (exposure.h).
+// compensation, and which rating the ISO is (exposure.h); and the tags of
+// how it was taken that LibRaw keeps nothing of, for the EXIF group.
 struct ExifTags
 {
     double bias = 0;            // ExposureBiasValue, EV
     int sensitivity_type = -1;  // SensitivityType; -1: none
     float iso_speed = 0;        // ISOSpeed (ISO 12232's), for the trace; 0: none
+#ifdef HAVE_EXIF
+    std::vector<ExifTagValue> shown;  // as the file has them, the first of each
+#endif
 };
 void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, void* ifp, INT64);
 
@@ -2313,6 +2318,32 @@ void picture_style(const RawAccess& raw, const StyleNote& note, Image& out, bool
         out.add(N_("Camera"), N_("Picture style"), style);
 }
 
+// Where it was taken, from the raw's own GPS directory as LibRaw parses
+// it: the same whatever the raw's kind, and whichever way it's decoded.
+// Not from the EXIF LibRaw writes into the embedded preview it hands out,
+// which says every position is north and east. A hemisphere that isn't
+// N, S, E or W (zeros: a camera's "no fix") is no position.
+void raw_location(const LibRaw& raw, Image& out, bool rows)
+{
+    const libraw_gps_info_t& g = raw.imgdata.other.parsed_gps;
+    if (!g.gpsparsed || (g.latref != 'N' && g.latref != 'S') || (g.longref != 'E' && g.longref != 'W'))
+        return;
+    const double latitude = (g.latitude[0] + g.latitude[1] / 60.0 + g.latitude[2] / 3600.0) * (g.latref == 'S' ? -1 : 1);
+    const double longitude = (g.longitude[0] + g.longitude[1] / 60.0 + g.longitude[2] / 3600.0) * (g.longref == 'W' ? -1 : 1);
+    if (!std::isfinite(latitude) || !std::isfinite(longitude) || std::fabs(latitude) > 90 || std::fabs(longitude) > 180)
+        return;
+    out.has_location = true;
+    out.latitude = latitude;
+    out.longitude = longitude;
+    // GPSAltitudeRef: 1 below sea level. None written reads as 0.
+    if (rows && g.altitude != 0 && std::isfinite(g.altitude))
+    {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%.1f m", g.altref == 1 ? -std::fabs(g.altitude) : g.altitude);
+        out.add(N_("GPS"), N_("Altitude"), buf);
+    }
+}
+
 bool preview(const std::string& path, Image& out)
 {
     if (decode_options().raw_mode == DecodeOptions::RawMode::Preview)
@@ -2343,6 +2374,9 @@ bool preview(const std::string& path, Image& out)
     out.info = camera_name(raw);
     out.exposure_bias = tags.bias;
     picture_style(raw, style, out, false);
+    // The raw's own position, as its decode will have it: the map shows
+    // with the stand-in, and the place is looked up.
+    raw_location(raw, out, false);
     // What the develop will produce, so the window can be sized for it now.
     raw.imgdata.params.half_size = decode_options().raw_mode == DecodeOptions::RawMode::Half ? 1 : 0;
     apply_camera_crop(raw);
@@ -2387,6 +2421,47 @@ void on_exif_tag(void* context, int tag, int type, int len, unsigned int order, 
         else if (type == 3 && stream->read(buf, 2, 1) == 1)
             tags.iso_speed = float(get16(buf));
     }
+#ifdef HAVE_EXIF
+    // How it was taken, beyond what the Camera group says, and what's the
+    // photo's rather than its file's (no dimensions, versions or offsets).
+    // An Exif directory's tags only: LibRaw passes the TIFF directories',
+    // the GPS directory's and a Panasonic's with bits set above the 16 of
+    // the tag itself.
+    static const uint16_t kShown[] = {
+        0x8822,  // ExposureProgram
+        0x9207,  // MeteringMode
+        0x9208,  // LightSource
+        0x9209,  // Flash
+        0xA402,  // ExposureMode
+        0xA403,  // WhiteBalance
+        0xA406,  // SceneCaptureType
+        0xA404,  // DigitalZoomRatio
+        0xA407,  // GainControl
+        0xA408,  // Contrast
+        0xA409,  // Saturation
+        0xA40A,  // Sharpness
+        0x9205,  // MaxApertureValue
+        0x9206,  // SubjectDistance
+        0xA40C,  // SubjectDistanceRange
+        0xA217,  // SensingMethod
+        0xA401,  // CustomRendered
+        0x9011,  // OffsetTimeOriginal: the time zone it was taken in
+        0xA430,  // CameraOwnerName
+        0xA431,  // BodySerialNumber
+        0xA435,  // LensSerialNumber
+    };
+    static const unsigned kUnit[] = {0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8};  // bytes a value, by TIFF type
+    if (std::find(std::begin(kShown), std::end(kShown), tag) == std::end(kShown) || type < 1 || type > 12 || len < 1 || size_t(len) * kUnit[type] > 256)
+        return;
+    for (const ExifTagValue& seen : tags.shown)
+        if (seen.tag == tag)
+            return;  // another directory's again (a Panasonic's, its preview's): the first is the raw's
+    ExifTagValue v;
+    v.tag = uint16_t(tag), v.type = uint16_t(type), v.count = uint32_t(len), v.little_endian = order == 0x4949;
+    v.bytes.resize(size_t(len) * kUnit[type]);
+    if (stream->read(v.bytes.data(), v.bytes.size(), 1) == 1)
+        tags.shown.push_back(std::move(v));
+#endif
 }
 
 bool decode_raw(const std::string& path, Image& out, std::string& error)
@@ -2493,6 +2568,10 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
             out.mosaic = std::move(m);
         }
     }
+    // What the develop said of itself (the framing it cropped to, the
+    // corrections it makes) follows what the file is, whichever develop.
+    std::vector<MetadataGroup> developed;
+    developed.swap(out.metadata);
     // The camera, and without any of the lens (a Phase One's are its
     // sensor's), how it was taken: the app finds the lens in lensfun's database.
     if (out.mosaic)
@@ -2646,6 +2725,15 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         out.add(N_("Raw"), N_("Camera white balance"), fmt(wb[0] / wb[1], 3) + " / 1 / " + fmt(wb[2] / wb[1], 3));
     if (out.linear)
         out.add(N_("Raw"), N_("Auto exposure gain"), fmt(std::log2(out.linear->auto_gain), 2) + " EV");
+    for (MetadataGroup& g : developed)
+        for (MetadataItem& m : g.items)
+            out.add(g.name, std::move(m.key), std::move(m.value));
+    // The raw's own EXIF and position, as LibRaw reads them from the file:
+    // nothing of its embedded preview's.
+#ifdef HAVE_EXIF
+    add_exif_entries(tags.shown, out);
+#endif
+    raw_location(raw, out, true);
     return true;
 }
 
