@@ -2526,7 +2526,18 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     else if (out.mosaic)
         out.color_space = "camera (developed on the GPU)";
     std::string make = raw.imgdata.idata.normalized_make[0] ? raw.imgdata.idata.normalized_make : raw.imgdata.idata.make;
-    out.format = make.empty() ? "RAW" : make + " RAW";
+    // Canon sRAW and mRAW are named for the shot (Canon's SRAWQuality: 1 mRAW, 2 sRAW).
+    std::string sraw_name;
+    if (raw.loader() == "canon_sraw_load_raw()")
+    {
+        switch (raw.imgdata.makernotes.canon.SRAWQuality)
+        {
+        case 1: sraw_name = "Canon M-RAW"; break;
+        case 2: sraw_name = "Canon S-RAW"; break;
+        default: sraw_name = "Canon sRAW"; break;
+        }
+    }
+    out.format = !sraw_name.empty() ? sraw_name : make.empty() ? "RAW" : make + " RAW";
     out.format += ", " + mode;
     out.info = camera_name(raw);
     out.is_raw = true;
@@ -2581,20 +2592,12 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         out.add(N_("Raw"), N_("DNG version"), std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
     // Canon's sRAW and mRAW are stored as YCbCr, its colour at half or a
     // quarter of the luma's resolution: neither a mosaic nor a linear raw.
-    // The name is the shot's own (Canon's SRAWQuality: 1 mRAW, 2 sRAW).
-    std::string sraw_name;
     int sraw_h = 0;
-    if (raw.loader() == "canon_sraw_load_raw()")
+    if (!sraw_name.empty())
     {
         sraw_h = canon_sraw_block_h(bytes, size);
         if (!sraw_h && out.mosaic)
             sraw_h = out.mosaic->ycc.block_h;
-        switch (raw.imgdata.makernotes.canon.SRAWQuality)
-        {
-        case 1: sraw_name = "Canon M-RAW"; break;
-        case 2: sraw_name = "Canon S-RAW"; break;
-        default: sraw_name = "Canon sRAW"; break;
-        }
     }
     {
         const int bits = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
