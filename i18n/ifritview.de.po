@@ -2381,3 +2381,11 @@ msgstr "Entwicklungseinstellungen in {0} gespeichert"
 #: src/ui/app_develop.cpp
 msgid "Couldn't save the develop settings: {0}"
 msgstr "Die Entwicklungseinstellungen ließen sich nicht speichern: {0}"
+
+#: src/decoders/decoder.cpp:586
+msgid "{0} mm ({1} mm equiv)"
+msgstr "{0} mm (entspr. {1} mm)"
+
+#: src/decoders/decoder.cpp:624
+msgid "{0} mm equiv"
+msgstr "entspr. {0} mm"

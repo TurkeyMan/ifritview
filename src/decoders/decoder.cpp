@@ -576,14 +576,14 @@ std::string shutter_text(double t)
     return "1/" + std::to_string(n) + " s";
 }
 
-// "4.9 mm (28 mm equivalent)"; "70 mm" alone when the equivalent isn't
+// "4.9 mm (28 mm equiv)"; "70 mm" alone when the equivalent isn't
 // known or is within 5% of it (full frame, give or take its rounding).
 std::string focal_length_text(double focal, double focal_35mm)
 {
     const std::string mm = fixed(focal, std::fabs(focal - std::round(focal)) < 0.05 ? 0 : 1);
     if (!(focal_35mm > 0 && focal_35mm < 100000) || std::fabs(focal_35mm - focal) <= 0.05 * focal)
         return mm + " mm";
-    return rap::i18n::format(_("{0} mm ({1} mm equivalent)"), mm, fixed(focal_35mm, 0));
+    return rap::i18n::format(_("{0} mm ({1} mm equiv)"), mm, fixed(focal_35mm, 0));
 }
 
 // "abc" starts "ABC..." whatever the case of either.
@@ -621,7 +621,7 @@ void add_camera_rows(const CameraRows& c, Image& out)
     if (c.focal_length > 0 && c.focal_length < 100000)
         out.add(N_("Camera"), N_("Focal length"), focal_length_text(c.focal_length, c.focal_35mm));
     else if (c.focal_35mm > 0 && c.focal_35mm < 100000)  // the equivalent's all there is
-        out.add(N_("Camera"), N_("Focal length"), rap::i18n::format(_("{0} mm equivalent"), fixed(c.focal_35mm, 0)));
+        out.add(N_("Camera"), N_("Focal length"), rap::i18n::format(_("{0} mm equiv"), fixed(c.focal_35mm, 0)));
     out.add(N_("Camera"), N_("Picture style"), c.picture_style);
     if (std::fabs(c.bias) >= 0.005 && std::fabs(c.bias) < 100)
         out.add(N_("Camera"), N_("Exposure compensation"), (c.bias > 0 ? "+" : "") + fixed(c.bias, 2) + " EV");

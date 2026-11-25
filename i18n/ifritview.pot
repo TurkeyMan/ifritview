@@ -2364,3 +2364,11 @@ msgstr ""
 #: src/ui/app.cpp
 msgid "Copied"
 msgstr ""
+
+#: src/decoders/decoder.cpp:586
+msgid "{0} mm ({1} mm equiv)"
+msgstr ""
+
+#: src/decoders/decoder.cpp:624
+msgid "{0} mm equiv"
+msgstr ""
