@@ -137,6 +137,11 @@ struct RawMosaic
     float cam_xyz[3][3] = {};    // XYZ (D65) to camera RGB, for white balance by temperature
     std::shared_ptr<const DngColour> dng;  // a DNG's colour, in place of the two above; null for other raws
     int crop[4] = {};            // the camera's framing in the data: x, y, width, height
+    // The camera's JPEG's framing in the data (its inset wholly inside the
+    // active area), whether or not `crop` is it, and how the camera was held
+    // for it. Zero: not known, and never guessed (a centred crop, say).
+    int camera_crop[4] = {};
+    int camera_orientation = 1;
     int orientation = 1;         // EXIF 1..8: how the camera was held
     // A raw's own corrections (a DNG's lens shading and vignetting, a Phase
     // One's black and sensor corrections), as the develop reads them
@@ -386,6 +391,11 @@ struct Image
     // While a preview: the size the final pixels will have, so the window and
     // zoom are chosen for that. 0 = unknown.
     int final_width = 0, final_height = 0;
+    // The camera's JPEG shown as itself (as that's what's chosen): it stands in
+    // for nothing, so its own pixels are its 1:1. The final size is kept for
+    // when it stands in for the develop again.
+    bool shown_as_itself = false;
+    bool stands_in() const { return final_width > 0 && final_height > 0 && !shown_as_itself; }
     // Edits made while a preview, replayed on the final pixels on adoption.
     struct PendingEdit
     {

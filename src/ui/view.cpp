@@ -671,7 +671,126 @@ void View::image_changed()
     image_replaced();
 }
 
-void View::image_replaced()
+void View::refit()
+{
+    drop_caches();
+    layout();
+    invalidate();
+}
+
+void View::image_developed(const Shape& before)
+{
+    if (image_)
+        ++image_->generation;
+    image_replaced(&before, image_.get());
+}
+
+View::Shape View::Shape::of(const Image& image)
+{
+    Shape s;
+    s.width = image.width;
+    s.height = image.height;
+    s.mosaic = image.mosaic;
+    // A raw's preview, whatever size it was decoded at, is its camera's JPEG
+    // (as is what's shown instead of it); LibRaw's develop is neither.
+    s.camera_jpeg = !image.mosaic && image.is_raw && (image.is_preview() || image.stand_in_full);
+    s.transform = image.transform;
+    return s;
+}
+
+void View::replace_image(std::shared_ptr<Image> image, const Image* raw)
+{
+    if (!image_ || !image)
+    {
+        set_image(std::move(image));
+        return;
+    }
+    const Shape before = Shape::of(*image_);
+    // Finish any old animation at its current framing before changing units.
+    end_motion();
+    drop_outgoing();
+    previewed_.reset();
+    presented_ = nullptr;
+    base_.reset();  // not a video frame; the new pixels may live only on the GPU
+    clear_selection();
+    drag_active_ = false;
+    pressed_button_ = 0;
+    image_ = std::move(image);
+    image_replaced(&before, raw);
+    zoom_changed();
+}
+
+namespace
+{
+struct SceneFrame
+{
+    double x, y, w, h;
+    int orientation;
+};
+
+// Map normalized points using the image's existing EXIF rectangle transform.
+void turn_point(int orientation, double& x, double& y)
+{
+    int x0 = 0, y0 = 0, x1 = 1, y1 = 0, x2 = 0, y2 = 1, w = 0, h = 0;
+    orient_rect(orientation, 1, 1, x0, y0, w, h);
+    orient_rect(orientation, 1, 1, x1, y1, w, h);
+    orient_rect(orientation, 1, 1, x2, y2, w, h);
+    const double a = x0 + (x1 - x0) * x + (x2 - x0) * y;
+    y = y0 + (y1 - y0) * x + (y2 - y0) * y;
+    x = a;
+}
+
+bool scene_frame(const View::Shape& image, const RawMosaic& raw, SceneFrame& f)
+{
+    if (raw.camera_crop[2] <= 0 || raw.camera_crop[3] <= 0)
+        return false;  // its JPEG's framing isn't known
+    if (image.mosaic)
+    {
+        const auto& m = *image.mosaic;
+        // Geometry only belongs to this exposure, never an unrelated compare.
+        if (&m != &raw && !(m.data && m.data == raw.data) && !(m.stream && m.stream == raw.stream))
+            return false;
+        f = {double(m.crop[0]), double(m.crop[1]), double(m.crop[2]), double(m.crop[3]), m.orientation};
+    }
+    else
+    {
+        if (!image.camera_jpeg)
+            return false;  // a CPU LibRaw develop is not a camera JPEG
+        f = {double(raw.camera_crop[0]), double(raw.camera_crop[1]), double(raw.camera_crop[2]), double(raw.camera_crop[3]), raw.camera_orientation};
+        // User edits to the JPEG are recorded in its decoded-image coordinates.
+        const auto& t = image.transform;
+        if (!t.broken.empty())
+            return false;
+        if (t.width > 0 && t.height > 0)
+        {
+            double x0 = double(t.x) / (t.orientation >= 5 ? t.height : t.width);
+            double y0 = double(t.y) / (t.orientation >= 5 ? t.width : t.height);
+            double x1 = double(t.x + t.w) / (t.orientation >= 5 ? t.height : t.width);
+            double y1 = double(t.y + t.h) / (t.orientation >= 5 ? t.width : t.height);
+            turn_point(inverse_orientation(t.orientation), x0, y0);
+            turn_point(inverse_orientation(t.orientation), x1, y1);
+            turn_point(inverse_orientation(f.orientation), x0, y0);
+            turn_point(inverse_orientation(f.orientation), x1, y1);
+            const double w = f.w, h = f.h;
+            f.x += std::min(x0, x1) * w;
+            f.y += std::min(y0, y1) * h;
+            f.w = std::abs(x1 - x0) * w;
+            f.h = std::abs(y1 - y0) * h;
+            f.orientation = compose_orientation(f.orientation, t.orientation);
+        }
+    }
+    if (!(f.w > 0 && f.h > 0) || image.width <= 0 || image.height <= 0)
+        return false;
+    // A camera can supply a thumbnail with a different aspect crop. Metadata
+    // bounds alone do not register that JPEG; tolerate only rounding by one
+    // decoded JPEG pixel and otherwise use the explicit unknown-frame policy.
+    const double w = f.orientation >= 5 ? f.h : f.w;
+    const double h = f.orientation >= 5 ? f.w : f.h;
+    return std::abs(image.height - image.width * h / w) <= 1;
+}
+}  // namespace
+
+void View::image_replaced(const Shape* before, const Image* raw)
 {
     drop_caches();
     if (!image_)
@@ -683,7 +802,35 @@ void View::image_replaced()
     else
         base_.reset();
     base_dirty_ = !base_;
-    if (old_w > 0 && old_w != image_->width)
+    SceneFrame from{}, to{};
+    if (before && raw && raw->mosaic && scene_frame(*before, *raw->mosaic, from) && scene_frame(Shape::of(*image_), *raw->mosaic, to))
+    {
+        // Both are framings of the one sensor: the point of the scene at the
+        // view's centre, in sensor pixels, and the screen pixels each of them
+        // takes, are kept. Fit stays fit, whatever each one frames.
+        end_motion();
+        int vw, vh;
+        view_size(vw, vh);
+        double cx = (vw / 2.0 - pan_x_) / (before->width * zoom_);
+        double cy = (vh / 2.0 - pan_y_) / (before->height * zoom_);
+        turn_point(inverse_orientation(from.orientation), cx, cy);
+        cx = (from.x + cx * from.w - to.x) / to.w;
+        cy = (from.y + cy * from.h - to.y) / to.h;
+        turn_point(to.orientation, cx, cy);
+        const double from_span = from.orientation >= 5 ? from.h : from.w;  // sensor px across what was shown
+        const double to_span = to.orientation >= 5 ? to.h : to.w;
+        zoom_ = std::clamp(zoom_ * (before->width / from_span) * (to_span / image_->width), kMinZoom, kMaxZoom);
+        pan_x_ = vw / 2.0 - cx * image_->width * zoom_;
+        pan_y_ = vh / 2.0 - cy * image_->height * zoom_;
+        if (mode_ == ZoomMode::Fit)
+            layout();
+        else
+            clamp_pan();
+    }
+    // Not registered (a camera whose framing isn't known, a raw with no
+    // JPEG of its own, another kind of image): it's shown the same size,
+    // where it was, so the same fraction of it is at the centre.
+    else if (old_w > 0 && old_w != image_->width)
     {
         const double ratio = double(old_w) / image_->width;  // old image px per new image px
         zoom_ *= ratio;
@@ -763,7 +910,7 @@ double View::fit_zoom() const
     if (!image_ || vw <= 0 || vh <= 0)
         return 1.0;
     // A stand-in is shown at the size its real image will have.
-    const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
+    const bool stand_in = image_->stands_in();
     const double w = stand_in ? image_->final_width : image_->width;
     const double h = stand_in ? image_->final_height : image_->height;
     double z = std::min(vw / w, vh / h);

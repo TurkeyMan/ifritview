@@ -36,6 +36,24 @@ public:
     rap::canvas* canvas() const { return canvas_; }
 
     void set_image(std::shared_ptr<Image> image);  // resets zoom to fit
+    // What registering one image of a raw against another needs of the one
+    // that was shown: its size, and whether it was the camera's JPEG (at
+    // whatever size it was decoded, with the user's turns and crop of it)
+    // or a develop of the raw's own data.
+    struct Shape
+    {
+        int width = 0, height = 0;
+        bool camera_jpeg = false;
+        Image::Transform transform;
+        std::shared_ptr<const RawMosaic> mosaic;
+        static Shape of(const Image& image);
+    };
+    // Another image of the same raw (its camera's JPEG, its develop): the
+    // same point of the scene stays at the view's centre at the same scale,
+    // registered by the camera's framing on the sensor as `raw`'s data knows
+    // it; where that isn't known, the same fraction across at the same shown
+    // size. Fit stays fit.
+    void replace_image(std::shared_ptr<Image> image, const Image* raw);
     const Image* image() const { return image_.get(); }
     void set_fullscreen(bool on);
     void config_changed();
@@ -45,6 +63,10 @@ public:
     // meanwhile draws it, at its new size.
     void hold_present(bool held);
     void image_changed();  // the image's pixels (and maybe its size) changed in place
+    void refit();          // its size for 1:1 changed in place (a stand-in shown as itself): Fit fits that
+    // A raw's develop adopted in place of the camera's JPEG it showed, which
+    // was `before`: registered as replace_image() registers.
+    void image_developed(const Shape& before);
     void retoned();        // only its 8-bit pixels did, for a new exposure: its own data is the same
     // The histogram of what's shown: over the image (fullscreen) and/or on
     // the docked panel's canvas (null when it isn't showing). GPU only.
@@ -240,7 +262,8 @@ private:
     void drop_caches();
     // image_changed() for another image put in the view's (comparing): its
     // data is as it was, so the GPU keeps what it has of it.
-    void image_replaced();
+    // `before` (what was shown), with `raw`, registers the new image against it.
+    void image_replaced(const Shape* before = nullptr, const Image* raw = nullptr);
     void zoom_changed();
     bool pointer(const rap::pointer_event& e);
     bool scroll(const rap::scroll_event& e);

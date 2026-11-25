@@ -288,6 +288,13 @@ private:
     rap::check* libraw_check_ = nullptr;
     Instead instead_ = Instead::Nothing;
     std::shared_ptr<Image> instead_image_;  // the shown raw's, while it's shown instead
+    // What's on screen: the view's image (the file's own, or what's shown
+    // instead of it, even a moment after the choice changed). The status bar, the info panel's Image group and the
+    // HUD describe this (its size, format, depth); the file's own metadata
+    // stays the file's.
+    const Image& shown_image() const;
+    // What it is, for saying so: "Camera JPEG", "LibRaw develop", or its format.
+    std::string shown_format() const;
     uint64_t instead_request_ = 0;
     bool syncing_instead_ = false;  // its checks set here, not by the user
     // Lens corrections from lensfun's database (lens_store.h) for the raw

@@ -2089,20 +2089,24 @@ bool finish_mosaic(RawAccess& raw, std::shared_ptr<RawMosaic> m, Image& out)
     }
     // The camera's framing, as the CPU develop crops to it.
     m->crop[0] = 0, m->crop[1] = 0, m->crop[2] = m->width, m->crop[3] = m->height;
-    if (decode_options().raw_camera_crop)
     {
         const auto& c = sz.raw_inset_crops[0];
         const int left = int(c.cleft) - int(sz.left_margin), top = int(c.ctop) - int(sz.top_margin);
         if (c.cwidth && c.cheight && c.cleft != 0xFFFF && c.ctop != 0xFFFF && left >= 0 && top >= 0 &&
             left + int(c.cwidth) <= m->width && top + int(c.cheight) <= m->height)
         {
-            m->crop[0] = left, m->crop[1] = top, m->crop[2] = c.cwidth, m->crop[3] = c.cheight;
-            out.add(N_("Raw"), N_("Camera framing"),
-                    std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " +
-                        std::to_string(c.ctop) + ")");
+            m->camera_crop[0] = left, m->camera_crop[1] = top;
+            m->camera_crop[2] = c.cwidth, m->camera_crop[3] = c.cheight;
+            if (decode_options().raw_camera_crop)
+            {
+                std::copy(m->camera_crop, m->camera_crop + 4, m->crop);
+                out.add(N_("Raw"), N_("Camera framing"),
+                        std::to_string(c.cwidth) + " × " + std::to_string(c.cheight) + " at (" + std::to_string(c.cleft) + ", " +
+                            std::to_string(c.ctop) + ")");
+            }
         }
     }
-    m->orientation = flip_to_orientation(sz.flip);
+    m->camera_orientation = m->orientation = flip_to_orientation(sz.flip);
     const bool turned = m->orientation >= 5;
     // What it will be, as shown: no pixels until something asks for them.
     out.width = turned ? m->crop[3] : m->crop[2];
