@@ -1015,10 +1015,12 @@ int main(int argc, char** argv)
     {
         const int rc = check_copy_path ? App::check_copy_path(toolkit) : App::check_camera_jpeg(toolkit);
         platform::set_main_dispatch([](std::function<void()>) {});
+        lenses::shutdown();  // a raw shown started reading lensfun's database
         return rc;
     }
     const int rc = run_app(**ui, argc, argv, t_start, first.get(), settings);
     platform::set_main_dispatch([](std::function<void()>) {});  // late arrivals after the toolkit goes
+    lenses::shutdown();  // not torn down under a read of lensfun's database
     return rc;
 }
 

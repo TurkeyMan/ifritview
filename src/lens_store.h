@@ -34,6 +34,10 @@ std::shared_ptr<const Database> database();
 // Main thread.
 void want(std::function<void()> arrived);
 
+// Quitting: a read or unpack under way stops at its next file, and is waited
+// for (a few seconds at most). Main thread.
+void shutdown();
+
 // Where it stands, for when a raw goes uncorrected: "not downloaded yet",
 // "downloading", "downloads are off", or empty once there's a database.
 std::string state();

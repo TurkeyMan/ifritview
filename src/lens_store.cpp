@@ -15,6 +15,9 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -49,6 +52,29 @@ bool downloads = true;
 bool started = false;
 std::function<void()> listener;
 int64_t local_timestamp = 0;  // the cached copy's (0: none)
+
+// The workers reading or unpacking it, which shutdown() stops between files
+// and waits for: torn down under one, its parse can throw.
+std::atomic<bool> stopping{false};
+std::mutex workers_mutex;
+std::condition_variable workers_done;
+int workers = 0;
+struct Worker
+{
+    Worker()
+    {
+        std::lock_guard lock(workers_mutex);
+        ++workers;
+    }
+    ~Worker()
+    {
+        std::lock_guard lock(workers_mutex);
+        --workers;
+        workers_done.notify_all();
+    }
+    Worker(const Worker&) = delete;
+    Worker& operator=(const Worker&) = delete;
+};
 
 std::string root()
 {
@@ -87,6 +113,11 @@ bool read_folder(const std::string& dir, Database& db, std::string& error)
     std::sort(names.begin(), names.end());
     for (const std::string& n : names)
     {
+        if (stopping)
+        {
+            error = "stopped";
+            return false;
+        }
         gchar* text = nullptr;
         gsize len = 0;
         std::string why;
@@ -249,11 +280,18 @@ bool unpack(const std::string& archive, int64_t timestamp, std::shared_ptr<Datab
         return false;
     auto db = std::make_shared<Database>();
     for (const auto& [name, data] : files)
+    {
+        if (stopping)
+        {
+            error = "stopped";
+            return false;
+        }
         if (g_str_has_suffix(name.c_str(), ".xml") && !db->add_xml(data.data(), data.size(), error))
         {
             error = name + ": " + error;
             return false;
         }
+    }
     if (db->lens_count() < 100)
     {
         error = "only " + std::to_string(db->lens_count()) + " lenses";
@@ -320,6 +358,7 @@ void download(size_t site, int64_t timestamp)
                            std::thread(
                                [site, timestamp, t1, archive = r.body]
                                {
+                                   const Worker busy;
                                    platform::lower_thread_priority();
                                    std::shared_ptr<Database> db;
                                    std::string error;
@@ -390,6 +429,7 @@ void read_cache()
     std::thread(
         []
         {
+            const Worker busy;
             platform::lower_thread_priority();
             const char* local = g_getenv("IFRIT_LENSFUN_DB");
             const std::string dir = local ? local : folder();
@@ -434,6 +474,13 @@ void allow_downloads(bool allow)
     // Turned on with nothing to show for the last try: try again.
     if (allow && started && stage == Failed)
         fetch_from(0);
+}
+
+void shutdown()
+{
+    stopping = true;
+    std::unique_lock lock(workers_mutex);
+    workers_done.wait_for(lock, std::chrono::seconds(5), [] { return workers == 0; });
 }
 
 std::shared_ptr<const Database> database()
