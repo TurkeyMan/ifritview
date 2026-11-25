@@ -146,6 +146,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
             break;
         case COMPRESSION_JPEG:
             out.format += ", JPEG";
+            out.coding.loss = Image::Coding::Loss::Lossy;
             break;
         case COMPRESSION_DEFLATE:
         case COMPRESSION_ADOBE_DEFLATE:
@@ -161,6 +162,8 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
         default:
             break;
     }
+    // Lossless but for JPEG's, which is its lossy mode, named as one.
+    out.coding.name = out.coding.loss == Image::Coding::Loss::Lossy ? "TIFF (JPEG)" : "TIFF";
 
     const struct
     {

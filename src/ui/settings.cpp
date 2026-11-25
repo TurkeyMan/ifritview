@@ -558,7 +558,7 @@ rap::node viewing_page(const Config& cfg, State& st)
                          .on_toggled([s](bool on) { s->overlay_details->set_enabled(on); })
                          .bind(st.ov_enabled),
                      L::form{
-                         {"", L::check{_("File: name, position in folder, size, date"), cfg.overlay_file}.bind(st.ov_file)},
+                         {"", L::check{_("File: name, position in folder, size, date, encoding"), cfg.overlay_file}.bind(st.ov_file)},
                          {"", L::check{_("Format: dimensions, depth, codec details, colour profile"), cfg.overlay_format}.bind(st.ov_format)},
                          {"", L::check{_("Shot: camera, lens, aperture, shutter, ISO, focal length"), cfg.overlay_shot}.bind(st.ov_shot)},
                          {"", L::check{_("Location"), cfg.overlay_location}.bind(st.ov_location)},

@@ -337,6 +337,9 @@ View::OverlaySections App::overlay_sections() const
             line += std::string(line.empty() ? "" : "  ·  ") + t;
         if (!line.empty())
             lines.push_back(line);
+        // What to expect of its quality: how what's shown is encoded.
+        if (const std::string coding = shown_image().coding_summary(); !coding.empty())
+            lines.push_back(coding);
     }
     flush();
     if (cfg_.overlay_format)

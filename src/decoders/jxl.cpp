@@ -120,6 +120,8 @@ bool decode(const std::string& path, Image& out, std::string& error)
                 {
                     out.color_space = cicp.label;
                     out.declared_space = cicp.space;
+                    out.coding.gamut = cicp.space ? gamut_of(*cicp.space) : cicp.gamut;
+                    out.coding.hdr = cicp.hdr;
                 }
             }
             else
@@ -163,6 +165,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
     out.has_alpha = info.alpha_bits > 0;
     out.bits_per_sample = int(info.bits_per_sample);
     out.format = "JPEG XL";
+    out.coding.name = "JPEG XL";
+    // Lossy as a rule; a lossless file isn't told apart by libjxl (an
+    // original profile is kept by lossy ones too), so nothing's said of it.
+    out.coding.lossy_kind = true;
     out.pixel_format =
         PixelFormat::packed(info.num_color_channels == 1 ? PixelFormat::Model::L : PixelFormat::Model::RGB,
                             info.num_color_channels == 1 ? (info.alpha_bits ? "LA" : "L") : (info.alpha_bits ? "RGBA" : "RGB"), int(info.bits_per_sample));

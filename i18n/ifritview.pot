@@ -1739,7 +1739,7 @@ msgid "Show the overlay (I toggles it in fullscreen)"
 msgstr ""
 
 #: src/ui/settings.cpp:395
-msgid "File: name, position in folder, size, date"
+msgid "File: name, position in folder, size, date, encoding"
 msgstr ""
 
 #: src/ui/settings.cpp:396
@@ -2069,6 +2069,26 @@ msgstr ""
 msgid "the develop settings were changed"
 msgstr ""
 
+#: src/image.cpp:640
+msgid "{0}-bit"
+msgstr ""
+
+#: src/image.cpp:642
+msgid "float{0}"
+msgstr ""
+
+#: src/image.cpp:646
+msgid "{0}-bit palette"
+msgstr ""
+
+#: src/image.cpp:648
+msgid "grey"
+msgstr ""
+
+#: src/image.cpp:665
+msgid "lossless"
+msgstr ""
+
 #: src/ui/app_develop.cpp
 msgid "Contrast"
 msgstr ""
@@ -2343,4 +2363,12 @@ msgstr ""
 
 #: src/ui/app.cpp
 msgid "Copied"
+msgstr ""
+
+#: src/decoders/decoder.cpp:586
+msgid "{0} mm ({1} mm equiv)"
+msgstr ""
+
+#: src/decoders/decoder.cpp:624
+msgid "{0} mm equiv"
 msgstr ""

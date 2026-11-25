@@ -621,6 +621,57 @@ std::string key_text(const std::string& key)
     return key_file(key) + " [" + std::to_string(part.page) + "." + std::to_string(part.level) + "]";
 }
 
+std::string Image::coding_summary() const
+{
+    std::string line = coding.name.empty() ? format : coding.name;
+    auto part = [&](const std::string& p)
+    {
+        if (!p.empty())
+            line += (line.empty() ? "" : "  ·  ") + p;
+    };
+    // The depth, and how the samples are laid out where that tells of the
+    // quality: a mosaic, chroma at less than full resolution, a palette.
+    using M = PixelFormat::Model;
+    const PixelFormat& pf = pixel_format;
+    bool uniform = !pf.channels.empty();
+    for (const PixelFormat::Channel& c : pf.channels)
+        uniform &= c.bits == pf.channels[0].bits;
+    const int bits = uniform ? pf.channels[0].bits : 0;
+    const std::string depth = bits ? rap::i18n::format(_("{0}-bit"), bits) : "";
+    if (pf.sample == PixelFormat::Sample::Float && bits)
+        part(rap::i18n::format(_("float{0}"), bits));
+    else if (pf.model == M::Mosaic)
+        part(depth + (pf.mosaic.empty() ? "" : " " + pf.mosaic.substr(0, pf.mosaic.find(' '))));  // "Bayer RGGB": the kind, not the order
+    else if (pf.model == M::Palette)
+        part(rap::i18n::format(_("{0}-bit palette"), pf.bits_per_pixel));
+    else if (pf.model == M::L)
+        part(depth.empty() ? _("grey") : depth + " " + _("grey"));
+    else if (pf.model == M::CMYK)
+        part(depth.empty() ? "CMYK" : depth + " CMYK");
+    else
+        part(depth);
+    if (pf.model == M::YCbCr)
+    {
+        const char* chroma = pf.chroma_h == 2 && pf.chroma_v == 2 ? "4:2:0"
+                             : pf.chroma_h == 2 && pf.chroma_v == 1 ? "4:2:2"
+                             : pf.chroma_h == 1 && pf.chroma_v == 2 ? "4:4:0"
+                             : pf.chroma_h == 1 && pf.chroma_v == 1 ? "4:4:4"
+                                                                    : "";
+        // YCbCr is news only in a raw's readout (sRAW's); the lossy
+        // formats' (its camera JPEG's too) is a matter of course.
+        part(is_raw && !is_preview() && *chroma ? std::string("YCbCr ") + chroma : chroma);
+    }
+    if (coding.lossy_kind && coding.loss == Coding::Loss::Lossless)
+        part(_("lossless"));
+    // Only what tells: not sRGB, which is what's assumed, nor a raw's own
+    // camera space, which every raw is in.
+    std::string space = coding.gamut == Gamut::SRGB || coding.gamut == Gamut::Camera ? "" : gamut_name(coding.gamut);
+    if (coding.hdr != Hdr::None)
+        space += std::string(space.empty() ? "" : " ") + (coding.hdr == Hdr::PQ ? "PQ" : "HLG");
+    part(space);
+    return line;
+}
+
 std::string Image::location_text() const
 {
     char buf[64];
@@ -686,6 +737,7 @@ Image Image::crop(int x, int y, int w, int h) const
     out.info = info;
     out.encoded_as = encoded_as;  // still the file's pixels: lossless JPEG crops start from it
     out.encoding = encoding;
+    out.coding = coding;
     out.metadata = metadata;
     out.exposure_bias = exposure_bias;
     out.is_raw = is_raw;
@@ -818,6 +870,7 @@ void Image::adopt(Image&& f)
     info = std::move(f.info);
     encoded_as = std::move(f.encoded_as);
     encoding = std::move(f.encoding);
+    coding = std::move(f.coding);  // the readout's, not the camera JPEG's
     metadata = std::move(f.metadata);
     stored = std::move(f.stored);
     // A place looked up for where the stand-in said it was is kept only

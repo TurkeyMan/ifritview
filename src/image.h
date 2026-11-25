@@ -322,6 +322,31 @@ struct Image
     // when there's no such encoder or nothing to say.
     std::string encoded_as;
     std::map<std::string, int> encoding;
+    // How the file encodes what's shown, in brief, as its decoder read it:
+    // for a line saying what to expect of its quality (summary()). The
+    // depth and subsampling are `pixel_format`'s.
+    struct Coding
+    {
+        // The format as its mode names it, where `format` says more or less:
+        // "Canon M-RAW", "DNG (lossy)", "Camera JPEG". Empty: `format`.
+        std::string name;
+        enum class Loss
+        {
+            Unknown,  // not known: never guessed
+            Lossless,
+            Lossy,
+        };
+        Loss loss = Loss::Unknown;
+        // The format is lossy as a rule (WebP, JPEG XL, HEIF): a lossless
+        // file of it is worth saying so. Others' modes are in their names.
+        bool lossy_kind = false;
+        Gamut gamut = Gamut::Unknown;  // its colours' space: Camera for a raw's own
+        Hdr hdr = Hdr::None;
+    } coding;
+    // "Canon M-RAW · 15-bit · YCbCr 4:2:0", "JPEG · 8-bit · 4:2:2 · Adobe RGB",
+    // "WebP · 8-bit · lossless": `coding` and `pixel_format` in one line,
+    // what isn't known left out.
+    std::string coding_summary() const;
     std::shared_ptr<LinearData> linear;  // only for raw files
     std::shared_ptr<const RawMosaic> mosaic;  // a raw the GPU develops (then `pixels` start stale); turns and crops join its framing
     std::shared_ptr<SourceData> source;  // more than 8 bits a channel; may be null

@@ -94,6 +94,7 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
         out.format = "AVIF";
     if (out.format.empty())
         out.format = "HEIF";
+    out.coding.lossy_kind = true;  // which this file is, libheif doesn't say
     if (heif_image_handle_get_number_of_depth_images(handle) > 0)
         out.info = "has depth map";
     {
@@ -125,6 +126,8 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
                 const CicpSpace cicp = from_cicp(int(nclx->color_primaries), int(nclx->transfer_characteristics));
                 out.color_space = cicp.label;
                 out.declared_space = cicp.space;
+                out.coding.gamut = cicp.gamut;
+                out.coding.hdr = cicp.hdr;
                 heif_nclx_color_profile_free(nclx);
             }
         }

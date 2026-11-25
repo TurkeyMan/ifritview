@@ -235,6 +235,8 @@ int process(int argc, char** argv)
             ok = st.arg.empty() || st.arg == "metadata", error = "info: takes no argument, or metadata (to list the metadata rows too)";
         else if (st.name == "diff")
             ok = !st.arg.empty(), error = "diff: takes the file to compare with, e.g. diff:original.png";
+        else if (st.name == "camera-jpeg")
+            ok = st.arg.empty() && steps.empty(), error = "camera-jpeg: takes no argument, and comes first";
         else if (st.name == "page" || st.name == "level")
             ok = integer(st.arg, v) && v >= 0 &&
                  std::all_of(steps.begin(), steps.end(), [](const Step& p) { return p.name == "page" || p.name == "level"; }),
@@ -247,7 +249,7 @@ int process(int argc, char** argv)
             error = "shrink: takes WIDTH,HEIGHT in pixels, no larger than the image at that step";
         }
         else
-            ok = false, error = "unknown step \"" + a + "\" (page, level, rotate, flip, crop, shrink, exposure, info, diff, save); --help explains them";
+            ok = false, error = "unknown step \"" + a + "\" (page, level, camera-jpeg, rotate, flip, crop, shrink, exposure, info, diff, save); --help explains them";
         if (!ok)
         {
             std::fprintf(stderr, "%s\n", error.c_str());
@@ -261,6 +263,10 @@ int process(int argc, char** argv)
         return 2;
     }
 
+    // A raw's own JPEG, whole, as the viewer shows it for Camera JPEG.
+    const bool camera_jpeg = !steps.empty() && steps.front().name == "camera-jpeg";
+    if (camera_jpeg)
+        steps.erase(steps.begin());
     // Which of the file's images: page:N and level:N, first.
     ImagePart part;
     while (!steps.empty() && (steps.front().name == "page" || steps.front().name == "level"))
@@ -270,7 +276,12 @@ int process(int argc, char** argv)
     }
     Image img;
     std::string error;
-    if (!decode_image_part(in, part, img, error))
+    if (camera_jpeg && (!decode_preview(in, img) || !img.is_raw))
+    {
+        std::fprintf(stderr, "%s: no camera JPEG to read\n", in.c_str());
+        return 1;
+    }
+    if (!camera_jpeg && !decode_image_part(in, part, img, error))
     {
         std::fprintf(stderr, "%s: %s\n", in.c_str(), error.c_str());
         return 1;
@@ -340,6 +351,9 @@ int process(int argc, char** argv)
                             img.page_label.c_str(), img.part.level, img.level_count - 1);  // as the steps number them
             if (!img.pixel_format.empty())
                 std::printf("pixel format: %s\n", img.pixel_format.describe(img.width, img.height).c_str());
+            // The fullscreen overlay's line for it.
+            if (const std::string coding = img.coding_summary(); !coding.empty())
+                std::printf("encoding: %s\n", coding.c_str());
             if (!img.color_space.empty())
                 std::printf("colour space: %s%s\n", img.color_space.c_str(),
                             img.stored && !img.stored->icc.empty() ? " (with an ICC profile, kept on saving)" : "");
@@ -471,6 +485,8 @@ it is at that step, after earlier turns and crops)
   exposure:EV        raw and HDR images only: brighter (+) or darker (-), in stops
   page:N, level:N    first: the file's page N (from 0: a TIFF's directories, a PDF's
                      pages, a texture's slices or faces) and mip level N
+  camera-jpeg        first, raws only: the camera's JPEG the raw holds, whole, in
+                     place of its develop (what the viewer shows for Camera JPEG)
   shrink:W,H         reduce to W x H pixels with the filter the viewer draws a
                      zoomed-out image with (smaller only; the shape is up to you)
   diff:FILE          compare the image at this point with FILE (the same size): PSNR,
@@ -478,8 +494,9 @@ it is at that step, after earlier turns and crops)
   gpu                render the pixels again from the image's own samples (a raw's
                      or a 16-bit or float image's) on the GPU, at the exposure so
                      far; for checking the GPU pipeline against the CPU with diff:
-  info               print the image's size and format at this point, and how the
-                     input was saved as its format's save settings ("the file's jpg
+  info               print the image's size and format at this point, its encoding
+                     as the fullscreen overlay sums it up, and how the input was
+                     saved as its format's save settings ("the file's jpg
                      settings: progressive=1 quality=85 subsampling=3"; quality
                      estimated); info:metadata also lists the metadata rows, as
                      "group: key: value"
