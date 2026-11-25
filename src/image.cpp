@@ -705,6 +705,7 @@ Image Image::crop(int x, int y, int w, int h) const
         out.final_width = std::max(1, int(std::lround(double(final_width) * w / width)));
         out.final_height = std::max(1, int(std::lround(double(final_height) * h / height)));
     }
+    out.shown_as_itself = shown_as_itself;
     out.has_location = has_location;
     out.latitude = latitude;
     out.longitude = longitude;
@@ -862,6 +863,7 @@ void Image::adopt(Image&& f)
     is_video = is_video || f.is_video;
     has_audio = has_audio || f.has_audio;
     final_width = final_height = 0;
+    shown_as_itself = false;
     stage = Stage::Final;
     if (tonable() && (exposure_edit != 0 || !adjust.neutral() || adjust.detail.active()))
         retone(exposure_edit);

@@ -249,10 +249,14 @@ std::vector<MetadataGroup> App::collect_metadata() const
     if (const std::string t = file_time(image_path_, "%Y-%m-%d %H:%M:%S"); !t.empty())
         file.items.push_back({N_("Modified"), t});
     groups.push_back(std::move(file));
+    // The pixels on screen (the camera's JPEG instead of the raw's develop,
+    // say); the groups after it are the file's, whichever is shown.
+    const Image& shown = shown_image();
+    const std::string format = shown_format();
     MetadataGroup img{N_("Image"), {}};
-    img.items.push_back({N_("Dimensions"), std::to_string(image_->width) + " × " + std::to_string(image_->height)});
-    if (!image_->format.empty())  // a pasted image has none
-        img.items.push_back({N_("Format"), image_->format});
+    img.items.push_back({N_("Dimensions"), std::to_string(shown.width) + " × " + std::to_string(shown.height)});
+    if (!format.empty())  // a pasted image has none
+        img.items.push_back({N_("Format"), format});
     // What the picture is: when it was taken, who by, what it shows. The
     // decoders file these under the metadata's own "Image" group; they show
     // here, not a second time as a group of their own.
@@ -268,12 +272,12 @@ std::vector<MetadataGroup> App::collect_metadata() const
                 if (m.key != "Taken" && m.key != "Artist" && m.key != "Description")
                     kept.push_back(m);
         }
-    if (!image_->pixel_format.empty())
-        img.items.push_back({N_("Pixel format"), image_->pixel_format.describe(image_->width, image_->height)});
-    if (!image_->color_space.empty())
-        img.items.push_back({N_("Colour space"), image_->color_space});
-    img.items.push_back({N_("Source depth"), rap::i18n::format(P_("{0} bit per sample", "{0} bits per sample", image_->bits_per_sample), image_->bits_per_sample)});
-    img.items.push_back({N_("Alpha"), image_->has_alpha ? _("yes") : _("no")});
+    if (!shown.pixel_format.empty())
+        img.items.push_back({N_("Pixel format"), shown.pixel_format.describe(shown.width, shown.height)});
+    if (!shown.color_space.empty())
+        img.items.push_back({N_("Colour space"), shown.color_space});
+    img.items.push_back({N_("Source depth"), rap::i18n::format(P_("{0} bit per sample", "{0} bits per sample", shown.bits_per_sample), shown.bits_per_sample)});
+    img.items.push_back({N_("Alpha"), shown.has_alpha ? _("yes") : _("no")});
     if (!image_->info.empty())
         img.items.push_back({N_("Notes"), image_->info});
     groups.push_back(std::move(img));
@@ -337,9 +341,10 @@ View::OverlaySections App::overlay_sections() const
     flush();
     if (cfg_.overlay_format)
     {
-        lines.push_back(std::to_string(image_->width) + " × " + std::to_string(image_->height) + "  ·  " + image_->format);
-        if (!image_->pixel_format.empty())
-            lines.push_back(image_->pixel_format.describe(image_->width, image_->height) + (image_->color_space.empty() ? "" : "  ·  " + image_->color_space));
+        const Image& shown = shown_image();
+        lines.push_back(std::to_string(shown.width) + " × " + std::to_string(shown.height) + "  ·  " + shown_format());
+        if (!shown.pixel_format.empty())
+            lines.push_back(shown.pixel_format.describe(shown.width, shown.height) + (shown.color_space.empty() ? "" : "  ·  " + shown.color_space));
         const std::string compression = find({"TIFF"}, {"Compression"});
         if (!compression.empty())
             lines.push_back(rap::i18n::format(_("compression {0}"), compression));
@@ -384,16 +389,17 @@ View::OverlaySections App::overlay_sections() const
     flush();
     if (cfg_.overlay_view)
     {
-        const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
-        std::string line = std::to_string(int(std::lround(shown * 100))) + "%";
+        const Image& shown = shown_image();
+        const double scale = (shown.stands_in() ? view_->zoom() * shown.width / shown.final_width : view_->zoom()) / view_->natural_zoom();
+        std::string line = std::to_string(int(std::lround(scale * 100))) + "%";
         if (image_->page_count > 1)
             line += "  ·  " + rap::i18n::format(_("page {0} / {1}"), image_->part.page + 1, image_->page_count) +
                     (image_->page_label.empty() ? "" : " " + image_->page_label);
         if (image_->level_count > 1)
             line += "  ·  " + rap::i18n::format(_("mip {0} / {1}"), image_->part.level, image_->level_count - 1);
-        if (image_->is_preview())
-            line += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
-        else if (image_->tonable())
+        if (shown.is_preview() && shown_format() == shown.format)
+            line += std::string("  ·  ") + (shown.is_raw ? _("embedded preview") : _("preview"));
+        else if (&shown == image_.get() && image_->tonable())  // not what stands instead of it
         {
             char ev[32];
             std::snprintf(ev, sizeof ev, "%+.2f EV", exposure_->value());

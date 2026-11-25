@@ -973,7 +973,7 @@ void App::script_export(const std::string& path)
     }
     // Encoded on a thread of its own, as a save is (a raw's tens of
     // megapixels took the UI thread seconds), from a copy of what's shown.
-    auto shown = std::make_shared<const Image>(instead_image_ && view_->image() == instead_image_.get() ? *instead_image_ : *edited);
+    auto shown = std::make_shared<const Image>(&shown_image() == image_.get() ? *edited : shown_image());
     std::thread(
         [e, shown, path, running = saves_->start()]
         {
@@ -1002,12 +1002,73 @@ int App::check_camera_jpeg(rap::ui& ui)
     cfg.geocoder_url.clear();
     std::promise<Config> settings;
     settings.set_value(cfg);
+    // A real-sized, nonpainting canvas: exercise View geometry without a GPU
+    // or native desktop input. It outlives the App's attached View.
+    class CheckCanvas final : public rap::canvas
+    {
+    public:
+        void set_enabled(bool) override {}
+        void set_visible(bool) override {}
+        void set_tooltip(const std::string&) override {}
+        void focus() override {}
+        bool has_focus() const override { return false; }
+        void invalidate() override {}
+        rap::size_f size() const override { return {800, 600}; }
+        float device_scale() const override { return 1; }
+        void set_cursor(rap::cursor) override {}
+        void on_paint(std::function<void(rap::painter&, rap::size_f)>) override {}
+        void on_resize(std::function<void(rap::size_f)>) override {}
+        void on_pointer(std::function<bool(const rap::pointer_event&)>) override {}
+        void on_scroll(std::function<bool(const rap::scroll_event&)>) override {}
+        void on_key(std::function<bool(const rap::key_event&)>) override {}
+        rap::subscription on_frame(std::function<void(double)>) override { return {}; }
+        rap::frame_target target() const override { return {}; }
+        void on_frame_target(std::function<void(const rap::frame_target&)>) override {}
+        void present(std::shared_ptr<const rap::image>, rap::frame_color) override {}
+        void clear_frame() override {}
+    } canvas;
     App app(ui, settings.get_future().share());
+    // The status bar's description, as it's set.
+    struct Label : rap::label
+    {
+        std::string text;
+        void set_enabled(bool) override {}
+        void set_visible(bool) override {}
+        void set_tooltip(const std::string&) override {}
+        void focus() override {}
+        bool has_focus() const override { return false; }
+        void set_text(const std::string& v) override { text = v; }
+    } status, zoom;
+    rap::label* const original_status = app.status_center_;
+    rap::label* const original_zoom = app.status_right_;
+    app.status_center_ = &status;
+    app.status_right_ = &zoom;
     int failed = 0;
     const auto expect = [&](bool ok, const char* what)
     {
         std::printf("camera-JPEG: %s: %s\n", what, ok ? "ok" : "FAILED");
         failed += !ok;
+    };
+    // The status bar and the info panel's Image group both describe `w` x `h`
+    // pixels of `format`.
+    const auto describes = [&](int w, int h, const std::string& format)
+    {
+        const std::string size = std::to_string(w) + " × " + std::to_string(h);
+        bool panel = false;
+        for (const MetadataGroup& g : app.collect_metadata())
+            if (g.name == "Image")
+            {
+                std::string dims, fmt;
+                for (const MetadataItem& m : g.items)
+                {
+                    if (m.key == "Dimensions")
+                        dims = m.value;
+                    else if (m.key == "Format")
+                        fmt = m.value;
+                }
+                panel = dims == size && fmt == format;
+            }
+        return panel && status.text.rfind(size + " × ", 0) == 0 && status.text.find("  ·  " + format) != std::string::npos;
     };
     const auto raw = [](bool preview)
     {
@@ -1060,6 +1121,7 @@ int App::check_camera_jpeg(rap::ui& ui)
     drain();
     expect(app.instead_ == Instead::CameraJpeg && app.view_->image() != first.image.get() && app.view_->image()->stand_in_full,
            "JPEG choice is displayed after develop completes");
+    expect(describes(2, 2, _("Camera JPEG")), "status and panel describe the camera JPEG shown");
 
     // A foreground decode of the next raw started before the choice changed.
     // There is no preview of that raw on screen yet: it must not flash its
@@ -1079,6 +1141,7 @@ int App::check_camera_jpeg(rap::ui& ui)
     app.on_loaded(camera);
     expect(app.instead_ == Instead::CameraJpeg, "choice remains selected after navigation");
     expect(app.view_->image() == jpeg.get(), "next raw presents its camera JPEG");
+    expect(describes(2, 2, _("Camera JPEG")), "status and panel describe the next raw's camera JPEG");
     app.folder_.set_single(first.path);
     app.load_current();
     expect(app.view_->image()->stand_in_full && app.image_key_ == first.path, "previous raw keeps JPEG mode through the cache");
@@ -1086,6 +1149,308 @@ int App::check_camera_jpeg(rap::ui& ui)
     app.load_current();
     expect(app.view_->image() == jpeg.get(), "next raw keeps JPEG mode through the cache");
     drain();
+
+    app.show_instead(Instead::Nothing);
+    // The old fake-file preview can have requested a real develop on switch-off.
+    // Its refusal belongs to the preceding navigation case, not this exposure.
+    ++app.load_generation_;
+    app.view_->attach(&canvas);
+    const auto sized = [](int w, int h, bool preview)
+    {
+        auto image = std::make_shared<Image>();
+        image->width = w;
+        image->height = h;
+        image->stride = w * 4;
+        image->pixels_stale = true;  // no CPU upload exists, as on the GPU path
+        image->is_raw = true;
+        image->stage = preview ? Image::Stage::Preview : Image::Stage::Final;
+        image->stand_in_full = preview;
+        return image;
+    };
+    const auto close = [](double a, double b) { return std::abs(a - b) < 0.002; };
+    auto full = sized(4000, 3000, false);
+    full->format = "Canon RAW";
+    full->bits_per_sample = 14;
+    auto mosaic = std::make_shared<RawMosaic>();
+    mosaic->width = 4000;
+    mosaic->height = 3000;
+    mosaic->crop[2] = 4000;
+    mosaic->crop[3] = 3000;
+    mosaic->camera_crop[0] = 200;
+    mosaic->camera_crop[1] = 100;
+    mosaic->camera_crop[2] = 3600;
+    mosaic->camera_crop[3] = 2600;
+    full->mosaic = mosaic;
+    app.image_ = full;
+    app.view_->set_image(full);
+    View::Framing chosen;
+    chosen.fit = false;
+    chosen.width = 2000;
+    chosen.cx = .55;
+    chosen.cy = .45;
+    app.view_->set_framing(chosen);
+    const auto before = app.view_->framing();
+    app.camera_preview_ = [&](const std::string&, Image& image)
+    {
+        image = *sized(1800, 1300, true);
+        image.final_width = 4000;  // as a raw's preview carries the develop's size
+        image.final_height = 3000;
+        return true;
+    };
+    app.script_instead("jpeg");
+    drain();
+    const auto camera_frame = app.view_->framing();
+    expect(app.view_->image() != full.get() && !camera_frame.fit && close(camera_frame.cx, (before.cx * 4000 - 200) / 3600) &&
+               close(camera_frame.cy, (before.cy * 3000 - 100) / 2600) && close(camera_frame.width / before.width, 3600.0 / 4000),
+           "camera JPEG preserves sensor centre and scale with framing off");
+    expect(describes(1800, 1300, _("Camera JPEG")) && status.text.find("-bit") == std::string::npos,
+           "status and panel follow the toggle to the JPEG");
+    {
+        // Its own pixels are its 1:1, not the develop's it would stand in for.
+        const auto was = app.view_->framing();
+        View::Framing one = was;
+        one.width = 1800;
+        app.view_->set_framing(one);
+        app.update_status();
+        expect(!app.view_->image()->stands_in() && zoom.text.rfind("100%", 0) == 0, "the camera JPEG's 1:1 is its own");
+        app.view_->set_framing(was);
+        // Switched to LibRaw's develop: until it's there (here it never is), the
+        // JPEG still on screen is what's described.
+        app.script_instead("libraw");
+        expect(app.view_->image() != full.get() && describes(1800, 1300, _("Camera JPEG")), "the JPEG on screen is described while LibRaw develops");
+        drain();
+    }
+    app.script_instead("off");
+    const auto restored = app.view_->framing();
+    expect(app.view_->image() == full.get() && !restored.fit && close(restored.cx, before.cx) && close(restored.cy, before.cy) &&
+               close(restored.width, before.width),
+           "raw return preserves sensor centre and scale without a CPU upload");
+    expect(describes(4000, 3000, "Canon RAW") && status.text.find("(14-bit)") != std::string::npos, "status and panel follow the toggle back to the raw");
+
+    // At Fit, each is shown whole, though they frame the sensor differently.
+    app.view_->set_framing(View::Framing{});
+    app.script_instead("jpeg");
+    drain();
+    expect(app.view_->image() != full.get() && app.view_->framing().fit && close(app.view_->framing().width, 800), "Fit stays Fit on the JPEG");
+    app.script_instead("off");
+    expect(app.view_->image() == full.get() && app.view_->framing().fit && close(app.view_->framing().width, 800), "Fit stays Fit back on the raw");
+
+    // Not registered: a camera whose JPEG's framing isn't known (no inset
+    // inside the active area), or a JPEG of another aspect than that framing.
+    // The same fraction across at the same shown size, rather than an
+    // invented crop origin.
+    const int inset[4] = {mosaic->camera_crop[0], mosaic->camera_crop[1], mosaic->camera_crop[2], mosaic->camera_crop[3]};
+    for (const bool known : {false, true})
+    {
+        std::fill(mosaic->camera_crop, mosaic->camera_crop + 4, 0);
+        if (known)
+            std::copy(inset, inset + 4, mosaic->camera_crop);
+        app.camera_preview_ = [&, known](const std::string&, Image& image)
+        {
+            image = *sized(1800, 1350, true);  // the raw's aspect, not the inset's
+            return true;
+        };
+        app.view_->set_framing(chosen);
+        app.script_instead("jpeg");
+        drain();
+        const auto unknown = app.view_->framing();
+        expect(!unknown.fit && close(unknown.cx, before.cx) && close(unknown.cy, before.cy) && close(unknown.width, before.width),
+               known ? "JPEG of another aspect keeps the fraction across and shown size" : "unknown framing keeps the fraction across and shown size");
+        app.script_instead("off");
+        const auto unknown_back = app.view_->framing();
+        expect(!unknown_back.fit && close(unknown_back.cx, before.cx) && close(unknown_back.cy, before.cy) && close(unknown_back.width, before.width),
+               known ? "JPEG of another aspect returns to the same view" : "unknown framing returns to the same view");
+    }
+
+    // Mid-develop: the camera's JPEG came first (chosen as the raw was
+    // opened), it's turned off, and the develop lands in place of it.
+    {
+        app.show_instead(Instead::CameraJpeg);
+        drain();  // the JPEG asked for the raw before, not shown
+        app.folder_.set_single("camera-mode-develop.raw");
+        auto stand_in = sized(1800, 1300, true);
+        stand_in->final_width = 4000;
+        stand_in->final_height = 3000;
+        Loader::Result opened{++app.load_generation_, app.current_key(), stand_in, {}, true};
+        opened.stand_ins_only = true;
+        app.on_loaded(opened);
+        expect(app.view_->image() == stand_in.get() && describes(1800, 1300, _("Camera JPEG")), "the JPEG opened in its place is described as it");
+        expect(!stand_in->stands_in() && stand_in->final_width == 4000 && app.view_->framing().fit && close(app.view_->framing().width, 800), "the JPEG opened in its place fits as itself");
+        app.view_->set_framing(chosen);
+        const auto jpeg_frame = app.view_->framing();
+        app.show_instead(Instead::Nothing);
+        ++app.load_generation_;  // the fake file's own develop, asked for on switch-off, can't land
+        expect(app.view_->image() == stand_in.get() && app.view_->framing() == jpeg_frame, "switching off mid-develop keeps the view");
+        auto developed = sized(4000, 3000, false);
+        developed->format = "Canon RAW";
+        developed->mosaic = mosaic;
+        Loader::Result landed{app.load_generation_, app.current_key(), developed, {}};
+        app.on_loaded(landed);
+        const auto developed_frame = app.view_->framing();
+        expect(app.image_ == stand_in && !stand_in->is_preview() && !developed_frame.fit &&
+                   close(developed_frame.cx, (jpeg_frame.cx * 3600 + 200) / 4000) && close(developed_frame.cy, (jpeg_frame.cy * 2600 + 100) / 3000) &&
+                   close(developed_frame.width / jpeg_frame.width, 4000.0 / 3600),
+               "develop landing after switch-off keeps the sensor centre and scale");
+        expect(describes(4000, 3000, "Canon RAW"), "status and panel describe the develop that landed");
+    }
+
+    // Switched off before the develop lands, at Fit: the JPEG stands in for
+    // the develop again at the develop's size, so its landing changes nothing
+    // of the fit, the window or the zoom shown. (An M-RAW's JPEG is larger
+    // than its develop: 5760 x 3840 for 3960 x 2640.)
+    {
+        app.show_instead(Instead::CameraJpeg);
+        app.folder_.set_single("camera-mode-fit.raw");
+        auto stand_in = sized(1800, 1200, true);
+        stand_in->final_width = 1188;
+        stand_in->final_height = 792;
+        Loader::Result opened{++app.load_generation_, app.current_key(), stand_in, {}, true};
+        opened.stand_ins_only = true;
+        app.on_loaded(opened);
+        const std::string as_jpeg = zoom.text;
+        app.show_instead(Instead::Nothing);
+        ++app.load_generation_;
+        expect(stand_in->stands_in() && stand_in->final_width == 1188 && zoom.text != as_jpeg, "switched off, the JPEG stands in at the develop's size again");
+        const auto fit = app.view_->framing();
+        const std::string percent = zoom.text;
+        const rap::size_f window = app.window().size();
+        auto developed = sized(1188, 792, false);
+        developed->format = "Canon RAW";
+        Loader::Result landed{app.load_generation_, app.current_key(), developed, {}};
+        app.on_loaded(landed);
+        const auto after = app.view_->framing();
+        expect(fit.fit && after.fit && close(after.width, fit.width) && zoom.text == percent && app.window().size().w == window.w &&
+                   app.window().size().h == window.h,
+               "the develop landing after switch-off changes no fit, window or zoom shown");
+    }
+    // Framing on: the JPEG and develop have the same field of view at
+    // different resolutions. Check every camera orientation, not just landscape.
+    for (int orientation = 1; orientation <= 8; ++orientation)
+    {
+        auto framed = sized(orientation >= 5 ? 2600 : 3600, orientation >= 5 ? 3600 : 2600, false);
+        auto m = std::make_shared<RawMosaic>(*mosaic);
+        std::copy(m->camera_crop, m->camera_crop + 4, m->crop);
+        m->orientation = m->camera_orientation = orientation;
+        framed->mosaic = m;
+        auto jpeg = sized(framed->width / 2, framed->height / 2, true);
+        app.view_->set_image(framed);
+        auto f = chosen;
+        f.width = framed->width;
+        f.cx = .53;
+        f.cy = .47;
+        app.view_->set_framing(f);
+        const auto before_turn = app.view_->framing();
+        app.view_->replace_image(jpeg, framed.get());
+        const auto after_turn = app.view_->framing();
+        expect(!after_turn.fit && close(before_turn.width, after_turn.width) && close(before_turn.cx, after_turn.cx) && close(before_turn.cy, after_turn.cy),
+               "framed camera orientation preserves manual view");
+        app.view_->set_image(framed);
+        app.view_->replace_image(jpeg, framed.get());
+        expect(app.view_->framing().fit, "same camera frame retains Fit");
+    }
+
+    // Framing off, each camera orientation: the develop shows the whole
+    // sensor, the JPEG its inset (200,100 3600x2600), each turned as the camera
+    // was held. A sensor point at the view's centre stays there, at the same
+    // sensor pixels per screen pixel. EXIF's turns, of a point as fractions:
+    const auto turned = [](int o, double x, double y)
+    {
+        switch (o)
+        {
+            case 2: return std::pair{1 - x, y};
+            case 3: return std::pair{1 - x, 1 - y};
+            case 4: return std::pair{x, 1 - y};
+            case 5: return std::pair{y, x};
+            case 6: return std::pair{1 - y, x};
+            case 7: return std::pair{1 - y, 1 - x};
+            case 8: return std::pair{y, 1 - x};
+            default: return std::pair{x, y};
+        }
+    };
+    for (int orientation = 1; orientation <= 8; ++orientation)
+    {
+        const bool across = orientation >= 5;
+        auto whole = sized(across ? 3000 : 4000, across ? 4000 : 3000, false);
+        auto m = std::make_shared<RawMosaic>(*mosaic);
+        m->orientation = m->camera_orientation = orientation;
+        whole->mosaic = m;
+        auto jpeg = sized(across ? 1300 : 1800, across ? 1800 : 1300, true);
+        const double sx = 2100, sy = 1400;  // on the sensor
+        const auto [dx, dy] = turned(orientation, sx / 4000, sy / 3000);
+        const auto [jx, jy] = turned(orientation, (sx - 200) / 3600, (sy - 100) / 2600);
+        app.view_->set_image(whole);
+        View::Framing f;
+        f.fit = false;
+        f.width = whole->width * 0.5;
+        f.cx = dx;
+        f.cy = dy;
+        app.view_->set_framing(f);
+        app.view_->replace_image(jpeg, whole.get());
+        const auto j = app.view_->framing();
+        // Sensor px across what's shown: the develop's 4000 (or 3000 turned), the JPEG's 3600 (2600).
+        const double scale = across ? 2600.0 / 3000 : 3600.0 / 4000;
+        expect(!j.fit && close(j.cx, jx) && close(j.cy, jy) && close(j.width / f.width, scale),
+               "differing framings, every orientation: JPEG keeps the sensor point and scale");
+        app.view_->replace_image(whole, whole.get());
+        const auto back = app.view_->framing();
+        expect(!back.fit && close(back.cx, dx) && close(back.cy, dy) && close(back.width, f.width),
+               "differing framings, every orientation: back on the develop");
+    }
+
+    // The user's crop of the JPEG (its transform): a tenth in from the top
+    // left, half its size, so 560,360 1800x1300 on the sensor.
+    {
+        app.view_->set_image(full);
+        View::Framing f;
+        f.fit = false;
+        f.width = 2000;
+        f.cx = 1500.0 / 4000;
+        f.cy = 1000.0 / 3000;
+        app.view_->set_framing(f);
+        auto cropped = sized(900, 650, true);
+        cropped->transform = {1800, 1300, 1, 180, 130, 900, 650, {}};
+        app.view_->replace_image(cropped, full.get());
+        const auto c = app.view_->framing();
+        expect(!c.fit && close(c.cx, (1500.0 - 560) / 1800) && close(c.cy, (1000.0 - 360) / 1300) && close(c.width / f.width, 1800.0 / 4000),
+               "the user's crop of the JPEG keeps the sensor point and scale");
+        // And turned by the user too (a quarter turn clockwise after the crop).
+        cropped = sized(650, 900, true);
+        cropped->transform = {1800, 1300, 6, 1300 - 130 - 650, 180, 650, 900, {}};
+        f.width = 4000;  // shown wider than the view, so the pan isn't centred for it
+        app.view_->set_image(full);
+        app.view_->set_framing(f);
+        app.view_->replace_image(cropped, full.get());
+        const auto t = app.view_->framing();
+        const auto [tx, ty] = turned(6, (1500.0 - 560) / 1800, (1000.0 - 360) / 1300);
+        expect(!t.fit && close(t.cx, tx) && close(t.cy, ty) && close(t.width / f.width, 1300.0 / 4000),
+               "the user's crop and turn of the JPEG keep the sensor point and scale");
+    }
+
+    // The existing #26 in-place preview adoption must keep its width memory:
+    // no CPU base was made, and Fit must remain Fit on the regular path.
+    auto preview = sized(1000, 750, true);
+    preview->final_width = 4000;
+    preview->final_height = 3000;
+    app.view_->set_image(preview);
+    app.view_->set_framing(chosen);
+    const auto preview_frame = app.view_->framing();
+    preview->width = 4000;
+    preview->height = 3000;
+    preview->final_width = preview->final_height = 0;
+    app.view_->image_changed();
+    const auto developed_frame = app.view_->framing();
+    expect(!developed_frame.fit && close(developed_frame.width, preview_frame.width) && close(developed_frame.cx, preview_frame.cx) &&
+               close(developed_frame.cy, preview_frame.cy),
+           "preview adoption preserves manual view without a CPU upload");
+    app.view_->set_image(preview);
+    preview->width = 8000;
+    preview->height = 6000;
+    app.view_->image_changed();
+    expect(app.view_->framing().fit && close(app.view_->framing().width, 800), "normal preview adoption retains Fit");
+
+    drain();  // no JPEG still being read as this goes
+    app.status_center_ = original_status;
+    app.status_right_ = original_zoom;
     app.quit();
     return failed ? 1 : 0;
 }
@@ -1763,13 +2128,17 @@ void App::on_loaded(Loader::Result& r)
     // started before the user left it and came back (only one runs).
     if (!r.preview && !r.cached && r.image && image_ && image_->is_preview() && image_key_ == r.path)
     {
+        const View::Shape before = View::Shape::of(*image_);  // the camera's JPEG, as it stood in
         image_->adopt(std::move(*r.image));
         if (tracing())
             std::fprintf(stderr, "developed %s %dx%d: decoded in %.0f ms, %.0f ms to reach the UI\n", key_text(r.path).c_str(), image_->width,
                          image_->height, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
         status_message_.clear();
         correct_lens(false);
-        view_->image_changed();
+        if (view_->image() == image_.get())
+            view_->image_developed(before);
+        else
+            view_->image_changed();
         fit_window_to_image();
         sync_exposure_slider();
         update_status();
@@ -1978,6 +2347,7 @@ void App::show_instead(Instead what)
     if (syncing_instead_)
         return;
     const ImageCache::Source was = wanted_source();
+    const bool itself = image_ && image_->shown_as_itself;
     instead_ = what;
     syncing_instead_ = true;  // one at a time: the other check goes off
     camera_jpeg_check_->set_checked(what == Instead::CameraJpeg);
@@ -1998,6 +2368,12 @@ void App::show_instead(Instead what)
         schedule_prefetch();
     }
     show_instead();
+    if (image_ && image_->shown_as_itself != itself)
+        fit_window_to_image();  // to the JPEG's own size, or the develop's it stands in for now
+    // The camera's JPEG may be on screen already, and now is what's chosen.
+    update_status();
+    if (image_)
+        refresh_metadata();
 }
 
 ImageCache::Source App::wanted_source() const
@@ -2018,6 +2394,26 @@ ImageCache::Source App::cache_source(const Image& image) const
     return image.mosaic ? ImageCache::Source::GpuDevelop : ImageCache::Source::CpuDevelop;
 }
 
+const Image& App::shown_image() const
+{
+    // What the view has, even a moment after the choice changed (the camera's
+    // JPEG stays up while LibRaw develops in its place).
+    const Image* shown = view_->image();
+    return shown ? *shown : *image_;
+}
+
+std::string App::shown_format() const
+{
+    const Image& shown = shown_image();
+    if (shown.reference)
+        return _("LibRaw develop");
+    // The camera's JPEG whole, shown as itself: read to show instead of the
+    // develop, or the file's own first image while that's what's chosen.
+    if (shown.is_raw && shown.is_preview() && shown.stand_in_full && (&shown != image_.get() || instead_ == Instead::CameraJpeg))
+        return _("Camera JPEG");
+    return shown.format;
+}
+
 void App::show_instead()
 {
     // The camera's JPEG needs no develop first: the stand-in may be it.
@@ -2027,10 +2423,22 @@ void App::show_instead()
     {
         if (wanted)
             platform::trace("shown: %s, the camera's JPEG (%dx%d), no develop", key_text(image_key_).c_str(), image_->width, image_->height);
+        // The camera's JPEG shown as itself, or no longer chosen and standing in
+        // for the develop to come: Fit is to its own size, or to the develop's.
+        if (image_ && image_->shown_as_itself != wanted)
+        {
+            image_->shown_as_itself = wanted;
+            if (view_->image() == image_.get())
+                view_->refit();
+        }
         instead_image_.reset();
         ++instead_request_;
         if (image_ && view_->image() != image_.get())
-            view_->set_image(image_);
+        {
+            view_->replace_image(image_, image_.get());
+            update_status();  // what's shown is described
+            refresh_metadata();
+        }
         return;
     }
     if (instead_image_ && view_->image() == instead_image_.get())
@@ -2051,7 +2459,11 @@ void App::show_instead()
             std::string error;
             bool ok;
             if (what == Instead::CameraJpeg)
+            {
                 ok = camera_preview_(path, *other);
+                if (ok)
+                    other->shown_as_itself = true;  // never a stand-in
+            }
             else
             {
                 develop_raws_as_reference(true);
@@ -2079,7 +2491,9 @@ void App::show_instead()
                     platform::trace("shown: %s, %s instead (%dx%d)", key_text(image_key_).c_str(),
                                     what == Instead::CameraJpeg ? "the camera's JPEG" : "LibRaw's develop", other->width, other->height);
                     instead_image_ = other;
-                    view_->set_image(other);
+                    view_->replace_image(other, raw.get());
+                    update_status();
+                    refresh_metadata();
                 });
         })
         .detach();
@@ -2453,7 +2867,7 @@ void App::fit_window_to_image()
 
     // Leave room for the title bar and a little air around the window.
     const float max_w = work.w - 24, max_h = work.h - 72;
-    const bool stand_in = image_->final_width > 0 && image_->final_height > 0;
+    const bool stand_in = image_->stands_in();
     const double iw = (stand_in ? image_->final_width : image_->width) / scale;  // logical pixels at 1:1
     const double ih = (stand_in ? image_->final_height : image_->height) / scale;
     // A page that renders at any size fills the screen its way up; pixels
@@ -2657,11 +3071,15 @@ void App::update_status()
     status_message_label_->set_text(status_message_);
     if (image_)
     {
-        center = std::to_string(image_->width) + " × " + std::to_string(image_->height) + " × " + (image_->has_alpha ? "32" : "24") + " bpp";
-        if (image_->bits_per_sample != 8)
-            center += " (" + std::to_string(image_->bits_per_sample) + "-bit)";
-        if (!image_->format.empty())
-            center += "  ·  " + image_->format;
+        // The pixels described are those shown (the camera's JPEG instead of
+        // the raw's develop, say); the file's size is the file's.
+        const Image& shown = shown_image();
+        const std::string format = shown_format();
+        center = std::to_string(shown.width) + " × " + std::to_string(shown.height) + " × " + (shown.has_alpha ? "32" : "24") + " bpp";
+        if (shown.bits_per_sample != 8)
+            center += " (" + std::to_string(shown.bits_per_sample) + "-bit)";
+        if (!format.empty())
+            center += "  ·  " + format;
         if (file_size_)
             center += "  ·  " + human_size(file_size_);
         if (!image_->info.empty() && !image_->is_video)
@@ -2675,11 +3093,11 @@ void App::update_status()
         }
         if (image_->level_count > 1)
             center += "  ·  " + rap::i18n::format(_("mip {0} / {1}"), image_->part.level, image_->level_count - 1);
-        if (image_->is_preview() && status_message_.empty())
-            center += std::string("  ·  ") + (image_->is_raw ? _("embedded preview") : _("preview"));
+        if (shown.is_preview() && status_message_.empty() && format == shown.format)
+            center += std::string("  ·  ") + (shown.is_raw ? _("embedded preview") : _("preview"));
         // Against 1:1, which for a page is its actual size.
-        const double shown = (image_->final_width > 0 ? view_->zoom() * image_->width / image_->final_width : view_->zoom()) / view_->natural_zoom();
-        right = std::to_string(int(std::lround(shown * 100.0))) + "%";
+        const double scale = (shown.stands_in() ? view_->zoom() * shown.width / shown.final_width : view_->zoom()) / view_->natural_zoom();
+        right = std::to_string(int(std::lround(scale * 100.0))) + "%";
         if (image_->is_video && video_.active() && video_.duration() > 0)
         {
             auto clock = [](double t)
