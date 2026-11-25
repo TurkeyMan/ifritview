@@ -27,6 +27,10 @@ fi
 printf 'P6\n64 48\n255\n' > "$smoke"/big.ppm
 head -c $((64 * 48 * 3)) /dev/urandom >> "$smoke"/big.ppm
 "$build/ifritview" --process "$smoke"/big.ppm shrink:23,17 info
+# The overlay's encoding line, as info prints it: a PNG's format and depth,
+# nothing said of its loss (always lossless) or its space (untagged).
+"$build/ifritview" --process "$smoke"/rgb.ppm save:"$smoke"/rgb.png
+"$build/ifritview" --process "$smoke"/rgb.png info | grep -q '^encoding: PNG  ·  8-bit$'
 # SVG: drawn 2048 px on its longer side (the view box alone gives the
 # shape), gzipped too; a broken one refused, not crashed on (1 is a refusal).
 svg=$(dirname "$0")/../../tools/svg

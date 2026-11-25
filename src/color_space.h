@@ -50,6 +50,32 @@ struct ColorSpace
     bool is_srgb() const;
 };
 
+// Which standard space's primaries and white a space has, whatever its
+// curve, for naming it in brief: a one-line summary's "Adobe RGB".
+// `Camera` is none of them: a raw's, as its sensor saw.
+enum class Gamut
+{
+    Unknown,
+    SRGB,
+    AdobeRGB,
+    DisplayP3,
+    DCIP3,
+    BT2020,
+    ProPhoto,
+    Other,  // primaries of its own
+    Camera,
+};
+Gamut gamut_of(const ColorSpace& space);
+const char* gamut_name(Gamut g);  // "Adobe RGB", "Display P3"; empty for Unknown, Other and Camera
+
+// A high-dynamic-range curve, as H.273 names them (transfer 16, 18).
+enum class Hdr
+{
+    None,
+    PQ,
+    HLG,
+};
+
 // A space given as ITU-T H.273 (CICP) code points, as HEIF's nclx and JPEG
 // XL's colour encoding give them: `space` when it's one a profile carries
 // (PQ and HLG wait for HDR display), and a label for it either way ("sRGB",
@@ -58,6 +84,8 @@ struct CicpSpace
 {
     std::optional<ColorSpace> space;
     std::string label;
+    Gamut gamut = Gamut::Unknown;  // its primaries', whatever the curve (PQ's and HLG's too)
+    Hdr hdr = Hdr::None;
 };
 CicpSpace from_cicp(int primaries, int transfer, double gamma = 0);
 
@@ -67,6 +95,12 @@ using Mat3 = std::array<Vec3, 3>;
 Mat3 mul(const Mat3& a, const Mat3& b);
 Vec3 mul(const Mat3& a, const Vec3& v);
 Mat3 inverse(const Mat3& m);
+
+// The space's linear RGB to XYZ adapted to D50 (Bradford), as an ICC
+// profile's colorants are.
+Mat3 rgb_to_xyz_d50(const ColorSpace& space);
+// Which standard space's those colorants are (gamut_of's, from a profile).
+Gamut gamut_of_colorants(const Mat3& rgb_to_d50);
 
 // The XYZ of a chromaticity, Y = 1.
 Vec3 to_xyz(ColorSpace::XY c);

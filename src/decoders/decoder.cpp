@@ -1,4 +1,5 @@
 #include "decoder.h"
+#include "icc.h"
 
 #include "../i18n.h"
 #include "../platform.h"
@@ -89,6 +90,18 @@ void carry_declared_space(Image& out)
         out.color_space = out.declared_space->name;
 }
 
+// The space the colours are in, in brief, where the decoder didn't say: the
+// one the file names, else its profile's.
+void name_gamut(Image& out)
+{
+    if (out.coding.gamut != Gamut::Unknown)
+        return;
+    if (out.declared_space)
+        out.coding.gamut = gamut_of(*out.declared_space);
+    else if (out.stored && !out.stored->icc.empty())
+        out.coding.gamut = icc_gamut(out.stored->icc.data(), out.stored->icc.size());
+}
+
 void merge_metadata(Image& out, Image&& extra)
 {
     for (MetadataGroup& g : extra.metadata)
@@ -117,6 +130,7 @@ struct MetadataPass
     {
         thread.join();
         merge_metadata(out, std::move(extra));
+        name_gamut(out);  // before a profile's made for the named space
         carry_declared_space(out);
     }
     ~MetadataPass()

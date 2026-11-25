@@ -115,6 +115,7 @@ bool decode_preview(LibRaw& raw, Image& out, std::string& error, int fit_w = 0, 
     if (thumb->type == LIBRAW_IMAGE_JPEG)
     {
         ok = decode_jpeg_memory(thumb->data, thumb->data_size, out, error, fit_w, fit_h);
+        out.coding.name = "Camera JPEG";
         // Embedded previews are stored unrotated; apply the camera orientation.
         if (ok && out.width >= out.height)
             out.apply_camera_orientation(flip_to_orientation(raw.imgdata.sizes.flip));
@@ -647,6 +648,45 @@ public:
     {
         libraw_decoder_info_t info{};
         return const_cast<RawAccess*>(this)->get_decoder_info(&info) == LIBRAW_SUCCESS && info.decoder_name ? info.decoder_name : "";
+    }
+    // How the readout is coded (Image::Coding), as its loader reads it: a
+    // family's lossy mode by its own name (Canon's C-RAW, Sony's cRAW, a
+    // lossy NEF or DNG), and lossless where the loader is. `make` is
+    // LibRaw's normalised one; `sraw` Canon's sRAW name, where it is one.
+    Image::Coding coding(const uint8_t* file, size_t size, const std::string& make, const std::string& sraw) const
+    {
+        using Loss = Image::Coding::Loss;
+        Image::Coding c;
+        c.gamut = Gamut::Camera;
+        const std::string name = loader();
+        const auto& u = libraw_internal_data.unpacker_data;
+        for (const char* lossless : {"lossless_jpeg_load_raw()", "canon_sraw_load_raw()", "lossless_dng_load_raw()", "deflate_dng_load_raw()",
+                                     "packed_dng_load_raw()", "uncompressed_fp_dng_load_raw()", "packed_load_raw()", "unpacked_load_raw()",
+                                     "sony_ljpeg_load_raw()", "fuji_14bit_load_raw()", "pentax_load_raw()"})
+            if (name == lossless)
+                c.loss = Loss::Lossless;
+        if (name == "lossy_dng_load_raw()" || name == "sony_arw2_load_raw()")
+            c.loss = Loss::Lossy;
+        else if (name == "crxLoadRaw()" && u.crx_track_selected >= 0 && u.crx_track_selected < LIBRAW_CRXTRACKS_MAXCOUNT)
+            c.loss = u.crx_header[u.crx_track_selected].imageLevels > 0 ? Loss::Lossy : Loss::Lossless;  // C-RAW's wavelets
+        else if (name == "nikon_load_raw()" && u.meta_offset > 0 && size_t(u.meta_offset) < size)
+            c.loss = file[u.meta_offset] == 0x46 ? Loss::Lossless : Loss::Lossy;  // nikon_load_raw's lossless tree, else a lossy one
+        else if (name == "fuji_compressed_load_raw()")
+            c.loss = u.fuji_lossless ? Loss::Lossless : Loss::Lossy;
+        const bool lossy = c.loss == Loss::Lossy;
+        if (!sraw.empty())
+            c.name = sraw;
+        else if (imgdata.idata.dng_version)
+            c.name = name == "jxl_dng_load_raw_placeholder()" ? "DNG (JPEG XL)" : lossy ? "DNG (lossy)" : "DNG";
+        else if (name == "crxLoadRaw()")
+            c.name = lossy ? "Canon C-RAW" : "Canon RAW";
+        else if (make == "Nikon")
+            c.name = lossy ? "NEF (lossy)" : "NEF";
+        else if (make == "Sony")
+            c.name = name == "sony_arw2_load_raw()" ? "Sony cRAW" : "Sony RAW";
+        else
+            c.name = (make.empty() ? "RAW" : make + " RAW") + (lossy ? " (lossy)" : "");
+        return c;
     }
     // The embedded JPEG it opens with isn't all there: one still being
     // copied. Either the file ends before it does, or (a copy that sets the
@@ -2521,6 +2561,7 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         ok = decode_preview(raw, out, error);
         mode = "embedded preview";
     }
+    const bool embedded = ok;  // the camera's JPEG, not the readout
     // Developed on the GPU where there is one: only unpacked here.
     if (!ok && options.raw_mode == RawMode::Full && options.gpu_develop)
     {
@@ -2711,6 +2752,8 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
             out.pixel_format.notes.push_back("linear");
         }
     }
+    if (!embedded)
+        out.coding = raw.coding(bytes, size, make, sraw_name);
     if (!sraw_name.empty())
         out.add(N_("Raw"), N_("Mosaic"),
                 "none (" + sraw_name + ": YCbCr" + (sraw_h ? sraw_h == 2 ? ", half-resolution colour" : ", half-width colour" : "") + ")");

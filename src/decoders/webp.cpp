@@ -97,6 +97,10 @@ bool decode(const std::string& path, Image& out, std::string& error)
             out.pixel_format.channels.push_back({'A', 8});
         out.pixel_format.notes.push_back("lossy");
     }
+    out.coding.name = "WebP";
+    out.coding.lossy_kind = true;
+    if (features.format != 0)  // 0: frames of both, or not said
+        out.coding.loss = features.format == 2 ? Image::Coding::Loss::Lossless : Image::Coding::Loss::Lossy;
     out.add(N_("WebP"), N_("Coding"), features.format == 2 ? "lossless" : features.format == 1 ? "lossy" : "mixed/undefined");
     if (features.has_animation)
         out.add(N_("WebP"), N_("Frames"), std::to_string(info.frame_count));

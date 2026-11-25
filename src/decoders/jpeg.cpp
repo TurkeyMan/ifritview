@@ -104,6 +104,7 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         if (jpeg_read_icc_profile(&cinfo, &icc, &icc_len))
         {
             out.color_space = icc_profile_description(icc, icc_len);
+            out.coding.gamut = icc_gamut(icc, icc_len);  // here too for a raw's JPEG, whose file's metadata isn't its own
             free(icc);
         }
     }
@@ -177,6 +178,7 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     out.format = progressive ? "JPEG (progressive)" : "JPEG";
+    out.coding.name = "JPEG";
     if (cmyk)
         out.format += ", CMYK";
     return true;

@@ -1752,8 +1752,8 @@ msgid "Show the overlay (I toggles it in fullscreen)"
 msgstr "Einblendung anzeigen (I schaltet sie im Vollbild um)"
 
 #: src/ui/settings.cpp:395
-msgid "File: name, position in folder, size, date"
-msgstr "Datei: Name, Position im Ordner, Größe, Datum"
+msgid "File: name, position in folder, size, date, encoding"
+msgstr "Datei: Name, Position im Ordner, Größe, Datum, Kodierung"
 
 #: src/ui/settings.cpp:396
 msgid "Format: dimensions, depth, codec details, colour profile"
@@ -2093,6 +2093,26 @@ msgstr "Das XMP ließ sich nicht zusammenstellen"
 #: src/image.cpp
 msgid "the develop settings were changed"
 msgstr "die Entwicklungseinstellungen wurden geändert"
+
+#: src/image.cpp:640
+msgid "{0}-bit"
+msgstr "{0} Bit"
+
+#: src/image.cpp:642
+msgid "float{0}"
+msgstr "float{0}"
+
+#: src/image.cpp:646
+msgid "{0}-bit palette"
+msgstr "{0}-Bit-Palette"
+
+#: src/image.cpp:648
+msgid "grey"
+msgstr "Grau"
+
+#: src/image.cpp:665
+msgid "lossless"
+msgstr "verlustfrei"
 
 #: src/ui/app_develop.cpp
 msgid "Contrast"

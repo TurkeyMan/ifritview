@@ -108,3 +108,30 @@ bool icc_bt709_primaries(const uint8_t* data, size_t size)
     }
     return found == 7;
 }
+
+Gamut icc_gamut(const uint8_t* data, size_t size)
+{
+    if (!data || size < 132 || std::memcmp(data + 36, "acsp", 4) != 0 || std::memcmp(data + 16, "RGB ", 4) != 0)
+        return Gamut::Unknown;
+    const uint32_t count = be32(data + 128);
+    if (count > 1000 || size_t(count) * 12 > size - 132)
+        return Gamut::Unknown;
+    const char* names[3] = {"rXYZ", "gXYZ", "bXYZ"};
+    Mat3 m{};
+    unsigned found = 0;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const uint8_t* tag = data + 132 + i * 12;
+        for (int c = 0; c < 3; ++c)
+            if (std::memcmp(tag, names[c], 4) == 0)
+            {
+                const uint32_t off = be32(tag + 4), len = be32(tag + 8);
+                if (off > size || len > size - off || len < 20 || std::memcmp(data + off, "XYZ ", 4) != 0)
+                    return Gamut::Unknown;
+                for (int j = 0; j < 3; ++j)
+                    m[j][c] = double(int32_t(be32(data + off + 8 + j * 4))) / 65536.0;
+                found |= 1u << c;
+            }
+    }
+    return found == 7 ? gamut_of_colorants(m) : Gamut::Unknown;
+}

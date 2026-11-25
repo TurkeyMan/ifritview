@@ -71,6 +71,13 @@ void colorants(const ColorSpace& s, Mat& rgb_to_d50, Mat& adapt)
 
 }  // namespace
 
+Mat3 rgb_to_xyz_d50(const ColorSpace& space)
+{
+    Mat m, adapt;
+    colorants(space, m, adapt);
+    return m;
+}
+
 Mat3 rgb_to_xyz_d65(const ColorSpace& space)
 {
     Mat m, adapt, srgb_m, d65_to_d50;
@@ -208,6 +215,72 @@ ColorSpace ColorSpace::with_transfer(Transfer t, double g) const
     return s;
 }
 
+namespace
+{
+
+// The spaces a summary names, by primaries and white.
+struct Named
+{
+    Gamut gamut;
+    ColorSpace space;
+};
+const std::vector<Named>& named_gamuts()
+{
+    static const std::vector<Named> all = {
+        {Gamut::SRGB, ColorSpace::srgb()},
+        {Gamut::AdobeRGB, ColorSpace::adobe_rgb()},
+        {Gamut::DisplayP3, ColorSpace::display_p3()},
+        {Gamut::DCIP3, ColorSpace::from_primaries({0.680, 0.320}, {0.265, 0.690}, {0.150, 0.060}, {0.314, 0.351}, ColorSpace::Transfer::Gamma, 2.6, "DCI-P3")},
+        {Gamut::BT2020, ColorSpace::rec2020()},
+        {Gamut::ProPhoto, ColorSpace::prophoto()},
+    };
+    return all;
+}
+
+}  // namespace
+
+Gamut gamut_of(const ColorSpace& space)
+{
+    const auto near = [](ColorSpace::XY a, ColorSpace::XY b) { return std::fabs(a.x - b.x) < 0.002 && std::fabs(a.y - b.y) < 0.002; };
+    for (const Named& n : named_gamuts())
+        if (near(space.red, n.space.red) && near(space.green, n.space.green) && near(space.blue, n.space.blue) && near(space.white, n.space.white))
+            return n.gamut;
+    return Gamut::Other;
+}
+
+Gamut gamut_of_colorants(const Mat3& rgb_to_d50)
+{
+    // s15Fixed16 rounding, and the adaptations profiles were made with.
+    for (const Named& n : named_gamuts())
+    {
+        const Mat3 m = rgb_to_xyz_d50(n.space);
+        bool same = true;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                same &= std::fabs(m[i][j] - rgb_to_d50[i][j]) < 0.003;
+        if (same)
+            return n.gamut;
+    }
+    return Gamut::Other;
+}
+
+const char* gamut_name(Gamut g)
+{
+    switch (g)
+    {
+        case Gamut::SRGB: return "sRGB";
+        case Gamut::AdobeRGB: return "Adobe RGB";
+        case Gamut::DisplayP3: return "Display P3";
+        case Gamut::DCIP3: return "DCI-P3";
+        case Gamut::BT2020: return "BT.2020";
+        case Gamut::ProPhoto: return "ProPhoto RGB";
+        case Gamut::Unknown:
+        case Gamut::Camera:
+        case Gamut::Other: break;
+    }
+    return "";
+}
+
 bool ColorSpace::is_srgb() const
 {
     const ColorSpace s = srgb();
@@ -313,6 +386,9 @@ CicpSpace from_cicp(int primaries, int transfer, double gamma)
             break;
     }
     CicpSpace c;
+    if (base)
+        c.gamut = gamut_of(*base);
+    c.hdr = transfer == 16 ? Hdr::PQ : transfer == 18 ? Hdr::HLG : Hdr::None;
     if (base && t)
     {
         c.space = base->with_transfer(*t, gamma);
