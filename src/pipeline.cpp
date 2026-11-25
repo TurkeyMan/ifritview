@@ -229,8 +229,10 @@ int process(int argc, char** argv)
         }
         else if (st.name == "save")
             ok = parse_save(st.arg, st.save, error);
-        else if (st.name == "info" || st.name == "gpu")
-            ;
+        else if (st.name == "gpu")
+            ok = st.arg.empty(), error = "gpu: takes no argument";
+        else if (st.name == "info")
+            ok = st.arg.empty() || st.arg == "metadata", error = "info: takes no argument, or metadata (to list the metadata rows too)";
         else if (st.name == "diff")
             ok = !st.arg.empty(), error = "diff: takes the file to compare with, e.g. diff:original.png";
         else if (st.name == "page" || st.name == "level")
@@ -336,6 +338,8 @@ int process(int argc, char** argv)
             if (img.page_count > 1 || img.level_count > 1)
                 std::printf("page:%d of 0-%d%s%s, level:%d of 0-%d\n", img.part.page, img.page_count - 1, img.page_label.empty() ? "" : " ",
                             img.page_label.c_str(), img.part.level, img.level_count - 1);  // as the steps number them
+            if (!img.pixel_format.empty())
+                std::printf("pixel format: %s\n", img.pixel_format.describe(img.width, img.height).c_str());
             if (!img.color_space.empty())
                 std::printf("colour space: %s%s\n", img.color_space.c_str(),
                             img.stored && !img.stored->icc.empty() ? " (with an ICC profile, kept on saving)" : "");
@@ -347,6 +351,10 @@ int process(int argc, char** argv)
                     std::printf(" %s=%d", key.c_str(), value);
                 std::printf("\n");
             }
+            if (st.arg == "metadata")
+                for (const MetadataGroup& g : img.metadata)
+                    for (const MetadataItem& item : g.items)
+                        std::printf("%s: %s: %s\n", g.name.c_str(), item.key.c_str(), item.value.c_str());
         }
         else if (st.name == "shrink")
         {
@@ -473,7 +481,8 @@ it is at that step, after earlier turns and crops)
   info               print the image's size and format at this point, and how the
                      input was saved as its format's save settings ("the file's jpg
                      settings: progressive=1 quality=85 subsampling=3"; quality
-                     estimated)
+                     estimated); info:metadata also lists the metadata rows, as
+                     "group: key: value"
   save:OUT[,KEY=VALUE...]
                      write the image as it is at this point; the format comes from
                      OUT's extension. Several saves may appear, e.g. one per size.
