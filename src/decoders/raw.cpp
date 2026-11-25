@@ -1534,6 +1534,36 @@ bool locate_cr2(const uint8_t* file, size_t size, uint32_t& offset, uint32_t& le
     return offset && length && uint64_t(offset) + length <= size;
 }
 
+// A Canon sRAW's chroma subsampling, from its lossless JPEG's frame header
+// (the first component's sampling): 1 for 4:2:2 (2 x 1), 2 for 4:2:0 (2 x 2),
+// 0 where it isn't a CR2 or says neither.
+int canon_sraw_block_h(const uint8_t* file, size_t size)
+{
+    uint32_t offset, length;
+    unsigned slices[3];
+    if (!locate_cr2(file, size, offset, length, slices))
+        return 0;
+    const uint8_t* const jpeg = file + offset;
+    for (size_t at = 2; at + 4 <= length;)
+    {
+        if (jpeg[at] != 0xFF)
+            return 0;
+        const int marker = jpeg[at + 1];
+        if (marker == 0xFF)  // fill
+        {
+            ++at;
+            continue;
+        }
+        const size_t body = size_t(jpeg[at + 2]) << 8 | jpeg[at + 3];
+        if (marker == 0xC3)  // SOF3: precision, height, width, components, then each one's id and sampling
+            return body >= 11 && at + 4 + 8 <= length && jpeg[at + 4 + 5] >= 1 ? (jpeg[at + 4 + 7] == 0x21 ? 1 : jpeg[at + 4 + 7] == 0x22 ? 2 : 0) : 0;
+        if (marker == 0xDA)  // the scan: no frame header before it
+            return 0;
+        at += 2 + body;
+    }
+    return 0;
+}
+
 // The readout unpacked here, on every core, as LibRaw's loader would: a raw
 // in blocks (rawblocks), one stored uncompressed (rawpacked), a CR3 (crx), a
 // Fuji's compressed RAF (fuji), Panasonic's stripes (pana8), an ORF
@@ -2549,9 +2579,31 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
     out.add(N_("Raw"), N_("Colour channels"), std::to_string(id.colors) + " (" + id.cdesc + ")");
     if (id.dng_version)
         out.add(N_("Raw"), N_("DNG version"), std::to_string(id.dng_version >> 24) + "." + std::to_string((id.dng_version >> 16) & 0xFF));
+    // Canon's sRAW and mRAW are stored as YCbCr, its colour at half or a
+    // quarter of the luma's resolution: neither a mosaic nor a linear raw.
+    // The name is the shot's own (Canon's SRAWQuality: 1 mRAW, 2 sRAW).
+    std::string sraw_name;
+    int sraw_h = 0;
+    if (raw.loader() == "canon_sraw_load_raw()")
+    {
+        sraw_h = canon_sraw_block_h(bytes, size);
+        if (!sraw_h && out.mosaic)
+            sraw_h = out.mosaic->ycc.block_h;
+        switch (raw.imgdata.makernotes.canon.SRAWQuality)
+        {
+        case 1: sraw_name = "Canon M-RAW"; break;
+        case 2: sraw_name = "Canon S-RAW"; break;
+        default: sraw_name = "Canon sRAW"; break;
+        }
+    }
     {
         const int bits = raw.imgdata.color.raw_bps ? raw.imgdata.color.raw_bps : 14;
-        if (id.filters == 9)
+        if (!sraw_name.empty())
+        {
+            out.pixel_format = PixelFormat::ycbcr(bits, sraw_h ? 2 : 1, sraw_h ? sraw_h : 1);
+            out.pixel_format.notes.push_back(sraw_name);
+        }
+        else if (id.filters == 9)
             out.pixel_format = PixelFormat::mosaic_("X-Trans", bits);
         else if (id.filters)
         {
@@ -2571,7 +2623,10 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
             out.pixel_format.notes.push_back("linear");
         }
     }
-    if (id.filters == 9)
+    if (!sraw_name.empty())
+        out.add(N_("Raw"), N_("Mosaic"),
+                "none (" + sraw_name + ": YCbCr" + (sraw_h ? sraw_h == 2 ? ", half-resolution colour" : ", half-width colour" : "") + ")");
+    else if (id.filters == 9)
         out.add(N_("Raw"), N_("Mosaic"), "X-Trans");
     else if (id.filters)
         out.add(N_("Raw"), N_("Mosaic"), "Bayer");
