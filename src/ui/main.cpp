@@ -702,6 +702,103 @@ static int check_highlight()
     return failed ? 1 : 0;
 }
 
+// --check-camera-rows FILE...: each file read as the viewer reads it, with
+// a raw's every mode (its embedded preview; half and full size, on the CPU,
+// adopted over the preview standing in for them), has one Camera group and
+// one Image group, neither with a row twice, and the same location (or
+// none) in every mode. A raw's preview is a JPEG with EXIF of its own: it
+// mustn't add to the raw's Camera rows, but its location is the raw's.
+static int check_camera_rows(int argc, char** argv)
+{
+    using RawMode = DecodeOptions::RawMode;
+    int failed = 0;
+    for (int i = 0; i < argc; ++i)
+    {
+        // A TIFF-based raw's own GPS directory: if it has a position, every
+        // mode must show one.
+        bool located = false;
+#ifdef HAVE_EXIF
+        gchar* bytes = nullptr;
+        gsize size = 0;
+        if (g_file_get_contents(argv[i], &bytes, &size, nullptr))
+        {
+            const auto* d = reinterpret_cast<const uint8_t*>(bytes);
+            if (size > 8 && (std::memcmp(d, "II*\0", 4) == 0 || std::memcmp(d, "MM\0*", 4) == 0))
+            {
+                Image probe;
+                read_exif_blob(d, size, probe);
+                located = probe.has_location;
+            }
+            g_free(bytes);
+        }
+#endif
+        std::string first_place;
+        for (const RawMode mode : {RawMode::Preview, RawMode::Half, RawMode::Full})
+        {
+            DecodeOptions o;
+            o.raw_mode = mode;
+            set_decode_options(o);
+            const char* name = mode == RawMode::Preview ? "preview" : mode == RawMode::Half ? "half" : "full";
+            Image image;
+            const bool stand_in = decode_preview(argv[i], image);
+            Image final;
+            std::string error;
+            if (!decode_image(argv[i], final, error))
+            {
+                std::printf("FAIL %s (%s): %s\n", argv[i], name, error.c_str());
+                ++failed;
+                continue;
+            }
+            if (stand_in)
+                image.adopt(std::move(final));
+            else
+                image = std::move(final);
+            std::string problem;
+            for (const char* group : {"Camera", "Image"})
+            {
+                int groups = 0;
+                for (const MetadataGroup& g : image.metadata)
+                    if (g.name == group)
+                    {
+                        ++groups;
+                        for (size_t a = 0; a < g.items.size(); ++a)
+                            for (size_t b = a + 1; b < g.items.size(); ++b)
+                                if (g.items[a].key == g.items[b].key)
+                                    problem += std::string(" ") + group + ": " + g.items[a].key + " twice;";
+                    }
+                if (groups > 1)
+                    problem += std::string(" ") + std::to_string(groups) + " " + group + " groups;";
+                if (groups == 0 && std::string(group) == "Camera")
+                    problem += " no Camera group;";
+            }
+            // What the Camera group says isn't said again in EXIF's.
+            for (const MetadataGroup& g : image.metadata)
+                if (g.name == "EXIF")
+                    for (const MetadataItem& m : g.items)
+                        for (const char* key : {"Manufacturer", "Model", "Software", "Exposure Time", "F-Number", "ISO Speed Ratings", "Focal Length",
+                                                "Focal Length in 35mm Film", "Exposure Bias", "Lens Model", "Lens Make", "Date and Time (Original)"})
+                            if (m.key == key)
+                                problem += std::string(" EXIF: ") + key + " repeats Camera or Image;";
+            char place[64] = "no location";
+            if (image.has_location)
+                std::snprintf(place, sizeof place, "%.6f, %.6f", image.latitude, image.longitude);
+            if (located && !image.has_location)
+                problem += " the file's location lost;";
+            if (mode == RawMode::Preview)
+                first_place = place;
+            else if (first_place != place)
+                problem += " location " + std::string(place) + ", in preview " + first_place + ";";
+            size_t exif_rows = 0;
+            for (const MetadataGroup& g : image.metadata)
+                if (g.name == "EXIF")
+                    exif_rows += g.items.size();
+            std::printf("%s %s (%s, %s, %zu EXIF rows)%s\n", problem.empty() ? "ok  " : "FAIL", argv[i], name, place, exif_rows, problem.c_str());
+            failed += !problem.empty();
+        }
+    }
+    return failed ? 1 : 0;
+}
+
 // --gpu-render IN OUT.ppm ZOOM [nearest|area|mitchell|catmullrom|lanczos3]:
 // IN drawn as the window's GPU view draws it, at ZOOM, on a headless device
 // (lavapipe will do), into OUT; with how much of it isn't the background.
@@ -932,6 +1029,8 @@ int main(int argc, char** argv)
         return formats_report();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-render") == 0)
         return gpu_render(argc - 2, argv + 2);
+    if (argc > 1 && std::strcmp(argv[1], "--check-camera-rows") == 0)
+        return check_camera_rows(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--check-measures") == 0)
         return check_measures(argc - 2, argv + 2);
     if (argc > 1 && std::strcmp(argv[1], "--check-volume") == 0)

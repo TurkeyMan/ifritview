@@ -257,19 +257,19 @@ std::vector<MetadataGroup> App::collect_metadata() const
     img.items.push_back({N_("Dimensions"), std::to_string(shown.width) + " × " + std::to_string(shown.height)});
     if (!format.empty())  // a pasted image has none
         img.items.push_back({N_("Format"), format});
-    // What the picture is: when it was taken, who by, what it shows. The
-    // decoders file these under the metadata's own "Image" group; they show
-    // here, not a second time as a group of their own.
+    // What the picture is: when it was taken, who by, what it shows, what
+    // wrote it. The decoders file these under the metadata's own "Image"
+    // group; they show here, not a second time as a group of their own.
     std::vector<MetadataItem> kept;  // the rest of that group (e.g. Brightest)
     for (const MetadataGroup& g : image_->metadata)
         if (g.name == "Image")
         {
-            for (const char* key : {"Taken", "Artist", "Description"})
+            for (const char* key : {"Taken", "Artist", "Description", "Software"})
                 for (const MetadataItem& m : g.items)
                     if (m.key == key)
                         img.items.push_back(m);
             for (const MetadataItem& m : g.items)
-                if (m.key != "Taken" && m.key != "Artist" && m.key != "Description")
+                if (m.key != "Taken" && m.key != "Artist" && m.key != "Description" && m.key != "Software")
                     kept.push_back(m);
         }
     if (!shown.pixel_format.empty())
@@ -352,10 +352,11 @@ View::OverlaySections App::overlay_sections() const
     flush();
     if (cfg_.overlay_shot)
     {
-        const std::string make = find({"Camera", "EXIF"}, {"Make", "Manufacturer"});
-        const std::string model = find({"Camera", "EXIF"}, {"Model"});
+        // Every format's Camera group has the same rows (add_camera_rows).
+        const std::string make = find({"Camera"}, {"Make"});
+        const std::string model = find({"Camera"}, {"Model"});
         std::string camera = model.rfind(make, 0) == 0 || make.empty() ? model : make + " " + model;
-        const std::string lens = find({"Camera", "EXIF"}, {"Lens", "Lens Model"});
+        const std::string lens = find({"Camera"}, {"Lens"});
         if (!camera.empty())
             lines.push_back(camera + (lens.empty() ? "" : "  ·  " + lens));
         std::string exp;
@@ -364,15 +365,13 @@ View::OverlaySections App::overlay_sections() const
             if (!v.empty())
                 exp += (exp.empty() ? "" : "  ·  ") + v;
         };
-        append(find({"Camera", "EXIF"}, {"Focal length", "Focal Length"}));
-        append(find({"Camera", "EXIF"}, {"F-Number", "Aperture"}));
-        append(find({"Camera", "EXIF"}, {"Shutter", "Exposure Time"}));
-        const std::string iso = find({"Camera", "EXIF"}, {"ISO", "ISO Speed Ratings"});
+        append(find({"Camera"}, {"Focal length"}));
+        append(find({"Camera"}, {"Aperture"}));
+        append(find({"Camera"}, {"Shutter"}));
+        const std::string iso = find({"Camera"}, {"ISO"});
         if (!iso.empty())
             append("ISO " + iso);
-        const std::string bias = find({"Camera", "EXIF"}, {"Exposure compensation", "Exposure Bias"});
-        if (!bias.empty() && bias != "0.00 EV")
-            append(bias + (bias.find("EV") == std::string::npos ? " EV" : ""));
+        append(find({"Camera"}, {"Exposure compensation"}));
         if (!exp.empty())
             lines.push_back(exp);
         std::string taken = find({"Image"}, {"Taken"});

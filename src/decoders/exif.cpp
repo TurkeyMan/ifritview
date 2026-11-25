@@ -6,6 +6,8 @@
 #include <libexif/exif-loader.h>
 #include <libexif/exif-mnote-data.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -32,6 +34,8 @@ struct Visit
     Image* out;
     const char* group;
     ExifIfd ifd;
+    const std::vector<int>* shown;  // tags the Camera group has already
+    bool image_rows;                // Taken, Artist, Description to the Image group
 };
 
 void visit_entry(ExifEntry* e, void* user)
@@ -39,6 +43,8 @@ void visit_entry(ExifEntry* e, void* user)
     auto* v = static_cast<Visit*>(user);
     if (e->tag == EXIF_TAG_MAKER_NOTE)
         return;  // binary; decoded separately below
+    if (std::find(v->shown->begin(), v->shown->end(), int(e->tag)) != v->shown->end())
+        return;
     const char* name = exif_tag_get_title_in_ifd(e->tag, v->ifd);
     if (!name)
         name = exif_tag_get_name_in_ifd(e->tag, v->ifd);
@@ -51,18 +57,23 @@ void visit_entry(ExifEntry* e, void* user)
         for (auto pos = title.find(from); pos != std::string::npos; pos = title.find(from))
             title.replace(pos, std::strlen(from), to);
     // What the picture is, rather than how it was shot, goes to the Image
-    // group (and only there).
-    if (v->ifd == EXIF_IFD_EXIF && e->tag == EXIF_TAG_DATE_TIME_ORIGINAL)
+    // group (and only there; not at all for a raw's preview, the raw says).
+    const bool taken = v->ifd == EXIF_IFD_EXIF && e->tag == EXIF_TAG_DATE_TIME_ORIGINAL;
+    const bool artist = v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_ARTIST;
+    const bool description = v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_IMAGE_DESCRIPTION;
+    if ((taken || artist || description) && !v->image_rows)
+        return;
+    if (taken)
         v->out->add(N_("Image"), N_("Taken"), exif_date_text(value));
-    else if (v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_ARTIST)
+    else if (artist)
         v->out->add(N_("Image"), N_("Artist"), value);
-    else if (v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_IMAGE_DESCRIPTION)
+    else if (description)
         v->out->add(N_("Image"), N_("Description"), value);
     else
         v->out->add(v->group, title, value);
 }
 
-ExifSummary read(ExifData* ed, Image& out)
+ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
 {
     ExifSummary summary;
     if (!ed)
@@ -99,6 +110,74 @@ ExifSummary read(ExifData* ed, Image& out)
             summary.camera = buf;
     }
 
+    // How it was taken, in the Camera group as a raw's is (add_camera_rows);
+    // the tags that come from are left out of the EXIF group.
+    const ExifByteOrder order = exif_data_get_byte_order(ed);
+    std::vector<int> shown;
+    auto entry = [&](ExifIfd ifd, int tag) { return exif_content_get_entry(ed->ifd[ifd], static_cast<ExifTag>(tag)); };
+    auto text = [&](ExifIfd ifd, int tag) -> std::string
+    {
+        ExifEntry* e = entry(ifd, tag);
+        if (!e || e->format != EXIF_FORMAT_ASCII || !e->data)
+            return {};
+        shown.push_back(tag);
+        const char* s = reinterpret_cast<const char*>(e->data);
+        return std::string(s, std::find(s, s + e->size, '\0'));
+    };
+    auto number = [&](ExifIfd ifd, int tag, bool mark = true) -> double
+    {
+        ExifEntry* e = entry(ifd, tag);
+        if (!e || !e->data || e->components < 1)
+            return 0;
+        double value = 0;
+        switch (e->format)
+        {
+            case EXIF_FORMAT_SHORT: value = exif_get_short(e->data, order); break;
+            case EXIF_FORMAT_LONG: value = exif_get_long(e->data, order); break;
+            case EXIF_FORMAT_RATIONAL:
+            {
+                const ExifRational q = exif_get_rational(e->data, order);
+                value = q.denominator ? double(q.numerator) / q.denominator : 0;
+                break;
+            }
+            case EXIF_FORMAT_SRATIONAL:
+            {
+                const ExifSRational q = exif_get_srational(e->data, order);
+                value = q.denominator ? double(q.numerator) / q.denominator : 0;
+                break;
+            }
+            default: return 0;
+        }
+        if (mark)
+            shown.push_back(tag);
+        return value;
+    };
+    CameraRows cam;
+    cam.make = text(EXIF_IFD_0, 0x010F);
+    cam.model = text(EXIF_IFD_0, 0x0110);
+    cam.software = text(EXIF_IFD_0, 0x0131);
+    cam.lens = text(EXIF_IFD_EXIF, 0xA434);
+    cam.lens_make = text(EXIF_IFD_EXIF, 0xA433);
+    cam.iso = number(EXIF_IFD_EXIF, 0x8827);  // ISOSpeedRatings (PhotographicSensitivity)
+    if (cam.iso <= 0 || cam.iso >= 65535)
+        if (const double iso = number(EXIF_IFD_EXIF, 0x8833, false); iso > 0)  // ISOSpeed: past what the short holds
+            cam.iso = iso, shown.push_back(0x8833);
+    cam.shutter = number(EXIF_IFD_EXIF, 0x829A);
+    // APEX's shutter speed and aperture say the same again, only rounded.
+    if (const double tv = number(EXIF_IFD_EXIF, 0x9201); cam.shutter <= 0 && tv != 0 && std::fabs(tv) < 30)
+        cam.shutter = std::exp2(-tv);
+    cam.aperture = number(EXIF_IFD_EXIF, 0x829D);
+    if (const double av = number(EXIF_IFD_EXIF, 0x9202); cam.aperture <= 0 && av > 0 && av < 30)
+        cam.aperture = std::exp2(av / 2);
+    cam.focal_length = number(EXIF_IFD_EXIF, 0x920A);
+    cam.bias = number(EXIF_IFD_EXIF, 0x9204);
+    // The camera's own FocalLengthIn35mmFilm only: not worked out from the
+    // focal plane resolution, which an editor that resizes or crops keeps
+    // while it rewrites the pixel dimensions.
+    cam.focal_35mm = number(EXIF_IFD_EXIF, 0xA405);
+    if (camera_rows)
+        add_camera_rows(cam, out);
+
     const struct
     {
         ExifIfd ifd;
@@ -111,7 +190,8 @@ ExifSummary read(ExifData* ed, Image& out)
     };
     for (const auto& s : sections)
     {
-        Visit v{&out, s.group, s.ifd};
+        const std::vector<int> none;
+        Visit v{&out, s.group, s.ifd, s.ifd == EXIF_IFD_0 || s.ifd == EXIF_IFD_EXIF ? &shown : &none, camera_rows};
         exif_content_foreach_entry(ed->ifd[s.ifd], visit_entry, &v);
     }
     // GPS position: three rationals (deg, min, sec) plus a hemisphere letter.
@@ -225,6 +305,26 @@ struct Tiff
         const char* s = reinterpret_cast<const char*>(d + at);
         return std::string(s, std::find(s, s + count, '\0'));
     }
+    // A SHORT, LONG or RATIONAL entry's (first) value, or 0.
+    double number(size_t entry) const
+    {
+        if (!entry || u32(entry + 4) < 1)
+            return 0;
+        switch (u16(entry + 2))
+        {
+            case 3: return u16(entry + 8);
+            case 4: return u32(entry + 8);
+            case 5:
+            {
+                const size_t at = u32(entry + 8);
+                if (at > n || n - at < 8)
+                    return 0;
+                const uint32_t over = u32(at), under = u32(at + 4);
+                return under ? double(over) / under : 0;
+            }
+            default: return 0;
+        }
+    }
 };
 
 // The position in the GPS directory at `gps`.
@@ -272,7 +372,24 @@ bool tiff_location(const uint8_t* d, size_t n, double& latitude, double& longitu
 
 }  // namespace
 
-ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out)
+double tiff_focal_35mm(const uint8_t* data, size_t size, double focal)
+{
+    Tiff t;
+    if (focal <= 0 || !t.open(data, size))
+        return 0;
+    const size_t pointer = t.find(t.first(), 0x8769);  // the Exif directory's place, a single LONG (or IFD)
+    if (!pointer || (t.u16(pointer + 2) != 4 && t.u16(pointer + 2) != 13) || t.u32(pointer + 4) != 1)
+        return 0;
+    const size_t exif = t.u32(pointer + 8);
+    if (const double eq = t.number(t.find(exif, 0xA405)); eq > 0)  // FocalLengthIn35mmFilm
+        return eq;
+    // The resolution is for the image the camera writes (PixelX/YDimension).
+    const double unit = t.number(t.find(exif, 0xA210));
+    return focal_35mm_from_plane(focal, t.number(t.find(exif, 0xA20E)), t.number(t.find(exif, 0xA20F)), unit > 0 ? int(unit) : 2,
+                                 t.number(t.find(exif, 0xA002)), t.number(t.find(exif, 0xA003)));
+}
+
+ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool camera_rows)
 {
     if (!data || size < 8 || size > (size_t(1) << 28))
         return {};
@@ -280,13 +397,13 @@ ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out)
     // TIFF structure get it prepended.
     ExifSummary summary;
     if (std::memcmp(data, "Exif\0\0", 6) == 0 || (data[0] == 0xFF && data[1] == 0xD8))
-        summary = read(load(data, size), out);
+        summary = read(load(data, size), out, camera_rows);
     else
     {
         std::vector<uint8_t> buf(6 + size);
         std::memcpy(buf.data(), "Exif\0\0", 6);
         std::memcpy(buf.data() + 6, data, size);
-        summary = read(load(buf.data(), buf.size()), out);
+        summary = read(load(buf.data(), buf.size()), out, camera_rows);
     }
     if (!out.has_location)
     {

@@ -170,10 +170,19 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
         {TIFFTAG_IMAGEDESCRIPTION, "Description"}, {TIFFTAG_MAKE, "Make"},     {TIFFTAG_MODEL, "Model"},         {TIFFTAG_SOFTWARE, "Software"},
         {TIFFTAG_DATETIME, "Date/time"},           {TIFFTAG_ARTIST, "Artist"}, {TIFFTAG_COPYRIGHT, "Copyright"}, {TIFFTAG_HOSTCOMPUTER, "Host computer"},
     };
+    CameraRows cam;  // the Camera group, as a raw's or a JPEG's (add_camera_rows)
     for (const auto& t : strings)
     {
         char* v = nullptr;
-        if (TIFFGetField(tif, t.tag, &v) && v && *v)
+        if (!TIFFGetField(tif, t.tag, &v) || !v || !*v)
+            continue;
+        if (t.tag == TIFFTAG_MAKE)
+            cam.make = v;
+        else if (t.tag == TIFFTAG_MODEL)
+            cam.model = v;
+        else if (t.tag == TIFFTAG_SOFTWARE)
+            cam.software = v;
+        else
             out.add(t.tag == TIFFTAG_ARTIST || t.tag == TIFFTAG_IMAGEDESCRIPTION ? "Image" : "TIFF", t.name, v);
     }
     {
@@ -277,23 +286,50 @@ bool decode_part(const std::string& path, ImagePart part, Image& out, std::strin
     toff_t exif_offset = 0;
     if (TIFFGetField(tif, TIFFTAG_EXIFIFD, &exif_offset) && TIFFReadEXIFDirectory(tif, exif_offset))
     {
-        char* sv = nullptr;
-        float fv = 0;
-        if (TIFFGetField(tif, EXIFTAG_DATETIMEORIGINAL, &sv) && sv)
-            out.add(N_("Image"), N_("Taken"), exif_date_text(sv));
-        if (TIFFGetField(tif, EXIFTAG_EXPOSURETIME, &fv))
-            out.add(N_("EXIF"), N_("Exposure time"), fv >= 1 ? std::to_string(fv).substr(0, 4) + " s" : "1/" + std::to_string(int(1 / fv + 0.5)) + " s");
-        if (TIFFGetField(tif, EXIFTAG_FNUMBER, &fv))
-            out.add(N_("EXIF"), N_("F-number"), "f/" + std::to_string(fv).substr(0, 4));
-        if (TIFFGetField(tif, EXIFTAG_FOCALLENGTH, &fv))
-            out.add(N_("EXIF"), N_("Focal length"), std::to_string(fv).substr(0, 5) + " mm");
+        // libtiff keeps some rationals as floats, some as doubles.
+        auto number = [&](ttag_t tag) -> double
+        {
+            const TIFFField* f = TIFFFindField(tif, tag, TIFF_ANY);
+            if (!f)
+                return 0;
+            switch (TIFFFieldSetGetSize(f))
+            {
+                case 2: { uint16_t v = 0; return TIFFGetField(tif, tag, &v) ? v : 0; }
+                case 4:
+                    if (TIFFFieldDataType(f) == TIFF_RATIONAL || TIFFFieldDataType(f) == TIFF_SRATIONAL || TIFFFieldDataType(f) == TIFF_FLOAT)
+                    {
+                        float v = 0;
+                        return TIFFGetField(tif, tag, &v) ? v : 0;
+                    }
+                    else
+                    {
+                        uint32_t v = 0;
+                        return TIFFGetField(tif, tag, &v) ? v : 0;
+                    }
+                case 8: { double v = 0; return TIFFGetField(tif, tag, &v) ? v : 0; }
+                default: return 0;
+            }
+        };
+        auto text = [&](ttag_t tag) -> std::string
+        {
+            char* v = nullptr;
+            return TIFFGetField(tif, tag, &v) && v ? v : "";
+        };
+        if (const std::string taken = text(EXIFTAG_DATETIMEORIGINAL); !taken.empty())
+            out.add(N_("Image"), N_("Taken"), exif_date_text(taken));
+        cam.shutter = number(EXIFTAG_EXPOSURETIME);
+        cam.aperture = number(EXIFTAG_FNUMBER);
+        cam.focal_length = number(EXIFTAG_FOCALLENGTH);
+        cam.bias = number(EXIFTAG_EXPOSUREBIASVALUE);
         uint16_t count = 0;
         uint16_t* iso = nullptr;
         if (TIFFGetField(tif, EXIFTAG_ISOSPEEDRATINGS, &count, &iso) && count > 0)
-            out.add(N_("EXIF"), N_("ISO"), std::to_string(iso[0]));
-        if (TIFFGetField(tif, EXIFTAG_LENSMODEL, &sv) && sv)
-            out.add(N_("EXIF"), N_("Lens"), sv);
+            cam.iso = iso[0];
+        cam.lens = text(EXIFTAG_LENSMODEL);
+        cam.lens_make = text(EXIFTAG_LENSMAKE);
+        cam.focal_35mm = number(EXIFTAG_FOCALLENGTHIN35MMFILM);  // the camera's own; see exif.cpp
     }
+    add_camera_rows(cam, out);
     TIFFClose(tif);
     return true;
 }

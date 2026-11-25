@@ -218,7 +218,7 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
     if (!decode_from(cinfo, err, out, error, fit_w, fit_h))
         return false;
 #ifdef HAVE_EXIF
-    out.apply_camera_orientation(read_exif_blob(data, size, out).orientation);
+    out.apply_camera_orientation(read_exif_blob(data, size, out, false).orientation);
 #endif
     return true;
 }
