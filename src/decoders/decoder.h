@@ -182,7 +182,8 @@ const Decoder& pvr_decoder();
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews. `fit_w` x `fit_h`
 // (either way round), when given: decoded at 1/2, 1/4 or 1/8 size if that
-// still covers it.
+// still covers it. Its EXIF is read without the Camera and Image rows: the
+// raw's own (from LibRaw) are the file's, and the preview's may not agree.
 bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error, int fit_w = 0, int fit_h = 0);
 // The samples as stored, `components` bytes a pixel: four-component data
 // is left as it is (no CMYK or YCCK conversion; BLP1 keeps B, G, R, A
@@ -227,7 +228,40 @@ inline std::string exif_date_text(std::string text)
     return text;
 }
 
+// How a photo was taken, as the Camera group lists it for every format: a
+// raw's from LibRaw, anything else's from its EXIF, in the same rows with
+// the same labels and formatting. Zero or empty: not known, so no row.
+struct CameraRows
+{
+    std::string make, model;
+    std::string firmware;  // a raw's maker note's, where it says one apart from EXIF's Software
+    std::string software;  // EXIF's Software: whatever wrote the file (firmware or a program), under Image
+    std::string lens, lens_make;
+    double iso = 0;
+    double shutter = 0;       // seconds
+    double aperture = 0;      // f-number
+    double focal_length = 0;  // mm, the lens's own
+    double focal_35mm = 0;    // its 35 mm equivalent; shown alone without a focal length
+    std::string picture_style;
+    double bias = 0;  // exposure compensation, EV
+    unsigned shot_number = 0;
+};
+// Adds the Camera group's rows, and the software to the Image group.
+void add_camera_rows(const CameraRows& c, Image& out);
+// The 35 mm equivalent of `focal` mm from the sensor's size, as EXIF gives
+// it: its focal plane resolution (pixels per `unit`, EXIF's
+// FocalPlaneResolutionUnit: 2 inch, 3 cm, 4 mm, 5 µm) for an image of
+// `width` x `height` pixels. 0 when that can't be relied on: no absolute
+// unit, photosites far from square, or a crop factor no camera has. Only
+// for a raw: an editor that resizes or crops a JPEG rewrites its pixel
+// dimensions but not the resolution, which is the sensor's.
+double focal_35mm_from_plane(double focal, double x_res, double y_res, int unit, double width, double height);
+
 #ifdef HAVE_EXIF
+// From a TIFF-based raw's own Exif directory (a CR2's, a NEF's): its
+// FocalLengthIn35mmFilm, or that worked out from its focal plane
+// resolution; 0 when neither is there or reliable.
+double tiff_focal_35mm(const uint8_t* data, size_t size, double focal);
 // Parse an EXIF payload (a JPEG file, a bare "Exif\0\0..." blob, or a TIFF
 // header) into the image's metadata groups. Returns the orientation, 1 when
 // absent, and the camera model when known.
@@ -238,7 +272,10 @@ struct ExifSummary
     std::string color_space;  // "sRGB" / "Adobe RGB (1998)" when declared
     int64_t taken = 0;        // DateTimeOriginal in seconds, the camera's local time; 0 when absent
 };
-ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
+// `camera_rows` false, for a raw's embedded preview: everything but the
+// Camera group and the Image group's rows, which the raw's own decode
+// writes (its location, orientation and the rest of its EXIF group kept).
+ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool camera_rows = true);
 // The preview stored in an EXIF payload (usually a JPEG); empty if none.
 std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size);
 // A Canon CR3's EXIF, which it keeps as separate TIFF structures (its CMT1,

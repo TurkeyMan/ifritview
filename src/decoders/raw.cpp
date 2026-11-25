@@ -2555,34 +2555,36 @@ bool decode_raw(const std::string& path, Image& out, std::string& error)
         std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
         return std::string(buf);
     };
-    out.add(N_("Camera"), N_("Make"), id.make);
-    out.add(N_("Camera"), N_("Model"), id.model);
-    if (id.software[0])
-        out.add(N_("Camera"), N_("Firmware"), id.software);
-    if (lens.Lens[0])
-        out.add(N_("Camera"), N_("Lens"), lens.Lens);
-    else if (lens.LensMake[0])
-        out.add(N_("Camera"), N_("Lens make"), lens.LensMake);
-    if (other.iso_speed > 0)
-        out.add(N_("Camera"), N_("ISO"), std::to_string(int(other.iso_speed)));
-    if (other.shutter > 0)
-        out.add(N_("Camera"), N_("Shutter"), other.shutter >= 1 ? fmt(other.shutter, 1) + " s" : "1/" + std::to_string(int(1 / other.shutter + 0.5)) + " s");
-    if (other.aperture > 0)
-        out.add(N_("Camera"), N_("Aperture"), "f/" + fmt(other.aperture, 1));
-    if (other.focal_len > 0)
-        out.add(N_("Camera"), N_("Focal length"), fmt(other.focal_len, 0) + " mm");
+    CameraRows cam;
+    cam.make = id.make;
+    cam.model = id.model;
+    cam.software = id.software;
+    cam.firmware = raw.imgdata.makernotes.common.firmware;
+    cam.lens = lens.Lens;
+    cam.lens_make = lens.LensMake;
+    cam.iso = other.iso_speed;
+    cam.shutter = other.shutter;
+    cam.aperture = other.aperture;
+    cam.focal_length = other.focal_len;
+    // Its 35 mm equivalent as the camera wrote it (EXIF's, then the maker
+    // notes'), else from the sensor's size where its Exif directory says.
+    cam.focal_35mm = lens.FocalLengthIn35mmFormat > 0 ? lens.FocalLengthIn35mmFormat : lens.makernotes.FocalLengthIn35mmFormat;
+#ifdef HAVE_EXIF
+    if (cam.focal_35mm <= 0)
+        cam.focal_35mm = tiff_focal_35mm(bytes, size, other.focal_len);
+#endif
     out.exposure_bias = tags.bias;
-    picture_style(raw, style, out, true);
-    if (tags.bias != 0)
-        out.add(N_("Camera"), N_("Exposure compensation"), (tags.bias > 0 ? "+" : "") + fmt(tags.bias, 2) + " EV");
+    picture_style(raw, style, out, false);
+    cam.picture_style = out.picture_style;
+    cam.bias = tags.bias;
+    cam.shot_number = other.shot_order;
+    add_camera_rows(cam, out);
     if (other.timestamp)
     {
         char buf[64];
         std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", std::localtime(&other.timestamp));
         out.add(N_("Image"), N_("Taken"), buf);
     }
-    if (other.shot_order)
-        out.add(N_("Camera"), N_("Shot number"), std::to_string(other.shot_order));
     if (other.artist[0])
         out.add(N_("Image"), N_("Artist"), other.artist);
     if (other.desc[0])

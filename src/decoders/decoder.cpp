@@ -1,5 +1,6 @@
 #include "decoder.h"
 
+#include "../i18n.h"
 #include "../platform.h"
 #include "../plugins.h"
 #include "../video.h"
@@ -8,6 +9,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <mutex>
 #include <set>
@@ -535,4 +538,98 @@ void preload_optional_libraries()
 #endif
         })
         .detach();
+}
+
+namespace
+{
+
+std::string fixed(double v, int decimals)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
+    return buf;
+}
+
+// "1/250 s", "0.4 s", "2.0 s".
+std::string shutter_text(double t)
+{
+    if (t >= 1)
+        return fixed(t, 1) + " s";
+    const double r = 1 / t;
+    const long n = std::lround(r);
+    if (t >= 0.25 && std::fabs(r - double(n)) > 0.05 * r)
+        return fixed(t, 1) + " s";  // not a whole fraction of a second
+    return "1/" + std::to_string(n) + " s";
+}
+
+// "4.9 mm (28 mm equivalent)"; "70 mm" alone when the equivalent isn't
+// known or is within 5% of it (full frame, give or take its rounding).
+std::string focal_length_text(double focal, double focal_35mm)
+{
+    const std::string mm = fixed(focal, std::fabs(focal - std::round(focal)) < 0.05 ? 0 : 1);
+    if (!(focal_35mm > 0 && focal_35mm < 100000) || std::fabs(focal_35mm - focal) <= 0.05 * focal)
+        return mm + " mm";
+    return rap::i18n::format(_("{0} mm ({1} mm equivalent)"), mm, fixed(focal_35mm, 0));
+}
+
+// "abc" starts "ABC..." whatever the case of either.
+bool starts_with_nocase(const std::string& s, const std::string& prefix)
+{
+    if (prefix.size() > s.size())
+        return false;
+    for (size_t i = 0; i < prefix.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(s[i])) != std::tolower(static_cast<unsigned char>(prefix[i])))
+            return false;
+    return true;
+}
+
+}  // namespace
+
+void add_camera_rows(const CameraRows& c, Image& out)
+{
+    out.add(N_("Camera"), N_("Make"), c.make);
+    out.add(N_("Camera"), N_("Model"), c.model);
+    // A maker note's firmware version, unless EXIF's Software says it already
+    // (a Sony's "1.00" in "DSC-RX100 v1.00").
+    if (c.software.find(c.firmware) == std::string::npos)
+        out.add(N_("Camera"), N_("Firmware"), c.firmware);
+    out.add(N_("Camera"), N_("Lens"), c.lens);
+    // The lens's maker, unless its name already says it.
+    if (c.lens.empty() || !starts_with_nocase(c.lens, c.lens_make))
+        out.add(N_("Camera"), N_("Lens make"), c.lens_make);
+    if (c.iso > 0 && c.iso < 1e7)
+        out.add(N_("Camera"), N_("ISO"), fixed(c.iso, 0));
+    // Garbage (a zero denominator's infinity, a 1/0.0001 µs) gets no row.
+    if (std::isfinite(c.shutter) && c.shutter >= 1e-5 && c.shutter < 1e6)
+        out.add(N_("Camera"), N_("Shutter"), shutter_text(c.shutter));
+    if (c.aperture > 0 && c.aperture < 1000)
+        out.add(N_("Camera"), N_("Aperture"), "f/" + fixed(c.aperture, 1));
+    if (c.focal_length > 0 && c.focal_length < 100000)
+        out.add(N_("Camera"), N_("Focal length"), focal_length_text(c.focal_length, c.focal_35mm));
+    else if (c.focal_35mm > 0 && c.focal_35mm < 100000)  // the equivalent's all there is
+        out.add(N_("Camera"), N_("Focal length"), rap::i18n::format(_("{0} mm equivalent"), fixed(c.focal_35mm, 0)));
+    out.add(N_("Camera"), N_("Picture style"), c.picture_style);
+    if (std::fabs(c.bias) >= 0.005 && std::fabs(c.bias) < 100)
+        out.add(N_("Camera"), N_("Exposure compensation"), (c.bias > 0 ? "+" : "") + fixed(c.bias, 2) + " EV");
+    if (c.shot_number)
+        out.add(N_("Camera"), N_("Shot number"), std::to_string(c.shot_number));
+    // What wrote the file: EXIF says "software or firmware", and which it is
+    // can't be told, so it's the picture's, not the camera's.
+    out.add(N_("Image"), N_("Software"), c.software);
+}
+
+double focal_35mm_from_plane(double focal, double x_res, double y_res, int unit, double width, double height)
+{
+    const double mm_per_unit = unit == 2 ? 25.4 : unit == 3 ? 10 : unit == 4 ? 1 : unit == 5 ? 0.001 : 0;
+    if (!(focal > 0 && x_res > 0 && y_res > 0 && width > 0 && height > 0 && mm_per_unit > 0))
+        return 0;
+    if (std::fabs(x_res / y_res - 1) > 0.05)
+        return 0;
+    const double sensor = std::hypot(width / x_res, height / y_res) * mm_per_unit;  // the image's diagonal on the sensor, mm
+    const double crop = std::hypot(36.0, 24.0) / sensor;
+    // From medium format's 0.5 to a 1/4" sensor's 10.8; anything else is a
+    // resolution written for some other image size.
+    if (!(crop >= 0.5 && crop <= 15))
+        return 0;
+    return focal * crop;
 }
