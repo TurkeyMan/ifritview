@@ -194,12 +194,13 @@ ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
         Visit v{&out, s.group, s.ifd, s.ifd == EXIF_IFD_0 || s.ifd == EXIF_IFD_EXIF ? &shown : &none, camera_rows};
         exif_content_foreach_entry(ed->ifd[s.ifd], visit_entry, &v);
     }
-    // GPS position: three rationals (deg, min, sec) plus a hemisphere letter.
-    auto coordinate = [&](ExifTag value_tag, ExifTag ref_tag, double& result)
+    // GPS position: three rationals (deg, min, sec) plus a hemisphere letter;
+    // without the letter (zeros, some cameras' "no fix") it's no position.
+    auto coordinate = [&](ExifTag value_tag, ExifTag ref_tag, char positive, char negative, double& result)
     {
         ExifEntry* v = exif_content_get_entry(ed->ifd[EXIF_IFD_GPS], value_tag);
         ExifEntry* r = exif_content_get_entry(ed->ifd[EXIF_IFD_GPS], ref_tag);
-        if (!v || v->format != EXIF_FORMAT_RATIONAL || v->components < 3)
+        if (!v || v->format != EXIF_FORMAT_RATIONAL || v->components < 3 || !r || r->size < 1 || (r->data[0] != positive && r->data[0] != negative))
             return false;
         const ExifByteOrder order = exif_data_get_byte_order(ed);
         double parts[3];
@@ -209,13 +210,13 @@ ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
             parts[i] = q.denominator ? double(q.numerator) / q.denominator : 0;
         }
         result = parts[0] + parts[1] / 60 + parts[2] / 3600;
-        if (r && r->size > 0 && (r->data[0] == 'S' || r->data[0] == 'W'))
+        if (r->data[0] == negative)
             result = -result;
         return true;
     };
     double lat = 0, lon = 0;
-    if (coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE_REF), lat) &&
-        coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE_REF), lon) && lat >= -90 && lat <= 90 &&
+    if (coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LATITUDE_REF), 'N', 'S', lat) &&
+        coordinate(static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE), static_cast<ExifTag>(EXIF_TAG_GPS_LONGITUDE_REF), 'E', 'W', lon) && lat >= -90 && lat <= 90 &&
         lon >= -180 && lon <= 180)
     {
         out.has_location = true;
