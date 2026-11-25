@@ -16,11 +16,14 @@
 // the ends' (within kDriftMid: the ratios change smoothly along it, so it's
 // one surface, where at the edge of two objects they'd jump) and where the
 // light rises along it by kDriftRise at most (however little: a run isn't
-// chosen by its noisy rise). For a colour c (the one
-// nearest its own clip in the brighter end: the first to roll off), how far
-// its log rose against how far the other two's mean log did: the light's
-// rise d, and c's departure e from it (0 while c's linear; e = (s - 1) d
-// where its slope is s). Each run counts at c's level in the brighter end,
+// chosen by its noisy rise). For a colour c, how far its log rose against
+// how far the logs of the colours further from their clips than c (at the
+// brighter end) rose: the light's rise d, and c's departure e from it (0
+// while c's linear; e = (s - 1) d where its slope is s). The nearest its
+// clip is read against the other two's mean; the middle one against the
+// furthest's alone, as the nearest may have rolled off with it (an sRAW's
+// red and green, clipped together before encoding); the furthest isn't read.
+// Each run counts at c's level in the brighter end,
 // as a fraction of its clip, into kDriftBins levels from kPileFrom up: the
 // sums of e d, d d, e e and how many, across the whole image, and of the
 // noise's variances in d and in e.
@@ -158,9 +161,40 @@ DRIFT_FN bool drift_run(int c, DRIFT_IN float lo[3], DRIFT_IN float mid[3], DRIF
         DRIFT_ABS((m[2] - m[1]) - 0.5f * ((a[2] - a[1]) + (h[2] - h[1]))) > kDriftMid)
         return false;
     const int o1 = c == 0 ? 1 : 0, o2 = c == 2 ? 1 : 2;
-    float d = 0.5f * ((h[o1] + h[o2]) - (a[o1] + a[o2]));  // the light's rise: the other two's
-    float e = (h[c] - a[c]) - d;                            // c's departure from it
-    const bool up = d >= 0;
+    // The light's rise is read from the colours further from their clips
+    // than c at the brighter end: the other two's mean where c is the
+    // nearest its clip; the one under it alone where c is the middle one
+    // (the nearest may have rolled off with c, as an sRAW's red and green
+    // do together, or before it); none, the furthest of the three, whose
+    // rise is the light's for the others.
+    bool up = true;
+    int under = -1;
+    float d = 0, e = 0, vd = 0;
+    for (int turn = 0; turn < 2; ++turn)
+    {
+        if (turn == 0)
+        {
+            d = 0.5f * ((h[o1] + h[o2]) - (a[o1] + a[o2]));
+            vd = 0.25f * (lo_noise[o1] + lo_noise[o2] + hi_noise[o1] + hi_noise[o2]);
+        }
+        else
+        {
+            d = h[under] - a[under];
+            vd = lo_noise[under] + hi_noise[under];
+        }
+        up = d >= 0;
+        // Each colour's level at the brighter end, as a fraction of its clip.
+        const float level = (up ? hi[c] : lo[c]) / stops[c], l1 = (up ? hi[o1] : lo[o1]) / stops[o1],
+                    l2 = (up ? hi[o2] : lo[o2]) / stops[o2];
+        if (turn == 0 && level >= l1 && level >= l2)
+            break;  // the nearest its clip: against the other two
+        if (turn == 1 && level >= (under == o1 ? l1 : l2))
+            break;  // still over the one it's read against
+        if (turn == 1 || (level < l1 && level < l2))
+            return false;  // the furthest from its clip, or no longer the middle one
+        under = level >= l1 ? o1 : o2;
+    }
+    e = (h[c] - a[c]) - d;  // c's departure from the light's rise
     if (!up)
         d = -d, e = -e;
     // No run chosen by how far the light rose (by d, or e against it): both
@@ -169,23 +203,12 @@ DRIFT_FN bool drift_run(int c, DRIFT_IN float lo[3], DRIFT_IN float mid[3], DRIF
     // stretch of a surface is left out.
     if (d > kDriftRise)
         return false;
-    // Its level at the brighter end, the nearest its clip of the three.
-    float level = 0, l1 = 0, l2 = 0;
-    for (int k = 0; k < 3; ++k)
-    {
-        const float v = (up ? hi[k] : lo[k]) / stops[k];
-        if (k == c)
-            level = v;
-        else if (k == o1)
-            l1 = v;
-        else
-            l2 = v;
-    }
-    if (level < l1 || level < l2 || level < kPileFrom || level >= 1)
+    // Its level at the brighter end.
+    const float level = (up ? hi[c] : lo[c]) / stops[c];
+    if (level < kPileFrom || level >= 1)
         return false;
     bin = DRIFT_MIN(int((level - kPileFrom) / (1 - kPileFrom) * float(kDriftBins)), int(kDriftBins) - 1);
     s[0] = e * d, s[1] = d * d, s[2] = e * e, s[3] = 1;
-    const float vd = 0.25f * (lo_noise[o1] + lo_noise[o2] + hi_noise[o1] + hi_noise[o2]);
     s[4] = vd;
     s[5] = lo_noise[c] + hi_noise[c] + vd;
     return true;
