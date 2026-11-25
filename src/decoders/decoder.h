@@ -182,8 +182,10 @@ const Decoder& pvr_decoder();
 #ifdef HAVE_JPEG
 // Used by the raw decoder for embedded JPEG previews. `fit_w` x `fit_h`
 // (either way round), when given: decoded at 1/2, 1/4 or 1/8 size if that
-// still covers it. Its EXIF is read without the Camera and Image rows: the
-// raw's own (from LibRaw) are the file's, and the preview's may not agree.
+// still covers it. Only its pixels, turned as its EXIF says, and the colour
+// space they're in: no metadata rows, no location, no save settings. They
+// would describe the preview (a JPEG LibRaw may have written EXIF into
+// itself), not the raw, whose own decode says what it is.
 bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::string& error, int fit_w = 0, int fit_h = 0);
 // The samples as stored, `components` bytes a pixel: four-component data
 // is left as it is (no CMYK or YCCK conversion; BLP1 keeps B, G, R, A
@@ -272,10 +274,25 @@ struct ExifSummary
     std::string color_space;  // "sRGB" / "Adobe RGB (1998)" when declared
     int64_t taken = 0;        // DateTimeOriginal in seconds, the camera's local time; 0 when absent
 };
-// `camera_rows` false, for a raw's embedded preview: everything but the
-// Camera group and the Image group's rows, which the raw's own decode
-// writes (its location, orientation and the rest of its EXIF group kept).
-ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool camera_rows = true);
+ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out);
+// Only what the pixels need (the orientation; a colour space EXIF declares,
+// as Image::declared_space) from a JPEG's or a bare "Exif\0\0" blob's EXIF:
+// no rows, no location.
+ExifSummary read_exif_summary(const uint8_t* data, size_t size, Image& out);
+// A tag of an Exif directory (EXIF's IFD 0x8769) as it is stored: its type
+// (TIFF's: 3 SHORT, 5 RATIONAL...), its count and its bytes, in the order
+// the file wrote them.
+struct ExifTagValue
+{
+    uint16_t tag = 0;
+    uint16_t type = 0;
+    uint32_t count = 0;
+    bool little_endian = true;
+    std::vector<uint8_t> bytes;
+};
+// Those tags as the EXIF group's rows, named and worded as any other
+// file's EXIF group is: a raw's own, as LibRaw finds them in the file.
+void add_exif_entries(const std::vector<ExifTagValue>& tags, Image& out);
 // The preview stored in an EXIF payload (usually a JPEG); empty if none.
 std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size);
 // A Canon CR3's EXIF, which it keeps as separate TIFF structures (its CMT1,

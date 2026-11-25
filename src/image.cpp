@@ -810,16 +810,27 @@ void Image::adopt(Image&& f)
     bits_per_sample = f.bits_per_sample;
     format = std::move(f.format);
     pixel_format = f.pixel_format;
-    if (!f.color_space.empty())
-        color_space = std::move(f.color_space);
-    if (!f.info.empty())
-        info = std::move(f.info);
+    // What the file is, as its own decode says, whatever stood in before:
+    // nothing of the stand-in's (a raw's embedded JPEG, its EXIF, its
+    // location, its colour space and save settings) stays.
+    color_space = std::move(f.color_space);
+    declared_space = std::move(f.declared_space);
+    info = std::move(f.info);
+    encoded_as = std::move(f.encoded_as);
+    encoding = std::move(f.encoding);
+    metadata = std::move(f.metadata);
+    stored = std::move(f.stored);
+    // A place looked up for where the stand-in said it was is kept only
+    // if that's where the file says.
+    if (f.has_location != has_location || f.latitude != latitude || f.longitude != longitude || !f.place.empty())
+        place = std::move(f.place);
+    has_location = f.has_location;
+    latitude = f.latitude;
+    longitude = f.longitude;
     linear = std::move(f.linear);
     source = std::move(f.source);
     mosaic = std::move(f.mosaic);
     pixels_stale = f.pixels_stale;
-    if (f.stored)
-        stored = std::move(f.stored);
     mips = std::move(f.mips);  // empty if pending edits rewrote f's pixels
     animation = std::move(f.animation);
     if (f.exposure_bias != 0)
@@ -828,27 +839,6 @@ void Image::adopt(Image&& f)
         picture_style = std::move(f.picture_style);
     if (f.camera_look)
         camera_look = f.camera_look;
-    if (f.has_location)
-    {
-        has_location = true;
-        latitude = f.latitude;
-        longitude = f.longitude;
-    }
-    // The final decode knows things the preview didn't (Camera, Raw...);
-    // groups it brings replace ours of the same name, the rest stay.
-    for (MetadataGroup& g : f.metadata)
-    {
-        bool replaced = false;
-        for (MetadataGroup& mine : metadata)
-            if (mine.name == g.name)
-            {
-                mine = std::move(g);
-                replaced = true;
-                break;
-            }
-        if (!replaced)
-            metadata.push_back(std::move(g));
-    }
     is_raw = is_raw || f.is_raw;
     // LibRaw's reference takes none of the edits made while its preview
     // stood in (nor a raw's Detail at rest, which the preview opened with).

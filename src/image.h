@@ -445,7 +445,8 @@ struct Image
     bool incomplete = false;
 
     // Take the final pixels of this same file: pending edits are replayed on
-    // them, then they replace ours in place (metadata merged, identity kept).
+    // them, then they replace ours in place (identity kept; what the file is,
+    // its metadata, location and colour space, all the final decode's).
     void adopt(Image&& final);
     XmpDevelop xmp;                       // edits read from XMP, applied by the app if enabled
     std::vector<MetadataGroup> metadata;  // whatever the decoder could dig out

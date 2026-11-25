@@ -2091,6 +2091,7 @@ void App::on_loaded(Loader::Result& r)
         else if (ImageCache::Entry old; cache_.peek(r.path, old) && old.image->is_preview() && old.source != ImageCache::Source::CameraJpeg)
         {
             old.image->adopt(std::move(*r.image));
+            request_place(old.image);
             return;
         }
     }
@@ -2130,6 +2131,7 @@ void App::on_loaded(Loader::Result& r)
     {
         const View::Shape before = View::Shape::of(*image_);  // the camera's JPEG, as it stood in
         image_->adopt(std::move(*r.image));
+        request_place(image_);
         if (tracing())
             std::fprintf(stderr, "developed %s %dx%d: decoded in %.0f ms, %.0f ms to reach the UI\n", key_text(r.path).c_str(), image_->width,
                          image_->height, (r.decoded_us - r.picked_us) / 1000.0, (g_get_monotonic_time() - r.decoded_us) / 1000.0);
@@ -2153,7 +2155,10 @@ void App::on_loaded(Loader::Result& r)
         {
             ImageCache::Entry old;
             if (cache_.get(r.path, old) && old.image->is_preview() && old.source != ImageCache::Source::CameraJpeg)
+            {
                 old.image->adopt(std::move(*r.image));
+                request_place(old.image);
+            }
         }
         return;
     }

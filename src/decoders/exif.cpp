@@ -35,7 +35,6 @@ struct Visit
     const char* group;
     ExifIfd ifd;
     const std::vector<int>* shown;  // tags the Camera group has already
-    bool image_rows;                // Taken, Artist, Description to the Image group
 };
 
 void visit_entry(ExifEntry* e, void* user)
@@ -57,12 +56,10 @@ void visit_entry(ExifEntry* e, void* user)
         for (auto pos = title.find(from); pos != std::string::npos; pos = title.find(from))
             title.replace(pos, std::strlen(from), to);
     // What the picture is, rather than how it was shot, goes to the Image
-    // group (and only there; not at all for a raw's preview, the raw says).
+    // group (and only there).
     const bool taken = v->ifd == EXIF_IFD_EXIF && e->tag == EXIF_TAG_DATE_TIME_ORIGINAL;
     const bool artist = v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_ARTIST;
     const bool description = v->ifd == EXIF_IFD_0 && e->tag == EXIF_TAG_IMAGE_DESCRIPTION;
-    if ((taken || artist || description) && !v->image_rows)
-        return;
     if (taken)
         v->out->add(N_("Image"), N_("Taken"), exif_date_text(value));
     else if (artist)
@@ -73,11 +70,11 @@ void visit_entry(ExifEntry* e, void* user)
         v->out->add(v->group, title, value);
 }
 
-ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
+// What the pixels need (their orientation, and a colour space declared for
+// them: Image::declared_space) and what the folder index keeps; no rows.
+ExifSummary summarize(ExifData* ed, Image& out)
 {
     ExifSummary summary;
-    if (!ed)
-        return summary;
     if (ExifEntry* e = exif_data_get_entry(ed, EXIF_TAG_ORIENTATION))
     {
         const int o = exif_get_short(e->data, exif_data_get_byte_order(ed));
@@ -109,6 +106,14 @@ ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
         if (exif_entry_get_value(e, buf, sizeof buf))
             summary.camera = buf;
     }
+    return summary;
+}
+
+ExifSummary read(ExifData* ed, Image& out)
+{
+    if (!ed)
+        return {};
+    const ExifSummary summary = summarize(ed, out);
 
     // How it was taken, in the Camera group as a raw's is (add_camera_rows);
     // the tags that come from are left out of the EXIF group.
@@ -175,8 +180,7 @@ ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
     // focal plane resolution, which an editor that resizes or crops keeps
     // while it rewrites the pixel dimensions.
     cam.focal_35mm = number(EXIF_IFD_EXIF, 0xA405);
-    if (camera_rows)
-        add_camera_rows(cam, out);
+    add_camera_rows(cam, out);
 
     const struct
     {
@@ -191,7 +195,7 @@ ExifSummary read(ExifData* ed, Image& out, bool camera_rows)
     for (const auto& s : sections)
     {
         const std::vector<int> none;
-        Visit v{&out, s.group, s.ifd, s.ifd == EXIF_IFD_0 || s.ifd == EXIF_IFD_EXIF ? &shown : &none, camera_rows};
+        Visit v{&out, s.group, s.ifd, s.ifd == EXIF_IFD_0 || s.ifd == EXIF_IFD_EXIF ? &shown : &none};
         exif_content_foreach_entry(ed->ifd[s.ifd], visit_entry, &v);
     }
     // GPS position: three rationals (deg, min, sec) plus a hemisphere letter;
@@ -390,7 +394,7 @@ double tiff_focal_35mm(const uint8_t* data, size_t size, double focal)
                                  t.number(t.find(exif, 0xA002)), t.number(t.find(exif, 0xA003)));
 }
 
-ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool camera_rows)
+ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out)
 {
     if (!data || size < 8 || size > (size_t(1) << 28))
         return {};
@@ -398,13 +402,13 @@ ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool ca
     // TIFF structure get it prepended.
     ExifSummary summary;
     if (std::memcmp(data, "Exif\0\0", 6) == 0 || (data[0] == 0xFF && data[1] == 0xD8))
-        summary = read(load(data, size), out, camera_rows);
+        summary = read(load(data, size), out);
     else
     {
         std::vector<uint8_t> buf(6 + size);
         std::memcpy(buf.data(), "Exif\0\0", 6);
         std::memcpy(buf.data() + 6, data, size);
-        summary = read(load(buf.data(), buf.size()), out, camera_rows);
+        summary = read(load(buf.data(), buf.size()), out);
     }
     if (!out.has_location)
     {
@@ -418,6 +422,60 @@ ExifSummary read_exif_blob(const uint8_t* data, size_t size, Image& out, bool ca
         }
     }
     return summary;
+}
+
+ExifSummary read_exif_summary(const uint8_t* data, size_t size, Image& out)
+{
+    if (!data || size < 8 || size > (size_t(1) << 28) || (std::memcmp(data, "Exif\0\0", 6) != 0 && !(data[0] == 0xFF && data[1] == 0xD8)))
+        return {};
+    ExifData* ed = load(data, size);
+    if (!ed)
+        return {};
+    const ExifSummary summary = summarize(ed, out);
+    exif_data_unref(ed);
+    return summary;
+}
+
+void add_exif_entries(const std::vector<ExifTagValue>& tags, Image& out)
+{
+    if (tags.empty())
+        return;
+    ExifData* ed = exif_data_new();
+    exif_data_unset_option(ed, EXIF_DATA_OPTION_FOLLOW_SPECIFICATION);
+    const bool little = tags.front().little_endian;
+    exif_data_set_byte_order(ed, little ? EXIF_BYTE_ORDER_INTEL : EXIF_BYTE_ORDER_MOTOROLA);
+    ExifMem* mem = exif_mem_new_default();
+    for (const ExifTagValue& tag : tags)
+    {
+        const unsigned unit = exif_format_get_size(ExifFormat(tag.type));
+        if (!unit || tag.count < 1 || tag.bytes.size() != size_t(unit) * tag.count)
+            continue;
+        ExifEntry* e = exif_entry_new_mem(mem);
+        if (!e)
+            continue;
+        e->tag = ExifTag(tag.tag);
+        e->format = ExifFormat(tag.type);
+        e->components = tag.count;
+        e->size = unsigned(tag.bytes.size());
+        e->data = static_cast<unsigned char*>(exif_mem_alloc(mem, e->size));
+        if (e->data)
+        {
+            std::memcpy(e->data, tag.bytes.data(), e->size);
+            // Written in another order than the first (another of the file's
+            // directories): turned round, each value (each half of a rational).
+            const unsigned swap = e->format == EXIF_FORMAT_RATIONAL || e->format == EXIF_FORMAT_SRATIONAL ? 4 : unit;
+            if (tag.little_endian != little && swap > 1)
+                for (unsigned at = 0; at + swap <= e->size; at += swap)
+                    std::reverse(e->data + at, e->data + at + swap);
+            exif_content_add_entry(ed->ifd[EXIF_IFD_EXIF], e);
+        }
+        exif_entry_unref(e);
+    }
+    exif_mem_unref(mem);
+    const std::vector<int> none;
+    Visit v{&out, "EXIF", EXIF_IFD_EXIF, &none};
+    exif_content_foreach_entry(ed->ifd[EXIF_IFD_EXIF], visit_entry, &v);
+    exif_data_unref(ed);
 }
 
 std::vector<uint8_t> exif_thumbnail(const uint8_t* data, size_t size)

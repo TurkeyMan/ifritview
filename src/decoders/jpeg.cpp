@@ -59,8 +59,10 @@ int estimate_quality(const JQUANT_TBL& table)
     return std::clamp(int(std::lround(q)), 1, 100);
 }
 
-// Shared body: the source is already attached to cinfo.
-bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, std::string& error, int fit_w = 0, int fit_h = 0)
+// Shared body: the source is already attached to cinfo. `describe` false:
+// only the pixels, their format and colour space, nothing of how the JPEG
+// was coded (its rows, its save settings), for a raw's embedded preview.
+bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, std::string& error, int fit_w = 0, int fit_h = 0, bool describe = true)
 {
     std::vector<uint8_t> cmyk_row;  // declared before setjmp so the error path can't skip its destructor
     bool progressive = false;
@@ -86,11 +88,16 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         cinfo.scale_denom = denom;
     }
     // As the save dialog's JPEG settings.
-    out.encoded_as = "jpg";
-    out.encoding["progressive"] = progressive;
+    if (describe)
+    {
+        out.encoded_as = "jpg";
+        out.encoding["progressive"] = progressive;
+    }
     int quality = 0;
     if (const JQUANT_TBL* table = cinfo.quant_tbl_ptrs[cinfo.comp_info[0].quant_tbl_no])
-        out.encoding["quality"] = quality = estimate_quality(*table);
+        quality = estimate_quality(*table);
+    if (describe && quality)
+        out.encoding["quality"] = quality;
     {
         JOCTET* icc = nullptr;
         unsigned int icc_len = 0;
@@ -139,7 +146,7 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
         subsampling = (h == 2 && v == 2) ? "4:2:0" : (h == 2 && v == 1) ? "4:2:2" : (h == 1 && v == 2) ? "4:4:0" : "4:4:4";
         // The settings' choices: full, half across, quarter (4:4:0 has none).
         const int choice = (h == 1 && v == 1) ? 1 : (h == 2 && v == 1) ? 2 : (h == 2 && v == 2) ? 3 : 0;
-        if (choice)
+        if (choice && describe)
             out.encoding["subsampling"] = choice;
     }
     {
@@ -154,16 +161,19 @@ bool decode_from(jpeg_decompress_struct& cinfo, ErrorManager& err, Image& out, s
             out.pixel_format = PixelFormat::ycbcr(cinfo.data_precision, cinfo.comp_info[0].h_samp_factor, cinfo.comp_info[0].v_samp_factor);
         out.pixel_format.notes.push_back(progressive ? "progressive" : "baseline");
     }
-    out.add(N_("JPEG"), N_("Coding"), progressive ? "progressive" : "baseline");
-    out.add(N_("JPEG"), N_("Components"), std::to_string(cinfo.num_components));
-    if (quality)
-        out.add(N_("JPEG"), N_("Quality (estimated)"), std::to_string(quality));
-    if (cinfo.num_components == 3)
-        out.add(N_("JPEG"), N_("Chroma subsampling"), subsampling);
-    if (cinfo.saw_JFIF_marker)
-        out.add(N_("JPEG"), N_("JFIF"), std::to_string(cinfo.JFIF_major_version) + "." + std::to_string(cinfo.JFIF_minor_version));
-    if (cinfo.saw_Adobe_marker)
-        out.add(N_("JPEG"), N_("Adobe transform"), std::to_string(cinfo.Adobe_transform));
+    if (describe)
+    {
+        out.add(N_("JPEG"), N_("Coding"), progressive ? "progressive" : "baseline");
+        out.add(N_("JPEG"), N_("Components"), std::to_string(cinfo.num_components));
+        if (quality)
+            out.add(N_("JPEG"), N_("Quality (estimated)"), std::to_string(quality));
+        if (cinfo.num_components == 3)
+            out.add(N_("JPEG"), N_("Chroma subsampling"), subsampling);
+        if (cinfo.saw_JFIF_marker)
+            out.add(N_("JPEG"), N_("JFIF"), std::to_string(cinfo.JFIF_major_version) + "." + std::to_string(cinfo.JFIF_minor_version));
+        if (cinfo.saw_Adobe_marker)
+            out.add(N_("JPEG"), N_("Adobe transform"), std::to_string(cinfo.Adobe_transform));
+    }
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     out.format = progressive ? "JPEG (progressive)" : "JPEG";
@@ -215,10 +225,10 @@ bool decode_jpeg_memory(const uint8_t* data, size_t size, Image& out, std::strin
     ErrorManager err{};
     setup(cinfo, err);
     jpeg_mem_src(&cinfo, data, static_cast<unsigned long>(size));
-    if (!decode_from(cinfo, err, out, error, fit_w, fit_h))
+    if (!decode_from(cinfo, err, out, error, fit_w, fit_h, false))
         return false;
 #ifdef HAVE_EXIF
-    out.apply_camera_orientation(read_exif_blob(data, size, out, false).orientation);
+    out.apply_camera_orientation(read_exif_summary(data, size, out).orientation);
 #endif
     return true;
 }
